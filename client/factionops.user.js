@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.35
+// @version      3.0.36
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -4424,8 +4424,11 @@ body.wb-chain-active {
         // 2. Apply theme
         applyTheme();
 
-        // 3. Create settings gear (always available, even before connection)
-        createSettingsGear();
+        // 3. Create settings gear (skip on faction/war pages — overlay has its own button)
+        const url = window.location.href;
+        if (!url.includes('factions.php') && !url.includes('war.php')) {
+            createSettingsGear();
+        }
 
         // 4. Set up keyboard shortcuts
         setupKeyboardShortcuts();
