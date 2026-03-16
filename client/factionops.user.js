@@ -424,7 +424,7 @@ html.wb-theme-light {
 /* Ensure rows have room for our right-aligned cells */
 .wb-sortable-row {
     position: relative !important;
-    padding-right: 268px !important;
+    padding-right: 300px !important;
     transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
@@ -659,6 +659,27 @@ html.wb-theme-light {
     opacity: 1;
 }
 
+/* ----- Group attack / viewers indicator ----- */
+.wb-viewers-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: rgba(108,92,231,0.2);
+    border: 1px solid rgba(108,92,231,0.4);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #a29bfe;
+    white-space: nowrap;
+    animation: wb-pulse 1.5s ease-in-out infinite;
+}
+.wb-viewers-badge.wb-viewers-multi {
+    background: rgba(214,48,49,0.2);
+    border-color: rgba(214,48,49,0.5);
+    color: #ff7675;
+}
+
 /* ----- BSP / FFS stat display ----- */
 .wb-bsp-cell {
     display: inline-flex;
@@ -772,6 +793,9 @@ body.wb-chain-active {
 
         // Map of targetId -> { status, until, description, activity }
         statuses: {},
+
+        // Map of targetId -> [ { id, name } ] — faction members viewing that attack page
+        viewers: {},
 
         // Chain data
         chain: {
@@ -1331,6 +1355,11 @@ body.wb-chain-active {
             // ── Online players ──
             if (data.onlinePlayers) {
                 state.onlinePlayers = data.onlinePlayers;
+            }
+
+            // ── Viewers (who is on which attack page) ──
+            if (data.viewers) {
+                state.viewers = data.viewers;
             }
 
             // Store enemyFactionId from server if we didn't have it
@@ -2115,7 +2144,14 @@ body.wb-chain-active {
         bspCell.id = `wb-bsp-${targetId}`;
         renderBspCell(bspCell, targetId);
 
+        // --- Viewers (group attack) badge ---
+        const viewersCell = document.createElement('span');
+        viewersCell.className = 'wb-cell';
+        viewersCell.id = `wb-viewers-${targetId}`;
+        renderViewersBadge(viewersCell, targetId);
+
         wbContainer.appendChild(priorityCell);
+        wbContainer.appendChild(viewersCell);
         wbContainer.appendChild(bspCell);
         wbContainer.appendChild(statusCell);
         wbContainer.appendChild(attackCell);
@@ -2331,6 +2367,23 @@ body.wb-chain-active {
         });
     }
 
+    /**
+     * Render a small badge showing how many faction members are viewing
+     * this target's attack page. Shows nothing if 0 viewers.
+     */
+    function renderViewersBadge(container, targetId) {
+        container.innerHTML = '';
+        const viewers = state.viewers[targetId];
+        if (!viewers || viewers.length === 0) return;
+
+        const badge = document.createElement('span');
+        badge.className = 'wb-viewers-badge' + (viewers.length >= 2 ? ' wb-viewers-multi' : '');
+        const names = viewers.map(v => v.name).join(', ');
+        badge.textContent = `\uD83D\uDC41 ${viewers.length}`;
+        badge.title = `Attacking: ${names}`;
+        container.appendChild(badge);
+    }
+
     /** Apply/remove row highlight classes based on call state. */
     function applyRowHighlights(row, targetId) {
         const isCalled = !!state.calls[targetId];
@@ -2350,6 +2403,9 @@ body.wb-chain-active {
 
         const bspEl = document.getElementById(`wb-bsp-${targetId}`);
         if (bspEl) renderBspCell(bspEl, targetId);
+
+        const viewersEl = document.getElementById(`wb-viewers-${targetId}`);
+        if (viewersEl) renderViewersBadge(viewersEl, targetId);
 
         // Update row highlight
         const row = document.querySelector(`[data-wb-target-id="${targetId}"]`);
@@ -2522,6 +2578,10 @@ body.wb-chain-active {
                 <span>Call:</span>
                 <span id="wb-atk-call">--</span>
             </div>
+            <div class="wb-attack-row">
+                <span>Also here:</span>
+                <span id="wb-atk-viewers" style="color:#a29bfe;">--</span>
+            </div>
             <div style="margin-top:8px;">
                 <button class="wb-btn wb-btn-sm" id="wb-atk-uncall">Quick Uncall</button>
             </div>
@@ -2548,6 +2608,21 @@ body.wb-chain-active {
         } else {
             callEl.textContent = 'Uncalled';
             callEl.style.color = 'var(--wb-text)';
+        }
+
+        // Update viewers (others on this same attack page)
+        const viewersEl = document.getElementById('wb-atk-viewers');
+        if (viewersEl) {
+            const viewers = (state.viewers[targetId] || []).filter(
+                v => String(v.id) !== state.myPlayerId
+            );
+            if (viewers.length > 0) {
+                viewersEl.textContent = viewers.map(v => v.name).join(', ');
+                viewersEl.style.color = viewers.length >= 2 ? '#ff7675' : '#a29bfe';
+            } else {
+                viewersEl.textContent = 'None';
+                viewersEl.style.color = 'var(--wb-text)';
+            }
         }
     }
 
@@ -2814,12 +2889,26 @@ body.wb-chain-active {
         createAttackOverlay();
         startStatusTimers();
 
-        // Listen for target-specific updates to refresh the overlay
+        // Report viewing target to server + refresh overlay
         const targetId = getAttackTargetId();
         if (targetId) {
+            // Tell server we're on this attack page
+            reportViewing(targetId);
             // Poll local state for overlay updates
             setInterval(() => updateAttackOverlay(targetId), 2000);
         }
+    }
+
+    /** Report to the server which target we're currently viewing. */
+    function reportViewing(targetId) {
+        if (!state.connected) return;
+        postAction('/api/viewing', { targetId }).catch(() => {});
+    }
+
+    /** Clear viewing status when leaving the attack page. */
+    function clearViewing() {
+        if (!state.connected) return;
+        postAction('/api/viewing', { targetId: null }).catch(() => {});
     }
 
     // =========================================================================
@@ -3080,7 +3169,10 @@ body.wb-chain-active {
         document.body.classList.remove('wb-chain-active');
 
         const attackOverlay = document.getElementById('wb-attack-overlay');
-        if (attackOverlay) attackOverlay.remove();
+        if (attackOverlay) {
+            attackOverlay.remove();
+            clearViewing(); // Tell server we left the attack page
+        }
 
         // Cancel status timer RAF
         if (statusTimerRAF) {

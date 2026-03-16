@@ -120,6 +120,26 @@ export function getOnlinePlayersForWar(warId) {
   return result;
 }
 
+/** Set which target a player is currently viewing (attack page). */
+export function setViewingTarget(playerId, targetId) {
+  const p = players.get(playerId);
+  if (p) {
+    p.viewingTarget = targetId || null;
+  }
+}
+
+/** Get a map of targetId → [{ id, name }] for all players viewing targets in a war. */
+export function getViewersForWar(warId) {
+  const viewers = {};
+  for (const [id, p] of players) {
+    if (p.warId === warId && p.viewingTarget) {
+      if (!viewers[p.viewingTarget]) viewers[p.viewingTarget] = [];
+      viewers[p.viewingTarget].push({ id, name: p.name });
+    }
+  }
+  return viewers;
+}
+
 // ── API key storage ─────────────────────────────────────────────────────
 
 export function storeApiKey(playerId, apiKey) {

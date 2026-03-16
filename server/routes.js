@@ -167,6 +167,7 @@ router.get("/api/poll", (req, res, next) => {
     enemyStatuses: war.enemyStatuses,
     chainData: war.chainData,
     onlinePlayers: store.getOnlinePlayersForWar(warId),
+    viewers: store.getViewersForWar(warId),
   });
 });
 
@@ -350,6 +351,17 @@ router.post("/api/status", requireAuth, async (req, res) => {
     }
   }
 
+  return res.json({ ok: true });
+});
+
+// ── POST /api/viewing ────────────────────────────────────────────────────
+// Report which target the player is currently viewing (attack page).
+// Send targetId = null when leaving the attack page.
+
+router.post("/api/viewing", requireAuth, (req, res) => {
+  const { playerId } = req.user;
+  const { targetId } = req.body ?? {};
+  store.setViewingTarget(playerId, targetId || null);
   return res.json({ ok: true });
 });
 
