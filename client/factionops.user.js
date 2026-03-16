@@ -599,6 +599,34 @@ html.wb-theme-light {
 
 /* (transition rule merged into .wb-sortable-row above) */
 
+/* ----- BSP sort toggle button ----- */
+.wb-bsp-sort-btn {
+    position: fixed;
+    bottom: 70px;
+    right: 16px;
+    z-index: 999996;
+    background: var(--wb-bg-secondary);
+    border: 1px solid var(--wb-border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: var(--wb-text);
+    font-family: monospace;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s, background 0.2s;
+    display: none;
+}
+.wb-bsp-sort-btn:hover {
+    opacity: 1;
+}
+.wb-bsp-sort-btn.active {
+    background: var(--wb-accent);
+    border-color: var(--wb-call-green);
+    opacity: 1;
+}
+
 /* ----- BSP / FFS stat display ----- */
 .wb-bsp-cell {
     display: inline-flex;
@@ -720,6 +748,9 @@ body.wb-chain-active {
             timeout: 0,
             cooldown: 0,
         },
+
+        // Sort mode: 'default' or 'bsp'
+        sortMode: 'default',
 
         // UI references
         ui: {
@@ -923,6 +954,28 @@ body.wb-chain-active {
             return formatEstimate(estimate) + '+';
         }
         return formatEstimate(estimate);
+    }
+
+    /**
+     * Get the BSP/FFS stat number for a target (for sorting).
+     * Checks BSP prediction (sync). FFS is async so we cache resolved values.
+     * Returns the numeric stat value or 0 if unavailable.
+     */
+    const _ffsCache = {};
+    function getBspStatValue(targetId) {
+        // BSP prediction (sync)
+        const pred = fetchBspPrediction(targetId);
+        if (pred && pred.TBS != null) return Number(pred.TBS) || 0;
+
+        // FFS cached value (populated async by renderBspCell)
+        if (_ffsCache[targetId]) return _ffsCache[targetId];
+
+        // Kick off async FFS lookup and cache for next sort cycle
+        getFfScouterEstimate(targetId).then((ffs) => {
+            if (ffs && ffs.total) _ffsCache[targetId] = Number(ffs.total) || 0;
+        });
+
+        return 0;
     }
 
     function formatEstimate(mins) {
@@ -1536,6 +1589,33 @@ body.wb-chain-active {
         updateChainBar();
     }
 
+    /** Create the BSP sort toggle button (fixed bottom-right, above gear). */
+    function createBspSortButton() {
+        if (document.getElementById('wb-bsp-sort')) return;
+
+        const btn = document.createElement('button');
+        btn.id = 'wb-bsp-sort';
+        btn.className = 'wb-bsp-sort-btn';
+        btn.textContent = 'BSP \u25BC';
+        btn.title = 'Sort by estimated stats (highest first)';
+        btn.style.display = 'block';
+
+        btn.addEventListener('click', () => {
+            if (state.sortMode === 'bsp') {
+                state.sortMode = 'default';
+                btn.classList.remove('active');
+                btn.textContent = 'BSP \u25BC';
+            } else {
+                state.sortMode = 'bsp';
+                btn.classList.add('active');
+                btn.textContent = 'BSP \u25BC \u2713';
+            }
+            sortMemberList();
+        });
+
+        document.body.appendChild(btn);
+    }
+
     /** Update chain bar contents and styling. */
     function updateChainBar() {
         const bar = state.ui.chainBar;
@@ -2141,20 +2221,38 @@ body.wb-chain-active {
         if (!parent) return;
 
         // Build sort array
-        const sorted = rows.map((row) => ({
-            row,
-            targetId: row.dataset.wbTargetId,
-            priority: sortPriority(row.dataset.wbTargetId),
-            timer: sortTimerValue(row.dataset.wbTargetId),
-        }));
-
-        sorted.sort((a, b) => {
-            if (a.priority !== b.priority) return a.priority - b.priority;
-            // Within same priority, sort by timer ascending (shortest first,
-            // except hospital where longest goes to bottom)
-            if (a.priority === 2) return a.timer - b.timer; // hospital: shortest timer first (closer to release)
-            return a.timer - b.timer;
+        const sorted = rows.map((row) => {
+            const tid = row.dataset.wbTargetId;
+            return {
+                row,
+                targetId: tid,
+                priority: sortPriority(tid),
+                timer: sortTimerValue(tid),
+                bsp: state.sortMode === 'bsp' ? getBspStatValue(tid) : 0,
+            };
         });
+
+        if (state.sortMode === 'bsp') {
+            // BSP sort: highest stats first, unknowns (0) at bottom
+            sorted.sort((a, b) => {
+                // Both have stats — highest first
+                if (a.bsp && b.bsp) return b.bsp - a.bsp;
+                // One has stats, other doesn't — stats first
+                if (a.bsp && !b.bsp) return -1;
+                if (!a.bsp && b.bsp) return 1;
+                // Neither has stats — fall back to default sort
+                if (a.priority !== b.priority) return a.priority - b.priority;
+                return a.timer - b.timer;
+            });
+        } else {
+            sorted.sort((a, b) => {
+                if (a.priority !== b.priority) return a.priority - b.priority;
+                // Within same priority, sort by timer ascending (shortest first,
+                // except hospital where longest goes to bottom)
+                if (a.priority === 2) return a.timer - b.timer; // hospital: shortest timer first
+                return a.timer - b.timer;
+            });
+        }
 
         // Use CSS order property if parent is flex/grid, otherwise re-append nodes
         const computedDisplay = window.getComputedStyle(parent).display;
@@ -2483,6 +2581,7 @@ body.wb-chain-active {
     /** Initialise war/faction page enhancements. */
     function initWarPage() {
         createChainBar();
+        createBspSortButton();
         startChainTimer();
         setupMutationObserver();
         startStatusTimers();
