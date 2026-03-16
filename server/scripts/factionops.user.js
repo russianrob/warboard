@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.43
+// @version      3.0.44
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -4239,12 +4239,8 @@ body.wb-chain-active {
             log('Page: Attack');
             initAttackPage();
         } else if (url.includes('factions.php') || url.includes('war.php')) {
-            if (isWarContext()) {
-                log('Page: War — showing activate button');
-                showActivateButton();
-            } else {
-                log('Page: Faction (non-war) — skipping war UI');
-            }
+            log('Page: Faction/War — showing activate button');
+            showActivateButton();
         } else {
             log('Page: Unknown — running in passive mode');
         }
