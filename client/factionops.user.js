@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      1.0.1
+// @version      1.1.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -28,14 +28,24 @@
     // SECTION 1: CONFIGURATION
     // =========================================================================
 
+    // --- Torn PDA Detection ---
+    const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
+    const PDA_API_KEY = '###PDA-APIKEY###';
+
     const CONFIG = {
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
-        API_KEY: GM_getValue('factionops_apikey', ''),
+        API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
         AUTO_SORT: GM_getValue('factionops_autosort', true),
         CALL_TIMEOUT: 5 * 60 * 1000,       // 5 minute call expiry
         REFRESH_INTERVAL: 30 * 1000,        // 30 second status refresh
+        IS_PDA: IS_PDA,
     };
+
+    // Auto-save PDA key on first detection
+    if (IS_PDA && !GM_getValue('factionops_apikey', '')) {
+        GM_setValue('factionops_apikey', PDA_API_KEY);
+    }
 
     /** Persist a config key and update the live CONFIG object. */
     function setConfig(key, value) {
@@ -48,6 +58,25 @@
         };
         if (gmKeys[key]) {
             GM_setValue(gmKeys[key], value);
+        }
+    }
+
+    // =========================================================================
+    // SECTION 1B: PDA-COMPATIBLE HTTP WRAPPER
+    // =========================================================================
+
+    /**
+     * Cross-platform HTTP request wrapper.
+     * Uses PDA_httpGet on Torn PDA, GM_xmlhttpRequest elsewhere.
+     */
+    function httpRequest(opts) {
+        if (IS_PDA && typeof PDA_httpGet === 'function' && opts.method === 'GET') {
+            // PDA bridge for GET requests
+            PDA_httpGet(opts.url)
+                .then(r => opts.onload && opts.onload(typeof r === 'string' ? { status: 200, responseText: r } : r))
+                .catch(e => opts.onerror && opts.onerror(e));
+        } else {
+            GM_xmlhttpRequest(opts);
         }
     }
 
@@ -632,10 +661,10 @@ body.wb-chain-active {
 
             log('Loading Socket.IO from CDN...');
 
-            // Use GM_xmlhttpRequest to fetch the script content, then create a
+            // Use httpRequest to fetch the script content, then create a
             // blob URL. This avoids CSP issues that a direct CDN <script> might
-            // encounter on Torn.
-            GM_xmlhttpRequest({
+            // encounter on Torn. Works on both Tampermonkey and Torn PDA.
+            httpRequest({
                 method: 'GET',
                 url: 'https://cdn.socket.io/4.7.5/socket.io.min.js',
                 onload(res) {
@@ -666,7 +695,7 @@ body.wb-chain-active {
                     }
                 },
                 onerror(err) {
-                    reject(new Error('GM_xmlhttpRequest failed: ' + String(err)));
+                    reject(new Error('httpRequest failed: ' + String(err)));
                 },
             });
         });
@@ -990,9 +1019,10 @@ body.wb-chain-active {
 
             <label for="wb-input-apikey">Torn API Key</label>
             <div style="display:flex;gap:6px;margin-bottom:14px;">
-                <input type="password" id="wb-input-apikey" value="${escapeHtml(CONFIG.API_KEY)}" placeholder="Your Torn API key" style="margin-bottom:0;flex:1;">
+                <input type="password" id="wb-input-apikey" value="${escapeHtml(CONFIG.API_KEY)}" placeholder="Your Torn API key" style="margin-bottom:0;flex:1;" ${CONFIG.IS_PDA && CONFIG.API_KEY === PDA_API_KEY ? 'disabled' : ''}>
                 <button class="wb-btn wb-btn-sm" id="wb-btn-verify">Verify</button>
             </div>
+            ${CONFIG.IS_PDA ? '<div style="font-size:11px;color:#87ceeb;margin-bottom:8px;">\u2705 Torn PDA detected — using PDA-managed API key.</div>' : ''}
             <div id="wb-verify-result" style="font-size:11px;margin-bottom:10px;min-height:14px;"></div>
 
             <div class="wb-settings-row">
@@ -2270,7 +2300,8 @@ body.wb-chain-active {
     // =========================================================================
 
     async function main() {
-        log('Initialising FactionOps v1.0.0');
+        log('Initialising FactionOps v1.1.0');
+        if (IS_PDA) log('Torn PDA detected — using PDA-managed API key');
 
         // 1. Inject CSS
         injectStyles();
