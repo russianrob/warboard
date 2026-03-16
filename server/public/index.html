@@ -280,6 +280,26 @@ img { max-width: 100%; display: block; }
   50% { opacity: 0.5; transform: scale(0.8); }
 }
 
+.hero-badge.server-online {
+  color: var(--accent);
+  border-color: rgba(0, 212, 170, 0.3);
+  background: rgba(0, 212, 170, 0.08);
+}
+.hero-badge.server-online .pulse-dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(0, 212, 170, 0.6);
+}
+.hero-badge.server-offline {
+  color: var(--red);
+  border-color: rgba(255, 71, 87, 0.3);
+  background: rgba(255, 71, 87, 0.08);
+}
+.hero-badge.server-offline .pulse-dot {
+  background: var(--red);
+  box-shadow: none;
+  animation: none;
+}
+
 .hero h1 {
   font-family: 'JetBrains Mono', monospace;
   font-size: clamp(48px, 10vw, 96px);
@@ -898,9 +918,9 @@ img { max-width: 100%; display: block; }
 <!-- ═══════════════ HERO ═══════════════ -->
 <section class="hero" id="hero">
   <div class="hero-content">
-    <div class="hero-badge reveal">
-      <span class="pulse-dot"></span>
-      LIVE COORDINATION
+    <div class="hero-badge reveal" id="server-status-badge">
+      <span class="pulse-dot" id="status-dot"></span>
+      <span id="status-text">CHECKING SERVER...</span>
     </div>
     <h1 class="reveal">FACTIONOPS</h1>
     <p class="hero-tagline reveal">Real-time faction war coordination for Torn</p>
@@ -1003,6 +1023,32 @@ img { max-width: 100%; display: block; }
         </div>
         <h3>Instant Sync</h3>
         <p>WebSocket-powered. Every call, every status change — live across all tabs.</p>
+      </div>
+
+      <!-- Group Attack Detection -->
+      <div class="feature-card reveal" style="--i:6">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </div>
+        <h3>Group Attack Detection</h3>
+        <p>See who else is viewing the same target. Eye badges show real-time viewer counts to prevent pile-ons.</p>
+      </div>
+
+      <!-- Next Up Queue -->
+      <div class="feature-card reveal" style="--i:7">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <line x1="8" y1="8" x2="16" y2="8"/>
+            <line x1="8" y1="12" x2="14" y2="12"/>
+            <line x1="8" y1="16" x2="12" y2="16"/>
+          </svg>
+        </div>
+        <h3>Next Up Queue</h3>
+        <p>Hospitalized targets about to come out are pinned to the chain bar. One-click call before they're even available.</p>
       </div>
 
     </div>
@@ -1130,6 +1176,34 @@ img { max-width: 100%; display: block; }
 <script>
 (function() {
   'use strict';
+
+  // ── Server Status Dot ──
+  (function checkServerStatus() {
+    const badge = document.getElementById('server-status-badge');
+    const dot   = document.getElementById('status-dot');
+    const text  = document.getElementById('status-text');
+    if (!badge) return;
+
+    function setOnline() {
+      badge.classList.remove('server-offline');
+      badge.classList.add('server-online');
+      text.textContent = 'SERVER ONLINE';
+    }
+    function setOffline() {
+      badge.classList.remove('server-online');
+      badge.classList.add('server-offline');
+      text.textContent = 'SERVER OFFLINE';
+    }
+
+    function ping() {
+      fetch('/api/health', { cache: 'no-store' })
+        .then(function(r) { return r.ok ? setOnline() : setOffline(); })
+        .catch(function() { setOffline(); });
+    }
+
+    ping();
+    setInterval(ping, 30000); // re-check every 30s
+  })();
 
   // Scroll-aware header
   const header = document.querySelector('.site-header');

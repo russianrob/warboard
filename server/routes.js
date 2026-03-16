@@ -37,6 +37,13 @@ function uncallTarget(warId, targetId) {
   clearExistingTimer(timerKey);
 }
 
+// ── GET /api/health ──────────────────────────────────────────────────────
+// Unauthenticated — used by the landing page to show a live status dot.
+
+router.get("/api/health", (req, res) => {
+  res.json({ status: "ok", uptime: Math.floor(process.uptime()) });
+});
+
 // ── POST /api/auth ──────────────────────────────────────────────────────
 
 router.post("/api/auth", async (req, res) => {
