@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.32
+// @version      3.0.33
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2034,6 +2034,7 @@ body.wb-chain-active {
                 warn('Call failed:', e.message);
                 delete state.calls[tid];
                 updateTargetRow(tid);
+                showToast(e.message || 'Call failed', 'error');
             });
     }
 
