@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.21
+// @version      3.0.22
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1191,7 +1191,7 @@ body.wb-chain-active {
     .fo-header { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
     .fo-col-headers, .fo-row {
         /* Prior | Target | (Lvl hidden) | BSP | Status | On | Call | Action */
-        grid-template-columns: 40px 1fr 0px 48px 68px 28px 72px 60px;
+        grid-template-columns: 40px 1fr 0px 44px 62px 24px 62px 56px;
         padding: 7px 12px;
         column-gap: 8px;
         font-size: 11px;
@@ -1201,11 +1201,11 @@ body.wb-chain-active {
     .fo-row > :nth-child(3) { display: none; }
     .fo-footer { padding: 6px 12px; flex-wrap: wrap; gap: 4px; }
     .fo-footer-stats { gap: 10px; flex-wrap: wrap; }
-    .fo-attack-btn { padding: 3px 8px; font-size: 9px; }
-    .fo-call-btn { padding: 3px 8px; font-size: 9px; }
-    .fo-called-tag { padding: 2px 6px; font-size: 9px; }
+    .fo-attack-btn { padding: 3px 6px; font-size: 8px; }
+    .fo-call-btn { padding: 3px 6px; font-size: 8px; }
+    .fo-called-tag { padding: 2px 5px; font-size: 8px; }
     .fo-called-tag .fo-caller-name { max-width: 34px; }
-    .fo-call-cell { overflow: hidden; max-width: 100%; }
+    .fo-call-cell { overflow: hidden; max-width: 100%; gap: 2px; padding: 0 2px; }
     .fo-status-pill { padding: 2px 6px; font-size: 10px; }
     .fo-player-name .fo-name { font-size: 11.5px; }
     .fo-player-name .fo-pid { font-size: 9px; }
