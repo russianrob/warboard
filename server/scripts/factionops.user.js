@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.52
+// @version      3.0.53
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -974,27 +974,34 @@ body.wb-chain-active {
     background: rgba(0,184,148,0.15);
 }
 
-/* ── Activate FactionOps button (full-width bar, matches PDA style) ── */
-.fo-activate-btn {
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    width: 100%; max-width: 500px;
-    margin: 10px auto; padding: 10px 16px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.1em;
-    border-radius: 8px;
-    border: 1.5px solid rgba(225,112,85,0.5);
-    background: rgba(225,112,85,0.1); color: #e17055;
-    cursor: pointer; transition: all 0.2s ease;
-    white-space: nowrap;
-    box-sizing: border-box;
+/* ── Activate FactionOps button (fixed top banner, avoids Torn layout issues) ── */
+#fo-activate-btn {
+    position: fixed !important;
+    top: 0 !important; left: 50% !important;
+    transform: translateX(-50%) !important;
+    z-index: 999998 !important;
+    display: flex !important; align-items: center !important; justify-content: center !important; gap: 8px !important;
+    width: auto !important; min-width: 320px !important; max-width: 500px !important;
+    height: 38px !important;
+    margin: 0 !important; padding: 0 16px !important;
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 13px !important; font-weight: 700 !important;
+    text-transform: uppercase !important; letter-spacing: 0.1em !important;
+    border: 1.5px solid rgba(225,112,85,0.5) !important;
+    border-top: none !important;
+    border-radius: 0 0 10px 10px !important;
+    background: rgba(225,112,85,0.12) !important; color: #e17055 !important;
+    backdrop-filter: blur(8px) !important; -webkit-backdrop-filter: blur(8px) !important;
+    cursor: pointer !important; transition: all 0.2s ease !important;
+    white-space: nowrap !important;
+    box-sizing: border-box !important;
 }
-.fo-activate-btn:hover {
-    background: rgba(225,112,85,0.25);
-    border-color: rgba(225,112,85,0.8);
-    box-shadow: 0 0 12px rgba(225,112,85,0.2);
+#fo-activate-btn:hover {
+    background: rgba(225,112,85,0.3) !important;
+    border-color: rgba(225,112,85,0.8) !important;
+    box-shadow: 0 4px 16px rgba(225,112,85,0.25) !important;
 }
-.fo-activate-btn .fo-activate-icon {
+#fo-activate-btn .fo-activate-icon {
     font-size: 14px; line-height: 1;
 }
 
@@ -3211,18 +3218,14 @@ body.wb-chain-active {
 
         const btn = document.createElement('button');
         btn.id = 'fo-activate-btn';
-        btn.className = 'fo-activate-btn';
         btn.innerHTML = '<span class="fo-activate-icon">&#x2694;</span> Activate FactionOps';
         btn.addEventListener('click', () => {
             btn.remove();
             initWarOverlay();
         });
 
-        // Insert near the top of the page content
-        const mainContent = document.getElementById('mainContainer')
-            || document.querySelector('.content-wrapper')
-            || document.body;
-        mainContent.prepend(btn);
+        // Fixed-position banner — append to body to avoid Torn layout interference
+        document.body.appendChild(btn);
     }
 
     function initWarOverlay() {
