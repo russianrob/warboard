@@ -1,4 +1,4 @@
-# Warboard Server
+# Factionops Server
 
 Backend server for a Torn.com faction war coordination tool. Provides real-time target calling, rally coordination, enemy status tracking, and chain monitoring via WebSockets.
 

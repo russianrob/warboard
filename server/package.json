@@ -1,5 +1,5 @@
 {
-  "name": "warboard-server",
+  "name": "factionops-server",
   "version": "1.0.0",
   "description": "Torn.com faction war coordination backend",
   "main": "server.js",

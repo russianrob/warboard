@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         WarBoard - Faction War Coordinator
-// @namespace    https://warboard.dev
+// @name         FactionOps - Faction War Coordinator
+// @namespace    https://factionops.dev
 // @version      1.0.0
 // @description  Real-time faction war coordination tool for Torn.com
-// @author       WarBoard
+// @author       FactionOps
 // @license      MIT
 // @match        https://www.torn.com/factions.php?step=your*
 // @match        https://www.torn.com/factions.php?step=profile*
@@ -27,10 +27,10 @@
     // =========================================================================
 
     const CONFIG = {
-        SERVER_URL: GM_getValue('warboard_server', 'https://tornwar.com'),
-        API_KEY: GM_getValue('warboard_apikey', ''),
-        THEME: GM_getValue('warboard_theme', 'dark'),
-        AUTO_SORT: GM_getValue('warboard_autosort', true),
+        SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
+        API_KEY: GM_getValue('factionops_apikey', ''),
+        THEME: GM_getValue('factionops_theme', 'dark'),
+        AUTO_SORT: GM_getValue('factionops_autosort', true),
         CALL_TIMEOUT: 5 * 60 * 1000,       // 5 minute call expiry
         REFRESH_INTERVAL: 30 * 1000,        // 30 second status refresh
     };
@@ -39,10 +39,10 @@
     function setConfig(key, value) {
         CONFIG[key] = value;
         const gmKeys = {
-            SERVER_URL: 'warboard_server',
-            API_KEY: 'warboard_apikey',
-            THEME: 'warboard_theme',
-            AUTO_SORT: 'warboard_autosort',
+            SERVER_URL: 'factionops_server',
+            API_KEY: 'factionops_apikey',
+            THEME: 'factionops_theme',
+            AUTO_SORT: 'factionops_autosort',
         };
         if (gmKeys[key]) {
             GM_setValue(gmKeys[key], value);
@@ -53,7 +53,7 @@
     // SECTION 2: LOGGING UTILITIES
     // =========================================================================
 
-    const LOG_PREFIX = '[WarBoard]';
+    const LOG_PREFIX = '[FactionOps]';
 
     function log(...args) {
         console.log(LOG_PREFIX, ...args);
@@ -74,7 +74,7 @@
     function injectStyles() {
         const css = `
 /* =====================================================================
-   WarBoard CSS — all selectors prefixed with wb- to avoid Torn conflicts
+   FactionOps CSS — all selectors prefixed with wb- to avoid Torn conflicts
    ===================================================================== */
 
 /* Theme variables — dark by default, light via .wb-theme-light on <html> */
@@ -527,7 +527,7 @@ body.wb-chain-active {
         connected: false,
         connecting: false,
         socket: null,
-        jwtToken: GM_getValue('warboard_jwt', ''),
+        jwtToken: GM_getValue('factionops_jwt', ''),
         myPlayerId: null,
         myPlayerName: null,
 
@@ -675,7 +675,7 @@ body.wb-chain-active {
     // =========================================================================
 
     /**
-     * Authenticate with the WarBoard server.
+     * Authenticate with the FactionOps server.
      * Sends the Torn API key to POST /api/auth, receives a JWT.
      */
     function authenticate() {
@@ -693,7 +693,7 @@ body.wb-chain-active {
                     const body = safeParse(res.responseText);
                     if (res.status === 200 && body && body.token) {
                         state.jwtToken = body.token;
-                        GM_setValue('warboard_jwt', body.token);
+                        GM_setValue('factionops_jwt', body.token);
                         if (body.player) {
                             state.myPlayerId = String(body.player.id);
                             state.myPlayerName = body.player.name;
@@ -941,7 +941,7 @@ body.wb-chain-active {
         const gear = document.createElement('div');
         gear.className = 'wb-settings-gear';
         gear.textContent = '\u2699'; // gear unicode
-        gear.title = 'WarBoard Settings';
+        gear.title = 'FactionOps Settings';
         gear.addEventListener('click', toggleSettings);
         document.body.appendChild(gear);
     }
@@ -976,7 +976,7 @@ body.wb-chain-active {
         else if (state.connecting) { connText = 'Connecting...'; connClass = 'connecting'; }
 
         modal.innerHTML = `
-            <h2>\u2699 WarBoard Settings</h2>
+            <h2>\u2699 FactionOps Settings</h2>
 
             <div class="wb-connection-status">
                 <span class="wb-status-dot ${connClass}" id="wb-settings-conn-dot"></span>
@@ -1390,7 +1390,7 @@ body.wb-chain-active {
     }
 
     /**
-     * Enhance a single member row with WarBoard columns.
+     * Enhance a single member row with FactionOps columns.
      * Injects Call, Status, and Rally cells into the row.
      */
     function enhanceRow(row) {
@@ -1592,7 +1592,7 @@ body.wb-chain-active {
         row.classList.toggle('wb-row-rally', hasRally);
     }
 
-    /** Re-render all WarBoard cells for a specific target. */
+    /** Re-render all FactionOps cells for a specific target. */
     function updateTargetRow(targetId) {
         const callEl = document.getElementById(`wb-call-${targetId}`);
         if (callEl) renderCallCell(callEl, targetId);
@@ -1744,7 +1744,7 @@ body.wb-chain-active {
         overlay.id = 'wb-attack-overlay';
 
         overlay.innerHTML = `
-            <h4>WarBoard</h4>
+            <h4>FactionOps</h4>
             <div class="wb-attack-row">
                 <span>Target:</span>
                 <span id="wb-atk-target">#${escapeHtml(targetId)}</span>
@@ -2101,14 +2101,14 @@ body.wb-chain-active {
 
     /**
      * Use BroadcastChannel to coordinate between multiple Torn tabs running
-     * WarBoard. This prevents duplicate socket connections and keeps state in
+     * FactionOps. This prevents duplicate socket connections and keeps state in
      * sync across tabs.
      */
     let broadcastChannel = null;
 
     function setupTabCoordination() {
         try {
-            broadcastChannel = new BroadcastChannel('warboard_sync');
+            broadcastChannel = new BroadcastChannel('factionops_sync');
             broadcastChannel.onmessage = (event) => {
                 const msg = event.data;
                 if (!msg || !msg.type) return;
@@ -2268,7 +2268,7 @@ body.wb-chain-active {
     // =========================================================================
 
     async function main() {
-        log('Initialising WarBoard v1.0.0');
+        log('Initialising FactionOps v1.0.0');
 
         // 1. Inject CSS
         injectStyles();
@@ -2322,7 +2322,7 @@ body.wb-chain-active {
             }
         } else {
             log('No API key configured — open settings to get started');
-            showToast('WarBoard: Click the gear icon to configure', 'info');
+            showToast('FactionOps: Click the gear icon to configure', 'info');
         }
 
         // 9. Detect page type and initialise appropriate enhancements
@@ -2331,7 +2331,7 @@ body.wb-chain-active {
         // 10. Start call age visual feedback loop
         requestAnimationFrame(updateCallAges);
 
-        log('WarBoard initialised');
+        log('FactionOps initialised');
     }
 
     // =========================================================================

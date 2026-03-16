@@ -1,5 +1,5 @@
 /**
- * Warboard Server – Torn.com faction war coordination tool.
+ * FactionOps Server – Torn.com faction war coordination tool.
  *
  * Express + Socket.IO backend providing:
  *  - JWT auth via Torn API key verification
@@ -51,13 +51,13 @@ app.use(express.json());
 app.use(express.static(join(__dirname, "public")));
 
 // ── Userscript download route ───────────────────────────────────────────
-const USERSCRIPT_PATH = join(__dirname, "..", "client", "warboard.user.js");
+const USERSCRIPT_PATH = join(__dirname, "..", "client", "factionops.user.js");
 
-app.get("/download/warboard.user.js", (_req, res) => {
+app.get("/download/factionops.user.js", (_req, res) => {
   try {
     const script = readFileSync(USERSCRIPT_PATH, "utf-8");
     res.setHeader("Content-Type", "text/javascript");
-    res.setHeader("Content-Disposition", 'inline; filename="warboard.user.js"');
+    res.setHeader("Content-Disposition", 'inline; filename="factionops.user.js"');
     res.send(script);
   } catch (err) {
     console.error("[server] Failed to serve userscript:", err.message);
@@ -119,9 +119,9 @@ for (const [warId, war] of store.getAllWars()) {
 }
 
 httpServer.listen(PORT, () => {
-  console.log(`[server] Warboard server listening on port ${PORT}`);
+  console.log(`[server] FactionOps server listening on port ${PORT}`);
   console.log(`[server] Landing page: http://localhost:${PORT}`);
-  console.log(`[server] Script download: http://localhost:${PORT}/download/warboard.user.js`);
+  console.log(`[server] Script download: http://localhost:${PORT}/download/factionops.user.js`);
   console.log(`[server] REST API: http://localhost:${PORT}/api`);
   console.log(`[server] WebSocket: ws://localhost:${PORT}`);
 });
