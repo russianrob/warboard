@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.46
+// @version      3.0.47
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1282,11 +1282,11 @@ body.wb-chain-active {
     .fo-col-headers > :nth-child(6) { text-align: center; }
 }
 
-/* ----- Heatmap toggle button (fixed bottom-right) ----- */
+/* ----- Heatmap toggle button (fixed bottom-right, next to settings gear) ----- */
 .wb-heatmap-btn {
     position: fixed;
-    bottom: 70px;
-    right: 16px;
+    bottom: 20px;
+    right: 70px;
     width: 42px;
     height: 42px;
     border-radius: 50%;
