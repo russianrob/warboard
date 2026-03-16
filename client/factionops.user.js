@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      1.2.1
+// @version      1.2.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -723,8 +723,8 @@ body.wb-chain-active {
                         state.jwtToken = body.token;
                         GM_setValue('factionops_jwt', body.token);
                         if (body.player) {
-                            state.myPlayerId = String(body.player.id);
-                            state.myPlayerName = body.player.name;
+                            state.myPlayerId = String(body.player.playerId || body.player.id);
+                            state.myPlayerName = body.player.playerName || body.player.name;
                         }
                         log('Authenticated as', state.myPlayerName || 'unknown');
                         resolve(body);
@@ -748,8 +748,8 @@ body.wb-chain-active {
                         state.jwtToken = body.token;
                         GM_setValue('factionops_jwt', body.token);
                         if (body.player) {
-                            state.myPlayerId = String(body.player.id);
-                            state.myPlayerName = body.player.name;
+                            state.myPlayerId = String(body.player.playerId || body.player.id);
+                            state.myPlayerName = body.player.playerName || body.player.name;
                         }
                         log('Authenticated as', state.myPlayerName || 'unknown');
                         resolve(body);
