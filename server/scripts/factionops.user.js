@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.44
+// @version      3.0.45
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2140,11 +2140,14 @@ body.wb-chain-active {
 
             <div class="wb-settings-row">
                 <span>Theme</span>
-                <label class="wb-toggle">
-                    <input type="checkbox" id="wb-toggle-theme" ${CONFIG.THEME === 'light' ? 'checked' : ''}>
-                    <span class="wb-toggle-slider"></span>
-                </label>
-                <span style="font-size:11px;opacity:0.6;">${CONFIG.THEME === 'light' ? 'Light' : 'Dark'}</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:11px;opacity:0.6;">Dark</span>
+                    <label class="wb-toggle">
+                        <input type="checkbox" id="wb-toggle-theme" ${CONFIG.THEME === 'light' ? 'checked' : ''}>
+                        <span class="wb-toggle-slider"></span>
+                    </label>
+                    <span style="font-size:11px;opacity:0.6;">Light</span>
+                </div>
             </div>
 
             <div class="wb-settings-row">
@@ -2224,8 +2227,6 @@ body.wb-chain-active {
             const theme = e.target.checked ? 'light' : 'dark';
             setConfig('THEME', theme);
             applyTheme();
-            // Update label
-            e.target.closest('.wb-settings-row').querySelector('span:last-child').textContent = theme === 'light' ? 'Light' : 'Dark';
         });
 
         document.getElementById('wb-toggle-autosort').addEventListener('change', (e) => {
