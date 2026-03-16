@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.31
+// @version      3.0.32
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2022,16 +2022,36 @@ body.wb-chain-active {
         if (!state.connected) return;
         const warId = deriveWarId();
         if (!warId) return;
-        postAction('/api/call', { warId, targetId: String(targetId) })
-            .catch(e => warn('Call failed:', e.message));
+        // Optimistic update
+        const tid = String(targetId);
+        state.calls[tid] = {
+            calledBy: { id: state.myPlayerId, name: state.myPlayerName || 'You' },
+            calledAt: Date.now(),
+        };
+        updateTargetRow(tid);
+        postAction('/api/call', { warId, targetId: tid })
+            .catch(e => {
+                warn('Call failed:', e.message);
+                delete state.calls[tid];
+                updateTargetRow(tid);
+            });
     }
 
     function emitUncallTarget(targetId) {
         if (!state.connected) return;
         const warId = deriveWarId();
         if (!warId) return;
-        postAction('/api/call', { warId, targetId: String(targetId), action: 'uncall' })
-            .catch(e => warn('Uncall failed:', e.message));
+        // Optimistic update
+        const tid = String(targetId);
+        const prev = state.calls[tid];
+        delete state.calls[tid];
+        updateTargetRow(tid);
+        postAction('/api/call', { warId, targetId: tid, action: 'uncall' })
+            .catch(e => {
+                warn('Uncall failed:', e.message);
+                if (prev) state.calls[tid] = prev;
+                updateTargetRow(tid);
+            });
     }
 
     /** Set or clear a priority tag on a target (leader/co-leader only). */
