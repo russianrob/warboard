@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.11
+// @version      3.0.12
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1191,7 +1191,7 @@ body.wb-chain-active {
     .fo-header { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
     .fo-col-headers, .fo-row {
         /* Prior | Target | (Lvl hidden) | BSP | Status | On | Call | Action */
-        grid-template-columns: 44px minmax(0, 1fr) 0px 60px 110px 36px 54px 62px;
+        grid-template-columns: 40px 1fr 0px 56px 72px 30px 54px 60px;
         padding: 7px 12px;
         column-gap: 6px;
         font-size: 11px;
@@ -1211,11 +1211,11 @@ body.wb-chain-active {
     .fo-bsp-stat { font-size: 10px; }
     .fo-priority-badge { font-size: 8px; padding: 2px 6px; }
     .fo-priority-select { width: 38px; font-size: 8px; }
-    /* Push status pill and online dot to the right */
-    .fo-row > :nth-child(5) { justify-content: flex-end; }
-    .fo-online-dot { margin: 0 0 0 auto; }
-    /* Center the ON column header with the dot */
-    .fo-col-headers > :nth-child(6) { text-align: right; }
+    /* Center status pill and online dot in their cells */
+    .fo-row > :nth-child(5) { justify-content: center; }
+    .fo-online-dot { margin: 0 auto; }
+    .fo-col-headers > :nth-child(5) { text-align: center; }
+    .fo-col-headers > :nth-child(6) { text-align: center; }
 }
 `;
         GM_addStyle(css);
