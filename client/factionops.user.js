@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.18
+// @version      3.0.19
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1187,22 +1187,18 @@ body.wb-chain-active {
 
 /* ── Responsive ── */
 @media (max-width: 700px) {
-    .fo-overlay { border-radius: 0; margin: 0; width: 100%; max-width: 100%; }
+    .fo-overlay { border-radius: 6px; margin: 4px 0; }
     .fo-header { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
     .fo-col-headers, .fo-row {
-        /* (Prior hidden) | Target | (Lvl hidden) | (BSP hidden) | Status | On | Call | Action */
-        grid-template-columns: 0px 1fr 0px 0px 72px 30px 80px 64px;
-        padding: 7px 10px;
-        column-gap: 6px;
+        /* Prior | Target | (Lvl hidden) | BSP | Status | On | Call | Action */
+        grid-template-columns: 40px 1fr 0px 48px 68px 28px 56px 64px;
+        padding: 7px 12px;
+        column-gap: 8px;
         font-size: 11px;
     }
-    /* Hide Priority, Level, BSP columns on mobile */
-    .fo-col-headers > :nth-child(1),
-    .fo-row > :nth-child(1),
+    /* Hide level column on mobile */
     .fo-col-headers > :nth-child(3),
-    .fo-row > :nth-child(3),
-    .fo-col-headers > :nth-child(4),
-    .fo-row > :nth-child(4) { display: none; }
+    .fo-row > :nth-child(3) { display: none; }
     .fo-footer { padding: 6px 12px; flex-wrap: wrap; gap: 4px; }
     .fo-footer-stats { gap: 10px; flex-wrap: wrap; }
     .fo-attack-btn { padding: 3px 8px; font-size: 9px; }
@@ -1215,12 +1211,11 @@ body.wb-chain-active {
     .fo-bsp-stat { font-size: 10px; }
     .fo-priority-badge { font-size: 8px; padding: 2px 6px; }
     .fo-priority-select { width: 38px; font-size: 8px; }
-    /* Align status pill right, online dot centered */
-    .fo-row > :nth-child(5) { justify-content: flex-end; }
+    /* Center status pill and online dot */
+    .fo-row > :nth-child(5) { justify-content: center; }
     .fo-online-dot { margin: 0 auto; }
-    .fo-col-headers > :nth-child(5) { text-align: right; }
+    .fo-col-headers > :nth-child(5) { text-align: center; }
     .fo-col-headers > :nth-child(6) { text-align: center; }
-    .fo-call-cell { overflow: hidden; }
 }
 `;
         GM_addStyle(css);
