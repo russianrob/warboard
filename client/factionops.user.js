@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
-// @namespace    https://factionops.dev
-// @version      1.0.0
+// @namespace    https://tornwar.com
+// @version      1.0.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
+// @downloadURL  https://tornwar.com/download/factionops.user.js
+// @updateURL    https://tornwar.com/download/factionops.user.js
 // @match        https://www.torn.com/factions.php?step=your*
 // @match        https://www.torn.com/factions.php?step=profile*
 // @match        https://www.torn.com/loader.php?sid=attack&user*
