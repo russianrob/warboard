@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      1.1.2
+// @version      1.1.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -652,70 +652,67 @@ body.wb-chain-active {
      * Load Socket.IO client library by injecting a <script> tag pointing to
      * the CDN.  Returns a promise that resolves once `window.io` is available.
      */
-    function loadSocketIO() {
-        return new Promise((resolve, reject) => {
-            if (typeof window.io === 'function') {
-                log('Socket.IO already loaded');
-                return resolve();
-            }
+    async function loadSocketIO() {
+        if (typeof window.io === 'function') {
+            log('Socket.IO already loaded');
+            return;
+        }
 
-            log('Loading Socket.IO from CDN...');
+        log('Loading Socket.IO...', 'IS_PDA:', IS_PDA, 'GM_xmlhttpRequest:', typeof GM_xmlhttpRequest);
 
-            if (IS_PDA) {
-                // PDA: Load from our own server to avoid CDN/CSP issues
-                const script = document.createElement('script');
-                script.src = `${CONFIG.SERVER_URL}/socket.io.min.js`;
-                script.onload = () => {
-                    if (typeof window.io === 'function') {
-                        log('Socket.IO loaded successfully (PDA)');
-                        resolve();
-                    } else {
-                        reject(new Error('Socket.IO loaded but window.io not found'));
-                    }
-                };
-                script.onerror = () => reject(new Error('Failed to load Socket.IO via script tag'));
-                document.head.appendChild(script);
-                return;
-            }
-
-            // Desktop: Use GM_xmlhttpRequest to fetch then blob-inject.
-            // This avoids CSP issues that a direct CDN <script> might
-            // encounter on Torn.
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: 'https://cdn.socket.io/4.7.5/socket.io.min.js',
-                onload(res) {
-                    if (res.status !== 200) {
-                        return reject(new Error(`Failed to load Socket.IO: HTTP ${res.status}`));
-                    }
-                    try {
-                        const blob = new Blob([res.responseText], { type: 'application/javascript' });
-                        const blobUrl = URL.createObjectURL(blob);
-                        const script = document.createElement('script');
-                        script.src = blobUrl;
-                        script.onload = () => {
-                            URL.revokeObjectURL(blobUrl);
-                            if (typeof window.io === 'function') {
-                                log('Socket.IO loaded successfully');
-                                resolve();
-                            } else {
-                                reject(new Error('Socket.IO loaded but window.io not found'));
-                            }
-                        };
-                        script.onerror = () => {
-                            URL.revokeObjectURL(blobUrl);
-                            reject(new Error('Script injection failed'));
-                        };
-                        document.head.appendChild(script);
-                    } catch (e) {
-                        reject(e);
-                    }
-                },
-                onerror(err) {
-                    reject(new Error('GM_xmlhttpRequest failed: ' + String(err)));
-                },
+        // Helper: try loading via <script> tag
+        const tryScriptTag = (url) => {
+            return new Promise((res, rej) => {
+                const s = document.createElement('script');
+                s.src = url;
+                s.onload = () => (typeof window.io === 'function') ? res() : rej(new Error('io not found after load'));
+                s.onerror = () => rej(new Error('script tag blocked: ' + url));
+                document.head.appendChild(s);
             });
-        });
+        };
+
+        // Helper: try loading via GM_xmlhttpRequest + blob
+        const tryGMBlob = (url) => {
+            return new Promise((res, rej) => {
+                if (typeof GM_xmlhttpRequest !== 'function') return rej(new Error('GM_xmlhttpRequest not available'));
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url,
+                    onload(r) {
+                        if (r.status !== 200) return rej(new Error('HTTP ' + r.status));
+                        try {
+                            const blob = new Blob([r.responseText], { type: 'application/javascript' });
+                            const blobUrl = URL.createObjectURL(blob);
+                            const s = document.createElement('script');
+                            s.src = blobUrl;
+                            s.onload = () => { URL.revokeObjectURL(blobUrl); (typeof window.io === 'function') ? res() : rej(new Error('io not found')); };
+                            s.onerror = () => { URL.revokeObjectURL(blobUrl); rej(new Error('blob inject failed')); };
+                            document.head.appendChild(s);
+                        } catch (e) { rej(e); }
+                    },
+                    onerror(e) { rej(new Error('GM request failed')); },
+                });
+            });
+        };
+
+        // Try methods in order: server script tag → CDN script tag → GM blob from CDN
+        const methods = [
+            { name: 'server script tag', fn: () => tryScriptTag(`${CONFIG.SERVER_URL}/socket.io.min.js`) },
+            { name: 'CDN script tag', fn: () => tryScriptTag('https://cdn.socket.io/4.7.5/socket.io.min.js') },
+            { name: 'GM blob inject', fn: () => tryGMBlob('https://cdn.socket.io/4.7.5/socket.io.min.js') },
+        ];
+
+        for (const method of methods) {
+            try {
+                await method.fn();
+                log('Socket.IO loaded via', method.name);
+                return;
+            } catch (e) {
+                log(method.name, 'failed:', e.message);
+            }
+        }
+
+        throw new Error('All Socket.IO load methods failed');
     }
 
     // =========================================================================
