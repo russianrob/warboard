@@ -869,6 +869,47 @@ body.wb-chain-active {
         return 'c';
     }
 
+    /**
+     * Estimated one-way travel times in minutes (standard / airstrip).
+     * Used as a rough fallback when the API doesn't provide an exact timer.
+     * Returns midpoint between standard and airstrip as a reasonable guess.
+     */
+    const TRAVEL_ESTIMATES = {
+        'mexico':              17, // 20 std / 14 air
+        'canada':              32, // 37 / 26
+        'cayman islands':      49, // 57 / 40
+        'cayman':              49,
+        'hawaii':              103, // 121 / 85
+        'united kingdom':      130, // 152 / 107
+        'uk':                  130,
+        'argentina':           161, // 189 / 133
+        'switzerland':         144, // 169 / 118
+        'japan':               173, // 203 / 142
+        'china':               186, // 219 / 153
+        'united arab emirates':220, // 259 / 181
+        'uae':                 220,
+        'south africa':        264, // 311 / 217
+    };
+
+    /**
+     * Try to estimate remaining travel time from the status description.
+     * Returns a string like "~2h 10m" or null if unknown.
+     */
+    function estimateTravelReturn(description) {
+        if (!description) return null;
+        const desc = description.toLowerCase();
+        for (const [dest, mins] of Object.entries(TRAVEL_ESTIMATES)) {
+            if (desc.includes(dest)) {
+                // Returning takes the same time; if description says "Returning"
+                // we still use the same estimate. Show as approximate.
+                const h = Math.floor(mins / 60);
+                const m = mins % 60;
+                return h > 0 ? `~${h}h ${m}m` : `~${m}m`;
+            }
+        }
+        return null;
+    }
+
     // =========================================================================
     // SECTION 6: HTTP POLLING CLIENT
     // =========================================================================
@@ -1844,10 +1885,14 @@ body.wb-chain-active {
                 badge.innerHTML = `${dot} Hosp: ${timerSpan}`;
                 break;
             case 'traveling':
-            case 'travel':
+            case 'travel': {
                 badge.className = 'wb-status-badge wb-status-travel';
-                badge.innerHTML = `${dot} Travel: ${statusData.description || ''} ${timerSpan}`;
+                const travelTimer = timerSpan || '';
+                const estimate = !travelTimer ? estimateTravelReturn(statusData.description) : null;
+                const timeStr = travelTimer || (estimate ? `<span style="opacity:0.6">${estimate}</span>` : '');
+                badge.innerHTML = `${dot} Travel: ${statusData.description || ''} ${timeStr}`;
                 break;
+            }
             case 'jail':
                 badge.className = 'wb-status-badge wb-status-jail';
                 badge.innerHTML = `${dot} Jail: ${timerSpan}`;
