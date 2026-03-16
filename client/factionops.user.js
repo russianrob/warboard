@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.25
+// @version      3.0.26
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1196,11 +1196,11 @@ body.wb-chain-active {
         column-gap: 8px;
         font-size: 11px;
     }
-    /* Hide level and BSP columns on mobile */
+    /* Hide level and BSP columns on mobile (keep in grid flow) */
     .fo-col-headers > :nth-child(3),
     .fo-row > :nth-child(3),
     .fo-col-headers > :nth-child(4),
-    .fo-row > :nth-child(4) { display: none; }
+    .fo-row > :nth-child(4) { visibility: hidden; overflow: hidden; padding: 0 !important; margin: 0; min-width: 0; max-width: 0; font-size: 0; }
     .fo-footer { padding: 6px 12px; flex-wrap: wrap; gap: 4px; }
     .fo-footer-stats { gap: 10px; flex-wrap: wrap; }
     .fo-attack-btn { padding: 3px 8px; font-size: 9px; }
