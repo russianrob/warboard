@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.1
+// @version      3.0.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1188,27 +1188,28 @@ body.wb-chain-active {
 /* ── Responsive ── */
 @media (max-width: 700px) {
     .fo-overlay { border-radius: 6px; margin: 4px 0; }
-    .fo-header { flex-wrap: wrap; gap: 6px; padding: 8px 10px; }
+    .fo-header { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
     .fo-col-headers, .fo-row {
-        grid-template-columns: 40px 1fr 0px 52px 80px 30px 70px 52px;
-        padding: 6px 8px;
+        /* Prior | Target | (Lvl hidden) | BSP | Status | On | Call | Action */
+        grid-template-columns: 44px 1fr 0px 58px 62px 32px 56px 56px;
+        padding: 7px 10px;
         font-size: 11px;
     }
     /* Hide level column on mobile */
     .fo-col-headers > :nth-child(3),
     .fo-row > :nth-child(3) { display: none; }
-    .fo-footer { padding: 6px 10px; flex-wrap: wrap; gap: 4px; }
-    .fo-footer-stats { gap: 8px; flex-wrap: wrap; }
-    .fo-attack-btn { padding: 3px 6px; font-size: 9px; }
-    .fo-call-btn { padding: 3px 6px; font-size: 9px; }
-    .fo-called-tag { padding: 2px 5px; font-size: 9px; }
+    .fo-footer { padding: 6px 12px; flex-wrap: wrap; gap: 4px; }
+    .fo-footer-stats { gap: 10px; flex-wrap: wrap; }
+    .fo-attack-btn { padding: 3px 8px; font-size: 9px; }
+    .fo-call-btn { padding: 3px 8px; font-size: 9px; }
+    .fo-called-tag { padding: 2px 6px; font-size: 9px; }
     .fo-called-tag .fo-caller-name { max-width: 50px; }
-    .fo-status-pill { padding: 2px 5px; font-size: 10px; }
-    .fo-player-name .fo-name { font-size: 11px; }
+    .fo-status-pill { padding: 2px 6px; font-size: 10px; }
+    .fo-player-name .fo-name { font-size: 11.5px; }
     .fo-player-name .fo-pid { font-size: 9px; }
     .fo-bsp-stat { font-size: 10px; }
-    .fo-priority-badge { font-size: 8px; padding: 1px 5px; }
-    .fo-priority-select { width: 36px; font-size: 8px; }
+    .fo-priority-badge { font-size: 8px; padding: 2px 6px; }
+    .fo-priority-select { width: 38px; font-size: 8px; }
 }
 `;
         GM_addStyle(css);
