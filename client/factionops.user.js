@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.33
+// @version      3.0.34
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -936,6 +936,21 @@ body.wb-chain-active {
 .fo-online-badge .fo-dot {
     width: 6px; height: 6px;
     border-radius: 50%; background: #00b894;
+}
+
+/* ── Settings button in header ── */
+.fo-settings-btn {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(99,110,114,0.2);
+    border: 1px solid rgba(99,110,114,0.3);
+    color: #b0b0c0; font-size: 15px;
+    cursor: pointer; display: flex;
+    align-items: center; justify-content: center;
+    transition: all 0.15s ease; padding: 0; line-height: 1;
+}
+.fo-settings-btn:hover {
+    background: rgba(99,110,114,0.35);
+    color: #e0e0e0;
 }
 
 /* ── Column labels ── */
@@ -3111,6 +3126,7 @@ body.wb-chain-active {
                 </div>
                 <div class="fo-header-right">
                     <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.onlinePlayers.length} online</span></div>
+                    <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                 </div>
             </div>
             <div class="fo-col-headers">
@@ -3147,6 +3163,20 @@ body.wb-chain-active {
         }
 
         renderOverlay();
+
+        // Wire up settings button in overlay header
+        const settingsBtn = document.getElementById('fo-settings-btn');
+        if (settingsBtn) {
+            settingsBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleSettings();
+            });
+        }
+
+        // Hide the floating settings gear when overlay is active
+        const fab = document.querySelector('.wb-settings-gear');
+        if (fab) fab.style.display = 'none';
+
         log('War overlay initialised');
     }
 
