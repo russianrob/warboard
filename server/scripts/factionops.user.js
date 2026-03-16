@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.54
+// @version      3.0.55
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1445,9 +1445,6 @@ body.wb-chain-active {
         // Whether a faction API key has been saved on the server
         factionKeyStored: false,
 
-        // Sort mode: 'default' or 'bsp'
-        sortMode: 'default',
-
         // UI references
         ui: {
             chainBar: null,
@@ -1652,27 +1649,6 @@ body.wb-chain-active {
         return formatEstimate(estimate);
     }
 
-    /**
-     * Get the BSP/FFS stat number for a target (for sorting).
-     * Checks BSP prediction (sync). FFS is async so we cache resolved values.
-     * Returns the numeric stat value or 0 if unavailable.
-     */
-    const _ffsCache = {};
-    function getBspStatValue(targetId) {
-        // BSP prediction (sync)
-        const pred = fetchBspPrediction(targetId);
-        if (pred && pred.TBS != null) return Number(pred.TBS) || 0;
-
-        // FFS cached value (populated async by renderBspCell)
-        if (_ffsCache[targetId]) return _ffsCache[targetId];
-
-        // Kick off async FFS lookup and cache for next sort cycle
-        getFfScouterEstimate(targetId).then((ffs) => {
-            if (ffs && ffs.total) _ffsCache[targetId] = Number(ffs.total) || 0;
-        });
-
-        return 0;
-    }
 
 
     function formatEstimate(mins) {
@@ -3378,23 +3354,12 @@ body.wb-chain-active {
             targetId: tid,
             priority: sortPriority(tid),
             timer: sortTimerValue(tid),
-            bsp: state.sortMode === 'bsp' ? getBspStatValue(tid) : 0,
         }));
 
-        if (state.sortMode === 'bsp') {
-            sorted.sort((a, b) => {
-                if (a.bsp && b.bsp) return b.bsp - a.bsp;
-                if (a.bsp && !b.bsp) return -1;
-                if (!a.bsp && b.bsp) return 1;
-                if (a.priority !== b.priority) return a.priority - b.priority;
-                return a.timer - b.timer;
-            });
-        } else {
-            sorted.sort((a, b) => {
-                if (a.priority !== b.priority) return a.priority - b.priority;
-                return a.timer - b.timer;
-            });
-        }
+        sorted.sort((a, b) => {
+            if (a.priority !== b.priority) return a.priority - b.priority;
+            return a.timer - b.timer;
+        });
 
         // Build/update rows in sorted order
         const fragment = document.createDocumentFragment();
@@ -3904,31 +3869,13 @@ body.wb-chain-active {
                 targetId: tid,
                 priority: sortPriority(tid),
                 timer: sortTimerValue(tid),
-                bsp: state.sortMode === 'bsp' ? getBspStatValue(tid) : 0,
             };
         });
 
-        if (state.sortMode === 'bsp') {
-            // BSP sort: highest stats first, unknowns (0) at bottom
-            sorted.sort((a, b) => {
-                // Both have stats — highest first
-                if (a.bsp && b.bsp) return b.bsp - a.bsp;
-                // One has stats, other doesn't — stats first
-                if (a.bsp && !b.bsp) return -1;
-                if (!a.bsp && b.bsp) return 1;
-                // Neither has stats — fall back to default sort
-                if (a.priority !== b.priority) return a.priority - b.priority;
-                return a.timer - b.timer;
-            });
-        } else {
-            sorted.sort((a, b) => {
-                if (a.priority !== b.priority) return a.priority - b.priority;
-                // Within same priority, sort by timer ascending (shortest first,
-                // except hospital where longest goes to bottom)
-                if (a.priority === 2) return a.timer - b.timer; // hospital: shortest timer first
-                return a.timer - b.timer;
-            });
-        }
+        sorted.sort((a, b) => {
+            if (a.priority !== b.priority) return a.priority - b.priority;
+            return a.timer - b.timer;
+        });
 
         // Use CSS order property if parent is flex/grid, otherwise re-append nodes
         const computedDisplay = window.getComputedStyle(parent).display;
