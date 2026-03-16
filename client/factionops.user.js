@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.30
+// @version      3.0.31
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3460,7 +3460,8 @@ body.wb-chain-active {
             tag.className = 'fo-called-tag';
             const callerName = document.createElement('span');
             callerName.className = 'fo-caller-name';
-            callerName.textContent = callData.calledBy ? callData.calledBy.name : 'Someone';
+            const isMine = callData.calledBy && String(callData.calledBy.id) === state.myPlayerId;
+            callerName.textContent = isMine ? 'Mine' : (callData.calledBy ? callData.calledBy.name : 'Someone');
             tag.appendChild(callerName);
             cell.appendChild(tag);
 
