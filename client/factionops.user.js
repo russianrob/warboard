@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.34
+// @version      3.0.35
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -951,6 +951,27 @@ body.wb-chain-active {
 .fo-settings-btn:hover {
     background: rgba(99,110,114,0.35);
     color: #e0e0e0;
+}
+
+/* ── Activate FactionOps button ── */
+.fo-activate-btn {
+    display: flex; align-items: center; gap: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 6px 14px; border-radius: 20px;
+    border: 1px solid rgba(225,112,85,0.4);
+    background: rgba(225,112,85,0.1); color: #e17055;
+    cursor: pointer; transition: all 0.2s ease;
+    margin: 8px auto; white-space: nowrap;
+}
+.fo-activate-btn:hover {
+    background: rgba(225,112,85,0.2);
+    border-color: rgba(225,112,85,0.6);
+    box-shadow: 0 0 12px rgba(225,112,85,0.15);
+}
+.fo-activate-btn .fo-activate-icon {
+    font-size: 14px; line-height: 1;
 }
 
 /* ── Column labels ── */
@@ -3079,6 +3100,25 @@ body.wb-chain-active {
      * Initialise the FactionOps overlay, hiding Torn's native war list.
      * Called from detectPageAndInit() when isWarContext() is true.
      */
+    /** Show an "Activate FactionOps" button on the war page. */
+    function showActivateButton() {
+        if (document.getElementById('fo-activate-btn')) return;
+        const btn = document.createElement('button');
+        btn.id = 'fo-activate-btn';
+        btn.className = 'fo-activate-btn';
+        btn.innerHTML = '<span class="fo-activate-icon">&#x2694;</span> Activate FactionOps';
+        btn.addEventListener('click', () => {
+            btn.remove();
+            initWarOverlay();
+        });
+
+        // Insert near the top of the page content
+        const mainContent = document.getElementById('mainContainer')
+            || document.querySelector('.content-wrapper')
+            || document.body;
+        mainContent.prepend(btn);
+    }
+
     function initWarOverlay() {
         // Keep chain bar, BSP button, copy button, timers as before
         createChainBar();
@@ -4101,8 +4141,8 @@ body.wb-chain-active {
             initAttackPage();
         } else if (url.includes('factions.php') || url.includes('war.php')) {
             if (isWarContext()) {
-                log('Page: War (overlay mode)');
-                initWarOverlay();
+                log('Page: War — showing activate button');
+                showActivateButton();
             } else {
                 log('Page: Faction (non-war) — skipping war UI');
             }
