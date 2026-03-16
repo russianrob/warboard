@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      2.0.5
+// @version      2.1.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -424,7 +424,7 @@ html.wb-theme-light {
 /* Ensure rows have room for our right-aligned cells */
 .wb-sortable-row {
     position: relative !important;
-    padding-right: 210px !important;
+    padding-right: 268px !important;
     transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
@@ -599,6 +599,47 @@ html.wb-theme-light {
 
 /* (transition rule merged into .wb-sortable-row above) */
 
+/* ----- BSP / FFS stat display ----- */
+.wb-bsp-cell {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    min-width: 48px;
+    font-family: monospace;
+}
+.wb-bsp-value {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+.wb-bsp-value.wb-bsp-tier-s {
+    color: var(--wb-call-red);
+}
+.wb-bsp-value.wb-bsp-tier-a {
+    color: var(--wb-idle-yellow);
+}
+.wb-bsp-value.wb-bsp-tier-b {
+    color: var(--wb-call-green);
+}
+.wb-bsp-value.wb-bsp-tier-c {
+    color: #a0a0b8;
+}
+.wb-bsp-value.wb-bsp-tier-unknown {
+    color: var(--wb-jail-gray);
+    font-weight: 400;
+}
+.wb-bsp-source {
+    font-size: 7px;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.45;
+    line-height: 1;
+}
+
 /* ----- Attack page overlay ----- */
 .wb-attack-overlay {
     position: fixed;
@@ -743,6 +784,89 @@ body.wb-chain-active {
     /** Safely parse JSON, returning null on failure. */
     function safeParse(text) {
         try { return JSON.parse(text); } catch { return null; }
+    }
+
+    // ── BSP / FFS stat helpers ──────────────────────────────────────────────
+
+    /**
+     * Read BSP prediction from localStorage (sync).
+     * Key: tdup.battleStatsPredictor.cache.prediction.<userId>
+     * Returns the parsed object (has .TBS) or null.
+     */
+    function fetchBspPrediction(userId) {
+        try {
+            const raw = localStorage.getItem(
+                'tdup.battleStatsPredictor.cache.prediction.' + userId
+            );
+            if (!raw) return null;
+            const pred = JSON.parse(raw);
+            return pred || null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    /**
+     * Read FF Scouter estimate from IndexedDB (async).
+     * DB "ffscouter-cache", store "cache", key = parseInt(userId).
+     * Resolves { total, human } or null.
+     */
+    function getFfScouterEstimate(userId) {
+        return new Promise((resolve) => {
+            try {
+                const req = window.indexedDB.open('ffscouter-cache', 1);
+                req.onerror = () => resolve(null);
+                req.onsuccess = () => {
+                    try {
+                        const db = req.result;
+                        const tx = db.transaction('cache', 'readonly');
+                        const store = tx.objectStore('cache');
+                        const get = store.get(parseInt(userId, 10));
+                        get.onerror = () => resolve(null);
+                        get.onsuccess = () => {
+                            const r = get.result;
+                            if (!r || r.no_data || typeof r.bs_estimate === 'undefined') {
+                                resolve(null);
+                            } else {
+                                resolve({
+                                    total: r.bs_estimate,
+                                    human: r.bs_estimate_human || null,
+                                });
+                            }
+                        };
+                    } catch (_) {
+                        resolve(null);
+                    }
+                };
+            } catch (_) {
+                resolve(null);
+            }
+        });
+    }
+
+    /**
+     * Format a raw battle-stats number into a compact human string.
+     * e.g. 3_200_000_000 → "3.20B", 750_000_000 → "750M".
+     */
+    function formatBspNumber(n) {
+        if (n == null || isNaN(n)) return '\u2014';
+        if (n >= 1e12)  return (n / 1e12).toFixed(2)  + 'T';
+        if (n >= 1e9)   return (n / 1e9).toFixed(2)   + 'B';
+        if (n >= 1e6)   return (n / 1e6).toFixed(1)    + 'M';
+        if (n >= 1e3)   return (n / 1e3).toFixed(0)    + 'K';
+        return String(Math.round(n));
+    }
+
+    /**
+     * Classify a raw stat number into a tier for colour coding.
+     * S (red, 3 B+), A (yellow, 1-3 B), B (green, 500 M-1 B), C (gray, <500 M).
+     */
+    function bspTier(n) {
+        if (n == null || isNaN(n)) return 'unknown';
+        if (n >= 3e9)   return 's';
+        if (n >= 1e9)   return 'a';
+        if (n >= 5e8)   return 'b';
+        return 'c';
     }
 
     // =========================================================================
@@ -1623,7 +1747,14 @@ body.wb-chain-active {
         priorityCell.id = `wb-priority-${targetId}`;
         renderPriorityCell(priorityCell, targetId);
 
+        // --- BSP / FFS estimated stats cell ---
+        const bspCell = document.createElement('span');
+        bspCell.className = 'wb-cell';
+        bspCell.id = `wb-bsp-${targetId}`;
+        renderBspCell(bspCell, targetId);
+
         wbContainer.appendChild(priorityCell);
+        wbContainer.appendChild(bspCell);
         wbContainer.appendChild(statusCell);
         wbContainer.appendChild(attackCell);
         wbContainer.appendChild(callCell);
@@ -1778,6 +1909,62 @@ body.wb-chain-active {
         // If no priority and not a leader, cell stays empty (takes no space)
     }
 
+    /**
+     * Render the BSP/FFS estimated-stats cell for a target.
+     * Tries BSP prediction (sync localStorage) first, then FFS (async IndexedDB).
+     * Shows the formatted number + a tiny "bsp" / "ffs" source label underneath.
+     */
+    function renderBspCell(container, targetId) {
+        container.innerHTML = '';
+
+        const wrapper = document.createElement('span');
+        wrapper.className = 'wb-bsp-cell';
+
+        // 1. Try BSP prediction (synchronous)
+        const pred = fetchBspPrediction(targetId);
+        if (pred && pred.TBS != null) {
+            const num = Number(pred.TBS);
+            const tier = bspTier(num);
+
+            const val = document.createElement('span');
+            val.className = `wb-bsp-value wb-bsp-tier-${tier}`;
+            val.textContent = formatBspNumber(num);
+            val.title = num.toLocaleString() + ' (BSP prediction)';
+            wrapper.appendChild(val);
+
+            const src = document.createElement('span');
+            src.className = 'wb-bsp-source';
+            src.textContent = 'bsp';
+            wrapper.appendChild(src);
+
+            container.appendChild(wrapper);
+            return;
+        }
+
+        // 2. FFS fallback (async) — show dash while loading
+        const val = document.createElement('span');
+        val.className = 'wb-bsp-value wb-bsp-tier-unknown';
+        val.textContent = '\u2014';
+        wrapper.appendChild(val);
+        container.appendChild(wrapper);
+
+        getFfScouterEstimate(targetId).then((ffs) => {
+            if (!ffs) return;                       // leave dash
+            const num = Number(ffs.total);
+            if (isNaN(num)) return;
+
+            const tier = bspTier(num);
+            val.className = `wb-bsp-value wb-bsp-tier-${tier}`;
+            val.textContent = ffs.human || formatBspNumber(num);
+            val.title = num.toLocaleString() + ' (FF Scouter)';
+
+            const src = document.createElement('span');
+            src.className = 'wb-bsp-source';
+            src.textContent = 'ffs';
+            wrapper.appendChild(src);
+        });
+    }
+
     /** Apply/remove row highlight classes based on call state. */
     function applyRowHighlights(row, targetId) {
         const isCalled = !!state.calls[targetId];
@@ -1794,6 +1981,9 @@ body.wb-chain-active {
 
         const prioEl = document.getElementById(`wb-priority-${targetId}`);
         if (prioEl) renderPriorityCell(prioEl, targetId);
+
+        const bspEl = document.getElementById(`wb-bsp-${targetId}`);
+        if (bspEl) renderBspCell(bspEl, targetId);
 
         // Update row highlight
         const row = document.querySelector(`[data-wb-target-id="${targetId}"]`);
@@ -2406,7 +2596,7 @@ body.wb-chain-active {
     // =========================================================================
 
     async function main() {
-        log('Initialising FactionOps v2.0.5');
+        log('Initialising FactionOps v2.1.0');
         if (IS_PDA) log('Torn PDA detected — using PDA-managed API key');
 
         // 1. Inject CSS
