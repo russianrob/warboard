@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.47
+// @version      3.0.48
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3256,6 +3256,7 @@ body.wb-chain-active {
                 </div>
                 <div class="fo-header-right">
                     <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.onlinePlayers.length} online</span></div>
+                    <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                 </div>
             </div>
@@ -3295,6 +3296,15 @@ body.wb-chain-active {
 
         renderOverlay();
 
+        // Wire up heatmap button in overlay header
+        const heatmapHeaderBtn = document.getElementById('fo-heatmap-header-btn');
+        if (heatmapHeaderBtn) {
+            heatmapHeaderBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleHeatmapPanel();
+            });
+        }
+
         // Wire up settings button in overlay header
         const settingsBtn = document.getElementById('fo-settings-btn');
         if (settingsBtn) {
@@ -3304,9 +3314,11 @@ body.wb-chain-active {
             });
         }
 
-        // Hide the floating settings gear when overlay is active
+        // Hide the floating gear and heatmap FABs when overlay is active
         const fab = document.querySelector('.wb-settings-gear');
         if (fab) fab.style.display = 'none';
+        const heatmapFab = document.getElementById('wb-heatmap-toggle');
+        if (heatmapFab) heatmapFab.style.display = 'none';
 
         log('War overlay initialised');
     }
