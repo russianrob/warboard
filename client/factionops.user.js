@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.17
+// @version      3.0.18
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1190,15 +1190,19 @@ body.wb-chain-active {
     .fo-overlay { border-radius: 0; margin: 0; width: 100%; max-width: 100%; }
     .fo-header { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
     .fo-col-headers, .fo-row {
-        /* Prior | Target | (Lvl hidden) | BSP | Status | On | Call | Action */
-        grid-template-columns: 40px minmax(60px, 90px) 0px 44px 1fr 28px 56px 64px;
-        padding: 7px 8px 7px 14px;
-        column-gap: 8px;
+        /* (Prior hidden) | Target | (Lvl hidden) | (BSP hidden) | Status | On | Call | Action */
+        grid-template-columns: 0px 1fr 0px 0px 72px 30px 80px 64px;
+        padding: 7px 10px;
+        column-gap: 6px;
         font-size: 11px;
     }
-    /* Hide level column on mobile */
+    /* Hide Priority, Level, BSP columns on mobile */
+    .fo-col-headers > :nth-child(1),
+    .fo-row > :nth-child(1),
     .fo-col-headers > :nth-child(3),
-    .fo-row > :nth-child(3) { display: none; }
+    .fo-row > :nth-child(3),
+    .fo-col-headers > :nth-child(4),
+    .fo-row > :nth-child(4) { display: none; }
     .fo-footer { padding: 6px 12px; flex-wrap: wrap; gap: 4px; }
     .fo-footer-stats { gap: 10px; flex-wrap: wrap; }
     .fo-attack-btn { padding: 3px 8px; font-size: 9px; }
@@ -1211,11 +1215,12 @@ body.wb-chain-active {
     .fo-bsp-stat { font-size: 10px; }
     .fo-priority-badge { font-size: 8px; padding: 2px 6px; }
     .fo-priority-select { width: 38px; font-size: 8px; }
-    /* Push status pill and online dot toward the right */
+    /* Align status pill right, online dot centered */
     .fo-row > :nth-child(5) { justify-content: flex-end; }
     .fo-online-dot { margin: 0 auto; }
     .fo-col-headers > :nth-child(5) { text-align: right; }
     .fo-col-headers > :nth-child(6) { text-align: center; }
+    .fo-call-cell { overflow: hidden; }
 }
 `;
         GM_addStyle(css);
