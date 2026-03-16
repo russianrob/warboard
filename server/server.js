@@ -15,7 +15,7 @@ import { Server as SocketIOServer } from "socket.io";
 import cors from "cors";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 
 import routes from "./routes.js";
 import { socketAuth } from "./auth.js";
@@ -54,7 +54,7 @@ app.use(express.json());
 // ── Static files (landing page) ─────────────────────────────────────────
 app.use(express.static(join(__dirname, "public")));
 
-// ── Userscript download route ───────────────────────────────────────────
+// ── Userscript download route (legacy) ──────────────────────────────────
 const USERSCRIPT_PATH = join(__dirname, "..", "client", "factionops.user.js");
 
 app.get("/download/factionops.user.js", (_req, res) => {
@@ -67,6 +67,41 @@ app.get("/download/factionops.user.js", (_req, res) => {
   } catch (err) {
     console.error("[server] Failed to read userscript:", err.message);
     res.status(500).json({ error: "Script file not found" });
+  }
+});
+
+// ── Scripts hosting ─────────────────────────────────────────────────────
+// Serves userscripts by exact filename only. No directory listing.
+// Scripts are stored in /opt/warboard/scripts/ on the VPS.
+const SCRIPTS_DIR = join(__dirname, "scripts");
+
+// Block directory listing and any path traversal
+app.get("/scripts/", (_req, res) => res.status(403).json({ error: "Forbidden" }));
+app.get("/scripts", (_req, res) => res.status(403).json({ error: "Forbidden" }));
+
+// Serve individual .user.js files only
+app.get("/scripts/:filename", (req, res) => {
+  const filename = req.params.filename;
+
+  // Only allow .user.js and .meta.js files, no path traversal
+  if (!/^[\w.-]+\.(?:user|meta)\.js$/.test(filename) || filename.includes("..")) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  const filePath = join(SCRIPTS_DIR, filename);
+  if (!existsSync(filePath)) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  try {
+    const script = readFileSync(filePath, "utf-8");
+    res.setHeader("Content-Type", "text/javascript; charset=UTF-8");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    res.setHeader("Cache-Control", "no-cache");
+    res.send(script);
+  } catch (err) {
+    console.error(`[server] Failed to read script ${filename}:`, err.message);
+    res.status(500).json({ error: "Failed to read script" });
   }
 });
 
