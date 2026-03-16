@@ -953,6 +953,52 @@ body.wb-chain-active {
     color: #e0e0e0;
 }
 
+/* ── Next Up bar (inside overlay) ── */
+.fo-next-up-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 12px;
+    background: rgba(15,52,96,0.15);
+    border-bottom: 1px solid rgba(45,52,54,0.4);
+    font-size: 11px; min-height: 0;
+    overflow-x: auto; overflow-y: hidden;
+    white-space: nowrap;
+}
+.fo-next-up-bar:empty { display: none; }
+.fo-next-up-label {
+    font-weight: 600; color: #fdcb6e;
+    white-space: nowrap; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+}
+.fo-next-up-item {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(45,52,54,0.5);
+    border-radius: 14px; padding: 2px 8px;
+    white-space: nowrap; font-size: 11px; color: #b0b0c0;
+}
+.fo-next-up-item a { text-decoration: none; color: #e0e0e0; font-weight: 500; }
+.fo-next-up-timer {
+    font-family: 'JetBrains Mono', monospace;
+    color: #e17055; font-weight: 600; font-size: 10px;
+}
+.fo-next-up-item.imminent {
+    background: rgba(214,48,49,0.15);
+    border-color: rgba(214,48,49,0.3);
+}
+.fo-next-up-item.imminent .fo-next-up-timer {
+    color: #fdcb6e;
+}
+.fo-next-up-call {
+    font-size: 8px; font-weight: 700;
+    padding: 1px 5px; border-radius: 10px;
+    border: 1px solid rgba(0,184,148,0.35);
+    background: transparent; color: #00b894;
+    cursor: pointer; line-height: 1.2;
+}
+.fo-next-up-call:hover {
+    background: rgba(0,184,148,0.15);
+}
+
 /* ── Activate FactionOps button ── */
 .fo-activate-btn {
     display: flex; align-items: center; gap: 6px;
@@ -2531,14 +2577,19 @@ body.wb-chain-active {
      * Excludes called targets (they're already claimed).
      */
     function updateNextUp() {
-        const container = document.getElementById('wb-next-up');
-        if (!container) return;
+        // Update both chain-bar version and overlay version
+        const wbContainer = document.getElementById('wb-next-up');
+        const foContainer = document.getElementById('fo-next-up');
+        if (wbContainer) updateNextUpContainer(wbContainer, 'wb');
+        if (foContainer) updateNextUpContainer(foContainer, 'fo');
+    }
 
+    function updateNextUpContainer(container, prefix) {
         // Collect hospital targets that aren't called and still have a timer
         const hospitalTargets = [];
         for (const [targetId, s] of Object.entries(state.statuses)) {
             if (s.status === 'hospital' && s.until > 0 && !state.calls[targetId]) {
-                hospitalTargets.push({ targetId, until: s.until });
+                hospitalTargets.push({ targetId, until: s.until, name: s.name || `#${targetId}` });
             }
         }
 
@@ -2557,36 +2608,50 @@ body.wb-chain-active {
         const sameSet = currentIds.length === newIds.length && currentIds.every((id, i) => id === newIds[i]);
 
         if (sameSet) {
-            // Just update timers and imminent class — no DOM rebuild
             for (const t of top3) {
                 const item = container.querySelector(`[data-nu-id="${t.targetId}"]`);
                 if (!item) continue;
-                const timerSpan = item.querySelector('.wb-next-timer');
+                const timerSpan = item.querySelector(`.${prefix}-next-timer, .fo-next-up-timer, .wb-next-timer`);
                 if (timerSpan) timerSpan.textContent = formatTimer(t.until);
                 const imminent = t.until <= 120;
-                item.classList.toggle('wb-next-imminent', imminent);
+                if (prefix === 'fo') {
+                    item.classList.toggle('imminent', imminent);
+                } else {
+                    item.classList.toggle('wb-next-imminent', imminent);
+                }
             }
             return;
         }
 
-        // Full rebuild — targets changed
+        // Full rebuild
         container.innerHTML = '';
 
         const label = document.createElement('span');
-        label.className = 'wb-next-up-label';
+        label.className = prefix === 'fo' ? 'fo-next-up-label' : 'wb-next-up-label';
         label.textContent = 'Next Up:';
         container.appendChild(label);
 
         for (const t of top3) {
-            const row = document.querySelector(`[data-wb-target-id="${t.targetId}"]`);
-            const name = row ? getPlayerNameFromRow(row) : `#${t.targetId}`;
+            // Try to get the name from the overlay row or status data
+            const foRow = document.querySelector(`[data-fo-id="${t.targetId}"]`);
+            const wbRow = document.querySelector(`[data-wb-target-id="${t.targetId}"]`);
+            let name = t.name;
+            if (foRow) {
+                const n = foRow.querySelector('.fo-name');
+                if (n) name = n.textContent;
+            } else if (wbRow) {
+                name = getPlayerNameFromRow(wbRow) || name;
+            }
             const imminent = t.until <= 120;
 
             const item = document.createElement('span');
-            item.className = imminent ? 'wb-next-up-item wb-next-imminent' : 'wb-next-up-item';
+            if (prefix === 'fo') {
+                item.className = 'fo-next-up-item' + (imminent ? ' imminent' : '');
+            } else {
+                item.className = imminent ? 'wb-next-up-item wb-next-imminent' : 'wb-next-up-item';
+            }
             item.dataset.nuId = t.targetId;
 
-            // Clickable name → attack link
             const nameLink = document.createElement('a');
             nameLink.href = `https://www.torn.com/loader.php?sid=attack&user2ID=${t.targetId}`;
             nameLink.textContent = name;
@@ -2594,15 +2659,13 @@ body.wb-chain-active {
             nameLink.title = `Attack ${name}`;
             item.appendChild(nameLink);
 
-            // Timer
             const timerSpan = document.createElement('span');
-            timerSpan.className = 'wb-next-timer';
+            timerSpan.className = prefix === 'fo' ? 'fo-next-up-timer' : 'wb-next-timer';
             timerSpan.textContent = formatTimer(t.until);
             item.appendChild(timerSpan);
 
-            // Call button
             const callBtn = document.createElement('button');
-            callBtn.className = 'wb-next-up-call';
+            callBtn.className = prefix === 'fo' ? 'fo-next-up-call' : 'wb-next-up-call';
             callBtn.textContent = 'Call';
             callBtn.title = `Call ${name}`;
             callBtn.addEventListener('click', (e) => {
@@ -3120,8 +3183,7 @@ body.wb-chain-active {
     }
 
     function initWarOverlay() {
-        // Keep chain bar, BSP button, copy button, timers as before
-        createChainBar();
+        // BSP button, copy button, timers — no chain bar in overlay mode
         createBspSortButton();
         createCopyButton();
         startChainTimer();
@@ -3169,6 +3231,7 @@ body.wb-chain-active {
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                 </div>
             </div>
+            <div class="fo-next-up-bar" id="fo-next-up"></div>
             <div class="fo-col-headers">
                 <div class="fo-col-header">Prior.</div>
                 <div class="fo-col-header">Target</div>
