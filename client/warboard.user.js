@@ -13,6 +13,7 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
+// @connect      tornwar.com
 // @connect      localhost
 // @connect      *
 // @run-at       document-idle
@@ -26,7 +27,7 @@
     // =========================================================================
 
     const CONFIG = {
-        SERVER_URL: GM_getValue('warboard_server', 'http://localhost:3000'),
+        SERVER_URL: GM_getValue('warboard_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('warboard_apikey', ''),
         THEME: GM_getValue('warboard_theme', 'dark'),
         AUTO_SORT: GM_getValue('warboard_autosort', true),
