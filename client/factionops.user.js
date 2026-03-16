@@ -3012,9 +3012,41 @@ body.wb-chain-active {
     // =========================================================================
 
     /**
-     * Determine which Torn page we're on and initialise the appropriate
-     * enhancements.
+     * Detect if the current page is a war page vs a regular faction page.
+     * Torn war pages have specific URL hashes or DOM elements that distinguish
+     * them from the member list, info tab, etc.
      */
+    function isWarContext() {
+        const hash = window.location.hash.toLowerCase();
+        const url = window.location.href.toLowerCase();
+
+        // war.php is always a war page
+        if (url.includes('war.php')) return true;
+
+        // Hash-based war indicators on factions.php
+        if (hash.includes('war') || hash.includes('ranked')) return true;
+
+        // DOM-based detection: look for war-specific elements
+        const warDomIndicators = [
+            '.faction-war',
+            '.ranked-war-list',
+            '.f-war-list',
+            '#faction-war-list',
+            '#war-root',
+            '.war-main',
+            '.war-list',
+            '[class*="warList"]',
+            '[class*="rankedWar"]',
+            '[class*="raidWar"]',
+            '.enemy-faction',
+        ];
+        for (const sel of warDomIndicators) {
+            if (document.querySelector(sel)) return true;
+        }
+
+        return false;
+    }
+
     function detectPageAndInit() {
         const url = window.location.href;
 
@@ -3022,8 +3054,12 @@ body.wb-chain-active {
             log('Page: Attack');
             initAttackPage();
         } else if (url.includes('factions.php') || url.includes('war.php')) {
-            log('Page: Faction / War');
-            initWarPage();
+            if (isWarContext()) {
+                log('Page: War');
+                initWarPage();
+            } else {
+                log('Page: Faction (non-war) — skipping war UI');
+            }
         } else {
             log('Page: Unknown — running in passive mode');
         }
