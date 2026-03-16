@@ -9,6 +9,34 @@ import { fetchFactionMembers, fetchFactionChain } from "./torn-api.js";
 
 const router = Router();
 
+const CALL_EXPIRE_MS = parseInt(process.env.CALL_EXPIRE_MS, 10) || 5 * 60 * 1000; // 5 minutes
+const SOFT_UNCALL_MS = 30_000; // 30 seconds after hospital detection
+const REFRESH_COOLDOWN_MS = 30_000; // 30 seconds between refreshes per war
+
+/** Track call expiry timers so they can be cancelled. */
+const callTimers = new Map(); // `${warId}:${targetId}` → timeoutId
+
+/** Track last refresh timestamp per warId. */
+const refreshCooldowns = new Map(); // warId → timestamp
+
+function clearExistingTimer(timerKey) {
+  if (callTimers.has(timerKey)) {
+    clearTimeout(callTimers.get(timerKey));
+    callTimers.delete(timerKey);
+  }
+}
+
+function uncallTarget(warId, targetId) {
+  const war = store.getWar(warId);
+  if (!war || !war.calls[targetId]) return;
+
+  delete war.calls[targetId];
+  store.saveState();
+
+  const timerKey = `${warId}:${targetId}`;
+  clearExistingTimer(timerKey);
+}
+
 // ── POST /api/auth ──────────────────────────────────────────────────────
 
 router.post("/api/auth", async (req, res) => {
@@ -97,6 +125,251 @@ router.get("/api/faction/:factionId/chain", requireAuth, async (req, res) => {
     console.error("[chain] Failed to fetch chain data:", err.message);
     return res.status(502).json({ error: "Failed to fetch chain data from Torn API" });
   }
+});
+
+// ── GET /api/poll ────────────────────────────────────────────────────────
+// Returns full war state for the authenticated player's faction.
+// The client polls this endpoint at 1-2s intervals instead of using Socket.IO.
+
+router.get("/api/poll", requireAuth, (req, res) => {
+  const { playerId, playerName, factionId } = req.user;
+  const { warId, enemyFactionId } = req.query;
+
+  if (!warId) {
+    return res.status(400).json({ error: "warId query parameter is required" });
+  }
+
+  // Ensure war exists (join_war equivalent)
+  const war = store.getOrCreateWar(warId, factionId, enemyFactionId || null);
+
+  // Track player as online (use playerId as pseudo-socketId for polling clients)
+  store.setPlayer(playerId, {
+    socketId: `poll_${playerId}`,
+    factionId,
+    warId,
+    name: playerName,
+  });
+
+  return res.json({
+    warId: war.warId,
+    factionId: war.factionId,
+    enemyFactionId: war.enemyFactionId,
+    calls: war.calls,
+    rallies: war.rallies,
+    enemyStatuses: war.enemyStatuses,
+    chainData: war.chainData,
+    onlinePlayers: store.getOnlinePlayersForWar(warId),
+  });
+});
+
+// ── POST /api/call ───────────────────────────────────────────────────────
+// Call or uncall a target.
+
+router.post("/api/call", requireAuth, (req, res) => {
+  const { playerId, playerName } = req.user;
+  const { action, targetId, targetName, warId } = req.body ?? {};
+
+  if (!targetId || !warId) {
+    return res.status(400).json({ error: "targetId and warId are required" });
+  }
+
+  const war = store.getWar(warId);
+  if (!war) {
+    return res.status(404).json({ error: "War not found" });
+  }
+
+  if (action === "uncall") {
+    const call = war.calls[targetId];
+    if (!call) {
+      return res.json({ ok: true }); // already uncalled, idempotent
+    }
+    if (call.calledBy.id !== playerId) {
+      return res.status(403).json({ error: "Only the caller can uncall this target" });
+    }
+
+    uncallTarget(warId, targetId);
+    console.log(`[api] ${playerName} uncalled target ${targetId}`);
+    return res.json({ ok: true });
+  }
+
+  // Default action: call
+  if (war.calls[targetId]) {
+    return res.status(409).json({
+      error: `Target ${targetId} is already called by ${war.calls[targetId].calledBy.name}`,
+    });
+  }
+
+  const callData = {
+    calledBy: { id: playerId, name: playerName },
+    timestamp: Date.now(),
+  };
+  war.calls[targetId] = callData;
+  store.saveState();
+
+  // Set auto-expire timer
+  const timerKey = `${warId}:${targetId}`;
+  clearExistingTimer(timerKey);
+  callTimers.set(
+    timerKey,
+    setTimeout(() => {
+      uncallTarget(warId, targetId);
+    }, CALL_EXPIRE_MS),
+  );
+
+  console.log(`[api] ${playerName} called target ${targetId} in war ${warId}`);
+  return res.json({ ok: true, call: callData });
+});
+
+// ── POST /api/rally ──────────────────────────────────────────────────────
+// Create, join, leave, or cancel a rally.
+
+router.post("/api/rally", requireAuth, (req, res) => {
+  const { playerId, playerName } = req.user;
+  const { action, targetId, targetName, message, warId } = req.body ?? {};
+
+  if (!targetId || !warId) {
+    return res.status(400).json({ error: "targetId and warId are required" });
+  }
+
+  const war = store.getWar(warId);
+  if (!war) {
+    return res.status(404).json({ error: "War not found" });
+  }
+
+  if (action === "join") {
+    const rally = war.rallies[targetId];
+    if (!rally) {
+      return res.status(404).json({ error: "No rally exists for this target" });
+    }
+    if (!rally.participants.some((p) => p.id === playerId)) {
+      rally.participants.push({ id: playerId, name: playerName });
+      store.saveState();
+    }
+    console.log(`[api] ${playerName} joined rally on ${targetId}`);
+    return res.json({ ok: true, participants: rally.participants });
+  }
+
+  if (action === "leave") {
+    const rally = war.rallies[targetId];
+    if (!rally) {
+      return res.json({ ok: true }); // idempotent
+    }
+    rally.participants = rally.participants.filter((p) => p.id !== playerId);
+    store.saveState();
+    console.log(`[api] ${playerName} left rally on ${targetId}`);
+    return res.json({ ok: true, participants: rally.participants });
+  }
+
+  if (action === "cancel") {
+    const rally = war.rallies[targetId];
+    if (!rally) {
+      return res.json({ ok: true }); // idempotent
+    }
+    if (rally.createdBy.id !== playerId) {
+      return res.status(403).json({ error: "Only the rally creator can cancel it" });
+    }
+    delete war.rallies[targetId];
+    store.saveState();
+    console.log(`[api] ${playerName} cancelled rally on ${targetId}`);
+    return res.json({ ok: true });
+  }
+
+  // Default action: create rally
+  if (war.rallies[targetId]) {
+    return res.status(409).json({ error: "A rally already exists for this target" });
+  }
+
+  const rallyData = {
+    createdBy: { id: playerId, name: playerName },
+    message: message || "",
+    participants: [{ id: playerId, name: playerName }],
+    timestamp: Date.now(),
+  };
+  war.rallies[targetId] = rallyData;
+  store.saveState();
+
+  console.log(`[api] ${playerName} started rally on ${targetId}`);
+  return res.json({ ok: true, rally: rallyData });
+});
+
+// ── POST /api/status ─────────────────────────────────────────────────────
+// Bulk update enemy statuses or report chain data.
+
+router.post("/api/status", requireAuth, async (req, res) => {
+  const { playerId, playerName, factionId } = req.user;
+  const { warId, statuses, chainData, refresh } = req.body ?? {};
+
+  if (!warId) {
+    return res.status(400).json({ error: "warId is required" });
+  }
+
+  const war = store.getWar(warId);
+  if (!war) {
+    return res.status(404).json({ error: "War not found" });
+  }
+
+  // Bulk status update from intercepted data
+  if (statuses && typeof statuses === "object") {
+    for (const [targetId, statusData] of Object.entries(statuses)) {
+      const existing = war.enemyStatuses[targetId] || {};
+      war.enemyStatuses[targetId] = {
+        ...existing,
+        ...statusData,
+      };
+
+      // If hospital, soft-uncall after delay
+      const st = statusData.status || "";
+      if (st.toLowerCase().includes("hospital") && war.calls[targetId]) {
+        const timerKey = `${warId}:${targetId}`;
+        clearExistingTimer(timerKey);
+        callTimers.set(
+          timerKey,
+          setTimeout(() => {
+            uncallTarget(warId, targetId);
+          }, SOFT_UNCALL_MS),
+        );
+      }
+    }
+    store.saveState();
+  }
+
+  // Chain data update from intercepted data
+  if (chainData && typeof chainData === "object") {
+    war.chainData = { ...war.chainData, ...chainData };
+    store.saveState();
+  }
+
+  // Full refresh from Torn API
+  if (refresh) {
+    if (!war.enemyFactionId) {
+      return res.status(400).json({ error: "No enemy faction configured for this war" });
+    }
+
+    const now = Date.now();
+    const lastRefresh = refreshCooldowns.get(warId) || 0;
+    if (now - lastRefresh < REFRESH_COOLDOWN_MS) {
+      const waitSec = Math.ceil((REFRESH_COOLDOWN_MS - (now - lastRefresh)) / 1000);
+      return res.status(429).json({ error: `Please wait ${waitSec}s before refreshing again` });
+    }
+    refreshCooldowns.set(warId, now);
+
+    const apiKey = store.getApiKeyForFaction(factionId);
+    if (!apiKey) {
+      return res.status(503).json({ error: "No API key available for status refresh" });
+    }
+
+    try {
+      const freshStatuses = await fetchFactionMembers(war.enemyFactionId, apiKey);
+      war.enemyStatuses = freshStatuses;
+      store.saveState();
+      console.log(`[api] Statuses refreshed for war ${warId} (${Object.keys(freshStatuses).length} members)`);
+    } catch (err) {
+      console.error("[api] Status refresh failed:", err.message);
+      return res.status(502).json({ error: `Status refresh failed: ${err.message}` });
+    }
+  }
+
+  return res.json({ ok: true });
 });
 
 export default router;
