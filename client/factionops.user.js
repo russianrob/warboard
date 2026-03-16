@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.28
+// @version      3.0.29
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3248,9 +3248,12 @@ body.wb-chain-active {
         const nameRow = document.createElement('div');
         nameRow.className = 'fo-name-row';
 
-        const nameSpan = document.createElement('span');
+        const nameSpan = document.createElement('a');
         nameSpan.className = 'fo-name';
         nameSpan.textContent = s.name || 'Unknown';
+        nameSpan.href = `https://www.torn.com/profiles.php?XID=${targetId}`;
+        nameSpan.style.textDecoration = 'none';
+        nameSpan.style.color = 'inherit';
         nameRow.appendChild(nameSpan);
 
         // Eye badge for viewers
