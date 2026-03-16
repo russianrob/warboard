@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.39
+// @version      3.0.40
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -651,65 +651,7 @@ html.wb-theme-light {
 
 /* (transition rule merged into .wb-sortable-row above) */
 
-/* ----- BSP sort toggle button ----- */
-.wb-bsp-sort-btn {
-    position: fixed;
-    bottom: 70px;
-    right: 16px;
-    z-index: 999996;
-    background: var(--wb-bg-secondary);
-    border: 1px solid var(--wb-border);
-    border-radius: 6px;
-    padding: 5px 10px;
-    color: var(--wb-text);
-    font-family: monospace;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    opacity: 0.7;
-    transition: opacity 0.2s, background 0.2s;
-    display: none;
-}
-.wb-bsp-sort-btn:hover {
-    opacity: 1;
-}
-.wb-bsp-sort-btn.active {
-    background: var(--wb-accent);
-    border-color: var(--wb-call-green);
-    opacity: 1;
-}
 
-/* ----- Copy faction list button ----- */
-.wb-copy-btn {
-    position: fixed;
-    bottom: 100px;
-    right: 16px;
-    z-index: 999996;
-    background: var(--wb-bg-secondary);
-    border: 1px solid var(--wb-border);
-    border-radius: 6px;
-    padding: 5px 10px;
-    color: var(--wb-text);
-    font-family: monospace;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    opacity: 0.7;
-    transition: opacity 0.2s, background 0.2s;
-    display: none;
-}
-.wb-copy-btn:hover {
-    opacity: 1;
-}
-.wb-copy-btn.wb-copying {
-    opacity: 1;
-    pointer-events: none;
-}
-.wb-copy-btn.wb-copy-done {
-    background: var(--wb-accent);
-    border-color: var(--wb-call-green);
-    opacity: 1;
-}
 
 /* ----- Group attack / viewers indicator ----- */
 .wb-viewers-badge {
@@ -2530,48 +2472,7 @@ body.wb-chain-active {
         updateChainBar();
     }
 
-    /** Create the BSP sort toggle button (fixed bottom-right, above gear). */
-    function createBspSortButton() {
-        if (document.getElementById('wb-bsp-sort')) return;
 
-        const btn = document.createElement('button');
-        btn.id = 'wb-bsp-sort';
-        btn.className = 'wb-bsp-sort-btn';
-        btn.textContent = 'BSP \u25BC';
-        btn.title = 'Sort by estimated stats (highest first)';
-        btn.style.display = 'block';
-
-        btn.addEventListener('click', () => {
-            if (state.sortMode === 'bsp') {
-                state.sortMode = 'default';
-                btn.classList.remove('active');
-                btn.textContent = 'BSP \u25BC';
-            } else {
-                state.sortMode = 'bsp';
-                btn.classList.add('active');
-                btn.textContent = 'BSP \u25BC \u2713';
-            }
-            sortMemberList();
-        });
-
-        document.body.appendChild(btn);
-    }
-
-    /** Create the Copy faction list button (fixed bottom-right, above BSP sort). */
-    function createCopyButton() {
-        if (document.getElementById('wb-copy-list')) return;
-
-        const btn = document.createElement('button');
-        btn.id = 'wb-copy-list';
-        btn.className = 'wb-copy-btn';
-        btn.textContent = '\uD83D\uDCCB Copy';
-        btn.title = 'Copy enemy faction list with stats, level, xanax & boosters';
-        btn.style.display = 'block';
-
-        btn.addEventListener('click', () => copyFactionList(btn));
-
-        document.body.appendChild(btn);
-    }
 
     /** Update chain bar contents and styling. */
     function updateChainBar() {
@@ -3312,9 +3213,7 @@ body.wb-chain-active {
     }
 
     function initWarOverlay() {
-        // BSP button, copy button, timers — no chain bar in overlay mode
-        createBspSortButton();
-        createCopyButton();
+        // Timers — no chain bar in overlay mode
         startChainTimer();
         startStatusTimers();
         startCallPruner();
@@ -4377,8 +4276,6 @@ body.wb-chain-active {
     /** Initialise war/faction page enhancements. */
     function initWarPage() {
         createChainBar();
-        createBspSortButton();
-        createCopyButton();
         startChainTimer();
         setupMutationObserver();
         startStatusTimers();
