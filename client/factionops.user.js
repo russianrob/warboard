@@ -408,6 +408,42 @@ html.wb-theme-light {
     opacity: 1;
 }
 
+/* ----- Next Up queue (in chain bar) ----- */
+.wb-next-up {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--wb-text);
+    opacity: 0.85;
+}
+.wb-next-up-label {
+    font-weight: 600;
+    color: var(--wb-idle-yellow);
+    white-space: nowrap;
+}
+.wb-next-up-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 3px;
+    padding: 2px 6px;
+    white-space: nowrap;
+}
+.wb-next-up-item .wb-next-timer {
+    font-family: monospace;
+    color: var(--wb-hospital-red);
+    font-weight: 600;
+}
+.wb-next-up-item.wb-next-imminent {
+    background: rgba(214,48,49,0.2);
+    animation: wb-pulse 1s ease-in-out infinite;
+}
+.wb-next-up-item.wb-next-imminent .wb-next-timer {
+    color: var(--wb-bonus-warning);
+}
+
 /* ----- FactionOps cell container — right-aligned in each row ----- */
 .wb-cell-container {
     position: absolute;
@@ -1800,6 +1836,7 @@ body.wb-chain-active {
                 <span class="wb-chain-count" id="wb-chain-count">0/0</span>
                 <span id="wb-chain-bonus-badge" class="wb-chain-bonus" style="display:none;"></span>
             </div>
+            <div class="wb-next-up" id="wb-next-up"></div>
             <div class="wb-chain-section">
                 <span>Timeout:</span>
                 <span class="wb-chain-timeout" id="wb-chain-timeout">--:--</span>
@@ -1954,6 +1991,7 @@ body.wb-chain-active {
     function startStatusTimers() {
         if (statusTimerRAF) return;
         statusTimerLast = performance.now();
+        let nextUpAccum = 0; // throttle next-up DOM writes to ~1s
 
         function tick(now) {
             const dt = (now - statusTimerLast) / 1000;
@@ -1973,10 +2011,61 @@ body.wb-chain-active {
                 }
             }
 
+            // Update the Next Up queue roughly once per second
+            nextUpAccum += dt;
+            if (nextUpAccum >= 1) {
+                nextUpAccum = 0;
+                updateNextUp();
+            }
+
             statusTimerRAF = requestAnimationFrame(tick);
         }
 
         statusTimerRAF = requestAnimationFrame(tick);
+    }
+
+    /**
+     * Update the "Next Up" queue in the chain bar.
+     * Shows the top 3 hospital targets closest to being released.
+     * Excludes called targets (they're already claimed).
+     */
+    function updateNextUp() {
+        const container = document.getElementById('wb-next-up');
+        if (!container) return;
+
+        // Collect hospital targets that aren't called and still have a timer
+        const hospitalTargets = [];
+        for (const [targetId, s] of Object.entries(state.statuses)) {
+            if (s.status === 'hospital' && s.until > 0 && !state.calls[targetId]) {
+                hospitalTargets.push({ targetId, until: s.until });
+            }
+        }
+
+        // Sort by shortest timer first, take top 3
+        hospitalTargets.sort((a, b) => a.until - b.until);
+        const top3 = hospitalTargets.slice(0, 3);
+
+        if (top3.length === 0) {
+            container.innerHTML = '';
+            return;
+        }
+
+        // Build the HTML — reuse existing elements when possible for smoothness
+        let html = '<span class="wb-next-up-label">Next Up:</span>';
+        for (const t of top3) {
+            // Resolve name from the DOM row
+            const row = document.querySelector(`[data-wb-target-id="${t.targetId}"]`);
+            const name = row ? getPlayerNameFromRow(row) : `#${t.targetId}`;
+            const imminent = t.until <= 120; // under 2 minutes
+            const cls = imminent ? 'wb-next-up-item wb-next-imminent' : 'wb-next-up-item';
+            const attackUrl = `https://www.torn.com/loader.php?sid=attack&user2ID=${t.targetId}`;
+            html += `<a href="${attackUrl}" class="${cls}" style="text-decoration:none;color:inherit;" title="Attack ${name}">`
+                + `<span>${name}</span>`
+                + `<span class="wb-next-timer">${formatTimer(t.until)}</span>`
+                + `</a>`;
+        }
+
+        container.innerHTML = html;
     }
 
     // =========================================================================
@@ -2420,6 +2509,7 @@ body.wb-chain-active {
             updateTargetRow(targetId);
         });
         if (CONFIG.AUTO_SORT) debouncedSort();
+        updateNextUp();
     }
 
     /**
@@ -2709,6 +2799,9 @@ body.wb-chain-active {
                 postAction('/api/status', { warId, statuses: statusBatch })
                     .catch(e => warn('Status report failed:', e.message));
             }
+
+            // Refresh the Next Up queue after status changes
+            updateNextUp();
         }
 
         // Chain data
