@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.36
+// @version      3.0.37
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1124,6 +1124,19 @@ body.wb-chain-active {
 }
 
 .fo-player-name .fo-pid { font-size: 10px; color: #636e72; font-weight: 400; }
+.fo-sub-row { display: flex; align-items: center; gap: 5px; }
+.fo-bsp-inline {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px; font-weight: 600;
+    padding: 1px 4px; border-radius: 8px;
+    background: rgba(255,255,255,0.06);
+    line-height: 1;
+}
+.fo-bsp-inline.tier-s { color: #e17055; }
+.fo-bsp-inline.tier-a { color: #fdcb6e; }
+.fo-bsp-inline.tier-b { color: #00b894; }
+.fo-bsp-inline.tier-c { color: #a0a0b8; }
+.fo-bsp-inline.tier-unknown { color: #4a4a5a; }
 
 /* ── Group Attack Eye Badge ── */
 .fo-eye-badge {
@@ -3422,10 +3435,23 @@ body.wb-chain-active {
 
         playerName.appendChild(nameRow);
 
+        // Sub-row: ID + inline BSP badge
+        const subRow = document.createElement('div');
+        subRow.className = 'fo-sub-row';
+
         const pid = document.createElement('span');
         pid.className = 'fo-pid';
         pid.textContent = `[${targetId}]`;
-        playerName.appendChild(pid);
+        subRow.appendChild(pid);
+
+        // Inline BSP badge
+        const bspBadge = document.createElement('span');
+        bspBadge.className = 'fo-bsp-inline';
+        bspBadge.id = `fo-bsp-inline-${targetId}`;
+        renderInlineBsp(bspBadge, targetId);
+        subRow.appendChild(bspBadge);
+
+        playerName.appendChild(subRow);
 
         targetCell.appendChild(playerName);
         li.appendChild(targetCell);
@@ -3571,6 +3597,35 @@ body.wb-chain-active {
     }
 
     /** Render the BSP cell for overlay rows. */
+    /** Render compact inline BSP badge (next to player name). */
+    function renderInlineBsp(el, targetId) {
+        el.textContent = '';
+        el.className = 'fo-bsp-inline';
+
+        // 1. BSP prediction (sync)
+        const pred = fetchBspPrediction(targetId);
+        if (pred && pred.TBS != null) {
+            const num = Number(pred.TBS);
+            const tier = bspTier(num);
+            el.className = `fo-bsp-inline tier-${tier}`;
+            el.textContent = formatBspNumber(num);
+            el.title = `~${num.toLocaleString()} total stats (BSP)`;
+            return;
+        }
+
+        // 2. FFS fallback (async)
+        el.className = 'fo-bsp-inline tier-unknown';
+        getFfScouterEstimate(targetId).then((ffs) => {
+            if (!ffs) return;
+            const num = Number(ffs.total);
+            if (isNaN(num)) return;
+            const tier = bspTier(num);
+            el.className = `fo-bsp-inline tier-${tier}`;
+            el.textContent = ffs.human || formatBspNumber(num);
+            el.title = `~${num.toLocaleString()} total stats (FFS)`;
+        });
+    }
+
     function renderOverlayBspCell(cell, targetId) {
         cell.innerHTML = '';
 
@@ -3704,6 +3759,9 @@ body.wb-chain-active {
 
         const bspCell = document.getElementById(`fo-bsp-${targetId}`);
         if (bspCell) renderOverlayBspCell(bspCell, targetId);
+
+        const bspInline = document.getElementById(`fo-bsp-inline-${targetId}`);
+        if (bspInline) renderInlineBsp(bspInline, targetId);
     }
 
     /** Update footer stats. */
