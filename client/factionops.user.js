@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      2.0.2
+// @version      2.0.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -67,17 +67,44 @@
 
     /**
      * Cross-platform HTTP request wrapper.
-     * Uses PDA_httpGet on Torn PDA, GM_xmlhttpRequest elsewhere.
+     * Uses PDA_httpGet/PDA_httpPost on Torn PDA, GM_xmlhttpRequest elsewhere.
+     * PDA bridge functions support headers: PDA_httpGet(url, headers), PDA_httpPost(url, headers, body)
      */
     function httpRequest(opts) {
-        if (IS_PDA && typeof PDA_httpGet === 'function' && opts.method === 'GET') {
-            // PDA bridge for GET requests
-            PDA_httpGet(opts.url)
-                .then(r => opts.onload && opts.onload(typeof r === 'string' ? { status: 200, responseText: r } : r))
-                .catch(e => opts.onerror && opts.onerror(e));
-        } else {
-            GM_xmlhttpRequest(opts);
+        if (IS_PDA) {
+            const method = (opts.method || 'GET').toUpperCase();
+            if (method === 'GET' && typeof PDA_httpGet === 'function') {
+                PDA_httpGet(opts.url, opts.headers || {})
+                    .then(r => {
+                        const resp = typeof r === 'string'
+                            ? { status: 200, responseText: r, statusText: 'OK' }
+                            : r;
+                        opts.onload && opts.onload(resp);
+                    })
+                    .catch(e => opts.onerror && opts.onerror(e));
+            } else if (method === 'POST' && typeof PDA_httpPost === 'function') {
+                PDA_httpPost(opts.url, opts.headers || {}, opts.data || '')
+                    .then(r => {
+                        const resp = typeof r === 'string'
+                            ? { status: 200, responseText: r, statusText: 'OK' }
+                            : r;
+                        opts.onload && opts.onload(resp);
+                    })
+                    .catch(e => opts.onerror && opts.onerror(e));
+            } else {
+                // Fallback: try fetch on PDA if bridge functions unavailable
+                fetch(opts.url, {
+                    method,
+                    headers: opts.headers || {},
+                    body: method !== 'GET' ? opts.data : undefined,
+                }).then(async (r) => {
+                    const text = await r.text();
+                    opts.onload && opts.onload({ status: r.status, responseText: text, statusText: r.statusText });
+                }).catch(e => opts.onerror && opts.onerror(e));
+            }
+            return;
         }
+        GM_xmlhttpRequest(opts);
     }
 
     // =========================================================================
@@ -674,23 +701,7 @@ body.wb-chain-active {
             const url = `${CONFIG.SERVER_URL}${endpoint}`;
             const json = JSON.stringify(body);
 
-            if (IS_PDA) {
-                fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${state.jwtToken}`,
-                    },
-                    body: json,
-                }).then(async (r) => {
-                    const data = await r.json().catch(() => null);
-                    if (r.ok) resolve(data);
-                    else reject(new Error((data && data.error) || `HTTP ${r.status}`));
-                }).catch(reject);
-                return;
-            }
-
-            GM_xmlhttpRequest({
+            httpRequest({
                 method: 'POST',
                 url,
                 headers: {
@@ -710,39 +721,15 @@ body.wb-chain-active {
 
     /**
      * GET with auth header.
-     * PDA: passes token as query parameter (PDA_httpGet/fetch can't set
-     *      cross-origin auth headers reliably).
-     * Desktop: uses GM_xmlhttpRequest with Authorization header.
+     * Uses httpRequest wrapper which routes through PDA_httpGet (with headers)
+     * on Torn PDA, or GM_xmlhttpRequest on desktop.
      */
     function getAction(endpoint) {
         if (!state.jwtToken) return Promise.reject(new Error('Not authenticated'));
 
-        if (IS_PDA) {
-            // Append token as query param — server accepts it
-            const sep = endpoint.includes('?') ? '&' : '?';
-            const url = `${CONFIG.SERVER_URL}${endpoint}${sep}token=${encodeURIComponent(state.jwtToken)}`;
-
-            // Try PDA_httpGet first (best compatibility), fall back to fetch
-            if (typeof PDA_httpGet === 'function') {
-                return PDA_httpGet(url).then(r => {
-                    const text = typeof r === 'string' ? r : (r && r.responseText) || '';
-                    const data = safeParse(text);
-                    if (!data) throw new Error('Invalid JSON response');
-                    if (data.error) throw new Error(data.error);
-                    return data;
-                });
-            }
-
-            return fetch(url).then(async (r) => {
-                const data = await r.json().catch(() => null);
-                if (r.ok) return data;
-                throw new Error((data && data.error) || `HTTP ${r.status}`);
-            });
-        }
-
         const url = `${CONFIG.SERVER_URL}${endpoint}`;
         return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
+            httpRequest({
                 method: 'GET',
                 url,
                 headers: { 'Authorization': `Bearer ${state.jwtToken}` },
@@ -761,7 +748,10 @@ body.wb-chain-active {
      */
     async function pollOnce() {
         const warId = deriveWarId();
-        if (!warId || !state.jwtToken) return;
+        if (!warId || !state.jwtToken) {
+            if (IS_PDA) log('pollOnce skip — warId:', warId, 'jwt:', !!state.jwtToken, 'factionId:', state.myFactionId);
+            return;
+        }
 
         try {
             const qs = `warId=${encodeURIComponent(warId)}` +
@@ -922,49 +912,22 @@ body.wb-chain-active {
      * Sends the Torn API key to POST /api/auth, receives a JWT.
      */
     function authenticate() {
-        return new Promise(async (resolve, reject) => {
+        return new Promise((resolve, reject) => {
             if (!CONFIG.API_KEY) {
                 return reject(new Error('No API key configured'));
             }
-            log('Authenticating with server...');
+            log('Authenticating with server...', IS_PDA ? '(PDA mode)' : '(desktop)');
+            if (IS_PDA) log('API key starts with:', CONFIG.API_KEY.substring(0, 4));
 
-            if (IS_PDA) {
-                // PDA: use fetch for POST requests (GM_xmlhttpRequest not available)
-                try {
-                    const resp = await fetch(`${CONFIG.SERVER_URL}/api/auth`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ apiKey: CONFIG.API_KEY }),
-                    });
-                    const body = await resp.json();
-                    if (resp.ok && body && body.token) {
-                        state.jwtToken = body.token;
-                        GM_setValue('factionops_jwt', body.token);
-                        if (body.player) {
-                            state.myPlayerId = String(body.player.playerId || body.player.id);
-                            state.myPlayerName = body.player.playerName || body.player.name;
-                            state.myFactionId = String(body.player.factionId || '0');
-                            state.myFactionName = body.player.factionName || '';
-                        }
-                        log('Authenticated as', state.myPlayerName || 'unknown');
-                        resolve(body);
-                    } else {
-                        reject(new Error((body && body.error) || `HTTP ${resp.status}`));
-                    }
-                } catch (e) {
-                    reject(new Error('Network error — is the server running?'));
-                }
-                return;
-            }
-
-            GM_xmlhttpRequest({
+            httpRequest({
                 method: 'POST',
                 url: `${CONFIG.SERVER_URL}/api/auth`,
                 headers: { 'Content-Type': 'application/json' },
                 data: JSON.stringify({ apiKey: CONFIG.API_KEY }),
                 onload(res) {
+                    log('Auth response status:', res.status);
                     const body = safeParse(res.responseText);
-                    if (res.status === 200 && body && body.token) {
+                    if (res.status >= 200 && res.status < 300 && body && body.token) {
                         state.jwtToken = body.token;
                         GM_setValue('factionops_jwt', body.token);
                         if (body.player) {
@@ -973,14 +936,17 @@ body.wb-chain-active {
                             state.myFactionId = String(body.player.factionId || '0');
                             state.myFactionName = body.player.factionName || '';
                         }
-                        log('Authenticated as', state.myPlayerName || 'unknown');
+                        log('Authenticated as', state.myPlayerName || 'unknown',
+                            '— factionId:', state.myFactionId);
                         resolve(body);
                     } else {
                         const msg = (body && body.error) || `HTTP ${res.status}`;
+                        warn('Auth failed:', msg);
                         reject(new Error(msg));
                     }
                 },
-                onerror() {
+                onerror(e) {
+                    warn('Auth network error:', e);
                     reject(new Error('Network error — is the server running?'));
                 },
             });
@@ -2377,7 +2343,7 @@ body.wb-chain-active {
     // =========================================================================
 
     async function main() {
-        log('Initialising FactionOps v2.0.0');
+        log('Initialising FactionOps v2.0.3');
         if (IS_PDA) log('Torn PDA detected — using PDA-managed API key');
 
         // 1. Inject CSS
