@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn OC 2.0 Missing Item Roles
 // @namespace    torn.oc2.items.floating
-// @version      2.5
+// @version      2.5.1
 // @description  Floating box listing only OC 2.0 Planning crimes with roles missing items
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
