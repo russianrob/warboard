@@ -2036,17 +2036,20 @@ body.wb-chain-active {
         const status = s ? (s.status || 'ok') : 'ok';
         const isCalled = !!state.calls[targetId];
 
+        // Called targets always sink to bottom (above hospital)
+        if (isCalled) return 5;
+
         switch (status) {
             case 'okay':
             case 'ok':
-                return isCalled ? 2 : 1;
+                return 1;
             case 'traveling':
             case 'travel':
-                return 3;
+                return 2;
             case 'jail':
-                return 4;
+                return 3;
             case 'hospital':
-                return 5;
+                return 4;
             default:
                 return 6;
         }
@@ -2083,7 +2086,7 @@ body.wb-chain-active {
             if (a.priority !== b.priority) return a.priority - b.priority;
             // Within same priority, sort by timer ascending (shortest first,
             // except hospital where longest goes to bottom)
-            if (a.priority === 5) return b.timer - a.timer; // hospital: longest last
+            if (a.priority === 4) return b.timer - a.timer; // hospital: longest last
             return a.timer - b.timer;
         });
 
