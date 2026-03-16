@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      1.2.3
+// @version      1.2.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -654,44 +654,36 @@ body.wb-chain-active {
 
     /**
      * Load Socket.IO client library from the bundled source.
-     * Patches the UMD wrapper so it always assigns to window.io,
-     * even in environments (Tampermonkey, PDA) where module/exports exist.
+     * Injects a <script> tag into the page DOM so the code runs in the
+     * page's global scope (no module/exports interference from Tampermonkey).
+     * For PDA, uses direct eval since there's no sandbox conflict.
      */
     async function loadSocketIO() {
-        if (typeof window.io === 'function') {
+        // Check both Tampermonkey's window and the page's real window
+        const pageWindow = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+        if (typeof pageWindow.io === 'function') {
+            window.io = pageWindow.io;
             log('Socket.IO already loaded');
             return;
         }
 
         log('Loading Socket.IO (bundled)...');
 
-        // The Socket.IO UMD wrapper detects module/exports (which exist in
-        // Tampermonkey's scope) and assigns to module.exports instead of
-        // window.io.  We patch the UMD header in the source string so it
-        // always takes the global-assignment branch.
-        const UMD_HEADER = '!function(t,n){"object"==typeof exports&&"undefined"!=typeof module?module.exports=n():"function"==typeof define&&define.amd?define(n):(t="undefined"!=typeof globalThis?globalThis:t||self).io=n()}(this,(function(){';
-        const GLOBAL_HEADER = 'window.io=(function(){';
-        const UMD_FOOTER = '}));';
-        const GLOBAL_FOOTER = '})();';
-
-        let src = SOCKET_IO_BUNDLE;
-        if (src.indexOf(UMD_HEADER) !== -1) {
-            src = src.replace(UMD_HEADER, GLOBAL_HEADER);
-            // Replace the LAST occurrence of })); with })();
-            const lastIdx = src.lastIndexOf(UMD_FOOTER);
-            if (lastIdx !== -1) {
-                src = src.substring(0, lastIdx) + GLOBAL_FOOTER + src.substring(lastIdx + UMD_FOOTER.length);
-            }
-            log('Patched UMD wrapper for global assignment');
-        }
-
+        // Inject as a <script> tag into the page.  This runs in the page's
+        // global context where module/exports don't exist, so the UMD
+        // wrapper correctly assigns to (globalThis).io.
         try {
-            (0, eval)(src);
+            const script = document.createElement('script');
+            script.textContent = SOCKET_IO_BUNDLE;
+            document.head.appendChild(script);
+            script.remove();
         } catch (e) {
-            error('Socket.IO bundle execution failed:', e.message);
+            error('Socket.IO script injection failed:', e.message);
         }
 
-        if (typeof window.io === 'function') {
+        // After injection, io lives on the page's window
+        if (typeof pageWindow.io === 'function') {
+            window.io = pageWindow.io;
             log('Socket.IO loaded successfully (bundled)');
             return;
         }
