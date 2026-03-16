@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      2.0.3
+// @version      2.0.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -409,6 +409,26 @@ html.wb-theme-light {
     opacity: 1;
 }
 
+/* ----- FactionOps cell container — right-aligned in each row ----- */
+.wb-cell-container {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    z-index: 5;
+    flex-shrink: 0;
+}
+
+/* Ensure rows have room for our right-aligned cells */
+.wb-sortable-row {
+    position: relative !important;
+    padding-right: 160px !important;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
 /* ----- Call / Rally / Status elements in member rows ----- */
 .wb-cell {
     display: inline-flex;
@@ -524,10 +544,7 @@ html.wb-theme-light {
     background: rgba(253,203,110,0.08) !important;
 }
 
-/* Smooth re-ordering transitions */
-.wb-sortable-row {
-    transition: transform 0.3s ease, opacity 0.3s ease;
-}
+/* (transition rule merged into .wb-sortable-row above) */
 
 /* ----- Attack page overlay ----- */
 .wb-attack-overlay {
@@ -1521,23 +1538,22 @@ body.wb-chain-active {
         row.classList.add('wb-sortable-row');
         row.dataset.wbTargetId = targetId;
 
-        // Create a container for our injected cells
+        // Create a container for our injected cells (absolutely positioned right)
         const wbContainer = document.createElement('div');
         wbContainer.className = 'wb-cell-container';
         wbContainer.id = `wb-cells-${targetId}`;
-        wbContainer.style.cssText = 'display:inline-flex;gap:6px;align-items:center;margin-left:8px;flex-shrink:0;';
-
-        // --- Call cell ---
-        const callCell = document.createElement('span');
-        callCell.className = 'wb-cell';
-        callCell.id = `wb-call-${targetId}`;
-        renderCallCell(callCell, targetId);
 
         // --- Status cell ---
         const statusCell = document.createElement('span');
         statusCell.className = 'wb-cell';
         statusCell.id = `wb-status-${targetId}`;
         renderStatusCell(statusCell, targetId);
+
+        // --- Call cell ---
+        const callCell = document.createElement('span');
+        callCell.className = 'wb-cell';
+        callCell.id = `wb-call-${targetId}`;
+        renderCallCell(callCell, targetId);
 
         // --- Rally cell ---
         const rallyCell = document.createElement('span');
@@ -1549,19 +1565,8 @@ body.wb-chain-active {
         wbContainer.appendChild(callCell);
         wbContainer.appendChild(rallyCell);
 
-        // Insert into the row — try to append to the last visible cell or to
-        // the row itself. Torn rows sometimes use flex, sometimes table cells.
-        const lastCell = row.querySelector('li:last-child, td:last-child, .last-cell, .status');
-        if (lastCell && lastCell !== row) {
-            lastCell.style.display = 'inline-flex';
-            lastCell.style.alignItems = 'center';
-            lastCell.style.gap = '4px';
-            lastCell.appendChild(wbContainer);
-        } else {
-            row.style.display = 'flex';
-            row.style.alignItems = 'center';
-            row.appendChild(wbContainer);
-        }
+        // Always append to the row directly — CSS handles positioning
+        row.appendChild(wbContainer);
 
         // Apply initial row highlights
         applyRowHighlights(row, targetId);
@@ -2343,7 +2348,7 @@ body.wb-chain-active {
     // =========================================================================
 
     async function main() {
-        log('Initialising FactionOps v2.0.3');
+        log('Initialising FactionOps v2.0.4');
         if (IS_PDA) log('Torn PDA detected — using PDA-managed API key');
 
         // 1. Inject CSS
