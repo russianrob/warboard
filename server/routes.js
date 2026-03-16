@@ -26,6 +26,20 @@ function clearExistingTimer(timerKey) {
   }
 }
 
+/**
+ * Faction gate — verify the authenticated player belongs to the war's faction.
+ * Returns the war object if OK, or sends a 403 and returns null.
+ */
+function requireWarMember(req, res, warId) {
+  const war = store.getWar(warId);
+  if (!war) return null; // let caller handle 404
+  if (war.factionId !== req.user.factionId) {
+    res.status(403).json({ error: "You are not a member of this war's faction" });
+    return null;
+  }
+  return war;
+}
+
 function uncallTarget(warId, targetId) {
   const war = store.getWar(warId);
   if (!war || !war.calls[targetId]) return;
@@ -83,6 +97,11 @@ router.post("/api/auth", async (req, res) => {
 router.get("/api/faction/:factionId/war", requireAuth, (req, res) => {
   const { factionId } = req.params;
 
+  // Faction gate — only your own faction's wars
+  if (factionId !== req.user.factionId) {
+    return res.status(403).json({ error: "You are not a member of this faction" });
+  }
+
   // Find all wars for this faction
   const result = [];
   for (const [, war] of store.getAllWars()) {
@@ -105,6 +124,11 @@ router.get("/api/faction/:factionId/war", requireAuth, (req, res) => {
 
 router.get("/api/faction/:factionId/chain", requireAuth, async (req, res) => {
   const { factionId } = req.params;
+
+  // Faction gate — only your own faction's chain
+  if (factionId !== req.user.factionId) {
+    return res.status(403).json({ error: "You are not a member of this faction" });
+  }
 
   // We need an API key for this faction
   const apiKey = store.getApiKeyForFaction(factionId);
@@ -157,6 +181,11 @@ router.get("/api/poll", (req, res, next) => {
   // Ensure war exists (join_war equivalent)
   const war = store.getOrCreateWar(warId, factionId, enemyFactionId || null);
 
+  // Faction gate — if this war already belongs to another faction, reject
+  if (war.factionId !== factionId) {
+    return res.status(403).json({ error: "You are not a member of this war's faction" });
+  }
+
   // Track player as online (use playerId as pseudo-socketId for polling clients)
   store.setPlayer(playerId, {
     socketId: `poll_${playerId}`,
@@ -189,9 +218,11 @@ router.post("/api/call", requireAuth, (req, res) => {
     return res.status(400).json({ error: "targetId and warId are required" });
   }
 
-  const war = store.getWar(warId);
+  const war = requireWarMember(req, res, warId);
   if (!war) {
-    return res.status(404).json({ error: "War not found" });
+    return war === null && !res.headersSent
+      ? res.status(404).json({ error: "War not found" })
+      : undefined;
   }
 
   if (action === "uncall") {
@@ -260,9 +291,11 @@ router.post("/api/priority", requireAuth, (req, res) => {
     return res.status(400).json({ error: "priority must be 'high', 'medium', 'low', or null" });
   }
 
-  const war = store.getWar(warId);
+  const war = requireWarMember(req, res, warId);
   if (!war) {
-    return res.status(404).json({ error: "War not found" });
+    return war === null && !res.headersSent
+      ? res.status(404).json({ error: "War not found" })
+      : undefined;
   }
 
   if (priority === null) {
@@ -292,9 +325,11 @@ router.post("/api/status", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "warId is required" });
   }
 
-  const war = store.getWar(warId);
+  const war = requireWarMember(req, res, warId);
   if (!war) {
-    return res.status(404).json({ error: "War not found" });
+    return war === null && !res.headersSent
+      ? res.status(404).json({ error: "War not found" })
+      : undefined;
   }
 
   // Bulk status update from intercepted data
