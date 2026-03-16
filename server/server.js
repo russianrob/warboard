@@ -57,15 +57,7 @@ app.use(express.static(join(__dirname, "public")));
 const USERSCRIPT_PATH = join(__dirname, "..", "client", "factionops.user.js");
 
 app.get("/download/factionops.user.js", (_req, res) => {
-  try {
-    const script = readFileSync(USERSCRIPT_PATH, "utf-8");
-    res.setHeader("Content-Type", "text/javascript");
-    res.setHeader("Content-Disposition", 'inline; filename="factionops.user.js"');
-    res.send(script);
-  } catch (err) {
-    console.error("[server] Failed to serve userscript:", err.message);
-    res.status(404).json({ error: "Userscript not found" });
-  }
+  res.status(403).json({ error: "Script download is currently disabled" });
 });
 
 // ── Serve Socket.IO client (for PDA and CSP-restricted environments) ───
