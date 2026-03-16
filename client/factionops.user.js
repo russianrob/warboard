@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      2.0.0
+// @version      2.0.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -710,22 +710,33 @@ body.wb-chain-active {
 
     /**
      * GET with auth header.
-     * Uses httpRequest (PDA-compatible GET) or GM_xmlhttpRequest.
+     * PDA: uses fetch() because PDA_httpGet doesn't support custom headers.
+     * Desktop: uses GM_xmlhttpRequest for cross-origin support.
      */
     function getAction(endpoint) {
-        return new Promise((resolve, reject) => {
-            if (!state.jwtToken) return reject(new Error('Not authenticated'));
-            const url = `${CONFIG.SERVER_URL}${endpoint}`;
+        if (!state.jwtToken) return Promise.reject(new Error('Not authenticated'));
+        const url = `${CONFIG.SERVER_URL}${endpoint}`;
 
-            httpRequest({
+        if (IS_PDA) {
+            return fetch(url, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${state.jwtToken}` },
+            }).then(async (r) => {
+                const data = await r.json().catch(() => null);
+                if (r.ok) return data;
+                throw new Error((data && data.error) || `HTTP ${r.status}`);
+            });
+        }
+
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
                 method: 'GET',
                 url,
                 headers: { 'Authorization': `Bearer ${state.jwtToken}` },
                 onload(res) {
-                    const data = safeParse(typeof res === 'string' ? res : res.responseText);
-                    const status = res.status || 200;
-                    if (status >= 200 && status < 300) resolve(data);
-                    else reject(new Error((data && data.error) || `HTTP ${status}`));
+                    const data = safeParse(res.responseText);
+                    if (res.status >= 200 && res.status < 300) resolve(data);
+                    else reject(new Error((data && data.error) || `HTTP ${res.status}`));
                 },
                 onerror() { reject(new Error('Network error')); },
             });
