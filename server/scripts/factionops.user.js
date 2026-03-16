@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.50
+// @version      3.0.51
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -976,8 +976,11 @@ body.wb-chain-active {
 
 /* ── Activate FactionOps button wrapper ── */
 .fo-activate-wrap {
-    display: flex; justify-content: center;
-    width: 100%; padding: 8px 0;
+    display: block; text-align: center;
+    padding: 8px 0; margin: 0;
+    background: transparent !important;
+    border: none !important;
+    height: auto !important;
 }
 /* ── Activate FactionOps button ── */
 .fo-activate-btn {
@@ -989,7 +992,7 @@ body.wb-chain-active {
     border: 1.5px solid rgba(225,112,85,0.6);
     background: rgba(225,112,85,0.15); color: #e17055;
     cursor: pointer; transition: all 0.2s ease;
-    white-space: nowrap; width: auto;
+    white-space: nowrap;
 }
 .fo-activate-btn:hover {
     background: rgba(225,112,85,0.3);
