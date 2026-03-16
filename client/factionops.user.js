@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      1.1.0
+// @version      1.1.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -661,10 +661,27 @@ body.wb-chain-active {
 
             log('Loading Socket.IO from CDN...');
 
-            // Use httpRequest to fetch the script content, then create a
-            // blob URL. This avoids CSP issues that a direct CDN <script> might
-            // encounter on Torn. Works on both Tampermonkey and Torn PDA.
-            httpRequest({
+            if (IS_PDA) {
+                // PDA: Load via direct <script> tag — PDA's webview allows this
+                const script = document.createElement('script');
+                script.src = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
+                script.onload = () => {
+                    if (typeof window.io === 'function') {
+                        log('Socket.IO loaded successfully (PDA)');
+                        resolve();
+                    } else {
+                        reject(new Error('Socket.IO loaded but window.io not found'));
+                    }
+                };
+                script.onerror = () => reject(new Error('Failed to load Socket.IO via script tag'));
+                document.head.appendChild(script);
+                return;
+            }
+
+            // Desktop: Use GM_xmlhttpRequest to fetch then blob-inject.
+            // This avoids CSP issues that a direct CDN <script> might
+            // encounter on Torn.
+            GM_xmlhttpRequest({
                 method: 'GET',
                 url: 'https://cdn.socket.io/4.7.5/socket.io.min.js',
                 onload(res) {
@@ -695,7 +712,7 @@ body.wb-chain-active {
                     }
                 },
                 onerror(err) {
-                    reject(new Error('httpRequest failed: ' + String(err)));
+                    reject(new Error('GM_xmlhttpRequest failed: ' + String(err)));
                 },
             });
         });
@@ -710,11 +727,39 @@ body.wb-chain-active {
      * Sends the Torn API key to POST /api/auth, receives a JWT.
      */
     function authenticate() {
-        return new Promise((resolve, reject) => {
+        return new Promise(async (resolve, reject) => {
             if (!CONFIG.API_KEY) {
                 return reject(new Error('No API key configured'));
             }
             log('Authenticating with server...');
+
+            if (IS_PDA) {
+                // PDA: use fetch for POST requests (GM_xmlhttpRequest not available)
+                try {
+                    const resp = await fetch(`${CONFIG.SERVER_URL}/api/auth`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ apiKey: CONFIG.API_KEY }),
+                    });
+                    const body = await resp.json();
+                    if (resp.ok && body && body.token) {
+                        state.jwtToken = body.token;
+                        GM_setValue('factionops_jwt', body.token);
+                        if (body.player) {
+                            state.myPlayerId = String(body.player.id);
+                            state.myPlayerName = body.player.name;
+                        }
+                        log('Authenticated as', state.myPlayerName || 'unknown');
+                        resolve(body);
+                    } else {
+                        reject(new Error((body && body.error) || `HTTP ${resp.status}`));
+                    }
+                } catch (e) {
+                    reject(new Error('Network error — is the server running?'));
+                }
+                return;
+            }
+
             GM_xmlhttpRequest({
                 method: 'POST',
                 url: `${CONFIG.SERVER_URL}/api/auth`,
@@ -748,10 +793,33 @@ body.wb-chain-active {
      * Returns { valid: true, player: {...} } or throws.
      */
     function verifyApiKey() {
-        return new Promise((resolve, reject) => {
+        return new Promise(async (resolve, reject) => {
             if (!CONFIG.API_KEY) {
                 return reject(new Error('No API key'));
             }
+
+            if (IS_PDA) {
+                try {
+                    const resp = await fetch(`${CONFIG.SERVER_URL}/api/auth/verify`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${state.jwtToken}`,
+                        },
+                        body: JSON.stringify({ apiKey: CONFIG.API_KEY }),
+                    });
+                    const body = await resp.json();
+                    if (resp.ok && body && body.valid) {
+                        resolve(body);
+                    } else {
+                        reject(new Error((body && body.error) || 'Verification failed'));
+                    }
+                } catch (e) {
+                    reject(new Error('Network error'));
+                }
+                return;
+            }
+
             GM_xmlhttpRequest({
                 method: 'POST',
                 url: `${CONFIG.SERVER_URL}/api/auth/verify`,

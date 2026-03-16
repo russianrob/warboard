@@ -36,12 +36,15 @@ const app = express();
 
 app.use(
   cors({
-    origin: [
-      /\.torn\.com$/,
-      "http://localhost:3000",
-      "http://localhost:5173",
-      "http://localhost:8080",
-    ],
+    origin: function (origin, callback) {
+      // Allow requests with no origin (PDA webview, mobile apps, curl)
+      if (!origin) return callback(null, true);
+      // Allow torn.com subdomains and localhost dev
+      if (/\.torn\.com$/.test(origin) || /^https?:\/\/localhost/.test(origin)) {
+        return callback(null, true);
+      }
+      callback(null, false);
+    },
     credentials: true,
   }),
 );
@@ -78,12 +81,13 @@ const httpServer = createServer(app);
 
 const io = new SocketIOServer(httpServer, {
   cors: {
-    origin: [
-      /\.torn\.com$/,
-      "http://localhost:3000",
-      "http://localhost:5173",
-      "http://localhost:8080",
-    ],
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      if (/\.torn\.com$/.test(origin) || /^https?:\/\/localhost/.test(origin)) {
+        return callback(null, true);
+      }
+      callback(null, false);
+    },
     credentials: true,
   },
 });
