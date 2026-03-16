@@ -130,8 +130,8 @@ router.get("/api/faction/:factionId/chain", requireAuth, async (req, res) => {
     return res.status(403).json({ error: "You are not a member of this faction" });
   }
 
-  // We need an API key for this faction
-  const apiKey = store.getApiKeyForFaction(factionId);
+  // We need an API key for this faction — prefer faction-dedicated key
+  const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
   if (!apiKey) {
     return res.status(503).json({ error: "No API key available for this faction" });
   }
@@ -204,6 +204,7 @@ router.get("/api/poll", (req, res, next) => {
     chainData: war.chainData,
     onlinePlayers: store.getOnlinePlayersForWar(warId),
     viewers: store.getViewersForWar(warId),
+    factionKeyStored: !!store.getFactionApiKey(factionId),
   });
 });
 
@@ -314,6 +315,47 @@ router.post("/api/priority", requireAuth, (req, res) => {
 });
 
 
+// ── POST /api/faction-key ─────────────────────────────────────────────────
+// Save a faction-dedicated API key for server-side polling.
+
+router.post("/api/faction-key", requireAuth, async (req, res) => {
+  const { factionId } = req.user;
+  const { apiKey } = req.body ?? {};
+
+  if (!apiKey || typeof apiKey !== "string") {
+    return res.status(400).json({ error: "apiKey is required" });
+  }
+
+  // Validate the key by making a test call to Torn API
+  try {
+    const url = `https://api.torn.com/user/?selections=basic&key=${encodeURIComponent(apiKey)}`;
+    const tornRes = await fetch(url);
+    if (!tornRes.ok) {
+      return res.status(502).json({ error: `Torn API returned HTTP ${tornRes.status}` });
+    }
+    const data = await tornRes.json();
+    if (data.error) {
+      return res.status(400).json({ error: `Invalid API key: ${data.error.error}` });
+    }
+  } catch (err) {
+    return res.status(502).json({ error: `Failed to validate key: ${err.message}` });
+  }
+
+  store.storeFactionApiKey(factionId, apiKey);
+  console.log(`[api] Faction API key saved for faction ${factionId}`);
+  return res.json({ ok: true });
+});
+
+// ── DELETE /api/faction-key ──────────────────────────────────────────────
+// Remove the faction-dedicated API key.
+
+router.delete("/api/faction-key", requireAuth, (req, res) => {
+  const { factionId } = req.user;
+  store.removeFactionApiKey(factionId);
+  console.log(`[api] Faction API key removed for faction ${factionId}`);
+  return res.json({ ok: true });
+});
+
 // ── POST /api/status ─────────────────────────────────────────────────────
 // Bulk update enemy statuses or report chain data.
 
@@ -377,7 +419,7 @@ router.post("/api/status", requireAuth, async (req, res) => {
     }
     refreshCooldowns.set(warId, now);
 
-    const apiKey = store.getApiKeyForFaction(factionId);
+    const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
     if (!apiKey) {
       return res.status(503).json({ error: "No API key available for status refresh" });
     }

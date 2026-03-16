@@ -21,6 +21,7 @@ import routes from "./routes.js";
 import { socketAuth } from "./auth.js";
 import { registerSocketHandlers } from "./socket-handlers.js";
 import { startChainMonitor, stopAll as stopAllChainMonitors } from "./chain-monitor.js";
+import { startWarStatusMonitor, stopAll as stopAllWarStatusMonitors } from "./war-status-monitor.js";
 import * as store from "./store.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -121,6 +122,7 @@ io.on("connection", (socket) => {
       const war = store.getWar(warId);
       if (war?.enemyFactionId) {
         startChainMonitor(io, warId);
+        startWarStatusMonitor(io, warId);
       }
     }, 100);
   });
@@ -129,11 +131,13 @@ io.on("connection", (socket) => {
 // ── Load persisted state & start ────────────────────────────────────────
 
 store.loadState();
+store.loadFactionKeys();
 
-// Resume chain monitors for any persisted wars with enemy factions
+// Resume chain monitors and war status monitors for any persisted wars with enemy factions
 for (const [warId, war] of store.getAllWars()) {
   if (war.enemyFactionId) {
     startChainMonitor(io, warId);
+    startWarStatusMonitor(io, warId);
   }
 }
 
@@ -150,6 +154,7 @@ httpServer.listen(PORT, () => {
 function shutdown(signal) {
   console.log(`\n[server] Received ${signal}, shutting down...`);
   stopAllChainMonitors();
+  stopAllWarStatusMonitors();
   store.saveState();
   httpServer.close(() => {
     console.log("[server] Server closed");

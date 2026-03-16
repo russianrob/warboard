@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.37
+// @version      3.0.38
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1358,6 +1358,9 @@ body.wb-chain-active {
             cooldown: 0,
         },
 
+        // Whether a faction API key has been saved on the server
+        factionKeyStored: false,
+
         // Sort mode: 'default' or 'bsp'
         sortMode: 'default',
 
@@ -1827,6 +1830,28 @@ body.wb-chain-active {
         });
     }
 
+    /** DELETE with auth header. */
+    function deleteAction(endpoint) {
+        return new Promise((resolve, reject) => {
+            if (!state.jwtToken) return reject(new Error('Not authenticated'));
+            const url = `${CONFIG.SERVER_URL}${endpoint}`;
+
+            httpRequest({
+                method: 'DELETE',
+                url,
+                headers: {
+                    'Authorization': `Bearer ${state.jwtToken}`,
+                },
+                onload(res) {
+                    const data = safeParse(res.responseText);
+                    if (res.status >= 200 && res.status < 300) resolve(data);
+                    else reject(new Error((data && data.error) || `HTTP ${res.status}`));
+                },
+                onerror() { reject(new Error('Network error')); },
+            });
+        });
+    }
+
     /**
      * GET with auth header.
      * Uses httpRequest wrapper which routes through PDA_httpGet (with headers)
@@ -1935,6 +1960,11 @@ body.wb-chain-active {
             // Store enemyFactionId from server if we didn't have it
             if (data.enemyFactionId && !state.enemyFactionId) {
                 state.enemyFactionId = data.enemyFactionId;
+            }
+
+            // Faction key status from server
+            if (data.factionKeyStored !== undefined) {
+                state.factionKeyStored = !!data.factionKeyStored;
             }
 
             // Refresh UI rows
@@ -2261,6 +2291,25 @@ body.wb-chain-active {
                 </label>
             </div>
 
+            <hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:14px 0;">
+
+            <label>Faction API Key</label>
+            <div style="font-size:11px;opacity:0.7;margin-bottom:8px;">
+                Provide a Limited API key for server-side war status updates. This lets the server poll Torn directly instead of relying on page data.
+            </div>
+            <div style="font-size:11px;margin-bottom:8px;">
+                <a href="https://www.torn.com/preferences.php#tab=api" target="_blank" rel="noopener" style="color:#87ceeb;text-decoration:underline;">Create a Limited key on Torn</a>
+            </div>
+            <div id="wb-faction-key-status" style="font-size:11px;margin-bottom:8px;min-height:14px;"></div>
+            <div id="wb-faction-key-input-row" style="display:flex;gap:6px;margin-bottom:14px;">
+                <input type="text" id="wb-input-faction-key" placeholder="Paste faction API key" style="margin-bottom:0;flex:1;">
+                <button class="wb-btn wb-btn-sm" id="wb-btn-save-faction-key">Save Key</button>
+            </div>
+            <div id="wb-faction-key-saved-row" style="display:none;align-items:center;gap:8px;margin-bottom:14px;">
+                <span style="color:var(--wb-call-green);font-size:12px;">Key saved \u2713</span>
+                <button class="wb-btn wb-btn-sm wb-btn-danger" id="wb-btn-remove-faction-key">Remove</button>
+            </div>
+
             <div class="wb-settings-actions">
                 <button class="wb-btn wb-btn-danger" id="wb-btn-disconnect">Disconnect</button>
                 <button class="wb-btn" id="wb-btn-save">Save &amp; Connect</button>
@@ -2306,6 +2355,73 @@ body.wb-chain-active {
             setConfig('AUTO_SORT', e.target.checked);
             if (e.target.checked) debouncedSort();
         });
+
+        // Faction API key — check if one already exists
+        (async () => {
+            if (state.factionKeyStored) {
+                showFactionKeySaved();
+            }
+        })();
+
+        document.getElementById('wb-btn-save-faction-key').addEventListener('click', async () => {
+            const statusEl = document.getElementById('wb-faction-key-status');
+            const keyVal = document.getElementById('wb-input-faction-key').value.trim();
+            if (!keyVal) {
+                statusEl.textContent = 'Please paste an API key.';
+                statusEl.style.color = 'var(--wb-call-red)';
+                return;
+            }
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = 'var(--wb-idle-yellow)';
+            try {
+                const resp = await postAction('/api/faction-key', { apiKey: keyVal });
+                if (resp && resp.ok) {
+                    statusEl.textContent = '';
+                    state.factionKeyStored = true;
+                    showFactionKeySaved();
+                } else {
+                    statusEl.textContent = (resp && resp.error) || 'Failed to save key';
+                    statusEl.style.color = 'var(--wb-call-red)';
+                }
+            } catch (e) {
+                statusEl.textContent = 'Error: ' + e.message;
+                statusEl.style.color = 'var(--wb-call-red)';
+            }
+        });
+
+        document.getElementById('wb-btn-remove-faction-key').addEventListener('click', async () => {
+            const statusEl = document.getElementById('wb-faction-key-status');
+            statusEl.textContent = 'Removing...';
+            statusEl.style.color = 'var(--wb-idle-yellow)';
+            try {
+                const resp = await deleteAction('/api/faction-key');
+                if (resp && resp.ok) {
+                    statusEl.textContent = '';
+                    state.factionKeyStored = false;
+                    showFactionKeyInput();
+                } else {
+                    statusEl.textContent = (resp && resp.error) || 'Failed to remove key';
+                    statusEl.style.color = 'var(--wb-call-red)';
+                }
+            } catch (e) {
+                statusEl.textContent = 'Error: ' + e.message;
+                statusEl.style.color = 'var(--wb-call-red)';
+            }
+        });
+
+        function showFactionKeySaved() {
+            const inputRow = document.getElementById('wb-faction-key-input-row');
+            const savedRow = document.getElementById('wb-faction-key-saved-row');
+            if (inputRow) inputRow.style.display = 'none';
+            if (savedRow) savedRow.style.display = 'flex';
+        }
+
+        function showFactionKeyInput() {
+            const inputRow = document.getElementById('wb-faction-key-input-row');
+            const savedRow = document.getElementById('wb-faction-key-saved-row');
+            if (inputRow) inputRow.style.display = 'flex';
+            if (savedRow) savedRow.style.display = 'none';
+        }
 
         document.getElementById('wb-btn-disconnect').addEventListener('click', () => {
             stopPolling();
@@ -4061,13 +4177,6 @@ body.wb-chain-active {
                 updateTargetRow(String(memberId));
             }
 
-            // Forward batch to server via POST /api/status
-            const warId = deriveWarId();
-            if (state.connected && warId && Object.keys(statusBatch).length > 0) {
-                postAction('/api/status', { warId, statuses: statusBatch })
-                    .catch(e => warn('Status report failed:', e.message));
-            }
-
             // Refresh the Next Up queue after status changes
             updateNextUp();
         }
@@ -4080,13 +4189,6 @@ body.wb-chain-active {
             state.chain.timeout = chain.timeout || 0;
             state.chain.cooldown = chain.cooldown || 0;
             updateChainBar();
-
-            // Forward to server via POST /api/status
-            const warId = deriveWarId();
-            if (state.connected && warId) {
-                postAction('/api/status', { warId, chainData: state.chain })
-                    .catch(e => warn('Chain report failed:', e.message));
-            }
         }
 
         // Attack result

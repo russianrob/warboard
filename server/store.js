@@ -10,6 +10,7 @@ import path from "node:path";
 
 const DATA_DIR = process.env.DATA_DIR || "./data";
 const WARS_FILE = path.join(DATA_DIR, "wars.json");
+const FACTION_KEYS_FILE = path.join(DATA_DIR, "faction-keys.json");
 
 // ── In-memory maps ──────────────────────────────────────────────────────
 
@@ -28,6 +29,12 @@ const players = new Map();
  * @type {Map<string, string>} playerId → apiKey
  */
 const apiKeys = new Map();
+
+/**
+ * Faction-dedicated API keys – one per faction, used for server-side polling.
+ * @type {Map<string, string>} factionId → apiKey
+ */
+const factionApiKeys = new Map();
 
 // ── Persistence helpers ─────────────────────────────────────────────────
 
@@ -159,4 +166,48 @@ export function getApiKeyForFaction(factionId) {
 
 export function getApiKeyForPlayer(playerId) {
   return apiKeys.get(playerId) ?? null;
+}
+
+// ── Faction API key storage ──────────────────────────────────────────────
+
+/** Load faction API keys from disk (called once at startup). */
+export function loadFactionKeys() {
+  ensureDataDir();
+  if (!fs.existsSync(FACTION_KEYS_FILE)) return;
+
+  try {
+    const raw = fs.readFileSync(FACTION_KEYS_FILE, "utf-8");
+    const data = JSON.parse(raw);
+    for (const [factionId, key] of Object.entries(data)) {
+      factionApiKeys.set(factionId, key);
+    }
+    console.log(`[store] Loaded ${factionApiKeys.size} faction API key(s) from disk`);
+  } catch (err) {
+    console.error("[store] Failed to load faction keys:", err.message);
+  }
+}
+
+/** Persist faction API keys to disk. */
+export function saveFactionKeys() {
+  ensureDataDir();
+  try {
+    const obj = Object.fromEntries(factionApiKeys);
+    fs.writeFileSync(FACTION_KEYS_FILE, JSON.stringify(obj, null, 2));
+  } catch (err) {
+    console.error("[store] Failed to persist faction keys:", err.message);
+  }
+}
+
+export function storeFactionApiKey(factionId, apiKey) {
+  factionApiKeys.set(factionId, apiKey);
+  saveFactionKeys();
+}
+
+export function getFactionApiKey(factionId) {
+  return factionApiKeys.get(factionId) ?? null;
+}
+
+export function removeFactionApiKey(factionId) {
+  factionApiKeys.delete(factionId);
+  saveFactionKeys();
 }

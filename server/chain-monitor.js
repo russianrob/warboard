@@ -30,7 +30,7 @@ export function startChainMonitor(io, warId) {
     const war = store.getWar(warId);
     if (!war || !war.enemyFactionId) return;
 
-    const apiKey = store.getApiKeyForFaction(war.factionId);
+    const apiKey = store.getFactionApiKey(war.factionId) || store.getApiKeyForFaction(war.factionId);
     if (!apiKey) return; // no key available, skip silently
 
     try {
