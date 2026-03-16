@@ -714,6 +714,157 @@ img { max-width: 100%; display: block; }
 }
 
 /* ═══════════════════════════════════════════
+   TERMS OF SERVICE
+   ═══════════════════════════════════════════ */
+.terms {
+  position: relative;
+  z-index: 1;
+  padding: 100px 0;
+}
+
+.terms-content {
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.terms-updated {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 40px;
+}
+
+.terms-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-bottom: 56px;
+}
+
+.terms-highlight-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px 20px;
+  transition: border-color var(--transition-interactive);
+}
+
+.terms-highlight-box:hover {
+  border-color: var(--accent-dim);
+}
+
+.terms-highlight-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(0, 212, 170, 0.08);
+  margin-bottom: 14px;
+}
+
+.terms-highlight-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.terms-highlight-box h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  line-height: 1.3;
+}
+
+.terms-highlight-box p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.terms-full {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 40px 36px;
+}
+
+.terms-section {
+  margin-bottom: 32px;
+}
+
+.terms-section:last-child {
+  margin-bottom: 0;
+}
+
+.terms-section h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+
+.terms-section p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 12px;
+}
+
+.terms-section p:last-child {
+  margin-bottom: 0;
+}
+
+.terms-section ul {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0 0;
+}
+
+.terms-section li {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  padding: 6px 0 6px 20px;
+  position: relative;
+}
+
+.terms-section li::before {
+  content: '›';
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+}
+
+.terms-section li strong {
+  color: var(--text-primary);
+}
+
+.terms-section a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--accent-dim);
+}
+
+@media (max-width: 900px) {
+  .terms-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .terms-full {
+    padding: 24px 20px;
+  }
+}
+
+/* ═══════════════════════════════════════════
    FOOTER
    ═══════════════════════════════════════════ */
 .site-footer {
@@ -891,6 +1042,7 @@ img { max-width: 100%; display: block; }
         <li><a href="#features">Features</a></li>
         <li><a href="#how-it-works">How It Works</a></li>
         <li><a href="#install">Install</a></li>
+        <li><a href="#terms">Terms</a></li>
       </ul>
     </nav>
     <button class="mobile-menu-btn" id="menuBtn" aria-label="Toggle menu">☰</button>
@@ -1137,6 +1289,131 @@ img { max-width: 100%; display: block; }
 
 
 
+<!-- ═══════════════ TERMS OF SERVICE ═══════════════ -->
+<section class="terms" id="terms">
+  <div class="container">
+    <div class="terms-content reveal">
+      <p class="section-label">Legal</p>
+      <h2 class="section-title">Terms of Service & Privacy</h2>
+      <p class="terms-updated">Last updated: March 16, 2026</p>
+
+      <div class="terms-grid">
+
+        <!-- Privacy Highlights -->
+        <div class="terms-highlight-box">
+          <div class="terms-highlight-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#00d4aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <h3>No API Keys Stored on Server</h3>
+          <p>Your Torn API key is stored exclusively in your browser's local storage. It is never transmitted to, stored on, or accessible by the FactionOps server. The server never sees, logs, or retains your personal API key at any point.</p>
+        </div>
+
+        <div class="terms-highlight-box">
+          <div class="terms-highlight-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#00d4aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <h3>No Personal Data Stored</h3>
+          <p>FactionOps does not store, log, or retain any personal information on the server. No user profiles, no browsing history, no IP addresses, no analytics, no cookies. The server holds only ephemeral war coordination data (calls, priorities) that is discarded when the war ends.</p>
+        </div>
+
+        <div class="terms-highlight-box">
+          <div class="terms-highlight-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#00d4aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          </div>
+          <h3>Open Source & Transparent</h3>
+          <p>The full source code for both the userscript and the server is publicly available on <a href="https://github.com/russianrob/factionops" target="_blank" rel="noopener">GitHub</a>. You can audit every line of code to verify these claims yourself.</p>
+        </div>
+
+      </div>
+
+      <!-- Full Terms -->
+      <div class="terms-full">
+
+        <div class="terms-section">
+          <h3>1. What FactionOps Is</h3>
+          <p>FactionOps is a free, open-source userscript and companion server for Torn.com that provides real-time faction war coordination. It runs as a browser extension via Tampermonkey or Violentmonkey and communicates with a lightweight coordination server over WebSockets.</p>
+        </div>
+
+        <div class="terms-section">
+          <h3>2. Data We Do Not Collect</h3>
+          <p>FactionOps does not collect, store, transmit, or have access to any of the following:</p>
+          <ul>
+            <li><strong>Torn API keys</strong> — Your API key never leaves your browser. It is stored in your browser's local storage and is used exclusively by the userscript to make direct requests to the official Torn API from your browser. The FactionOps server has no mechanism to receive, read, or store your API key.</li>
+            <li><strong>Personal information</strong> — No real names, email addresses, IP addresses, browser fingerprints, device identifiers, or any other personally identifiable information.</li>
+            <li><strong>Browsing activity</strong> — No page history, click tracking, session recordings, or behavioral analytics of any kind.</li>
+            <li><strong>Game data for profit</strong> — No scraped game data is sold, shared with third parties, or used for any purpose beyond real-time war coordination within your faction.</li>
+            <li><strong>Cookies or tracking</strong> — FactionOps sets no cookies, uses no third-party analytics services, and does not track users across sessions.</li>
+          </ul>
+        </div>
+
+        <div class="terms-section">
+          <h3>3. Data That Passes Through the Server</h3>
+          <p>The FactionOps server acts purely as a real-time relay for faction coordination. The following ephemeral data is transmitted between connected faction members during active wars:</p>
+          <ul>
+            <li><strong>Target calls</strong> — Which enemy targets have been called by which faction member (Torn player ID and name only).</li>
+            <li><strong>Priority tags</strong> — Target priority levels set by faction leaders (high, medium, low).</li>
+            <li><strong>Viewing indicators</strong> — Which faction members are currently viewing the same target (for group attack detection).</li>
+            <li><strong>Connection status</strong> — Whether a faction member's script is currently connected (online/offline indicator).</li>
+          </ul>
+          <p>This data is held in volatile memory only. It is not written to any database, not logged to disk, and is discarded when the server restarts or the war ends. There is no historical record, no audit trail, and no data retention.</p>
+        </div>
+
+        <div class="terms-section">
+          <h3>4. Faction API Key (Optional)</h3>
+          <p>Faction leaders may optionally provide a dedicated Limited Torn API key for server-side status polling. This is a separate key from your personal API key, created specifically for FactionOps. If provided:</p>
+          <ul>
+            <li>It is used solely to poll the Torn API for faction member statuses during active wars.</li>
+            <li>It is stored on the server in an encrypted configuration file, accessible only to the server process.</li>
+            <li>It can be removed at any time by the faction leader through the settings panel.</li>
+            <li>It should be a <strong>Limited</strong> access key to restrict its permissions to the minimum required.</li>
+          </ul>
+          <p>This is entirely optional. FactionOps functions without it — the local userscript will continue to update statuses from the page you are actively viewing.</p>
+        </div>
+
+        <div class="terms-section">
+          <h3>5. How the Userscript Works</h3>
+          <p>The FactionOps userscript operates exclusively on Torn.com war and faction pages. It:</p>
+          <ul>
+            <li>Reads war member data from pages you are actively viewing to update the local UI (sorting, timers, status colors).</li>
+            <li>Communicates with the FactionOps coordination server to sync calls, priorities, and viewer indicators with your faction members.</li>
+            <li>Makes requests only to the official Torn API (api.torn.com) and the FactionOps server — no other external services.</li>
+            <li>Does not make any non-API requests to Torn.com that are not directly initiated by you.</li>
+            <li>Does not intercept, bypass, or interfere with any CAPTCHA protections.</li>
+            <li>Does not operate on background tabs, minimized windows, or unfocused pages.</li>
+          </ul>
+        </div>
+
+        <div class="terms-section">
+          <h3>6. Torn Scripting Compliance</h3>
+          <p>FactionOps is designed to comply with Torn's official scripting and scraping rules as published at <a href="https://www.torn.com/rules.php" target="_blank" rel="noopener">torn.com/rules.php</a> and the <a href="https://www.torn.com/forums.php#/p=threads&f=1&t=16534470" target="_blank" rel="noopener">Updated Rules Page: Scripting & Scraping</a> forum thread. Specifically:</p>
+          <ul>
+            <li>The userscript only processes data from pages you are actively viewing and interacting with.</li>
+            <li>Server-side data comes exclusively from the official Torn API using authorized API keys.</li>
+            <li>No page scraping data is forwarded to external systems.</li>
+            <li>All functionality is disclosed and the source code is publicly auditable.</li>
+          </ul>
+        </div>
+
+        <div class="terms-section">
+          <h3>7. No Warranty & Limitation of Liability</h3>
+          <p>FactionOps is provided "as is" without warranty of any kind. The developer is not responsible for any consequences arising from the use of this software, including but not limited to account actions taken by Torn staff. Use at your own discretion. FactionOps is not affiliated with, endorsed by, or officially connected to Torn.com or Chedburn Networks Ltd.</p>
+        </div>
+
+        <div class="terms-section">
+          <h3>8. Changes to These Terms</h3>
+          <p>These terms may be updated from time to time. Changes will be reflected on this page with an updated date. Continued use of FactionOps after changes constitutes acceptance of the revised terms.</p>
+        </div>
+
+        <div class="terms-section">
+          <h3>9. Contact</h3>
+          <p>Questions or concerns about these terms can be directed to RussianRob on <a href="https://github.com/russianrob/factionops" target="_blank" rel="noopener">GitHub</a>.</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ═══════════════ FOOTER ═══════════════ -->
 <footer class="site-footer">
   <div class="container">
@@ -1147,7 +1424,9 @@ img { max-width: 100%; display: block; }
         <span class="footer-tagline">Built for Torn.com faction warfare</span>
       </div>
       <div class="footer-right">
-<span class="footer-version">v2.0.5</span>
+        <a href="#terms">Terms & Privacy</a>
+        <a href="https://github.com/russianrob/factionops" target="_blank" rel="noopener">GitHub</a>
+        <span class="footer-version">v3.0.38</span>
       </div>
     </div>
   </div>
