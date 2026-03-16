@@ -945,22 +945,27 @@ body.wb-chain-active {
     background: rgba(0,184,148,0.15);
 }
 
+/* ── Activate FactionOps button wrapper ── */
+.fo-activate-wrap {
+    display: flex; justify-content: center;
+    width: 100%; padding: 8px 0;
+}
 /* ── Activate FactionOps button ── */
 .fo-activate-btn {
-    display: flex; align-items: center; gap: 6px;
+    display: inline-flex; align-items: center; gap: 6px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.05em;
-    padding: 6px 14px; border-radius: 20px;
-    border: 1px solid rgba(225,112,85,0.4);
-    background: rgba(225,112,85,0.1); color: #e17055;
+    font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    padding: 8px 20px; border-radius: 20px;
+    border: 1.5px solid rgba(225,112,85,0.6);
+    background: rgba(225,112,85,0.15); color: #e17055;
     cursor: pointer; transition: all 0.2s ease;
-    margin: 8px auto; white-space: nowrap;
+    white-space: nowrap; width: auto;
 }
 .fo-activate-btn:hover {
-    background: rgba(225,112,85,0.2);
-    border-color: rgba(225,112,85,0.6);
-    box-shadow: 0 0 12px rgba(225,112,85,0.15);
+    background: rgba(225,112,85,0.3);
+    border-color: rgba(225,112,85,0.8);
+    box-shadow: 0 0 12px rgba(225,112,85,0.25);
 }
 .fo-activate-btn .fo-activate-icon {
     font-size: 14px; line-height: 1;
@@ -3166,27 +3171,30 @@ body.wb-chain-active {
     // SECTION 12B: FULL OVERLAY — WAR PAGE REPLACEMENT
     // =========================================================================
 
-    /**
-     * Initialise the FactionOps overlay, hiding Torn's native war list.
-     * Called from detectPageAndInit() when isWarContext() is true.
-     */
-    /** Show an "Activate FactionOps" button on the war page. */
+    /** Show an "Activate FactionOps" button on any faction/war page. */
     function showActivateButton() {
-        if (document.getElementById('fo-activate-btn')) return;
+        if (document.getElementById('fo-activate-wrap')) return;
+
+        const wrap = document.createElement('div');
+        wrap.id = 'fo-activate-wrap';
+        wrap.className = 'fo-activate-wrap';
+
         const btn = document.createElement('button');
         btn.id = 'fo-activate-btn';
         btn.className = 'fo-activate-btn';
         btn.innerHTML = '<span class="fo-activate-icon">&#x2694;</span> Activate FactionOps';
         btn.addEventListener('click', () => {
-            btn.remove();
+            wrap.remove();
             initWarOverlay();
         });
+
+        wrap.appendChild(btn);
 
         // Insert near the top of the page content
         const mainContent = document.getElementById('mainContainer')
             || document.querySelector('.content-wrapper')
             || document.body;
-        mainContent.prepend(btn);
+        mainContent.prepend(wrap);
     }
 
     function initWarOverlay() {
@@ -4797,7 +4805,9 @@ body.wb-chain-active {
             clearViewing(); // Tell server we left the attack page
         }
 
-        // Remove FactionOps war overlay and restore hidden Torn elements
+        // Remove FactionOps activate button and war overlay, restore hidden Torn elements
+        const foWrap = document.getElementById('fo-activate-wrap');
+        if (foWrap) foWrap.remove();
         const foOverlay = document.getElementById('fo-overlay');
         if (foOverlay) foOverlay.remove();
 
