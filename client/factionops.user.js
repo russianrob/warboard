@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      2.0.4
+// @version      2.0.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -425,7 +425,7 @@ html.wb-theme-light {
 /* Ensure rows have room for our right-aligned cells */
 .wb-sortable-row {
     position: relative !important;
-    padding-right: 160px !important;
+    padding-right: 210px !important;
     transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
@@ -439,6 +439,28 @@ html.wb-theme-light {
     font-size: 11px;
     vertical-align: middle;
 }
+/* Attack button */
+.wb-attack-btn {
+    padding: 2px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--wb-call-red);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, transform 0.1s;
+    font-family: Arial, sans-serif;
+    white-space: nowrap;
+    background: rgba(225,112,85,0.15);
+    color: var(--wb-call-red);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+}
+.wb-attack-btn:hover {
+    background: var(--wb-call-red);
+    color: #fff;
+    transform: scale(1.05);
+}
+
 .wb-call-btn,
 .wb-rally-btn {
     padding: 2px 10px;
@@ -1523,7 +1545,7 @@ body.wb-chain-active {
 
     /**
      * Enhance a single member row with FactionOps columns.
-     * Injects Call, Status, and Rally cells into the row.
+     * Injects Attack, Call, Status, and Rally cells into the row.
      */
     function enhanceRow(row) {
         if (enhancedRows.has(row)) return;
@@ -1549,6 +1571,18 @@ body.wb-chain-active {
         statusCell.id = `wb-status-${targetId}`;
         renderStatusCell(statusCell, targetId);
 
+        // --- Attack button ---
+        const attackCell = document.createElement('span');
+        attackCell.className = 'wb-cell';
+        const attackLink = document.createElement('a');
+        attackLink.className = 'wb-attack-btn';
+        attackLink.textContent = 'Attack';
+        attackLink.href = `https://www.torn.com/loader.php?sid=attack&user2ID=${targetId}`;
+        attackLink.target = '_blank';
+        attackLink.rel = 'noopener';
+        attackLink.addEventListener('click', (e) => e.stopPropagation());
+        attackCell.appendChild(attackLink);
+
         // --- Call cell ---
         const callCell = document.createElement('span');
         callCell.className = 'wb-cell';
@@ -1562,6 +1596,7 @@ body.wb-chain-active {
         renderRallyCell(rallyCell, targetId);
 
         wbContainer.appendChild(statusCell);
+        wbContainer.appendChild(attackCell);
         wbContainer.appendChild(callCell);
         wbContainer.appendChild(rallyCell);
 
@@ -2348,7 +2383,7 @@ body.wb-chain-active {
     // =========================================================================
 
     async function main() {
-        log('Initialising FactionOps v2.0.4');
+        log('Initialising FactionOps v2.0.5');
         if (IS_PDA) log('Torn PDA detected — using PDA-managed API key');
 
         // 1. Inject CSS
