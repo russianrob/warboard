@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      2.1.0
+// @version      3.0.0
 // @description  Real-time faction war coordination tool for Torn.com
-// @author       FactionOps
+// @author       RussianRob
 // @license      MIT
 // @downloadURL  https://tornwar.com/download/factionops.user.js
 // @updateURL    https://tornwar.com/download/factionops.user.js
@@ -815,6 +815,382 @@ html.wb-theme-light {
 body.wb-chain-active {
     padding-top: 42px !important;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FactionOps Full Overlay (fo- prefix)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── War Board Container ── */
+.fo-overlay {
+    width: 100%;
+    max-width: 1000px;
+    background: #1a1a2e;
+    border: 1px solid #2d3436;
+    border-radius: 10px;
+    box-shadow:
+        0 4px 24px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(255, 255, 255, 0.03),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    overflow: hidden;
+    height: fit-content;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #e0e0e0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 10px auto;
+}
+
+/* ── Header Bar ── */
+.fo-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: #16213e;
+    border-bottom: 1px solid #2d3436;
+    gap: 12px;
+}
+
+.fo-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.fo-logo-mark {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.fo-logo-icon { width: 20px; height: 20px; }
+
+.fo-logo-text {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #e0e0e0;
+    white-space: nowrap;
+}
+
+.fo-status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #00b894;
+    box-shadow: 0 0 6px rgba(0,184,148,0.6);
+    animation: fo-pulse-glow 2s ease-in-out infinite;
+    flex-shrink: 0;
+}
+.fo-status-dot.disconnected {
+    background: #e17055;
+    box-shadow: 0 0 6px rgba(225,112,85,0.6);
+}
+
+@keyframes fo-pulse-glow {
+    0%, 100% { box-shadow: 0 0 6px rgba(0,184,148,0.4); }
+    50% { box-shadow: 0 0 10px rgba(0,184,148,0.8); }
+}
+
+.fo-header-center {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #a0a0b8;
+    white-space: nowrap;
+}
+
+.fo-header-center strong { color: #e0e0e0; font-weight: 600; }
+
+.fo-war-badge {
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 2px 6px; border-radius: 4px;
+    background: rgba(225,112,85,0.15);
+    color: #e17055;
+    border: 1px solid rgba(225,112,85,0.25);
+}
+
+.fo-header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.fo-online-badge {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 500;
+    color: #00b894;
+    background: rgba(0,184,148,0.1);
+    border: 1px solid rgba(0,184,148,0.2);
+    padding: 3px 8px; border-radius: 20px;
+}
+
+.fo-online-badge .fo-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%; background: #00b894;
+}
+
+/* ── Column labels ── */
+.fo-col-headers {
+    display: grid;
+    grid-template-columns: 58px 1fr 52px 82px 130px 44px 180px 72px;
+    gap: 0; padding: 7px 16px;
+    background: rgba(15,52,96,0.2);
+    border-bottom: 1px solid #2d3436;
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: #636e72; user-select: none;
+}
+
+.fo-col-header { padding: 0 4px; white-space: nowrap; }
+.fo-col-header.center { text-align: center; }
+.fo-col-header.right { text-align: right; }
+
+/* ── Target Rows ── */
+.fo-target-list { list-style: none; margin: 0; padding: 0; }
+
+.fo-row {
+    display: grid;
+    grid-template-columns: 58px 1fr 52px 82px 130px 44px 180px 72px;
+    gap: 0; align-items: center;
+    padding: 8px 16px;
+    border-bottom: 1px solid rgba(45,52,54,0.5);
+    transition: background 0.15s ease;
+    position: relative;
+}
+
+.fo-row::before {
+    content: '';
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 3px; border-radius: 0 2px 2px 0;
+    transition: background 0.2s ease;
+}
+
+.fo-row:hover { background: rgba(15,52,96,0.2); }
+.fo-row:last-child { border-bottom: none; }
+
+.fo-row.is-hospital,
+.fo-row.is-jail,
+.fo-row.is-travel { opacity: 0.5; }
+
+.fo-row.is-hospital:hover,
+.fo-row.is-jail:hover,
+.fo-row.is-travel:hover { opacity: 0.7; }
+
+.fo-row.is-called::before { background: #00b894; }
+.fo-row.is-called { background: rgba(0,184,148,0.04); }
+.fo-row.is-high-priority::before { background: #e17055; }
+.fo-row.is-called.is-high-priority::before {
+    background: linear-gradient(180deg, #e17055 50%, #00b894 50%);
+}
+
+/* ── Cell styles ── */
+.fo-cell { padding: 0 4px; display: flex; align-items: center; }
+.fo-cell.center { justify-content: center; }
+
+.fo-priority-badge {
+    font-size: 9px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 4px;
+    white-space: nowrap; line-height: 1.4;
+}
+
+.fo-priority-badge.high {
+    background: rgba(225,112,85,0.15); color: #e17055;
+    border: 1px solid rgba(225,112,85,0.3);
+}
+.fo-priority-badge.med {
+    background: rgba(253,203,110,0.12); color: #fdcb6e;
+    border: 1px solid rgba(253,203,110,0.25);
+}
+.fo-priority-badge.low {
+    background: rgba(9,132,227,0.12); color: #0984e3;
+    border: 1px solid rgba(9,132,227,0.25);
+}
+
+.fo-priority-select {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    background: rgba(15,52,96,0.3); color: #a0a0b8;
+    border: 1px solid rgba(45,52,54,0.8); border-radius: 4px;
+    padding: 2px 4px; cursor: pointer; outline: none;
+    -webkit-appearance: none; appearance: none;
+    width: 50px; text-align: center;
+}
+.fo-priority-select:hover { border-color: rgba(99,110,114,0.6); }
+.fo-priority-select option { background: #16213e; color: #e0e0e0; }
+
+/* Player Name */
+.fo-player-name { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+
+.fo-player-name .fo-name-row {
+    display: flex; align-items: center; gap: 6px;
+}
+
+.fo-player-name .fo-name {
+    font-weight: 600; font-size: 12.5px; color: #e0e0e0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.fo-player-name .fo-pid { font-size: 10px; color: #636e72; font-weight: 400; }
+
+/* ── Group Attack Eye Badge ── */
+.fo-eye-badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 9px; font-weight: 600;
+    color: #fdcb6e;
+    background: rgba(253,203,110,0.12);
+    border: 1px solid rgba(253,203,110,0.25);
+    border-radius: 3px; padding: 1px 5px;
+    white-space: nowrap; cursor: default; line-height: 1.3;
+}
+
+.fo-eye-badge .fo-eye-icon { font-size: 10px; line-height: 1; }
+
+/* Level */
+.fo-level {
+    font-size: 11px; font-weight: 500; color: #a0a0b8;
+    text-align: center; white-space: nowrap;
+}
+
+/* BSP Stats */
+.fo-bsp-stat {
+    font-size: 11px; font-weight: 600; text-align: center;
+    white-space: nowrap; letter-spacing: 0.02em;
+}
+.fo-bsp-stat.tier-s { color: #e17055; text-shadow: 0 0 8px rgba(225,112,85,0.3); }
+.fo-bsp-stat.tier-a { color: #fdcb6e; }
+.fo-bsp-stat.tier-b { color: #00b894; }
+.fo-bsp-stat.tier-c { color: #a0a0b8; }
+.fo-bsp-stat.tier-unknown { color: #4a4a5a; font-weight: 400; font-style: italic; }
+
+.fo-bsp-source {
+    font-size: 8px; font-weight: 400;
+    letter-spacing: 0.04em; text-transform: uppercase;
+    opacity: 0.5; display: block; margin-top: 1px;
+}
+
+/* Status Pill */
+.fo-status-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 500;
+    padding: 3px 8px; border-radius: 20px;
+    white-space: nowrap; line-height: 1;
+}
+.fo-status-pill .fo-s-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+.fo-status-pill.ok { background: rgba(0,184,148,0.1); color: #00b894; border: 1px solid rgba(0,184,148,0.2); }
+.fo-status-pill.ok .fo-s-dot { background: #00b894; }
+.fo-status-pill.hosp { background: rgba(225,112,85,0.1); color: #e17055; border: 1px solid rgba(225,112,85,0.2); }
+.fo-status-pill.hosp .fo-s-dot { background: #e17055; }
+.fo-status-pill.travel { background: rgba(9,132,227,0.1); color: #0984e3; border: 1px solid rgba(9,132,227,0.2); }
+.fo-status-pill.travel .fo-s-dot { background: #0984e3; }
+.fo-status-pill.jail { background: rgba(99,110,114,0.15); color: #b2bec3; border: 1px solid rgba(99,110,114,0.25); }
+.fo-status-pill.jail .fo-s-dot { background: #636e72; }
+
+/* Online indicator */
+.fo-online-dot { width: 8px; height: 8px; border-radius: 50%; margin: 0 auto; }
+.fo-online-dot.on { background: #00b894; box-shadow: 0 0 5px rgba(0,184,148,0.4); }
+.fo-online-dot.idle { background: #fdcb6e; box-shadow: 0 0 5px rgba(253,203,110,0.3); }
+.fo-online-dot.off { background: #636e72; }
+
+/* Call column */
+.fo-call-cell { display: flex; align-items: center; gap: 4px; padding: 0 4px; }
+
+.fo-call-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 4px 10px; border-radius: 20px;
+    border: 1px solid rgba(0,184,148,0.35);
+    background: rgba(0,184,148,0.08); color: #00b894;
+    cursor: pointer; transition: all 0.15s ease;
+    white-space: nowrap; line-height: 1;
+}
+.fo-call-btn:hover {
+    background: rgba(0,184,148,0.18);
+    border-color: rgba(0,184,148,0.5);
+    box-shadow: 0 0 8px rgba(0,184,148,0.15);
+}
+
+.fo-called-tag {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 10px; font-weight: 500;
+    padding: 3px 8px; border-radius: 20px;
+    background: rgba(0,184,148,0.12);
+    border: 1px solid rgba(0,184,148,0.25);
+    color: #00b894; white-space: nowrap; line-height: 1;
+}
+.fo-called-tag .fo-caller-name { max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+
+.fo-uncall-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 1px solid rgba(225,112,85,0.3);
+    background: rgba(225,112,85,0.1); color: #e17055;
+    font-size: 10px; cursor: pointer;
+    transition: all 0.15s ease; flex-shrink: 0; line-height: 1;
+}
+.fo-uncall-btn:hover {
+    background: rgba(225,112,85,0.25);
+    border-color: rgba(225,112,85,0.5);
+}
+
+/* Attack button */
+.fo-attack-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 4px 10px; border-radius: 20px;
+    border: 1px solid rgba(225,112,85,0.4);
+    background: transparent; color: #e17055;
+    cursor: pointer; transition: all 0.15s ease;
+    text-decoration: none;
+    display: inline-flex; align-items: center; gap: 4px;
+    line-height: 1; white-space: nowrap;
+}
+.fo-attack-btn:hover {
+    background: rgba(225,112,85,0.15);
+    border-color: rgba(225,112,85,0.6);
+    box-shadow: 0 0 10px rgba(225,112,85,0.15);
+    color: #e17055;
+}
+.fo-attack-btn .fo-arrow { font-size: 11px; line-height: 1; }
+
+/* ── Footer ── */
+.fo-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 16px;
+    background: rgba(15,52,96,0.15);
+    border-top: 1px solid #2d3436;
+    font-size: 10px; color: #636e72;
+}
+.fo-footer-stats { display: flex; gap: 16px; }
+.fo-footer-stat { display: flex; align-items: center; gap: 4px; }
+.fo-footer-stat .fo-val { color: #a0a0b8; font-weight: 600; }
+.fo-footer-version { font-size: 9px; color: #4a4a5a; letter-spacing: 0.04em; }
+
+/* ── Scrollbar inside overlay ── */
+.fo-overlay ::-webkit-scrollbar { width: 6px; }
+.fo-overlay ::-webkit-scrollbar-track { background: transparent; }
+.fo-overlay ::-webkit-scrollbar-thumb { background: #2d3436; border-radius: 3px; }
+.fo-overlay ::-webkit-scrollbar-thumb:hover { background: #636e72; }
+
+/* ── Responsive ── */
+@media (max-width: 700px) {
+    .fo-col-headers, .fo-row {
+        grid-template-columns: 44px 1fr 42px 60px 100px 36px 100px 60px;
+        font-size: 11px;
+    }
+    .fo-header { flex-wrap: wrap; gap: 6px; }
+}
 `;
         GM_addStyle(css);
         log('Styles injected');
@@ -1190,29 +1566,46 @@ body.wb-chain-active {
      * Format: Name - (Stats: 1.23B) - Lvl 85 - Xan: 1,234 - Boosters: 567
      */
     async function copyFactionList(btn) {
-        const rows = Array.from(document.querySelectorAll('[data-wb-target-id]'));
-        if (rows.length === 0) {
+        // Support both overlay rows and legacy DOM rows
+        let targetIds = [];
+        const foRows = Array.from(document.querySelectorAll('[data-fo-id]'));
+        if (foRows.length > 0) {
+            targetIds = foRows.map(r => r.dataset.foId);
+        } else {
+            const wbRows = Array.from(document.querySelectorAll('[data-wb-target-id]'));
+            targetIds = wbRows.map(r => r.dataset.wbTargetId);
+        }
+
+        if (targetIds.length === 0) {
             showToast('No members found', 'error');
             return;
         }
 
         btn.classList.add('wb-copying');
-        const total = rows.length;
+        const total = targetIds.length;
         btn.textContent = `0/${total}`;
 
         const lines = [];
         let processed = 0;
 
-        for (const row of rows) {
-            const targetId = row.dataset.wbTargetId;
+        for (const targetId of targetIds) {
             if (!targetId) continue;
 
             try {
-                const name = getPlayerNameFromRow(row);
+                // Get name from state (overlay) or DOM (legacy)
+                let name;
+                const statusData = state.statuses[targetId];
+                if (statusData && statusData.name) {
+                    name = statusData.name;
+                } else {
+                    const domRow = document.querySelector(`[data-wb-target-id="${targetId}"]`);
+                    name = domRow ? getPlayerNameFromRow(domRow) : `ID ${targetId}`;
+                }
+
                 const statsStr = await getStatsString(targetId);
 
                 const extras = [];
-                const level = getMemberLevelFromRow(row);
+                const level = statusData && statusData.level != null ? statusData.level : null;
                 if (level != null) extras.push(`Lvl ${level}`);
 
                 const pStats = await getPersonalStats(targetId);
@@ -2024,6 +2417,11 @@ body.wb-chain-active {
                     if (timerEl) {
                         timerEl.textContent = formatTimer(s.until);
                     }
+                    // Also update overlay timer element
+                    const foTimerEl = document.getElementById(`fo-timer-${targetId}`);
+                    if (foTimerEl) {
+                        foTimerEl.textContent = formatTimer(s.until);
+                    }
                 }
             }
 
@@ -2544,6 +2942,13 @@ body.wb-chain-active {
 
     /** Re-render all FactionOps cells for a specific target. */
     function updateTargetRow(targetId) {
+        // Update overlay row if overlay is active
+        const foRow = document.querySelector(`[data-fo-id="${targetId}"]`);
+        if (foRow) {
+            updateOverlayRow(foRow, targetId);
+        }
+
+        // Also update old-style enhanced row cells
         const callEl = document.getElementById(`wb-call-${targetId}`);
         if (callEl) renderCallCell(callEl, targetId);
 
@@ -2566,6 +2971,12 @@ body.wb-chain-active {
 
     /** Re-render all enhanced rows (after bulk state update). */
     function refreshAllRows() {
+        // If the overlay is active, re-render it
+        if (document.getElementById('fo-overlay')) {
+            renderOverlay();
+        }
+
+        // Also update any old-style enhanced rows (e.g. non-war pages)
         const rows = document.querySelectorAll('[data-wb-target-id]');
         rows.forEach((row) => {
             const targetId = row.dataset.wbTargetId;
@@ -2595,16 +3006,553 @@ body.wb-chain-active {
     }
 
     // =========================================================================
+    // SECTION 12B: FULL OVERLAY — WAR PAGE REPLACEMENT
+    // =========================================================================
+
+    /**
+     * Initialise the FactionOps overlay, hiding Torn's native war list.
+     * Called from detectPageAndInit() when isWarContext() is true.
+     */
+    function initWarOverlay() {
+        // Keep chain bar, BSP button, copy button, timers as before
+        createChainBar();
+        createBspSortButton();
+        createCopyButton();
+        startChainTimer();
+        startStatusTimers();
+        startCallPruner();
+
+        // Hide Torn's native war list container
+        for (const sel of MEMBER_CONTAINER_SELECTORS) {
+            const el = document.querySelector(sel);
+            if (el) {
+                el.dataset.foHidden = 'true';
+                el.style.display = 'none';
+                break;
+            }
+        }
+
+        // Create the overlay if it doesn't already exist
+        if (document.getElementById('fo-overlay')) return;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'fo-overlay';
+        overlay.className = 'fo-overlay';
+
+        // ── Header ──
+        overlay.innerHTML = `
+            <div class="fo-header">
+                <div class="fo-header-left">
+                    <div class="fo-logo-mark">
+                        <svg class="fo-logo-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="FactionOps">
+                            <rect x="1" y="1" width="18" height="18" rx="3" stroke="#e17055" stroke-width="1.5" fill="none"/>
+                            <path d="M6 6h8M6 10h5M6 14h8" stroke="#e0e0e0" stroke-width="1.5" stroke-linecap="round"/>
+                            <circle cx="15" cy="14" r="2" fill="#00b894"/>
+                        </svg>
+                        <span class="fo-logo-text">FactionOps</span>
+                    </div>
+                    <div class="fo-status-dot${state.connected ? '' : ' disconnected'}" id="fo-conn-dot" title="${state.connected ? 'Connected' : 'Disconnected'}"></div>
+                </div>
+                <div class="fo-header-center">
+                    <span class="fo-war-badge" id="fo-war-type">War</span>
+                    <span>vs</span>
+                    <strong id="fo-enemy-name">${escapeHtml(state.enemyFactionName || state.enemyFactionId || 'Enemy Faction')}</strong>
+                </div>
+                <div class="fo-header-right">
+                    <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.onlinePlayers.length} online</span></div>
+                </div>
+            </div>
+            <div class="fo-col-headers">
+                <div class="fo-col-header">Prior.</div>
+                <div class="fo-col-header">Target</div>
+                <div class="fo-col-header center">Lvl</div>
+                <div class="fo-col-header center">BSP</div>
+                <div class="fo-col-header">Status</div>
+                <div class="fo-col-header center">On</div>
+                <div class="fo-col-header">Call</div>
+                <div class="fo-col-header right">Action</div>
+            </div>
+            <ul class="fo-target-list" id="fo-target-list"></ul>
+            <div class="fo-footer">
+                <div class="fo-footer-stats">
+                    <span class="fo-footer-stat">Targets: <span class="fo-val" id="fo-stat-targets">0</span></span>
+                    <span class="fo-footer-stat">Available: <span class="fo-val" id="fo-stat-available">0</span></span>
+                    <span class="fo-footer-stat">Called: <span class="fo-val" id="fo-stat-called">0</span></span>
+                    <span class="fo-footer-stat">Hosp: <span class="fo-val" id="fo-stat-hosp">0</span></span>
+                </div>
+                <span class="fo-footer-version">v${CONFIG.VERSION || '3.0.0'}</span>
+            </div>
+        `;
+
+        // Insert after the hidden container, or at the top of main content
+        const mainContent = document.getElementById('mainContainer')
+            || document.querySelector('.content-wrapper')
+            || document.body;
+        const hiddenEl = document.querySelector('[data-fo-hidden="true"]');
+        if (hiddenEl && hiddenEl.parentNode) {
+            hiddenEl.parentNode.insertBefore(overlay, hiddenEl.nextSibling);
+        } else {
+            mainContent.prepend(overlay);
+        }
+
+        renderOverlay();
+        log('War overlay initialised');
+    }
+
+    /** Simple HTML escape. */
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    /**
+     * Full render/re-render of all overlay rows from state.statuses.
+     * Uses DOM diffing: updates existing rows in-place, adds new ones,
+     * removes stale ones.
+     */
+    function renderOverlay() {
+        const list = document.getElementById('fo-target-list');
+        if (!list) return;
+
+        const targetIds = Object.keys(state.statuses);
+
+        // Build a set of current targets for stale-removal
+        const currentSet = new Set(targetIds);
+
+        // Remove stale rows
+        const existingRows = list.querySelectorAll('[data-fo-id]');
+        existingRows.forEach((row) => {
+            if (!currentSet.has(row.dataset.foId)) {
+                row.remove();
+            }
+        });
+
+        // Sort targets
+        const sorted = targetIds.map((tid) => ({
+            targetId: tid,
+            priority: sortPriority(tid),
+            timer: sortTimerValue(tid),
+            bsp: state.sortMode === 'bsp' ? getBspStatValue(tid) : 0,
+        }));
+
+        if (state.sortMode === 'bsp') {
+            sorted.sort((a, b) => {
+                if (a.bsp && b.bsp) return b.bsp - a.bsp;
+                if (a.bsp && !b.bsp) return -1;
+                if (!a.bsp && b.bsp) return 1;
+                if (a.priority !== b.priority) return a.priority - b.priority;
+                return a.timer - b.timer;
+            });
+        } else {
+            sorted.sort((a, b) => {
+                if (a.priority !== b.priority) return a.priority - b.priority;
+                return a.timer - b.timer;
+            });
+        }
+
+        // Build/update rows in sorted order
+        const fragment = document.createDocumentFragment();
+        for (const item of sorted) {
+            let row = list.querySelector(`[data-fo-id="${item.targetId}"]`);
+            if (row) {
+                // Update in-place
+                updateOverlayRow(row, item.targetId);
+            } else {
+                // Create new row
+                row = renderOverlayRow(item.targetId);
+            }
+            fragment.appendChild(row);
+        }
+        list.appendChild(fragment);
+
+        // Update footer stats
+        updateOverlayFooter();
+
+        // Update header connection dot
+        const dot = document.getElementById('fo-conn-dot');
+        if (dot) {
+            dot.classList.toggle('disconnected', !state.connected);
+            dot.title = state.connected ? 'Connected' : 'Disconnected';
+        }
+
+        // Update online count
+        const onlineEl = document.getElementById('fo-online-count');
+        if (onlineEl) onlineEl.textContent = `${state.onlinePlayers.length} online`;
+
+        // Update enemy name
+        const enemyEl = document.getElementById('fo-enemy-name');
+        if (enemyEl && state.enemyFactionName) {
+            enemyEl.textContent = state.enemyFactionName;
+        }
+    }
+
+    /**
+     * Build a single overlay row <li> for a target.
+     */
+    function renderOverlayRow(targetId) {
+        const li = document.createElement('li');
+        li.className = 'fo-row';
+        li.dataset.foId = targetId;
+
+        const s = state.statuses[targetId] || {};
+        const prio = state.priorities[targetId];
+        const callData = state.calls[targetId];
+        const viewers = state.viewers[targetId];
+
+        // Row status classes
+        applyOverlayRowClasses(li, targetId);
+
+        // 1. Priority cell
+        const prioCell = document.createElement('div');
+        prioCell.className = 'fo-cell';
+        prioCell.id = `fo-priority-${targetId}`;
+        renderOverlayPriorityCell(prioCell, targetId);
+        li.appendChild(prioCell);
+
+        // 2. Target cell (name + id + eye badge)
+        const targetCell = document.createElement('div');
+        targetCell.className = 'fo-cell';
+        const playerName = document.createElement('div');
+        playerName.className = 'fo-player-name';
+
+        const nameRow = document.createElement('div');
+        nameRow.className = 'fo-name-row';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'fo-name';
+        nameSpan.textContent = s.name || 'Unknown';
+        nameRow.appendChild(nameSpan);
+
+        // Eye badge for viewers
+        if (viewers && viewers.length > 0) {
+            const eye = document.createElement('span');
+            eye.className = 'fo-eye-badge';
+            eye.title = viewers.map((v) => v.name).join(', ') + ' viewing';
+            eye.innerHTML = `<span class="fo-eye-icon">\uD83D\uDC41</span>${viewers.length}`;
+            nameRow.appendChild(eye);
+        }
+
+        playerName.appendChild(nameRow);
+
+        const pid = document.createElement('span');
+        pid.className = 'fo-pid';
+        pid.textContent = `[${targetId}]`;
+        playerName.appendChild(pid);
+
+        targetCell.appendChild(playerName);
+        li.appendChild(targetCell);
+
+        // 3. Level cell
+        const lvlCell = document.createElement('div');
+        lvlCell.className = 'fo-cell center';
+        const lvlSpan = document.createElement('span');
+        lvlSpan.className = 'fo-level';
+        lvlSpan.textContent = s.level != null ? String(s.level) : '\u2014';
+        lvlCell.appendChild(lvlSpan);
+        li.appendChild(lvlCell);
+
+        // 4. BSP cell
+        const bspCell = document.createElement('div');
+        bspCell.className = 'fo-cell center';
+        bspCell.id = `fo-bsp-${targetId}`;
+        renderOverlayBspCell(bspCell, targetId);
+        li.appendChild(bspCell);
+
+        // 5. Status cell
+        const statusCell = document.createElement('div');
+        statusCell.className = 'fo-cell';
+        statusCell.id = `fo-status-${targetId}`;
+        renderOverlayStatusCell(statusCell, targetId);
+        li.appendChild(statusCell);
+
+        // 6. Online cell
+        const onlineCell = document.createElement('div');
+        onlineCell.className = 'fo-cell center';
+        onlineCell.id = `fo-online-${targetId}`;
+        const onlineDot = document.createElement('span');
+        const activity = (s.activity || 'offline').toLowerCase();
+        const onlineClass = activity === 'online' ? 'on' : (activity === 'idle' ? 'idle' : 'off');
+        onlineDot.className = `fo-online-dot ${onlineClass}`;
+        onlineDot.title = activity.charAt(0).toUpperCase() + activity.slice(1);
+        onlineCell.appendChild(onlineDot);
+        li.appendChild(onlineCell);
+
+        // 7. Call cell
+        const callCell = document.createElement('div');
+        callCell.className = 'fo-call-cell';
+        callCell.id = `fo-call-${targetId}`;
+        renderOverlayCallCell(callCell, targetId);
+        li.appendChild(callCell);
+
+        // 8. Action cell
+        const actionCell = document.createElement('div');
+        actionCell.className = 'fo-cell';
+        actionCell.style.justifyContent = 'flex-end';
+        const atkLink = document.createElement('a');
+        atkLink.className = 'fo-attack-btn';
+        atkLink.href = `https://www.torn.com/loader.php?sid=attack&user2ID=${targetId}`;
+        atkLink.target = '_blank';
+        atkLink.rel = 'noopener';
+        atkLink.innerHTML = 'Atk<span class="fo-arrow">\u203A</span>';
+        atkLink.addEventListener('click', (e) => e.stopPropagation());
+        actionCell.appendChild(atkLink);
+        li.appendChild(actionCell);
+
+        return li;
+    }
+
+    /** Apply status/call/priority classes to an overlay row. */
+    function applyOverlayRowClasses(row, targetId) {
+        const s = state.statuses[targetId] || {};
+        const status = (s.status || 'ok').toLowerCase();
+        const isCalled = !!state.calls[targetId];
+        const prio = state.priorities[targetId];
+        const isHigh = prio && prio.level === 'high';
+
+        row.classList.toggle('is-hospital', status === 'hospital');
+        row.classList.toggle('is-jail', status === 'jail');
+        row.classList.toggle('is-travel', status === 'traveling' || status === 'travel');
+        row.classList.toggle('is-called', isCalled);
+        row.classList.toggle('is-high-priority', isHigh);
+    }
+
+    /** Render the priority cell for overlay rows. */
+    function renderOverlayPriorityCell(cell, targetId) {
+        cell.innerHTML = '';
+        const prio = state.priorities[targetId];
+        const level = prio ? prio.level : null;
+
+        if (isLeader()) {
+            // Leaders get a dropdown
+            const sel = document.createElement('select');
+            sel.className = 'fo-priority-select';
+            sel.title = 'Set priority';
+            ['high', 'med', 'low', ''].forEach((val) => {
+                const opt = document.createElement('option');
+                opt.value = val;
+                opt.textContent = val ? val.toUpperCase() : '\u2014';
+                if (val === (level || '')) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            sel.addEventListener('change', () => {
+                emitSetPriority(targetId, sel.value || null);
+            });
+            cell.appendChild(sel);
+        } else if (level) {
+            const badge = document.createElement('span');
+            badge.className = `fo-priority-badge ${level}`;
+            badge.textContent = level.charAt(0).toUpperCase() + level.slice(1);
+            cell.appendChild(badge);
+        }
+    }
+
+    /** Render the status pill for overlay rows. */
+    function renderOverlayStatusCell(cell, targetId) {
+        cell.innerHTML = '';
+        const s = state.statuses[targetId] || {};
+        const status = (s.status || 'ok').toLowerCase();
+
+        let pillClass = 'ok';
+        let label = 'OK';
+
+        if (status === 'hospital') {
+            pillClass = 'hosp';
+            label = 'Hosp';
+        } else if (status === 'jail') {
+            pillClass = 'jail';
+            label = 'Jail';
+        } else if (status === 'traveling' || status === 'travel') {
+            pillClass = 'travel';
+            label = 'Travel';
+        }
+
+        const pill = document.createElement('span');
+        pill.className = `fo-status-pill ${pillClass}`;
+        pill.innerHTML = `<span class="fo-s-dot"></span>${label}`;
+
+        // Timer
+        if (s.until && s.until > 0) {
+            const timer = document.createElement('span');
+            timer.id = `fo-timer-${targetId}`;
+            timer.style.marginLeft = '4px';
+            timer.textContent = formatTimer(s.until);
+            pill.appendChild(timer);
+        }
+
+        cell.appendChild(pill);
+    }
+
+    /** Render the BSP cell for overlay rows. */
+    function renderOverlayBspCell(cell, targetId) {
+        cell.innerHTML = '';
+
+        // 1. Try BSP prediction (synchronous)
+        const pred = fetchBspPrediction(targetId);
+        if (pred && pred.TBS != null) {
+            const num = Number(pred.TBS);
+            const tier = bspTier(num);
+            const span = document.createElement('span');
+            span.className = `fo-bsp-stat tier-${tier}`;
+            span.title = `~${num.toLocaleString()} total stats (BSP)`;
+            span.innerHTML = `${formatBspNumber(num)}<span class="fo-bsp-source">bsp</span>`;
+            cell.appendChild(span);
+            return;
+        }
+
+        // 2. FFS fallback (async) — show dash while loading
+        const span = document.createElement('span');
+        span.className = 'fo-bsp-stat tier-unknown';
+        span.textContent = '\u2014';
+        cell.appendChild(span);
+
+        getFfScouterEstimate(targetId).then((ffs) => {
+            if (!ffs) return;
+            const num = Number(ffs.total);
+            if (isNaN(num)) return;
+            const tier = bspTier(num);
+            span.className = `fo-bsp-stat tier-${tier}`;
+            span.title = `~${num.toLocaleString()} total stats (FFS)`;
+            span.innerHTML = `${ffs.human || formatBspNumber(num)}<span class="fo-bsp-source">ffs</span>`;
+        });
+    }
+
+    /** Render the call cell for overlay rows. */
+    function renderOverlayCallCell(cell, targetId) {
+        cell.innerHTML = '';
+        const callData = state.calls[targetId];
+
+        if (callData) {
+            const tag = document.createElement('span');
+            tag.className = 'fo-called-tag';
+            const callerName = document.createElement('span');
+            callerName.className = 'fo-caller-name';
+            callerName.textContent = callData.calledBy ? callData.calledBy.name : 'Someone';
+            tag.appendChild(callerName);
+            cell.appendChild(tag);
+
+            const uncallBtn = document.createElement('button');
+            uncallBtn.className = 'fo-uncall-btn';
+            uncallBtn.title = 'Uncall';
+            uncallBtn.textContent = '\u2715';
+            uncallBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                emitUncallTarget(targetId);
+            });
+            cell.appendChild(uncallBtn);
+        } else {
+            const btn = document.createElement('button');
+            btn.className = 'fo-call-btn';
+            btn.textContent = 'Call';
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                emitCallTarget(targetId);
+            });
+            cell.appendChild(btn);
+        }
+    }
+
+    /** Update an existing overlay row in-place. */
+    function updateOverlayRow(row, targetId) {
+        if (!row) return;
+
+        applyOverlayRowClasses(row, targetId);
+
+        const s = state.statuses[targetId] || {};
+
+        // Update name
+        const nameEl = row.querySelector('.fo-name');
+        if (nameEl && s.name) nameEl.textContent = s.name;
+
+        // Update level
+        const lvlEl = row.querySelector('.fo-level');
+        if (lvlEl) lvlEl.textContent = s.level != null ? String(s.level) : '\u2014';
+
+        // Update online dot
+        const onlineCell = document.getElementById(`fo-online-${targetId}`);
+        if (onlineCell) {
+            const dot = onlineCell.querySelector('.fo-online-dot');
+            if (dot) {
+                const activity = (s.activity || 'offline').toLowerCase();
+                const cls = activity === 'online' ? 'on' : (activity === 'idle' ? 'idle' : 'off');
+                dot.className = `fo-online-dot ${cls}`;
+                dot.title = activity.charAt(0).toUpperCase() + activity.slice(1);
+            }
+        }
+
+        // Update viewers badge
+        const targetCell = row.children[1]; // second cell is target
+        if (targetCell) {
+            const existingEye = targetCell.querySelector('.fo-eye-badge');
+            const viewers = state.viewers[targetId];
+            if (viewers && viewers.length > 0) {
+                if (existingEye) {
+                    existingEye.innerHTML = `<span class="fo-eye-icon">\uD83D\uDC41</span>${viewers.length}`;
+                    existingEye.title = viewers.map((v) => v.name).join(', ') + ' viewing';
+                } else {
+                    const nameRow = targetCell.querySelector('.fo-name-row');
+                    if (nameRow) {
+                        const eye = document.createElement('span');
+                        eye.className = 'fo-eye-badge';
+                        eye.title = viewers.map((v) => v.name).join(', ') + ' viewing';
+                        eye.innerHTML = `<span class="fo-eye-icon">\uD83D\uDC41</span>${viewers.length}`;
+                        nameRow.appendChild(eye);
+                    }
+                }
+            } else if (existingEye) {
+                existingEye.remove();
+            }
+        }
+
+        // Re-render volatile cells
+        const prioCell = document.getElementById(`fo-priority-${targetId}`);
+        if (prioCell) renderOverlayPriorityCell(prioCell, targetId);
+
+        const statusCell = document.getElementById(`fo-status-${targetId}`);
+        if (statusCell) renderOverlayStatusCell(statusCell, targetId);
+
+        const callCell = document.getElementById(`fo-call-${targetId}`);
+        if (callCell) renderOverlayCallCell(callCell, targetId);
+
+        const bspCell = document.getElementById(`fo-bsp-${targetId}`);
+        if (bspCell) renderOverlayBspCell(bspCell, targetId);
+    }
+
+    /** Update footer stats. */
+    function updateOverlayFooter() {
+        const ids = Object.keys(state.statuses);
+        const total = ids.length;
+        let available = 0, called = 0, hosp = 0;
+
+        for (const tid of ids) {
+            const s = state.statuses[tid] || {};
+            const status = (s.status || 'ok').toLowerCase();
+            if (status === 'ok' || status === 'okay') available++;
+            if (status === 'hospital') hosp++;
+            if (state.calls[tid]) called++;
+        }
+
+        const set = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = String(val);
+        };
+        set('fo-stat-targets', total);
+        set('fo-stat-available', available);
+        set('fo-stat-called', called);
+        set('fo-stat-hosp', hosp);
+    }
+
+    // =========================================================================
     // SECTION 13: AUTO-SORT
     // =========================================================================
 
     /**
      * Sort priority for a target. Lower number = higher in the list.
-     *   1: OK + uncalled
-     *   2: OK + called
+     *   1: OK / idle / offline (uncalled)
+     *   2: Hospital
      *   3: Traveling
      *   4: Jail
-     *   5: Hospital (ordered by longest timer at bottom)
+     *   5: Called (sinks to bottom)
      */
     function sortPriority(targetId) {
         const s = state.statuses[targetId];
@@ -2642,6 +3590,11 @@ body.wb-chain-active {
      * on a flex container, or by physically moving DOM nodes.
      */
     function sortMemberList() {
+        // If the overlay is active, re-render it (renderOverlay handles sorting)
+        if (document.getElementById('fo-overlay')) {
+            renderOverlay();
+            return;
+        }
         const rows = Array.from(document.querySelectorAll('[data-wb-target-id]'));
         if (rows.length === 0) return;
 
@@ -2851,8 +3804,14 @@ body.wb-chain-active {
                 if (statusInfo) {
                     statusBatch[String(memberId)] = statusInfo;
                 }
-                // Also update local state immediately
-                state.statuses[String(memberId)] = statusInfo;
+                // Also update local state immediately, preserving existing name/level if not in this payload
+                const existing = state.statuses[String(memberId)] || {};
+                state.statuses[String(memberId)] = {
+                    ...existing,
+                    ...statusInfo,
+                    name: statusInfo.name || existing.name || null,
+                    level: statusInfo.level != null ? statusInfo.level : (existing.level != null ? existing.level : null),
+                };
                 updateTargetRow(String(memberId));
             }
 
@@ -2907,6 +3866,8 @@ body.wb-chain-active {
         let until = 0;
         let description = '';
         let activity = 'offline';
+        const name = member.name || null;
+        const level = member.level != null ? Number(member.level) : null;
 
         // Status
         if (member.status) {
@@ -2935,7 +3896,7 @@ body.wb-chain-active {
             }
         }
 
-        return { status, until, description, activity };
+        return { status, until, description, activity, name, level };
     }
 
     // =========================================================================
@@ -3055,8 +4016,8 @@ body.wb-chain-active {
             initAttackPage();
         } else if (url.includes('factions.php') || url.includes('war.php')) {
             if (isWarContext()) {
-                log('Page: War');
-                initWarPage();
+                log('Page: War (overlay mode)');
+                initWarOverlay();
             } else {
                 log('Page: Faction (non-war) — skipping war UI');
             }
@@ -3364,6 +4325,16 @@ body.wb-chain-active {
         if (attackOverlay) {
             attackOverlay.remove();
             clearViewing(); // Tell server we left the attack page
+        }
+
+        // Remove FactionOps war overlay and restore hidden Torn elements
+        const foOverlay = document.getElementById('fo-overlay');
+        if (foOverlay) foOverlay.remove();
+
+        const hiddenEl = document.querySelector('[data-fo-hidden="true"]');
+        if (hiddenEl) {
+            hiddenEl.style.display = '';
+            delete hiddenEl.dataset.foHidden;
         }
 
         // Cancel status timer RAF
