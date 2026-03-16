@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      1.2.2
+// @version      1.2.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -653,8 +653,9 @@ body.wb-chain-active {
 
 
     /**
-     * Load Socket.IO client library by injecting a <script> tag pointing to
-     * the CDN.  Returns a promise that resolves once `window.io` is available.
+     * Load Socket.IO client library from the bundled source.
+     * Patches the UMD wrapper so it always assigns to window.io,
+     * even in environments (Tampermonkey, PDA) where module/exports exist.
      */
     async function loadSocketIO() {
         if (typeof window.io === 'function') {
@@ -664,28 +665,31 @@ body.wb-chain-active {
 
         log('Loading Socket.IO (bundled)...');
 
-        // The Socket.IO UMD wrapper checks for `module`/`exports` first.
-        // In Tampermonkey, those may exist, causing it to skip the global
-        // assignment. We temporarily hide them so the code falls through
-        // to the `(globalThis || this || self).io = factory()` branch.
-        const _module = typeof module !== 'undefined' ? module : undefined;
-        const _exports = typeof exports !== 'undefined' ? exports : undefined;
-        try {
-            if (typeof module !== 'undefined') { module = undefined; }
-        } catch(e) {}
-        try {
-            if (typeof exports !== 'undefined') { exports = undefined; }
-        } catch(e) {}
+        // The Socket.IO UMD wrapper detects module/exports (which exist in
+        // Tampermonkey's scope) and assigns to module.exports instead of
+        // window.io.  We patch the UMD header in the source string so it
+        // always takes the global-assignment branch.
+        const UMD_HEADER = '!function(t,n){"object"==typeof exports&&"undefined"!=typeof module?module.exports=n():"function"==typeof define&&define.amd?define(n):(t="undefined"!=typeof globalThis?globalThis:t||self).io=n()}(this,(function(){';
+        const GLOBAL_HEADER = 'window.io=(function(){';
+        const UMD_FOOTER = '}));';
+        const GLOBAL_FOOTER = '})();';
+
+        let src = SOCKET_IO_BUNDLE;
+        if (src.indexOf(UMD_HEADER) !== -1) {
+            src = src.replace(UMD_HEADER, GLOBAL_HEADER);
+            // Replace the LAST occurrence of })); with })();
+            const lastIdx = src.lastIndexOf(UMD_FOOTER);
+            if (lastIdx !== -1) {
+                src = src.substring(0, lastIdx) + GLOBAL_FOOTER + src.substring(lastIdx + UMD_FOOTER.length);
+            }
+            log('Patched UMD wrapper for global assignment');
+        }
 
         try {
-            (0, eval)(SOCKET_IO_BUNDLE);
+            (0, eval)(src);
         } catch (e) {
             error('Socket.IO bundle execution failed:', e.message);
         }
-
-        // Restore module/exports
-        try { if (_module !== undefined) module = _module; } catch(e) {}
-        try { if (_exports !== undefined) exports = _exports; } catch(e) {}
 
         if (typeof window.io === 'function') {
             log('Socket.IO loaded successfully (bundled)');
