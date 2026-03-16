@@ -52,7 +52,7 @@ export function registerSocketHandlers(io, socket) {
       factionId: war.factionId,
       enemyFactionId: war.enemyFactionId,
       calls: war.calls,
-      rallies: war.rallies,
+      priorities: war.priorities,
       enemyStatuses: war.enemyStatuses,
       chainData: war.chainData,
       onlinePlayers: store.getOnlinePlayersForWar(warId),
@@ -132,129 +132,6 @@ export function registerSocketHandlers(io, socket) {
 
     uncallTarget(io, player.warId, targetId, "manual");
     console.log(`[ws] ${user.playerName} uncalled target ${targetId}`);
-  });
-
-  // ── rally_target ────────────────────────────────────────────────────
-
-  socket.on("rally_target", ({ targetId, targetName, message }) => {
-    if (!targetId) {
-      return socket.emit("error", { message: "targetId is required" });
-    }
-
-    const player = store.getPlayer(user.playerId);
-    if (!player?.warId) {
-      return socket.emit("error", { message: "You must join a war first" });
-    }
-
-    const war = store.getWar(player.warId);
-    if (!war) return;
-
-    if (war.rallies[targetId]) {
-      return socket.emit("error", { message: "A rally already exists for this target" });
-    }
-
-    const rallyData = {
-      createdBy: { id: user.playerId, name: user.playerName },
-      message: message || "",
-      participants: [{ id: user.playerId, name: user.playerName }],
-      timestamp: Date.now(),
-    };
-    war.rallies[targetId] = rallyData;
-    store.saveState();
-
-    const room = `war_${player.warId}`;
-    io.to(room).emit("rally_started", {
-      targetId,
-      targetName: targetName || targetId,
-      createdBy: rallyData.createdBy,
-      message: rallyData.message,
-      participants: rallyData.participants,
-    });
-
-    console.log(`[ws] ${user.playerName} started rally on ${targetId}`);
-  });
-
-  // ── join_rally ──────────────────────────────────────────────────────
-
-  socket.on("join_rally", ({ targetId }) => {
-    if (!targetId) {
-      return socket.emit("error", { message: "targetId is required" });
-    }
-
-    const player = store.getPlayer(user.playerId);
-    if (!player?.warId) return;
-
-    const war = store.getWar(player.warId);
-    if (!war) return;
-
-    const rally = war.rallies[targetId];
-    if (!rally) {
-      return socket.emit("error", { message: "No rally exists for this target" });
-    }
-
-    // Don't add duplicates
-    if (rally.participants.some((p) => p.id === user.playerId)) return;
-
-    rally.participants.push({ id: user.playerId, name: user.playerName });
-    store.saveState();
-
-    io.to(`war_${player.warId}`).emit("rally_updated", {
-      targetId,
-      participants: rally.participants,
-    });
-
-    console.log(`[ws] ${user.playerName} joined rally on ${targetId}`);
-  });
-
-  // ── leave_rally ─────────────────────────────────────────────────────
-
-  socket.on("leave_rally", ({ targetId }) => {
-    if (!targetId) return;
-
-    const player = store.getPlayer(user.playerId);
-    if (!player?.warId) return;
-
-    const war = store.getWar(player.warId);
-    if (!war) return;
-
-    const rally = war.rallies[targetId];
-    if (!rally) return;
-
-    rally.participants = rally.participants.filter((p) => p.id !== user.playerId);
-    store.saveState();
-
-    io.to(`war_${player.warId}`).emit("rally_updated", {
-      targetId,
-      participants: rally.participants,
-    });
-
-    console.log(`[ws] ${user.playerName} left rally on ${targetId}`);
-  });
-
-  // ── cancel_rally ────────────────────────────────────────────────────
-
-  socket.on("cancel_rally", ({ targetId }) => {
-    if (!targetId) return;
-
-    const player = store.getPlayer(user.playerId);
-    if (!player?.warId) return;
-
-    const war = store.getWar(player.warId);
-    if (!war) return;
-
-    const rally = war.rallies[targetId];
-    if (!rally) return;
-
-    // Only the rally creator can cancel
-    if (rally.createdBy.id !== user.playerId) {
-      return socket.emit("error", { message: "Only the rally creator can cancel it" });
-    }
-
-    delete war.rallies[targetId];
-    store.saveState();
-
-    io.to(`war_${player.warId}`).emit("rally_cancelled", { targetId });
-    console.log(`[ws] ${user.playerName} cancelled rally on ${targetId}`);
   });
 
   // ── update_status ───────────────────────────────────────────────────

@@ -3,7 +3,7 @@
  *
  * Express + Socket.IO backend providing:
  *  - JWT auth via Torn API key verification
- *  - Real-time target calling, rallying, and status tracking
+ *  - Real-time target calling and status tracking
  *  - Enemy chain monitoring with bonus-hit alerts
  *  - File-based persistence for war state
  */

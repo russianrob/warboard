@@ -56,6 +56,7 @@ router.post("/api/auth", async (req, res) => {
       playerName: info.playerName,
       factionId: info.factionId,
       factionName: info.factionName,
+      factionPosition: info.factionPosition,
     });
 
     console.log(`[auth] Player ${info.playerName} (${info.playerId}) authenticated`);
@@ -83,7 +84,7 @@ router.get("/api/faction/:factionId/war", requireAuth, (req, res) => {
         warId: war.warId,
         enemyFactionId: war.enemyFactionId,
         calls: war.calls,
-        rallies: war.rallies,
+        priorities: war.priorities,
         enemyStatuses: war.enemyStatuses,
         chainData: war.chainData,
       });
@@ -162,7 +163,7 @@ router.get("/api/poll", (req, res, next) => {
     factionId: war.factionId,
     enemyFactionId: war.enemyFactionId,
     calls: war.calls,
-    rallies: war.rallies,
+    priorities: war.priorities,
     enemyStatuses: war.enemyStatuses,
     chainData: war.chainData,
     onlinePlayers: store.getOnlinePlayersForWar(warId),
@@ -227,15 +228,28 @@ router.post("/api/call", requireAuth, (req, res) => {
   return res.json({ ok: true, call: callData });
 });
 
-// ── POST /api/rally ──────────────────────────────────────────────────────
-// Create, join, leave, or cancel a rally.
+// ── POST /api/priority ──────────────────────────────────────────────────
+// Set or clear a priority tag on a target. Leader/co-leader only.
 
-router.post("/api/rally", requireAuth, (req, res) => {
-  const { playerId, playerName } = req.user;
-  const { action, targetId, targetName, message, warId } = req.body ?? {};
+const LEADER_POSITIONS = ["leader", "co-leader"];
+
+router.post("/api/priority", requireAuth, (req, res) => {
+  const { playerId, playerName, factionPosition } = req.user;
+  const { targetId, priority, warId } = req.body ?? {};
+
+  // Enforce leader/co-leader
+  const pos = (factionPosition || "").toLowerCase();
+  if (!LEADER_POSITIONS.includes(pos)) {
+    return res.status(403).json({ error: "Only leaders and co-leaders can set priority tags" });
+  }
 
   if (!targetId || !warId) {
     return res.status(400).json({ error: "targetId and warId are required" });
+  }
+
+  const validPriorities = ["high", "medium", "low", null];
+  if (!validPriorities.includes(priority)) {
+    return res.status(400).json({ error: "priority must be 'high', 'medium', 'low', or null" });
   }
 
   const war = store.getWar(warId);
@@ -243,61 +257,21 @@ router.post("/api/rally", requireAuth, (req, res) => {
     return res.status(404).json({ error: "War not found" });
   }
 
-  if (action === "join") {
-    const rally = war.rallies[targetId];
-    if (!rally) {
-      return res.status(404).json({ error: "No rally exists for this target" });
-    }
-    if (!rally.participants.some((p) => p.id === playerId)) {
-      rally.participants.push({ id: playerId, name: playerName });
-      store.saveState();
-    }
-    console.log(`[api] ${playerName} joined rally on ${targetId}`);
-    return res.json({ ok: true, participants: rally.participants });
+  if (priority === null) {
+    delete war.priorities[targetId];
+  } else {
+    war.priorities[targetId] = {
+      level: priority,
+      setBy: { id: playerId, name: playerName },
+      timestamp: Date.now(),
+    };
   }
-
-  if (action === "leave") {
-    const rally = war.rallies[targetId];
-    if (!rally) {
-      return res.json({ ok: true }); // idempotent
-    }
-    rally.participants = rally.participants.filter((p) => p.id !== playerId);
-    store.saveState();
-    console.log(`[api] ${playerName} left rally on ${targetId}`);
-    return res.json({ ok: true, participants: rally.participants });
-  }
-
-  if (action === "cancel") {
-    const rally = war.rallies[targetId];
-    if (!rally) {
-      return res.json({ ok: true }); // idempotent
-    }
-    if (rally.createdBy.id !== playerId) {
-      return res.status(403).json({ error: "Only the rally creator can cancel it" });
-    }
-    delete war.rallies[targetId];
-    store.saveState();
-    console.log(`[api] ${playerName} cancelled rally on ${targetId}`);
-    return res.json({ ok: true });
-  }
-
-  // Default action: create rally
-  if (war.rallies[targetId]) {
-    return res.status(409).json({ error: "A rally already exists for this target" });
-  }
-
-  const rallyData = {
-    createdBy: { id: playerId, name: playerName },
-    message: message || "",
-    participants: [{ id: playerId, name: playerName }],
-    timestamp: Date.now(),
-  };
-  war.rallies[targetId] = rallyData;
   store.saveState();
 
-  console.log(`[api] ${playerName} started rally on ${targetId}`);
-  return res.json({ ok: true, rally: rallyData });
+  console.log(`[api] ${playerName} set priority '${priority}' on target ${targetId} in war ${warId}`);
+  return res.json({ ok: true, priority: war.priorities[targetId] || null });
 });
+
 
 // ── POST /api/status ─────────────────────────────────────────────────────
 // Bulk update enemy statuses or report chain data.

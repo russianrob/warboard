@@ -79,7 +79,7 @@ export function getOrCreateWar(warId, factionId, enemyFactionId = null) {
     factionId,
     enemyFactionId,
     calls: {},
-    rallies: {},
+    priorities: {},
     enemyStatuses: {},
     chainData: { current: 0, max: 0, timeout: 0, cooldown: 0 },
   };

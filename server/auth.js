@@ -32,6 +32,7 @@ export async function verifyTornApiKey(apiKey) {
     playerName: data.name,
     factionId: String(data.faction?.faction_id ?? 0),
     factionName: data.faction?.faction_name ?? "",
+    factionPosition: data.faction?.position ?? "",
   };
 }
 

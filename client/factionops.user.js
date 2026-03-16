@@ -143,7 +143,6 @@
     --wb-accent: #0f3460;
     --wb-call-green: #00b894;
     --wb-call-red: #e17055;
-    --wb-rally-orange: #fdcb6e;
     --wb-hospital-red: #d63031;
     --wb-travel-blue: #0984e3;
     --wb-jail-gray: #636e72;
@@ -429,7 +428,7 @@ html.wb-theme-light {
     transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
-/* ----- Call / Rally / Status elements in member rows ----- */
+/* ----- Call / Status elements in member rows ----- */
 .wb-cell {
     display: inline-flex;
     align-items: center;
@@ -461,8 +460,7 @@ html.wb-theme-light {
     transform: scale(1.05);
 }
 
-.wb-call-btn,
-.wb-rally-btn {
+.wb-call-btn {
     padding: 2px 10px;
     border-radius: 12px;
     border: 1px solid var(--wb-border);
@@ -509,21 +507,58 @@ html.wb-theme-light {
     color: #fff;
 }
 
-/* Rally button */
-.wb-rally-btn {
-    background: transparent;
-    border-color: var(--wb-rally-orange);
-    color: var(--wb-rally-orange);
-}
-.wb-rally-btn:hover {
-    background: var(--wb-rally-orange);
-    color: #000;
-}
-.wb-rally-btn.wb-rally-active {
-    background: var(--wb-rally-orange);
-    color: #000;
+/* Priority tag badges */
+.wb-priority-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 9px;
     font-weight: bold;
-    animation: wb-pulse 1.5s ease-in-out infinite;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    font-family: Arial, sans-serif;
+    cursor: default;
+}
+.wb-priority-high {
+    background: rgba(214,48,49,0.2);
+    color: var(--wb-hospital-red);
+    border: 1px solid rgba(214,48,49,0.4);
+}
+.wb-priority-medium {
+    background: rgba(253,203,110,0.15);
+    color: var(--wb-idle-yellow);
+    border: 1px solid rgba(253,203,110,0.3);
+}
+.wb-priority-low {
+    background: rgba(9,132,227,0.15);
+    color: var(--wb-travel-blue);
+    border: 1px solid rgba(9,132,227,0.3);
+}
+/* Priority selector (leader only) */
+.wb-priority-select {
+    padding: 1px 4px;
+    border-radius: 10px;
+    border: 1px solid var(--wb-border);
+    background: var(--wb-bg-secondary);
+    color: var(--wb-text);
+    font-size: 9px;
+    font-family: Arial, sans-serif;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    text-align: center;
+    min-width: 52px;
+}
+.wb-priority-select:focus {
+    border-color: var(--wb-call-green);
+}
+.wb-priority-select option {
+    background: var(--wb-bg);
+    color: var(--wb-text);
 }
 
 /* Status badges */
@@ -560,11 +595,7 @@ html.wb-theme-light {
 .wb-row-called {
     background: rgba(0,184,148,0.06) !important;
 }
-.wb-row-rally {
-    outline: 2px solid var(--wb-rally-orange);
-    outline-offset: -2px;
-    background: rgba(253,203,110,0.08) !important;
-}
+
 
 /* (transition rule merged into .wb-sortable-row above) */
 
@@ -628,14 +659,15 @@ body.wb-chain-active {
         myPlayerName: null,
         myFactionId: null,
         myFactionName: null,
+        myFactionPosition: null,
         enemyFactionId: null,
         onlinePlayers: [],
 
         // Map of targetId -> { calledBy: { id, name }, calledAt: timestamp }
         calls: {},
 
-        // Map of targetId -> { participants: [{ id, name }], startedBy: { id, name } }
-        rallies: {},
+        // Map of targetId -> { level, setBy: { id, name }, timestamp }
+        priorities: {},
 
         // Map of targetId -> { status, until, description, activity }
         statuses: {},
@@ -827,22 +859,9 @@ body.wb-chain-active {
                 state.calls = data.calls;
             }
 
-            // ── Diff & notify: rallies ──
-            if (data.rallies) {
-                const oldRallies = state.rallies;
-                for (const [tid, rallyData] of Object.entries(data.rallies)) {
-                    if (!oldRallies[tid]) {
-                        showToast(`Rally started on #${tid}!`, 'warning');
-                        broadcastStateChange({ type: 'state_update', rallies: data.rallies });
-                    } else {
-                        const oldCount = (oldRallies[tid].participants || []).length;
-                        const newCount = (rallyData.participants || []).length;
-                        if (newCount !== oldCount) {
-                            showToast(`Rally #${tid}: ${newCount} members`, 'warning');
-                        }
-                    }
-                }
-                state.rallies = data.rallies;
+            // ── Priorities ──
+            if (data.priorities) {
+                state.priorities = data.priorities;
             }
 
             // ── Statuses ──
@@ -974,6 +993,7 @@ body.wb-chain-active {
                             state.myPlayerName = body.player.playerName || body.player.name;
                             state.myFactionId = String(body.player.factionId || '0');
                             state.myFactionName = body.player.factionName || '';
+                            state.myFactionPosition = (body.player.factionPosition || '').toLowerCase();
                         }
                         log('Authenticated as', state.myPlayerName || 'unknown',
                             '— factionId:', state.myFactionId);
@@ -1067,28 +1087,36 @@ body.wb-chain-active {
             .catch(e => warn('Uncall failed:', e.message));
     }
 
-    function emitStartRally(targetId) {
+    /** Set or clear a priority tag on a target (leader/co-leader only). */
+    function emitSetPriority(targetId, priority) {
         if (!state.connected) return;
         const warId = deriveWarId();
         if (!warId) return;
-        postAction('/api/rally', { warId, targetId: String(targetId) })
-            .catch(e => warn('Rally failed:', e.message));
+        postAction('/api/priority', { warId, targetId: String(targetId), priority })
+            .then(() => {
+                // Optimistic update
+                if (priority === null) {
+                    delete state.priorities[targetId];
+                } else {
+                    state.priorities[targetId] = {
+                        level: priority,
+                        setBy: { id: state.myPlayerId, name: state.myPlayerName },
+                        timestamp: Date.now(),
+                    };
+                }
+                updateTargetRow(String(targetId));
+                broadcastStateChange({ type: 'state_update', priorities: state.priorities });
+            })
+            .catch(e => {
+                warn('Set priority failed:', e.message);
+                showToast(e.message || 'Failed to set priority', 'error');
+            });
     }
 
-    function emitJoinRally(targetId) {
-        if (!state.connected) return;
-        const warId = deriveWarId();
-        if (!warId) return;
-        postAction('/api/rally', { warId, targetId: String(targetId), action: 'join' })
-            .catch(e => warn('Join rally failed:', e.message));
-    }
-
-    function emitLeaveRally(targetId) {
-        if (!state.connected) return;
-        const warId = deriveWarId();
-        if (!warId) return;
-        postAction('/api/rally', { warId, targetId: String(targetId), action: 'leave' })
-            .catch(e => warn('Leave rally failed:', e.message));
+    /** Check if current user is a faction leader or co-leader. */
+    function isLeader() {
+        const pos = state.myFactionPosition || '';
+        return pos === 'leader' || pos === 'co-leader';
     }
 
     // =========================================================================
@@ -1545,7 +1573,7 @@ body.wb-chain-active {
 
     /**
      * Enhance a single member row with FactionOps columns.
-     * Injects Attack, Call, Status, and Rally cells into the row.
+     * Injects Attack, Call, and Status cells into the row.
      */
     function enhanceRow(row) {
         if (enhancedRows.has(row)) return;
@@ -1589,16 +1617,16 @@ body.wb-chain-active {
         callCell.id = `wb-call-${targetId}`;
         renderCallCell(callCell, targetId);
 
-        // --- Rally cell ---
-        const rallyCell = document.createElement('span');
-        rallyCell.className = 'wb-cell';
-        rallyCell.id = `wb-rally-${targetId}`;
-        renderRallyCell(rallyCell, targetId);
+        // --- Priority cell ---
+        const priorityCell = document.createElement('span');
+        priorityCell.className = 'wb-cell';
+        priorityCell.id = `wb-priority-${targetId}`;
+        renderPriorityCell(priorityCell, targetId);
 
+        wbContainer.appendChild(priorityCell);
         wbContainer.appendChild(statusCell);
         wbContainer.appendChild(attackCell);
         wbContainer.appendChild(callCell);
-        wbContainer.appendChild(rallyCell);
 
         // Always append to the row directly — CSS handles positioning
         row.appendChild(wbContainer);
@@ -1701,50 +1729,59 @@ body.wb-chain-active {
         container.appendChild(badge);
     }
 
-    function renderRallyCell(container, targetId) {
+    /**
+     * Render the priority cell for a target.
+     * Leaders/co-leaders see a dropdown; others see a read-only badge (or nothing).
+     */
+    function renderPriorityCell(container, targetId) {
         container.innerHTML = '';
-        const rallyData = state.rallies[targetId];
+        const prioData = state.priorities[targetId];
+        const level = prioData ? prioData.level : null;
 
-        if (!rallyData) {
-            // No rally — show Rally button
-            const btn = document.createElement('button');
-            btn.className = 'wb-rally-btn';
-            btn.textContent = 'Rally';
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                emitStartRally(targetId);
-            });
-            container.appendChild(btn);
-        } else {
-            const count = rallyData.participants ? rallyData.participants.length : 0;
-            const amInRally = rallyData.participants &&
-                rallyData.participants.some((p) => String(p.id) === state.myPlayerId);
+        if (isLeader()) {
+            // Show a dropdown selector for leaders
+            const select = document.createElement('select');
+            select.className = 'wb-priority-select';
+            select.title = 'Set target priority';
 
-            const btn = document.createElement('button');
-            btn.className = 'wb-rally-btn' + (amInRally ? ' wb-rally-active' : '');
-            btn.innerHTML = `Rally (${count}) \uD83C\uDFAF`;
-            btn.title = amInRally ? 'Click to leave rally' : 'Click to join rally';
-            btn.addEventListener('click', (e) => {
+            const options = [
+                { value: '', label: '\u2014' },
+                { value: 'high', label: '\u{1F534} High' },
+                { value: 'medium', label: '\u{1F7E1} Med' },
+                { value: 'low', label: '\u{1F535} Low' },
+            ];
+            for (const opt of options) {
+                const el = document.createElement('option');
+                el.value = opt.value;
+                el.textContent = opt.label;
+                if (opt.value === (level || '')) el.selected = true;
+                select.appendChild(el);
+            }
+
+            select.addEventListener('change', (e) => {
                 e.stopPropagation();
-                e.preventDefault();
-                if (amInRally) {
-                    emitLeaveRally(targetId);
-                } else {
-                    emitJoinRally(targetId);
-                }
+                const val = select.value || null;
+                emitSetPriority(targetId, val);
             });
-            container.appendChild(btn);
+            select.addEventListener('click', (e) => e.stopPropagation());
+
+            container.appendChild(select);
+        } else if (level) {
+            // Non-leaders see a read-only badge
+            const badge = document.createElement('span');
+            badge.className = `wb-priority-badge wb-priority-${level}`;
+            const labels = { high: '\u{1F534} HIGH', medium: '\u{1F7E1} MED', low: '\u{1F535} LOW' };
+            badge.textContent = labels[level] || level.toUpperCase();
+            badge.title = prioData.setBy ? `Set by ${prioData.setBy.name}` : '';
+            container.appendChild(badge);
         }
+        // If no priority and not a leader, cell stays empty (takes no space)
     }
 
-    /** Apply/remove row highlight classes based on call/rally state. */
+    /** Apply/remove row highlight classes based on call state. */
     function applyRowHighlights(row, targetId) {
         const isCalled = !!state.calls[targetId];
-        const hasRally = !!state.rallies[targetId];
-
         row.classList.toggle('wb-row-called', isCalled);
-        row.classList.toggle('wb-row-rally', hasRally);
     }
 
     /** Re-render all FactionOps cells for a specific target. */
@@ -1755,8 +1792,8 @@ body.wb-chain-active {
         const statusEl = document.getElementById(`wb-status-${targetId}`);
         if (statusEl) renderStatusCell(statusEl, targetId);
 
-        const rallyEl = document.getElementById(`wb-rally-${targetId}`);
-        if (rallyEl) renderRallyCell(rallyEl, targetId);
+        const prioEl = document.getElementById(`wb-priority-${targetId}`);
+        if (prioEl) renderPriorityCell(prioEl, targetId);
 
         // Update row highlight
         const row = document.querySelector(`[data-wb-target-id="${targetId}"]`);
@@ -1886,7 +1923,7 @@ body.wb-chain-active {
 
     /**
      * When on the attack page (loader.php?sid=attack), show a small overlay
-     * with call/rally info for the current target.
+     * with call info for the current target.
      */
     function createAttackOverlay() {
         const targetId = getAttackTargetId();
@@ -1908,10 +1945,6 @@ body.wb-chain-active {
                 <span>Call:</span>
                 <span id="wb-atk-call">--</span>
             </div>
-            <div class="wb-attack-row">
-                <span>Rally:</span>
-                <span id="wb-atk-rally">None</span>
-            </div>
             <div style="margin-top:8px;">
                 <button class="wb-btn wb-btn-sm" id="wb-atk-uncall">Quick Uncall</button>
             </div>
@@ -1929,8 +1962,7 @@ body.wb-chain-active {
     /** Update attack overlay with current state for the given target. */
     function updateAttackOverlay(targetId) {
         const callEl = document.getElementById('wb-atk-call');
-        const rallyEl = document.getElementById('wb-atk-rally');
-        if (!callEl || !rallyEl) return;
+        if (!callEl) return;
 
         const callData = state.calls[targetId];
         if (callData && callData.calledBy) {
@@ -1939,15 +1971,6 @@ body.wb-chain-active {
         } else {
             callEl.textContent = 'Uncalled';
             callEl.style.color = 'var(--wb-text)';
-        }
-
-        const rallyData = state.rallies[targetId];
-        if (rallyData && rallyData.participants) {
-            rallyEl.textContent = `${rallyData.participants.length} members`;
-            rallyEl.style.color = 'var(--wb-rally-orange)';
-        } else {
-            rallyEl.textContent = 'None';
-            rallyEl.style.color = 'var(--wb-text)';
         }
     }
 
@@ -2267,7 +2290,7 @@ body.wb-chain-active {
                     case 'state_update':
                         // Another tab pushed a state change
                         if (msg.calls) state.calls = { ...state.calls, ...msg.calls };
-                        if (msg.rallies) state.rallies = { ...state.rallies, ...msg.rallies };
+                        if (msg.priorities) state.priorities = { ...state.priorities, ...msg.priorities };
                         if (msg.statuses) state.statuses = { ...state.statuses, ...msg.statuses };
                         if (msg.chain) state.chain = { ...state.chain, ...msg.chain };
                         refreshAllRows();
@@ -2326,7 +2349,7 @@ body.wb-chain-active {
 
     /**
      * Show a brief toast notification at the top of the page.
-     * Used for events like "Rally started on [target]".
+     * Used for events like "Target called" or "Chain approaching bonus".
      */
     function showToast(message, type = 'info') {
         const toast = document.createElement('div');
@@ -2351,7 +2374,7 @@ body.wb-chain-active {
                 toast.style.background = 'var(--wb-call-green)';
                 break;
             case 'warning':
-                toast.style.background = 'var(--wb-rally-orange)';
+                toast.style.background = 'var(--wb-idle-yellow)';
                 toast.style.color = '#000';
                 break;
             case 'error':
