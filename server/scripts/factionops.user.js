@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.45
+// @version      3.0.46
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -144,7 +144,11 @@
     --wb-bg: #1a1a2e;
     --wb-bg-secondary: #16213e;
     --wb-text: #e0e0e0;
+    --wb-text-muted: #a0a0b8;
     --wb-accent: #0f3460;
+    --wb-accent-15: rgba(15,52,96,0.15);
+    --wb-accent-20: rgba(15,52,96,0.2);
+    --wb-accent-30: rgba(15,52,96,0.3);
     --wb-call-green: #00b894;
     --wb-call-red: #e17055;
     --wb-hospital-red: #d63031;
@@ -155,14 +159,24 @@
     --wb-offline-gray: #636e72;
     --wb-bonus-warning: #ff7675;
     --wb-border: #2d3436;
+    --wb-shadow: rgba(0,0,0,0.5);
+    --wb-inset-glow: rgba(255,255,255,0.04);
+    --wb-inset-border: rgba(255,255,255,0.03);
 }
 
 html.wb-theme-light {
     --wb-bg: #f5f5f5;
     --wb-bg-secondary: #ffffff;
     --wb-text: #2d3436;
-    --wb-accent: #74b9ff;
+    --wb-text-muted: #636e72;
+    --wb-accent: #d6eaf8;
+    --wb-accent-15: rgba(52,152,219,0.08);
+    --wb-accent-20: rgba(52,152,219,0.1);
+    --wb-accent-30: rgba(52,152,219,0.15);
     --wb-border: #dfe6e9;
+    --wb-shadow: rgba(0,0,0,0.12);
+    --wb-inset-glow: rgba(0,0,0,0.02);
+    --wb-inset-border: rgba(0,0,0,0.05);
 }
 
 /* ----- Settings gear icon (bottom-right FAB) ----- */
@@ -704,7 +718,7 @@ html.wb-theme-light {
     color: var(--wb-call-green);
 }
 .wb-bsp-value.wb-bsp-tier-c {
-    color: #a0a0b8;
+    color: var(--wb-text-muted);
 }
 .wb-bsp-value.wb-bsp-tier-unknown {
     color: var(--wb-jail-gray);
@@ -770,8 +784,8 @@ body.wb-chain-active {
 .fo-overlay {
     width: 100%;
     max-width: 1000px;
-    background: #1a1a2e;
-    border: 1px solid #2d3436;
+    background: var(--wb-bg);
+    border: 1px solid var(--wb-border);
     border-radius: 10px;
     box-shadow:
         0 4px 24px rgba(0, 0, 0, 0.5),
@@ -782,7 +796,7 @@ body.wb-chain-active {
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 13px;
     line-height: 1.5;
-    color: #e0e0e0;
+    color: var(--wb-text);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     margin: 10px auto;
@@ -796,8 +810,8 @@ body.wb-chain-active {
     align-items: center;
     justify-content: space-between;
     padding: 10px 16px;
-    background: #16213e;
-    border-bottom: 1px solid #2d3436;
+    background: var(--wb-bg-secondary);
+    border-bottom: 1px solid var(--wb-border);
     gap: 12px;
 }
 
@@ -821,7 +835,7 @@ body.wb-chain-active {
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #e0e0e0;
+    color: var(--wb-text);
     white-space: nowrap;
 }
 
@@ -848,11 +862,11 @@ body.wb-chain-active {
     align-items: center;
     gap: 6px;
     font-size: 12px;
-    color: #a0a0b8;
+    color: var(--wb-text-muted);
     white-space: nowrap;
 }
 
-.fo-header-center strong { color: #e0e0e0; font-weight: 600; }
+.fo-header-center strong { color: var(--wb-text); font-weight: 600; }
 
 .fo-war-badge {
     font-size: 10px; font-weight: 600;
@@ -896,14 +910,14 @@ body.wb-chain-active {
 }
 .fo-settings-btn:hover {
     background: rgba(99,110,114,0.35);
-    color: #e0e0e0;
+    color: var(--wb-text);
 }
 
 /* ── Next Up bar (inside overlay) ── */
 .fo-next-up-bar {
     display: flex; align-items: center; gap: 8px;
     padding: 5px 12px;
-    background: rgba(15,52,96,0.15);
+    background: var(--wb-accent-15);
     border-bottom: 1px solid rgba(45,52,54,0.4);
     font-size: 11px; min-height: 0;
     overflow-x: auto; overflow-y: hidden;
@@ -922,7 +936,7 @@ body.wb-chain-active {
     border-radius: 14px; padding: 2px 8px;
     white-space: nowrap; font-size: 11px; color: #b0b0c0;
 }
-.fo-next-up-item a { text-decoration: none; color: #e0e0e0; font-weight: 500; }
+.fo-next-up-item a { text-decoration: none; color: var(--wb-text); font-weight: 500; }
 .fo-next-up-timer {
     font-family: 'JetBrains Mono', monospace;
     color: #e17055; font-weight: 600; font-size: 10px;
@@ -976,8 +990,8 @@ body.wb-chain-active {
     display: grid;
     grid-template-columns: 58px 1fr 52px 82px 130px 44px 180px 72px;
     gap: 0; padding: 7px 16px;
-    background: rgba(15,52,96,0.2);
-    border-bottom: 1px solid #2d3436;
+    background: var(--wb-accent-20);
+    border-bottom: 1px solid var(--wb-border);
     font-size: 10px; font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.08em;
     color: #636e72; user-select: none;
@@ -1007,7 +1021,7 @@ body.wb-chain-active {
     transition: background 0.2s ease;
 }
 
-.fo-row:hover { background: rgba(15,52,96,0.2); }
+.fo-row:hover { background: var(--wb-accent-20); }
 .fo-row:last-child { border-bottom: none; }
 
 .fo-row.is-hospital,
@@ -1053,14 +1067,14 @@ body.wb-chain-active {
     font-family: 'JetBrains Mono', monospace;
     font-size: 9px; font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.04em;
-    background: rgba(15,52,96,0.3); color: #a0a0b8;
+    background: var(--wb-accent-30); color: var(--wb-text-muted);
     border: 1px solid rgba(45,52,54,0.8); border-radius: 4px;
     padding: 2px 4px; cursor: pointer; outline: none;
     -webkit-appearance: none; appearance: none;
     width: 50px; text-align: center;
 }
 .fo-priority-select:hover { border-color: rgba(99,110,114,0.6); }
-.fo-priority-select option { background: #16213e; color: #e0e0e0; }
+.fo-priority-select option { background: var(--wb-bg-secondary); color: var(--wb-text); }
 
 /* Player Name */
 .fo-player-name { display: flex; flex-direction: column; gap: 0; min-width: 0; }
@@ -1070,7 +1084,7 @@ body.wb-chain-active {
 }
 
 .fo-player-name .fo-name {
-    font-weight: 600; font-size: 12.5px; color: #e0e0e0;
+    font-weight: 600; font-size: 12.5px; color: var(--wb-text);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
@@ -1086,7 +1100,7 @@ body.wb-chain-active {
 .fo-bsp-inline.tier-s { color: #e17055; }
 .fo-bsp-inline.tier-a { color: #fdcb6e; }
 .fo-bsp-inline.tier-b { color: #00b894; }
-.fo-bsp-inline.tier-c { color: #a0a0b8; }
+.fo-bsp-inline.tier-c { color: var(--wb-text-muted); }
 .fo-bsp-inline.tier-unknown { color: #4a4a5a; }
 
 /* ── Group Attack Eye Badge ── */
@@ -1104,7 +1118,7 @@ body.wb-chain-active {
 
 /* Level */
 .fo-level {
-    font-size: 11px; font-weight: 500; color: #a0a0b8;
+    font-size: 11px; font-weight: 500; color: var(--wb-text-muted);
     text-align: center; white-space: nowrap;
 }
 
@@ -1116,7 +1130,7 @@ body.wb-chain-active {
 .fo-bsp-stat.tier-s { color: #e17055; text-shadow: 0 0 8px rgba(225,112,85,0.3); }
 .fo-bsp-stat.tier-a { color: #fdcb6e; }
 .fo-bsp-stat.tier-b { color: #00b894; }
-.fo-bsp-stat.tier-c { color: #a0a0b8; }
+.fo-bsp-stat.tier-c { color: var(--wb-text-muted); }
 .fo-bsp-stat.tier-unknown { color: #4a4a5a; font-weight: 400; font-style: italic; }
 
 .fo-bsp-source {
@@ -1217,19 +1231,19 @@ body.wb-chain-active {
 .fo-footer {
     display: flex; align-items: center; justify-content: space-between;
     padding: 8px 16px;
-    background: rgba(15,52,96,0.15);
-    border-top: 1px solid #2d3436;
+    background: var(--wb-accent-15);
+    border-top: 1px solid var(--wb-border);
     font-size: 10px; color: #636e72;
 }
 .fo-footer-stats { display: flex; gap: 16px; }
 .fo-footer-stat { display: flex; align-items: center; gap: 4px; }
-.fo-footer-stat .fo-val { color: #a0a0b8; font-weight: 600; }
+.fo-footer-stat .fo-val { color: var(--wb-text-muted); font-weight: 600; }
 .fo-footer-version { font-size: 9px; color: #4a4a5a; letter-spacing: 0.04em; }
 
 /* ── Scrollbar inside overlay ── */
 .fo-overlay ::-webkit-scrollbar { width: 6px; }
 .fo-overlay ::-webkit-scrollbar-track { background: transparent; }
-.fo-overlay ::-webkit-scrollbar-thumb { background: #2d3436; border-radius: 3px; }
+.fo-overlay ::-webkit-scrollbar-thumb { background: var(--wb-border); border-radius: 3px; }
 .fo-overlay ::-webkit-scrollbar-thumb:hover { background: #636e72; }
 
 /* ── Responsive ── */
