@@ -1,0 +1,4 @@
+server/node_modules/
+server/.env
+server/data/wars.json
+server/package-lock.json
