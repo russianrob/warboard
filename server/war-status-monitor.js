@@ -7,6 +7,7 @@
 
 import * as store from "./store.js";
 import { fetchFactionMembers } from "./torn-api.js";
+import { recordSample } from "./activity-heatmap.js";
 
 const POLL_INTERVAL_MS = 15_000; // 15 seconds
 
@@ -37,6 +38,17 @@ export function startWarStatusMonitor(io, warId) {
       store.saveState();
 
       io.to(`war_${warId}`).emit("status_update", freshStatuses);
+
+      // Record our faction's online count for the activity heatmap
+      try {
+        const ourMembers = await fetchFactionMembers(war.factionId, apiKey);
+        const onlineCount = Object.values(ourMembers).filter(
+          (m) => m.online === "Online" || m.online === "Idle",
+        ).length;
+        recordSample(war.factionId, onlineCount);
+      } catch (_) {
+        // Non-critical — skip silently
+      }
     } catch (err) {
       console.error(`[war-status] Poll failed for war ${warId}:`, err.message);
     }

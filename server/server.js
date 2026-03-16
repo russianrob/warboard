@@ -22,6 +22,7 @@ import { socketAuth } from "./auth.js";
 import { registerSocketHandlers } from "./socket-handlers.js";
 import { startChainMonitor, stopAll as stopAllChainMonitors } from "./chain-monitor.js";
 import { startWarStatusMonitor, stopAll as stopAllWarStatusMonitors } from "./war-status-monitor.js";
+import { loadHeatmaps, stopFlush as stopHeatmapFlush } from "./activity-heatmap.js";
 import * as store from "./store.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -193,6 +194,7 @@ io.on("connection", (socket) => {
 
 store.loadState();
 store.loadFactionKeys();
+loadHeatmaps();
 
 // Resume chain monitors and war status monitors for any persisted wars with enemy factions
 for (const [warId, war] of store.getAllWars()) {
@@ -216,6 +218,7 @@ function shutdown(signal) {
   console.log(`\n[server] Received ${signal}, shutting down...`);
   stopAllChainMonitors();
   stopAllWarStatusMonitors();
+  stopHeatmapFlush();
   store.saveState();
   httpServer.close(() => {
     console.log("[server] Server closed");

@@ -6,6 +6,7 @@ import { Router } from "express";
 import { verifyTornApiKey, issueToken, requireAuth } from "./auth.js";
 import * as store from "./store.js";
 import { fetchFactionMembers, fetchFactionChain } from "./torn-api.js";
+import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 
 const router = Router();
 
@@ -446,6 +447,27 @@ router.post("/api/viewing", requireAuth, (req, res) => {
   const { playerId } = req.user;
   const { targetId } = req.body ?? {};
   store.setViewingTarget(playerId, targetId || null);
+  return res.json({ ok: true });
+});
+
+// ── GET /api/heatmap ─────────────────────────────────────────────────────
+// Returns the activity heatmap data for the authenticated player's faction.
+
+router.get("/api/heatmap", requireAuth, (req, res) => {
+  const { factionId } = req.user;
+  return res.json({ heatmap: getHeatmap(factionId) });
+});
+
+// ── DELETE /api/heatmap ──────────────────────────────────────────────────
+// Reset the activity heatmap for the faction. Leader/co-leader only.
+
+router.delete("/api/heatmap", requireAuth, (req, res) => {
+  const { factionId, factionPosition } = req.user;
+  const pos = (factionPosition || "").toLowerCase();
+  if (!["leader", "co-leader"].includes(pos)) {
+    return res.status(403).json({ error: "Only leaders and co-leaders can reset the heatmap" });
+  }
+  resetHeatmap(factionId);
   return res.json({ ok: true });
 });
 

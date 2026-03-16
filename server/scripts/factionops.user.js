@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.42
+// @version      3.0.43
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1808,7 +1808,7 @@ body.wb-chain-active {
             // ── Online players ──
             if (data.onlinePlayers) {
                 state.onlinePlayers = data.onlinePlayers;
-                recordActivitySample(data.onlinePlayers.length);
+
             }
 
             // ── Viewers (who is on which attack page) ──
@@ -4448,39 +4448,81 @@ body.wb-chain-active {
     // SECTION 23: MEMBER ACTIVITY HEATMAP
     // =========================================================================
 
-    const HEATMAP_STORAGE_KEY = 'factionops_activity_heatmap';
     const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-    function getHeatmapData() {
+    /** Fetch heatmap data from the server. Returns the heatmap object or {}. */
+    async function fetchHeatmapData() {
         try {
-            const raw = GM_getValue(HEATMAP_STORAGE_KEY, null);
-            return raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : {};
+            const url = `${CONFIG.SERVER_URL}/api/heatmap`;
+            const res = await new Promise((resolve, reject) => {
+                httpRequest({
+                    method: 'GET',
+                    url,
+                    headers: { 'Authorization': `Bearer ${state.jwtToken}` },
+                    onload(r) {
+                        const d = safeParse(r.responseText);
+                        if (r.status >= 200 && r.status < 300) resolve(d);
+                        else reject(new Error((d && d.error) || `HTTP ${r.status}`));
+                    },
+                    onerror() { reject(new Error('Network error')); },
+                });
+            });
+            return (res && res.heatmap) || {};
         } catch (e) {
+            warn('Failed to fetch heatmap:', e.message);
             return {};
         }
     }
 
-    function saveHeatmapData(data) {
-        GM_setValue(HEATMAP_STORAGE_KEY, JSON.stringify(data));
+    /** Ask the server to reset heatmap data. */
+    async function resetServerHeatmap() {
+        try {
+            await new Promise((resolve, reject) => {
+                httpRequest({
+                    method: 'DELETE',
+                    url: `${CONFIG.SERVER_URL}/api/heatmap`,
+                    headers: {
+                        'Authorization': `Bearer ${state.jwtToken}`,
+                        'Content-Type': 'application/json',
+                    },
+                    onload(r) {
+                        if (r.status >= 200 && r.status < 300) resolve();
+                        else reject(new Error(`HTTP ${r.status}`));
+                    },
+                    onerror() { reject(new Error('Network error')); },
+                });
+            });
+        } catch (e) {
+            warn('Failed to reset heatmap:', e.message);
+            showToast('Failed to reset heatmap: ' + e.message, 'error');
+        }
     }
 
-    function recordActivitySample(onlineCount) {
-        const now = new Date();
-        // Convert JS getDay() (0=Sun..6=Sat) to 0=Mon..6=Sun
-        const jsDay = now.getDay();
-        const day = jsDay === 0 ? 6 : jsDay - 1;
-        const hour = now.getHours();
+    /**
+     * Convert server UTC heatmap data to the user's local timezone.
+     * Shifts day/hour buckets by the local UTC offset.
+     */
+    function utcHeatmapToLocal(utcData) {
+        const localData = {};
+        const offsetHours = -(new Date().getTimezoneOffset() / 60); // e.g. EDT = -4 → offset = -4
 
-        const data = getHeatmapData();
-        if (!data[day]) data[day] = {};
-        if (!data[day][hour]) data[day][hour] = { total: 0, samples: 0 };
+        for (let d = 0; d < 7; d++) {
+            for (let h = 0; h < 24; h++) {
+                const bucket = (utcData[d] && utcData[d][h]) || null;
+                if (!bucket || bucket.samples === 0) continue;
 
-        const bucket = data[day][hour];
-        if (bucket.samples < 1000) {
-            bucket.total += onlineCount;
-            bucket.samples += 1;
+                let localH = h + offsetHours;
+                let localD = d;
+                if (localH >= 24) { localH -= 24; localD = (localD + 1) % 7; }
+                if (localH < 0) { localH += 24; localD = (localD + 6) % 7; }
+
+                if (!localData[localD]) localData[localD] = {};
+                if (!localData[localD][localH]) localData[localD][localH] = { total: 0, samples: 0 };
+                localData[localD][localH].total += bucket.total;
+                localData[localD][localH].samples += bucket.samples;
+            }
         }
-        saveHeatmapData(data);
+        return localData;
     }
 
     function createHeatmapButton() {
@@ -4504,11 +4546,12 @@ body.wb-chain-active {
         renderHeatmapPanel();
     }
 
-    function renderHeatmapPanel() {
+    async function renderHeatmapPanel() {
         const existing = document.getElementById('wb-heatmap-panel');
         if (existing) existing.remove();
 
-        const data = getHeatmapData();
+        const utcData = await fetchHeatmapData();
+        const data = utcHeatmapToLocal(utcData);
 
         // Find max average for color scaling
         let maxAvg = 0;
@@ -4576,7 +4619,7 @@ body.wb-chain-active {
         if (totalSamples === 0) {
             const msg = document.createElement('div');
             msg.style.cssText = 'padding:16px;font-size:12px;opacity:0.7;text-align:center;';
-            msg.textContent = 'No activity data yet. Keep FactionOps running during wars to build up the heatmap.';
+            msg.textContent = 'No activity data yet. The server collects data automatically when a faction API key is set.';
             panel.appendChild(msg);
             document.body.appendChild(panel);
             return;
@@ -4628,11 +4671,19 @@ body.wb-chain-active {
         const resetBtn = document.createElement('button');
         resetBtn.className = 'wb-btn wb-btn-sm wb-btn-danger';
         resetBtn.textContent = 'Reset Data';
-        resetBtn.addEventListener('click', () => {
-            saveHeatmapData({});
+        resetBtn.addEventListener('click', async () => {
+            await resetServerHeatmap();
             panel.remove();
             renderHeatmapPanel();
         });
+        const refreshBtn = document.createElement('button');
+        refreshBtn.className = 'wb-btn wb-btn-sm';
+        refreshBtn.textContent = 'Refresh';
+        refreshBtn.addEventListener('click', () => {
+            panel.remove();
+            renderHeatmapPanel();
+        });
+        footer.appendChild(refreshBtn);
         footer.appendChild(resetBtn);
         panel.appendChild(footer);
 
