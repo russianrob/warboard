@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      1.2.0
+// @version      1.2.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -664,29 +664,35 @@ body.wb-chain-active {
 
         log('Loading Socket.IO (bundled)...');
 
-        // Socket.IO is bundled inline below — inject it via blob URL
-        const sioCode = SOCKET_IO_BUNDLE;
-        const blob = new Blob([sioCode], { type: 'application/javascript' });
-        const blobUrl = URL.createObjectURL(blob);
+        // The Socket.IO UMD wrapper checks for `module`/`exports` first.
+        // In Tampermonkey, those may exist, causing it to skip the global
+        // assignment. We temporarily hide them so the code falls through
+        // to the `(globalThis || this || self).io = factory()` branch.
+        const _module = typeof module !== 'undefined' ? module : undefined;
+        const _exports = typeof exports !== 'undefined' ? exports : undefined;
+        try {
+            if (typeof module !== 'undefined') { module = undefined; }
+        } catch(e) {}
+        try {
+            if (typeof exports !== 'undefined') { exports = undefined; }
+        } catch(e) {}
 
-        return new Promise((resolve, reject) => {
-            const s = document.createElement('script');
-            s.src = blobUrl;
-            s.onload = () => {
-                URL.revokeObjectURL(blobUrl);
-                if (typeof window.io === 'function') {
-                    log('Socket.IO loaded successfully (bundled)');
-                    resolve();
-                } else {
-                    reject(new Error('Socket.IO bundle loaded but window.io not found'));
-                }
-            };
-            s.onerror = () => {
-                URL.revokeObjectURL(blobUrl);
-                reject(new Error('Failed to inject bundled Socket.IO'));
-            };
-            document.head.appendChild(s);
-        });
+        try {
+            (0, eval)(SOCKET_IO_BUNDLE);
+        } catch (e) {
+            error('Socket.IO bundle execution failed:', e.message);
+        }
+
+        // Restore module/exports
+        try { if (_module !== undefined) module = _module; } catch(e) {}
+        try { if (_exports !== undefined) exports = _exports; } catch(e) {}
+
+        if (typeof window.io === 'function') {
+            log('Socket.IO loaded successfully (bundled)');
+            return;
+        }
+
+        throw new Error('Failed to load bundled Socket.IO');
     }
 
     // =========================================================================
