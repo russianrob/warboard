@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.41
+// @version      3.0.42
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -37,6 +37,8 @@
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
         AUTO_SORT: GM_getValue('factionops_autosort', true),
+        CHAIN_ALERT: GM_getValue('factionops_chain_alert', true),
+        CHAIN_ALERT_THRESHOLD: GM_getValue('factionops_chain_alert_threshold', 30),
         CALL_TIMEOUT: 5 * 60 * 1000,       // 5 minute call expiry
         REFRESH_INTERVAL: 30 * 1000,        // 30 second status refresh
         IS_PDA: IS_PDA,
@@ -55,6 +57,8 @@
             API_KEY: 'factionops_apikey',
             THEME: 'factionops_theme',
             AUTO_SORT: 'factionops_autosort',
+            CHAIN_ALERT: 'factionops_chain_alert',
+            CHAIN_ALERT_THRESHOLD: 'factionops_chain_alert_threshold',
         };
         if (gmKeys[key]) {
             GM_setValue(gmKeys[key], value);
@@ -1258,6 +1262,103 @@ body.wb-chain-active {
     .fo-col-headers > :nth-child(5) { text-align: center; }
     .fo-col-headers > :nth-child(6) { text-align: center; }
 }
+
+/* ----- Heatmap toggle button (fixed bottom-right) ----- */
+.wb-heatmap-btn {
+    position: fixed;
+    bottom: 70px;
+    right: 16px;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: var(--wb-accent);
+    color: var(--wb-text);
+    border: 2px solid var(--wb-border);
+    cursor: pointer;
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+    transition: transform 0.2s ease, background 0.2s ease;
+    font-family: Arial, sans-serif;
+}
+.wb-heatmap-btn:hover {
+    transform: scale(1.1);
+    background: var(--wb-call-green);
+}
+
+/* ----- Heatmap floating panel ----- */
+.wb-heatmap-panel {
+    position: fixed;
+    top: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--wb-bg);
+    border: 1px solid var(--wb-border);
+    border-radius: 8px;
+    z-index: 1000000;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    color: var(--wb-text);
+    font-family: monospace;
+    min-width: 420px;
+    max-width: 95vw;
+}
+.wb-heatmap-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    cursor: grab;
+    border-bottom: 1px solid var(--wb-border);
+    font-size: 14px;
+    font-weight: bold;
+    color: var(--wb-call-green);
+    user-select: none;
+}
+.wb-heatmap-close {
+    background: none;
+    border: none;
+    color: var(--wb-text);
+    font-size: 20px;
+    cursor: pointer;
+    opacity: 0.6;
+    padding: 0 4px;
+}
+.wb-heatmap-close:hover { opacity: 1; }
+
+.wb-heatmap-grid {
+    display: grid;
+    grid-template-columns: 36px repeat(24, 16px);
+    gap: 2px;
+    padding: 10px 14px;
+    justify-content: center;
+}
+.wb-heatmap-label {
+    font-size: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.6;
+}
+.wb-heatmap-day {
+    justify-content: flex-end;
+    padding-right: 4px;
+}
+.wb-heatmap-cell {
+    width: 16px;
+    height: 16px;
+    border-radius: 2px;
+    cursor: default;
+}
+.wb-heatmap-footer {
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid var(--wb-border);
+}
 `;
         GM_addStyle(css);
         log('Styles injected');
@@ -1299,6 +1400,9 @@ body.wb-chain-active {
             timeout: 0,
             cooldown: 0,
         },
+
+        // Chain alert fired flag (resets when timeout goes back above threshold)
+        chainAlertFired: false,
 
         // Whether a faction API key has been saved on the server
         factionKeyStored: false,
@@ -1704,6 +1808,7 @@ body.wb-chain-active {
             // ── Online players ──
             if (data.onlinePlayers) {
                 state.onlinePlayers = data.onlinePlayers;
+                recordActivitySample(data.onlinePlayers.length);
             }
 
             // ── Viewers (who is on which attack page) ──
@@ -2045,6 +2150,19 @@ body.wb-chain-active {
                 </label>
             </div>
 
+            <div class="wb-settings-row">
+                <span>Chain Break Alert</span>
+                <label class="wb-toggle">
+                    <input type="checkbox" id="wb-toggle-chain-alert" ${CONFIG.CHAIN_ALERT ? 'checked' : ''}>
+                    <span class="wb-toggle-slider"></span>
+                </label>
+            </div>
+            <div id="wb-chain-alert-threshold-row" style="display:${CONFIG.CHAIN_ALERT ? 'flex' : 'none'};align-items:center;gap:8px;margin-bottom:14px;">
+                <span style="font-size:12px;opacity:0.8;">Alert when chain timer below</span>
+                <input type="text" id="wb-input-chain-threshold" value="${CONFIG.CHAIN_ALERT_THRESHOLD}" style="width:50px;margin-bottom:0;text-align:center;">
+                <span style="font-size:12px;opacity:0.8;">seconds</span>
+            </div>
+
             <hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:14px 0;">
 
             <label>Faction API Key</label>
@@ -2108,6 +2226,21 @@ body.wb-chain-active {
         document.getElementById('wb-toggle-autosort').addEventListener('change', (e) => {
             setConfig('AUTO_SORT', e.target.checked);
             if (e.target.checked) debouncedSort();
+        });
+
+        document.getElementById('wb-toggle-chain-alert').addEventListener('change', (e) => {
+            setConfig('CHAIN_ALERT', e.target.checked);
+            const thresholdRow = document.getElementById('wb-chain-alert-threshold-row');
+            if (thresholdRow) thresholdRow.style.display = e.target.checked ? 'flex' : 'none';
+        });
+
+        document.getElementById('wb-input-chain-threshold').addEventListener('change', (e) => {
+            const val = parseInt(e.target.value, 10);
+            if (val > 0 && val <= 300) {
+                setConfig('CHAIN_ALERT_THRESHOLD', val);
+            } else {
+                e.target.value = CONFIG.CHAIN_ALERT_THRESHOLD;
+            }
         });
 
         // Faction API key — check if one already exists
@@ -2337,6 +2470,30 @@ body.wb-chain-active {
         }
     }
 
+    // ---- Chain break sound alert via Web Audio API ----
+    function playChainAlert() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const beep = (startTime) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.frequency.value = 800;
+                osc.type = 'square';
+                gain.gain.value = 0.3;
+                osc.start(startTime);
+                osc.stop(startTime + 0.1);
+            };
+            const now = ctx.currentTime;
+            beep(now);
+            beep(now + 0.2);
+            beep(now + 0.4);
+        } catch (e) {
+            warn('Chain alert audio failed:', e);
+        }
+    }
+
     // Client-side countdown for chain timeout/cooldown
     let chainTimerRAF = null;
     let chainTimerLast = 0;
@@ -2351,6 +2508,14 @@ body.wb-chain-active {
 
             if (state.chain.timeout > 0) {
                 state.chain.timeout = Math.max(0, state.chain.timeout - dt);
+            }
+            // Chain break sound alert
+            if (CONFIG.CHAIN_ALERT && state.chain.timeout > 0 && state.chain.timeout <= CONFIG.CHAIN_ALERT_THRESHOLD && !state.chainAlertFired) {
+                playChainAlert();
+                state.chainAlertFired = true;
+            }
+            if (state.chain.timeout > CONFIG.CHAIN_ALERT_THRESHOLD) {
+                state.chainAlertFired = false;
             }
             if (state.chain.cooldown > 0) {
                 state.chain.cooldown = Math.max(0, state.chain.cooldown - dt);
@@ -4280,6 +4445,201 @@ body.wb-chain-active {
     // Notifications are now driven by the polling diff logic in pollOnce() (Section 6).
 
     // =========================================================================
+    // SECTION 23: MEMBER ACTIVITY HEATMAP
+    // =========================================================================
+
+    const HEATMAP_STORAGE_KEY = 'factionops_activity_heatmap';
+    const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    function getHeatmapData() {
+        try {
+            const raw = GM_getValue(HEATMAP_STORAGE_KEY, null);
+            return raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function saveHeatmapData(data) {
+        GM_setValue(HEATMAP_STORAGE_KEY, JSON.stringify(data));
+    }
+
+    function recordActivitySample(onlineCount) {
+        const now = new Date();
+        // Convert JS getDay() (0=Sun..6=Sat) to 0=Mon..6=Sun
+        const jsDay = now.getDay();
+        const day = jsDay === 0 ? 6 : jsDay - 1;
+        const hour = now.getHours();
+
+        const data = getHeatmapData();
+        if (!data[day]) data[day] = {};
+        if (!data[day][hour]) data[day][hour] = { total: 0, samples: 0 };
+
+        const bucket = data[day][hour];
+        if (bucket.samples < 1000) {
+            bucket.total += onlineCount;
+            bucket.samples += 1;
+        }
+        saveHeatmapData(data);
+    }
+
+    function createHeatmapButton() {
+        if (document.getElementById('wb-heatmap-toggle')) return;
+        const btn = document.createElement('button');
+        btn.id = 'wb-heatmap-toggle';
+        btn.className = 'wb-heatmap-btn';
+        btn.textContent = '\uD83D\uDCCA';
+        btn.title = 'Member Activity Heatmap';
+        btn.style.display = 'block';
+        btn.addEventListener('click', toggleHeatmapPanel);
+        document.body.appendChild(btn);
+    }
+
+    function toggleHeatmapPanel() {
+        const existing = document.getElementById('wb-heatmap-panel');
+        if (existing) {
+            existing.remove();
+            return;
+        }
+        renderHeatmapPanel();
+    }
+
+    function renderHeatmapPanel() {
+        const existing = document.getElementById('wb-heatmap-panel');
+        if (existing) existing.remove();
+
+        const data = getHeatmapData();
+
+        // Find max average for color scaling
+        let maxAvg = 0;
+        let totalSamples = 0;
+        for (let d = 0; d < 7; d++) {
+            for (let h = 0; h < 24; h++) {
+                const bucket = (data[d] && data[d][h]) || { total: 0, samples: 0 };
+                totalSamples += bucket.samples;
+                if (bucket.samples > 0) {
+                    const avg = bucket.total / bucket.samples;
+                    if (avg > maxAvg) maxAvg = avg;
+                }
+            }
+        }
+
+        const panel = document.createElement('div');
+        panel.id = 'wb-heatmap-panel';
+        panel.className = 'wb-heatmap-panel';
+
+        // Restore saved position
+        const savedPos = GM_getValue('factionops_heatmap_pos', null);
+        if (savedPos) {
+            try {
+                const pos = typeof savedPos === 'string' ? JSON.parse(savedPos) : savedPos;
+                panel.style.left = pos.left + 'px';
+                panel.style.top = pos.top + 'px';
+            } catch (e) { /* ignore */ }
+        }
+
+        // Header
+        const header = document.createElement('div');
+        header.className = 'wb-heatmap-header';
+        header.innerHTML = '<span>Member Activity Heatmap</span>';
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = '\u00D7';
+        closeBtn.className = 'wb-heatmap-close';
+        closeBtn.addEventListener('click', () => panel.remove());
+        header.appendChild(closeBtn);
+        panel.appendChild(header);
+
+        // Make panel draggable by header
+        let isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
+        header.addEventListener('mousedown', (e) => {
+            if (e.target === closeBtn) return;
+            isDragging = true;
+            dragOffsetX = e.clientX - panel.offsetLeft;
+            dragOffsetY = e.clientY - panel.offsetTop;
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            panel.style.left = (e.clientX - dragOffsetX) + 'px';
+            panel.style.top = (e.clientY - dragOffsetY) + 'px';
+        });
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                GM_setValue('factionops_heatmap_pos', JSON.stringify({
+                    left: panel.offsetLeft,
+                    top: panel.offsetTop,
+                }));
+            }
+        });
+
+        if (totalSamples === 0) {
+            const msg = document.createElement('div');
+            msg.style.cssText = 'padding:16px;font-size:12px;opacity:0.7;text-align:center;';
+            msg.textContent = 'No activity data yet. Keep FactionOps running during wars to build up the heatmap.';
+            panel.appendChild(msg);
+            document.body.appendChild(panel);
+            return;
+        }
+
+        // Grid container
+        const grid = document.createElement('div');
+        grid.className = 'wb-heatmap-grid';
+
+        // Corner spacer
+        const spacer = document.createElement('div');
+        spacer.className = 'wb-heatmap-label';
+        grid.appendChild(spacer);
+
+        // Hour labels (every 3rd hour)
+        for (let h = 0; h < 24; h++) {
+            const lbl = document.createElement('div');
+            lbl.className = 'wb-heatmap-label wb-heatmap-hour';
+            lbl.textContent = h % 3 === 0 ? h : '';
+            grid.appendChild(lbl);
+        }
+
+        // Rows
+        for (let d = 0; d < 7; d++) {
+            // Day label
+            const dayLbl = document.createElement('div');
+            dayLbl.className = 'wb-heatmap-label wb-heatmap-day';
+            dayLbl.textContent = DAY_LABELS[d];
+            grid.appendChild(dayLbl);
+
+            for (let h = 0; h < 24; h++) {
+                const cell = document.createElement('div');
+                cell.className = 'wb-heatmap-cell';
+                const bucket = (data[d] && data[d][h]) || { total: 0, samples: 0 };
+                const avg = bucket.samples > 0 ? bucket.total / bucket.samples : 0;
+                const intensity = maxAvg > 0 ? avg / maxAvg : 0;
+                cell.style.backgroundColor = `rgba(0, 184, 148, ${(intensity * 0.9 + 0.1).toFixed(2)})`;
+                if (bucket.samples === 0) cell.style.backgroundColor = 'rgba(255,255,255,0.05)';
+                cell.title = `${DAY_LABELS[d]} ${String(h).padStart(2, '0')}:00 \u2014 Avg ${avg.toFixed(1)} members online (${bucket.samples} samples)`;
+                grid.appendChild(cell);
+            }
+        }
+        panel.appendChild(grid);
+
+        // Footer
+        const footer = document.createElement('div');
+        footer.className = 'wb-heatmap-footer';
+        footer.innerHTML = `<span style="font-size:11px;opacity:0.6;">Based on ${totalSamples} total samples</span>`;
+        const resetBtn = document.createElement('button');
+        resetBtn.className = 'wb-btn wb-btn-sm wb-btn-danger';
+        resetBtn.textContent = 'Reset Data';
+        resetBtn.addEventListener('click', () => {
+            saveHeatmapData({});
+            panel.remove();
+            renderHeatmapPanel();
+        });
+        footer.appendChild(resetBtn);
+        panel.appendChild(footer);
+
+        document.body.appendChild(panel);
+    }
+
+    // =========================================================================
     // SECTION 24: MAIN INITIALISATION
     // =========================================================================
 
@@ -4298,6 +4658,9 @@ body.wb-chain-active {
         if (!url.includes('factions.php') && !url.includes('war.php')) {
             createSettingsGear();
         }
+
+        // 3b. Create heatmap toggle button
+        createHeatmapButton();
 
         // 4. Set up keyboard shortcuts
         setupKeyboardShortcuts();
