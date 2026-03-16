@@ -105,6 +105,32 @@ app.get("/scripts/:filename", (req, res) => {
   }
 });
 
+// ── Data files hosting ──────────────────────────────────────────────────
+const DATA_DIR = join(__dirname, "data");
+
+app.get("/data/", (_req, res) => res.status(403).json({ error: "Forbidden" }));
+app.get("/data", (_req, res) => res.status(403).json({ error: "Forbidden" }));
+
+app.get("/data/:filename", (req, res) => {
+  const filename = req.params.filename;
+  if (!/^[\w.-]+\.json$/.test(filename) || filename.includes("..")) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const filePath = join(DATA_DIR, filename);
+  if (!existsSync(filePath)) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  try {
+    const data = readFileSync(filePath, "utf-8");
+    res.setHeader("Content-Type", "application/json; charset=UTF-8");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.send(data);
+  } catch (err) {
+    console.error(`[server] Failed to read data file ${filename}:`, err.message);
+    res.status(500).json({ error: "Failed to read file" });
+  }
+});
+
 // ── Serve Socket.IO client (for PDA and CSP-restricted environments) ───
 app.get("/socket.io.min.js", (_req, res) => {
   const sioPath = join(__dirname, "node_modules", "socket.io", "client-dist", "socket.io.min.js");
