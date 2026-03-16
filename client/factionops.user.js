@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.40
+// @version      3.0.39
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -651,6 +651,66 @@ html.wb-theme-light {
 
 /* (transition rule merged into .wb-sortable-row above) */
 
+/* ----- BSP sort toggle button ----- */
+.wb-bsp-sort-btn {
+    position: fixed;
+    bottom: 70px;
+    right: 16px;
+    z-index: 999996;
+    background: var(--wb-bg-secondary);
+    border: 1px solid var(--wb-border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: var(--wb-text);
+    font-family: monospace;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s, background 0.2s;
+    display: none;
+}
+.wb-bsp-sort-btn:hover {
+    opacity: 1;
+}
+.wb-bsp-sort-btn.active {
+    background: var(--wb-accent);
+    border-color: var(--wb-call-green);
+    opacity: 1;
+}
+
+/* ----- Copy faction list button ----- */
+.wb-copy-btn {
+    position: fixed;
+    bottom: 100px;
+    right: 16px;
+    z-index: 999996;
+    background: var(--wb-bg-secondary);
+    border: 1px solid var(--wb-border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: var(--wb-text);
+    font-family: monospace;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s, background 0.2s;
+    display: none;
+}
+.wb-copy-btn:hover {
+    opacity: 1;
+}
+.wb-copy-btn.wb-copying {
+    opacity: 1;
+    pointer-events: none;
+}
+.wb-copy-btn.wb-copy-done {
+    background: var(--wb-accent);
+    border-color: var(--wb-call-green);
+    opacity: 1;
+}
+
 /* ----- Group attack / viewers indicator ----- */
 .wb-viewers-badge {
     display: inline-flex;
@@ -670,6 +730,47 @@ html.wb-theme-light {
     background: rgba(214,48,49,0.2);
     border-color: rgba(214,48,49,0.5);
     color: #ff7675;
+}
+
+/* ----- BSP / FFS stat display ----- */
+.wb-bsp-cell {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    min-width: 48px;
+    font-family: monospace;
+}
+.wb-bsp-value {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+.wb-bsp-value.wb-bsp-tier-s {
+    color: var(--wb-call-red);
+}
+.wb-bsp-value.wb-bsp-tier-a {
+    color: var(--wb-idle-yellow);
+}
+.wb-bsp-value.wb-bsp-tier-b {
+    color: var(--wb-call-green);
+}
+.wb-bsp-value.wb-bsp-tier-c {
+    color: #a0a0b8;
+}
+.wb-bsp-value.wb-bsp-tier-unknown {
+    color: var(--wb-jail-gray);
+    font-weight: 400;
+}
+.wb-bsp-source {
+    font-size: 7px;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.45;
+    line-height: 1;
 }
 
 /* ----- Attack page overlay ----- */
@@ -922,7 +1023,7 @@ body.wb-chain-active {
 /* ── Column labels ── */
 .fo-col-headers {
     display: grid;
-    grid-template-columns: 58px 1fr 52px 130px 44px 180px 72px;
+    grid-template-columns: 58px 1fr 52px 82px 130px 44px 180px 72px;
     gap: 0; padding: 7px 16px;
     background: rgba(15,52,96,0.2);
     border-bottom: 1px solid #2d3436;
@@ -940,7 +1041,7 @@ body.wb-chain-active {
 
 .fo-row {
     display: grid;
-    grid-template-columns: 58px 1fr 52px 130px 44px 180px 72px;
+    grid-template-columns: 58px 1fr 52px 82px 130px 44px 180px 72px;
     gap: 0; align-items: center;
     padding: 8px 16px;
     border-bottom: 1px solid rgba(45,52,54,0.5);
@@ -1024,6 +1125,18 @@ body.wb-chain-active {
 
 .fo-player-name .fo-pid { font-size: 10px; color: #636e72; font-weight: 400; }
 .fo-sub-row { display: flex; align-items: center; gap: 5px; }
+.fo-bsp-inline {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px; font-weight: 600;
+    padding: 1px 4px; border-radius: 8px;
+    background: rgba(255,255,255,0.06);
+    line-height: 1;
+}
+.fo-bsp-inline.tier-s { color: #e17055; }
+.fo-bsp-inline.tier-a { color: #fdcb6e; }
+.fo-bsp-inline.tier-b { color: #00b894; }
+.fo-bsp-inline.tier-c { color: #a0a0b8; }
+.fo-bsp-inline.tier-unknown { color: #4a4a5a; }
 
 /* ── Group Attack Eye Badge ── */
 .fo-eye-badge {
@@ -1042,6 +1155,23 @@ body.wb-chain-active {
 .fo-level {
     font-size: 11px; font-weight: 500; color: #a0a0b8;
     text-align: center; white-space: nowrap;
+}
+
+/* BSP Stats */
+.fo-bsp-stat {
+    font-size: 11px; font-weight: 600; text-align: center;
+    white-space: nowrap; letter-spacing: 0.02em;
+}
+.fo-bsp-stat.tier-s { color: #e17055; text-shadow: 0 0 8px rgba(225,112,85,0.3); }
+.fo-bsp-stat.tier-a { color: #fdcb6e; }
+.fo-bsp-stat.tier-b { color: #00b894; }
+.fo-bsp-stat.tier-c { color: #a0a0b8; }
+.fo-bsp-stat.tier-unknown { color: #4a4a5a; font-weight: 400; font-style: italic; }
+
+.fo-bsp-source {
+    font-size: 8px; font-weight: 400;
+    letter-spacing: 0.04em; text-transform: uppercase;
+    opacity: 0.5; display: block; margin-top: 1px;
 }
 
 /* Status Pill */
@@ -1156,15 +1286,17 @@ body.wb-chain-active {
     .fo-overlay { border-radius: 6px; margin: 4px 0; }
     .fo-header { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
     .fo-col-headers, .fo-row {
-        /* Prior | Target | (Lvl hidden) | Status | On | Call | Action — 7 cols matching desktop */
-        grid-template-columns: 36px 1fr 0px 62px 26px 66px 58px;
+        /* Prior | Target | (Lvl hidden) | (BSP hidden) | Status | On | Call | Action */
+        grid-template-columns: 36px 1fr 0px 0px 62px 26px 66px 58px;
         padding: 7px 8px;
         column-gap: 6px;
         font-size: 11px;
     }
-    /* Hide level column on mobile (keep in grid flow) */
+    /* Hide level and BSP columns on mobile (keep in grid flow) */
     .fo-col-headers > :nth-child(3),
-    .fo-row > :nth-child(3) { visibility: hidden; overflow: hidden; padding: 0 !important; margin: 0; min-width: 0; max-width: 0; font-size: 0; }
+    .fo-row > :nth-child(3),
+    .fo-col-headers > :nth-child(4),
+    .fo-row > :nth-child(4) { visibility: hidden; overflow: hidden; padding: 0 !important; margin: 0; min-width: 0; max-width: 0; font-size: 0; }
     .fo-footer { padding: 6px 12px; flex-wrap: wrap; gap: 4px; }
     .fo-footer-stats { gap: 10px; flex-wrap: wrap; }
     .fo-attack-btn { padding: 3px 8px; font-size: 9px; }
@@ -1175,13 +1307,14 @@ body.wb-chain-active {
     .fo-status-pill { padding: 2px 6px; font-size: 10px; }
     .fo-player-name .fo-name { font-size: 11.5px; }
     .fo-player-name .fo-pid { font-size: 9px; }
+    .fo-bsp-stat { font-size: 10px; }
     .fo-priority-badge { font-size: 8px; padding: 2px 6px; }
     .fo-priority-select { width: 38px; font-size: 8px; }
     /* Center status pill and online dot */
-    .fo-row > :nth-child(4) { justify-content: center; }
+    .fo-row > :nth-child(5) { justify-content: center; }
     .fo-online-dot { margin: 0 auto; }
-    .fo-col-headers > :nth-child(4) { text-align: center; }
     .fo-col-headers > :nth-child(5) { text-align: center; }
+    .fo-col-headers > :nth-child(6) { text-align: center; }
 }
 `;
         GM_addStyle(css);
@@ -1227,6 +1360,9 @@ body.wb-chain-active {
 
         // Whether a faction API key has been saved on the server
         factionKeyStored: false,
+
+        // Sort mode: 'default' or 'bsp'
+        sortMode: 'default',
 
         // UI references
         ui: {
@@ -1293,7 +1429,25 @@ body.wb-chain-active {
         try { return JSON.parse(text); } catch { return null; }
     }
 
-    // ── FFS stat helpers ──────────────────────────────────────────────
+    // ── BSP / FFS stat helpers ──────────────────────────────────────────────
+
+    /**
+     * Read BSP prediction from localStorage (sync).
+     * Key: tdup.battleStatsPredictor.cache.prediction.<userId>
+     * Returns the parsed object (has .TBS) or null.
+     */
+    function fetchBspPrediction(userId) {
+        try {
+            const raw = localStorage.getItem(
+                'tdup.battleStatsPredictor.cache.prediction.' + userId
+            );
+            if (!raw) return null;
+            const pred = JSON.parse(raw);
+            return pred || null;
+        } catch (e) {
+            return null;
+        }
+    }
 
     /**
      * Read FF Scouter estimate from IndexedDB (async).
@@ -1337,7 +1491,7 @@ body.wb-chain-active {
      * Format a raw battle-stats number into a compact human string.
      * e.g. 3_200_000_000 → "3.20B", 750_000_000 → "750M".
      */
-    function formatStatNumber(n) {
+    function formatBspNumber(n) {
         if (n == null || isNaN(n)) return '\u2014';
         if (n >= 1e12)  return (n / 1e12).toFixed(2)  + 'T';
         if (n >= 1e9)   return (n / 1e9).toFixed(2)   + 'B';
@@ -1350,7 +1504,7 @@ body.wb-chain-active {
      * Classify a raw stat number into a tier for colour coding.
      * S (red, 3 B+), A (yellow, 1-3 B), B (green, 500 M-1 B), C (gray, <500 M).
      */
-    function statTier(n) {
+    function bspTier(n) {
         if (n == null || isNaN(n)) return 'unknown';
         if (n >= 3e9)   return 's';
         if (n >= 1e9)   return 'a';
@@ -1414,7 +1568,216 @@ body.wb-chain-active {
         return formatEstimate(estimate);
     }
 
-    // ── Misc helpers ──────────────────────────────────────────────
+    /**
+     * Get the BSP/FFS stat number for a target (for sorting).
+     * Checks BSP prediction (sync). FFS is async so we cache resolved values.
+     * Returns the numeric stat value or 0 if unavailable.
+     */
+    const _ffsCache = {};
+    function getBspStatValue(targetId) {
+        // BSP prediction (sync)
+        const pred = fetchBspPrediction(targetId);
+        if (pred && pred.TBS != null) return Number(pred.TBS) || 0;
+
+        // FFS cached value (populated async by renderBspCell)
+        if (_ffsCache[targetId]) return _ffsCache[targetId];
+
+        // Kick off async FFS lookup and cache for next sort cycle
+        getFfScouterEstimate(targetId).then((ffs) => {
+            if (ffs && ffs.total) _ffsCache[targetId] = Number(ffs.total) || 0;
+        });
+
+        return 0;
+    }
+
+    // ── Copy faction list helpers ─────────────────────────────────────────
+
+    /** Read Xanax Viewer localStorage cache for a user. */
+    function getXanaxViewerCache(userId) {
+        try {
+            const raw = localStorage.getItem('xanaxviewer_cache');
+            if (!raw) return null;
+            const cache = JSON.parse(raw);
+            const entry = cache[userId] || cache[String(userId)];
+            return (entry && typeof entry.xantaken !== 'undefined') ? entry.xantaken : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    /** Fetch xanax & boosters from Torn API for a user. */
+    const _personalStatsCache = {};
+    function fetchPersonalStats(userId) {
+        if (_personalStatsCache[userId] !== undefined) {
+            return Promise.resolve(_personalStatsCache[userId]);
+        }
+        const apiKey = CONFIG.API_KEY;
+        if (!apiKey || apiKey === '###PDA-APIKEY###') return Promise.resolve(null);
+
+        return new Promise((resolve) => {
+            const url = `https://api.torn.com/user/${userId}?selections=personalstats&key=${apiKey}&stat=xantaken,boostersused&comment=FactionOps`;
+            httpRequest({
+                method: 'GET',
+                url: url,
+            }).then((data) => {
+                if (!data || data.error) {
+                    _personalStatsCache[userId] = null;
+                    resolve(null);
+                    return;
+                }
+                const ps = data.personalstats || {};
+                _personalStatsCache[userId] = {
+                    xantaken: ps.xantaken ?? null,
+                    boostersused: ps.boostersused ?? null,
+                };
+                resolve(_personalStatsCache[userId]);
+            }).catch(() => {
+                _personalStatsCache[userId] = null;
+                resolve(null);
+            });
+        });
+    }
+
+    /** Get xanax + boosters: Xanax Viewer cache first, then API. */
+    async function getPersonalStats(userId) {
+        const xanCached = getXanaxViewerCache(userId);
+        const apiStats = await fetchPersonalStats(userId);
+        return {
+            xantaken: xanCached ?? apiStats?.xantaken ?? null,
+            boostersused: apiStats?.boostersused ?? null,
+        };
+    }
+
+    /** Get level from the DOM row. */
+    function getMemberLevelFromRow(row) {
+        if (!row) return null;
+        // Try common level selectors
+        const lvlEl = row.querySelector('[class*="level"], .lvl, .member-level, td.level');
+        if (lvlEl) {
+            const m = lvlEl.textContent.match(/(\d+)/);
+            if (m) return parseInt(m[1], 10);
+        }
+        // Try text pattern
+        const pat = row.textContent.match(/(?:Lv|Lvl|Level)\s*(\d+)/i);
+        if (pat) return parseInt(pat[1], 10);
+        return null;
+    }
+
+    /** Format a number for copy output (e.g. 1.23B). */
+    function formatCopyNumber(num) {
+        if (typeof num !== 'number' || isNaN(num)) return 'N/A';
+        if (num < 1e3)  return String(Math.floor(num));
+        if (num < 1e6)  return +(num / 1e3).toFixed(2)  + 'K';
+        if (num < 1e9)  return +(num / 1e6).toFixed(2)  + 'M';
+        if (num < 1e12) return +(num / 1e9).toFixed(2)  + 'B';
+        return +(num / 1e12).toFixed(2) + 'T';
+    }
+
+    /** Build a stats string from BSP prediction or FFS fallback. */
+    async function getStatsString(userId) {
+        const pred = fetchBspPrediction(userId);
+        if (pred && pred.TBS != null) {
+            let tbs = Number(pred.TBS);
+            return `(Stats: ${isFinite(tbs) ? formatCopyNumber(tbs) : 'N/A'})`;
+        }
+        const ffs = await getFfScouterEstimate(userId);
+        if (ffs && ffs.total != null) {
+            const total = Number(ffs.total);
+            const str = ffs.human || (isFinite(total) ? formatCopyNumber(total) : 'N/A');
+            return `(FF: Est ${str})`;
+        }
+        return '(Stats: N/A)';
+    }
+
+    /**
+     * Copy all enemy faction members to clipboard.
+     * Format: Name - (Stats: 1.23B) - Lvl 85 - Xan: 1,234 - Boosters: 567
+     */
+    async function copyFactionList(btn) {
+        // Support both overlay rows and legacy DOM rows
+        let targetIds = [];
+        const foRows = Array.from(document.querySelectorAll('[data-fo-id]'));
+        if (foRows.length > 0) {
+            targetIds = foRows.map(r => r.dataset.foId);
+        } else {
+            const wbRows = Array.from(document.querySelectorAll('[data-wb-target-id]'));
+            targetIds = wbRows.map(r => r.dataset.wbTargetId);
+        }
+
+        if (targetIds.length === 0) {
+            showToast('No members found', 'error');
+            return;
+        }
+
+        btn.classList.add('wb-copying');
+        const total = targetIds.length;
+        btn.textContent = `0/${total}`;
+
+        const lines = [];
+        let processed = 0;
+
+        for (const targetId of targetIds) {
+            if (!targetId) continue;
+
+            try {
+                // Get name from state (overlay) or DOM (legacy)
+                let name;
+                const statusData = state.statuses[targetId];
+                if (statusData && statusData.name) {
+                    name = statusData.name;
+                } else {
+                    const domRow = document.querySelector(`[data-wb-target-id="${targetId}"]`);
+                    name = domRow ? getPlayerNameFromRow(domRow) : `ID ${targetId}`;
+                }
+
+                const statsStr = await getStatsString(targetId);
+
+                const extras = [];
+                const level = statusData && statusData.level != null ? statusData.level : null;
+                if (level != null) extras.push(`Lvl ${level}`);
+
+                const pStats = await getPersonalStats(targetId);
+                if (pStats.xantaken != null) extras.push(`Xan: ${pStats.xantaken.toLocaleString()}`);
+                if (pStats.boostersused != null) extras.push(`Boosters: ${pStats.boostersused.toLocaleString()}`);
+
+                const extraStr = extras.length > 0 ? ` - ${extras.join(' - ')}` : '';
+                lines.push(`${name} - ${statsStr}${extraStr}`);
+            } catch (e) {
+                warn('Copy error for target', targetId, e);
+            }
+
+            processed++;
+            btn.textContent = `${processed}/${total}`;
+            // Yield to UI
+            await new Promise(r => setTimeout(r, 0));
+        }
+
+        if (lines.length > 0) {
+            try {
+                await navigator.clipboard.writeText(lines.join('\n'));
+            } catch (_) {
+                // Fallback
+                const ta = document.createElement('textarea');
+                ta.value = lines.join('\n');
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                ta.remove();
+            }
+            btn.textContent = `\u2705 ${lines.length}`;
+            btn.classList.remove('wb-copying');
+            btn.classList.add('wb-copy-done');
+            showToast(`Copied ${lines.length} members to clipboard`, 'info');
+        } else {
+            btn.textContent = '\u2753';
+            btn.classList.remove('wb-copying');
+        }
+
+        setTimeout(() => {
+            btn.textContent = '\uD83D\uDCCB Copy';
+            btn.classList.remove('wb-copy-done');
+        }, 3000);
+    }
 
     function formatEstimate(mins) {
         const h = Math.floor(mins / 60);
@@ -2167,6 +2530,49 @@ body.wb-chain-active {
         updateChainBar();
     }
 
+    /** Create the BSP sort toggle button (fixed bottom-right, above gear). */
+    function createBspSortButton() {
+        if (document.getElementById('wb-bsp-sort')) return;
+
+        const btn = document.createElement('button');
+        btn.id = 'wb-bsp-sort';
+        btn.className = 'wb-bsp-sort-btn';
+        btn.textContent = 'BSP \u25BC';
+        btn.title = 'Sort by estimated stats (highest first)';
+        btn.style.display = 'block';
+
+        btn.addEventListener('click', () => {
+            if (state.sortMode === 'bsp') {
+                state.sortMode = 'default';
+                btn.classList.remove('active');
+                btn.textContent = 'BSP \u25BC';
+            } else {
+                state.sortMode = 'bsp';
+                btn.classList.add('active');
+                btn.textContent = 'BSP \u25BC \u2713';
+            }
+            sortMemberList();
+        });
+
+        document.body.appendChild(btn);
+    }
+
+    /** Create the Copy faction list button (fixed bottom-right, above BSP sort). */
+    function createCopyButton() {
+        if (document.getElementById('wb-copy-list')) return;
+
+        const btn = document.createElement('button');
+        btn.id = 'wb-copy-list';
+        btn.className = 'wb-copy-btn';
+        btn.textContent = '\uD83D\uDCCB Copy';
+        btn.title = 'Copy enemy faction list with stats, level, xanax & boosters';
+        btn.style.display = 'block';
+
+        btn.addEventListener('click', () => copyFactionList(btn));
+
+        document.body.appendChild(btn);
+    }
+
     /** Update chain bar contents and styling. */
     function updateChainBar() {
         const bar = state.ui.chainBar;
@@ -2561,6 +2967,12 @@ body.wb-chain-active {
         priorityCell.id = `wb-priority-${targetId}`;
         renderPriorityCell(priorityCell, targetId);
 
+        // --- BSP / FFS estimated stats cell ---
+        const bspCell = document.createElement('span');
+        bspCell.className = 'wb-cell';
+        bspCell.id = `wb-bsp-${targetId}`;
+        renderBspCell(bspCell, targetId);
+
         // --- Viewers (group attack) badge ---
         const viewersCell = document.createElement('span');
         viewersCell.className = 'wb-cell';
@@ -2569,6 +2981,7 @@ body.wb-chain-active {
 
         wbContainer.appendChild(priorityCell);
         wbContainer.appendChild(viewersCell);
+        wbContainer.appendChild(bspCell);
         wbContainer.appendChild(statusCell);
         wbContainer.appendChild(attackCell);
         wbContainer.appendChild(callCell);
@@ -2728,6 +3141,62 @@ body.wb-chain-active {
     }
 
     /**
+     * Render the BSP/FFS estimated-stats cell for a target.
+     * Tries BSP prediction (sync localStorage) first, then FFS (async IndexedDB).
+     * Shows the formatted number + a tiny "bsp" / "ffs" source label underneath.
+     */
+    function renderBspCell(container, targetId) {
+        container.innerHTML = '';
+
+        const wrapper = document.createElement('span');
+        wrapper.className = 'wb-bsp-cell';
+
+        // 1. Try BSP prediction (synchronous)
+        const pred = fetchBspPrediction(targetId);
+        if (pred && pred.TBS != null) {
+            const num = Number(pred.TBS);
+            const tier = bspTier(num);
+
+            const val = document.createElement('span');
+            val.className = `wb-bsp-value wb-bsp-tier-${tier}`;
+            val.textContent = formatBspNumber(num);
+            val.title = num.toLocaleString() + ' (BSP prediction)';
+            wrapper.appendChild(val);
+
+            const src = document.createElement('span');
+            src.className = 'wb-bsp-source';
+            src.textContent = 'bsp';
+            wrapper.appendChild(src);
+
+            container.appendChild(wrapper);
+            return;
+        }
+
+        // 2. FFS fallback (async) — show dash while loading
+        const val = document.createElement('span');
+        val.className = 'wb-bsp-value wb-bsp-tier-unknown';
+        val.textContent = '\u2014';
+        wrapper.appendChild(val);
+        container.appendChild(wrapper);
+
+        getFfScouterEstimate(targetId).then((ffs) => {
+            if (!ffs) return;                       // leave dash
+            const num = Number(ffs.total);
+            if (isNaN(num)) return;
+
+            const tier = bspTier(num);
+            val.className = `wb-bsp-value wb-bsp-tier-${tier}`;
+            val.textContent = ffs.human || formatBspNumber(num);
+            val.title = num.toLocaleString() + ' (FF Scouter)';
+
+            const src = document.createElement('span');
+            src.className = 'wb-bsp-source';
+            src.textContent = 'ffs';
+            wrapper.appendChild(src);
+        });
+    }
+
+    /**
      * Render a small badge showing how many faction members are viewing
      * this target's attack page. Shows nothing if 0 viewers.
      */
@@ -2767,6 +3236,9 @@ body.wb-chain-active {
 
         const prioEl = document.getElementById(`wb-priority-${targetId}`);
         if (prioEl) renderPriorityCell(prioEl, targetId);
+
+        const bspEl = document.getElementById(`wb-bsp-${targetId}`);
+        if (bspEl) renderBspCell(bspEl, targetId);
 
         const viewersEl = document.getElementById(`wb-viewers-${targetId}`);
         if (viewersEl) renderViewersBadge(viewersEl, targetId);
@@ -2840,7 +3312,9 @@ body.wb-chain-active {
     }
 
     function initWarOverlay() {
-        // Timers — no chain bar in overlay mode
+        // BSP button, copy button, timers — no chain bar in overlay mode
+        createBspSortButton();
+        createCopyButton();
         startChainTimer();
         startStatusTimers();
         startCallPruner();
@@ -2891,6 +3365,7 @@ body.wb-chain-active {
                 <div class="fo-col-header">Prior.</div>
                 <div class="fo-col-header">Target</div>
                 <div class="fo-col-header center">Lvl</div>
+                <div class="fo-col-header center">BSP</div>
                 <div class="fo-col-header">Status</div>
                 <div class="fo-col-header center">On</div>
                 <div class="fo-col-header">Call</div>
@@ -2971,12 +3446,23 @@ body.wb-chain-active {
             targetId: tid,
             priority: sortPriority(tid),
             timer: sortTimerValue(tid),
+            bsp: state.sortMode === 'bsp' ? getBspStatValue(tid) : 0,
         }));
 
-        sorted.sort((a, b) => {
-            if (a.priority !== b.priority) return a.priority - b.priority;
-            return a.timer - b.timer;
-        });
+        if (state.sortMode === 'bsp') {
+            sorted.sort((a, b) => {
+                if (a.bsp && b.bsp) return b.bsp - a.bsp;
+                if (a.bsp && !b.bsp) return -1;
+                if (!a.bsp && b.bsp) return 1;
+                if (a.priority !== b.priority) return a.priority - b.priority;
+                return a.timer - b.timer;
+            });
+        } else {
+            sorted.sort((a, b) => {
+                if (a.priority !== b.priority) return a.priority - b.priority;
+                return a.timer - b.timer;
+            });
+        }
 
         // Build/update rows in sorted order
         const fragment = document.createDocumentFragment();
@@ -3065,7 +3551,7 @@ body.wb-chain-active {
 
         playerName.appendChild(nameRow);
 
-        // Sub-row: ID
+        // Sub-row: ID + inline BSP badge
         const subRow = document.createElement('div');
         subRow.className = 'fo-sub-row';
 
@@ -3073,6 +3559,13 @@ body.wb-chain-active {
         pid.className = 'fo-pid';
         pid.textContent = `[${targetId}]`;
         subRow.appendChild(pid);
+
+        // Inline BSP badge
+        const bspBadge = document.createElement('span');
+        bspBadge.className = 'fo-bsp-inline';
+        bspBadge.id = `fo-bsp-inline-${targetId}`;
+        renderInlineBsp(bspBadge, targetId);
+        subRow.appendChild(bspBadge);
 
         playerName.appendChild(subRow);
 
@@ -3088,14 +3581,21 @@ body.wb-chain-active {
         lvlCell.appendChild(lvlSpan);
         li.appendChild(lvlCell);
 
-        // 4. Status cell
+        // 4. BSP cell
+        const bspCell = document.createElement('div');
+        bspCell.className = 'fo-cell center';
+        bspCell.id = `fo-bsp-${targetId}`;
+        renderOverlayBspCell(bspCell, targetId);
+        li.appendChild(bspCell);
+
+        // 5. Status cell
         const statusCell = document.createElement('div');
         statusCell.className = 'fo-cell';
         statusCell.id = `fo-status-${targetId}`;
         renderOverlayStatusCell(statusCell, targetId);
         li.appendChild(statusCell);
 
-        // 5. Online cell
+        // 6. Online cell
         const onlineCell = document.createElement('div');
         onlineCell.className = 'fo-cell center';
         onlineCell.id = `fo-online-${targetId}`;
@@ -3107,14 +3607,14 @@ body.wb-chain-active {
         onlineCell.appendChild(onlineDot);
         li.appendChild(onlineCell);
 
-        // 6. Call cell
+        // 7. Call cell
         const callCell = document.createElement('div');
         callCell.className = 'fo-call-cell';
         callCell.id = `fo-call-${targetId}`;
         renderOverlayCallCell(callCell, targetId);
         li.appendChild(callCell);
 
-        // 7. Action cell
+        // 8. Action cell
         const actionCell = document.createElement('div');
         actionCell.className = 'fo-cell';
         actionCell.style.justifyContent = 'flex-end';
@@ -3210,6 +3710,69 @@ body.wb-chain-active {
         }
 
         cell.appendChild(pill);
+    }
+
+    /** Render the BSP cell for overlay rows. */
+    /** Render compact inline BSP badge (next to player name). */
+    function renderInlineBsp(el, targetId) {
+        el.textContent = '';
+        el.className = 'fo-bsp-inline';
+
+        // 1. BSP prediction (sync)
+        const pred = fetchBspPrediction(targetId);
+        if (pred && pred.TBS != null) {
+            const num = Number(pred.TBS);
+            const tier = bspTier(num);
+            el.className = `fo-bsp-inline tier-${tier}`;
+            el.textContent = formatBspNumber(num);
+            el.title = `~${num.toLocaleString()} total stats (BSP)`;
+            return;
+        }
+
+        // 2. FFS fallback (async)
+        el.className = 'fo-bsp-inline tier-unknown';
+        getFfScouterEstimate(targetId).then((ffs) => {
+            if (!ffs) return;
+            const num = Number(ffs.total);
+            if (isNaN(num)) return;
+            const tier = bspTier(num);
+            el.className = `fo-bsp-inline tier-${tier}`;
+            el.textContent = ffs.human || formatBspNumber(num);
+            el.title = `~${num.toLocaleString()} total stats (FFS)`;
+        });
+    }
+
+    function renderOverlayBspCell(cell, targetId) {
+        cell.innerHTML = '';
+
+        // 1. Try BSP prediction (synchronous)
+        const pred = fetchBspPrediction(targetId);
+        if (pred && pred.TBS != null) {
+            const num = Number(pred.TBS);
+            const tier = bspTier(num);
+            const span = document.createElement('span');
+            span.className = `fo-bsp-stat tier-${tier}`;
+            span.title = `~${num.toLocaleString()} total stats (BSP)`;
+            span.innerHTML = `${formatBspNumber(num)}<span class="fo-bsp-source">bsp</span>`;
+            cell.appendChild(span);
+            return;
+        }
+
+        // 2. FFS fallback (async) — show dash while loading
+        const span = document.createElement('span');
+        span.className = 'fo-bsp-stat tier-unknown';
+        span.textContent = '\u2014';
+        cell.appendChild(span);
+
+        getFfScouterEstimate(targetId).then((ffs) => {
+            if (!ffs) return;
+            const num = Number(ffs.total);
+            if (isNaN(num)) return;
+            const tier = bspTier(num);
+            span.className = `fo-bsp-stat tier-${tier}`;
+            span.title = `~${num.toLocaleString()} total stats (FFS)`;
+            span.innerHTML = `${ffs.human || formatBspNumber(num)}<span class="fo-bsp-source">ffs</span>`;
+        });
     }
 
     /** Render the call cell for overlay rows. */
@@ -3310,6 +3873,11 @@ body.wb-chain-active {
         const callCell = document.getElementById(`fo-call-${targetId}`);
         if (callCell) renderOverlayCallCell(callCell, targetId);
 
+        const bspCell = document.getElementById(`fo-bsp-${targetId}`);
+        if (bspCell) renderOverlayBspCell(bspCell, targetId);
+
+        const bspInline = document.getElementById(`fo-bsp-inline-${targetId}`);
+        if (bspInline) renderInlineBsp(bspInline, targetId);
     }
 
     /** Update footer stats. */
@@ -3404,16 +3972,31 @@ body.wb-chain-active {
                 targetId: tid,
                 priority: sortPriority(tid),
                 timer: sortTimerValue(tid),
+                bsp: state.sortMode === 'bsp' ? getBspStatValue(tid) : 0,
             };
         });
 
-        sorted.sort((a, b) => {
-            if (a.priority !== b.priority) return a.priority - b.priority;
-            // Within same priority, sort by timer ascending (shortest first,
-            // except hospital where longest goes to bottom)
-            if (a.priority === 2) return a.timer - b.timer; // hospital: shortest timer first
-            return a.timer - b.timer;
-        });
+        if (state.sortMode === 'bsp') {
+            // BSP sort: highest stats first, unknowns (0) at bottom
+            sorted.sort((a, b) => {
+                // Both have stats — highest first
+                if (a.bsp && b.bsp) return b.bsp - a.bsp;
+                // One has stats, other doesn't — stats first
+                if (a.bsp && !b.bsp) return -1;
+                if (!a.bsp && b.bsp) return 1;
+                // Neither has stats — fall back to default sort
+                if (a.priority !== b.priority) return a.priority - b.priority;
+                return a.timer - b.timer;
+            });
+        } else {
+            sorted.sort((a, b) => {
+                if (a.priority !== b.priority) return a.priority - b.priority;
+                // Within same priority, sort by timer ascending (shortest first,
+                // except hospital where longest goes to bottom)
+                if (a.priority === 2) return a.timer - b.timer; // hospital: shortest timer first
+                return a.timer - b.timer;
+            });
+        }
 
         // Use CSS order property if parent is flex/grid, otherwise re-append nodes
         const computedDisplay = window.getComputedStyle(parent).display;
@@ -3794,6 +4377,8 @@ body.wb-chain-active {
     /** Initialise war/faction page enhancements. */
     function initWarPage() {
         createChainBar();
+        createBspSortButton();
+        createCopyButton();
         startChainTimer();
         setupMutationObserver();
         startStatusTimers();
