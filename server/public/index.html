@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+   ______                            __
+  / ____/___  ____ ___  ____  __  __/ /____  _____
+ / /   / __ \/ __ `__ \/ __ \/ / / / __/ _ \/ ___/
+/ /___/ /_/ / / / / / / /_/ / /_/ / /_/  __/ /
+\____/\____/_/ /_/ /_/ .___/\__,_/\__/\___/_/
+                    /_/
+        Created with Perplexity Computer
+        https://www.perplexity.ai/computer
+-->
+
+<!-- Perplexity Computer Attribution — SEO Meta Tags -->
+<meta name="generator" content="Perplexity Computer">
+<meta name="author" content="Perplexity Computer">
+<meta property="og:see_also" content="https://www.perplexity.ai/computer">
+<link rel="author" href="https://www.perplexity.ai/computer">
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WarBoard — Real-time Faction War Coordination for Torn</title>
+<meta name="description" content="WarBoard is a real-time faction war coordination tool for Torn.com. Call targets, rally attacks, track chains, and sync your entire faction instantly.">
+<meta property="og:title" content="WarBoard — Real-time Faction War Coordination for Torn">
+<meta property="og:description" content="Call targets, rally attacks, track chains, and coordinate your faction in real-time. WebSocket-powered war room for Torn.com.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="/og-image.png">
+<meta name="theme-color" content="#0a0a0f">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+/* ═══════════════════════════════════════════
+   RESET & BASE
+   ═══════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-deep: #0a0a0f;
+  --bg-surface: #12121a;
+  --bg-card: #181825;
+  --bg-card-hover: #1e1e2e;
+  --border: #2a2a3a;
+  --border-glow: #00d4aa30;
+  --text-primary: #e0e0ea;
+  --text-secondary: #8888a0;
+  --text-muted: #55556a;
+  --accent: #00d4aa;
+  --accent-dim: #00d4aa80;
+  --accent-glow: #00d4aa40;
+  --red: #ff4757;
+  --orange: #ffa502;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-interactive: 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html {
+  scroll-behavior: smooth;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: var(--bg-deep);
+  overflow-x: hidden;
+}
+
+a { color: var(--accent); text-decoration: none; transition: color var(--transition-interactive); }
+a:hover { color: #33e0be; }
+
+img { max-width: 100%; display: block; }
+
+/* ═══════════════════════════════════════════
+   UTILITY
+   ═══════════════════════════════════════════ */
+.container {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.section-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+.section-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: clamp(24px, 4vw, 36px);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+  line-height: 1.2;
+}
+
+.section-desc {
+  color: var(--text-secondary);
+  font-size: 15px;
+  max-width: 560px;
+  line-height: 1.7;
+}
+
+/* ═══════════════════════════════════════════
+   ANIMATED BACKGROUND — GRID + SCANLINES
+   ═══════════════════════════════════════════ */
+.bg-grid {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(rgba(0, 212, 170, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 170, 0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+.scanline {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 200vh;
+  pointer-events: none;
+  z-index: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 212, 170, 0.008) 2px,
+    rgba(0, 212, 170, 0.008) 4px
+  );
+  animation: scanlineScroll 8s linear infinite;
+}
+
+@keyframes scanlineScroll {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-50%); }
+}
+
+/* ═══════════════════════════════════════════
+   HEADER NAV
+   ═══════════════════════════════════════════ */
+.site-header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: 16px 0;
+  background: rgba(10, 10, 15, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.site-header.scrolled {
+  border-bottom-color: var(--border);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.logo {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo svg {
+  width: 28px;
+  height: 28px;
+}
+
+.logo-text {
+  text-shadow: 0 0 20px var(--accent-glow);
+}
+
+.nav-links {
+  display: flex;
+  gap: 28px;
+  list-style: none;
+}
+
+.nav-links a {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  transition: color var(--transition-interactive);
+}
+
+.nav-links a:hover {
+  color: var(--accent);
+}
+
+.mobile-menu-btn {
+  display: none;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 18px;
+  transition: border-color var(--transition-interactive), color var(--transition-interactive);
+}
+.mobile-menu-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ═══════════════════════════════════════════
+   HERO
+   ═══════════════════════════════════════════ */
+.hero {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 120px 24px 80px;
+}
+
+.hero-content {
+  max-width: 720px;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(0, 212, 170, 0.08);
+  border: 1px solid rgba(0, 212, 170, 0.2);
+  border-radius: 100px;
+  padding: 6px 16px;
+  margin-bottom: 32px;
+}
+
+.hero-badge .pulse-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+.hero h1 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: clamp(48px, 10vw, 96px);
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  color: var(--text-primary);
+  text-shadow:
+    0 0 40px var(--accent-glow),
+    0 0 80px rgba(0, 212, 170, 0.15),
+    0 0 120px rgba(0, 212, 170, 0.05);
+  margin-bottom: 20px;
+}
+
+.hero-tagline {
+  font-size: clamp(16px, 2.5vw, 20px);
+  color: var(--text-secondary);
+  margin-bottom: 40px;
+  line-height: 1.5;
+}
+
+.hero-buttons {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* Buttons */
+.btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 14px 28px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition:
+    background var(--transition-interactive),
+    color var(--transition-interactive),
+    box-shadow var(--transition-interactive),
+    transform var(--transition-interactive),
+    border-color var(--transition-interactive);
+  text-decoration: none;
+}
+
+.btn:active { transform: translateY(0) !important; }
+
+.btn-primary {
+  background: var(--accent);
+  color: #0a0a0f;
+  box-shadow: 0 0 20px var(--accent-glow), 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.btn-primary:hover {
+  background: #33e0be;
+  color: #0a0a0f;
+  transform: translateY(-2px);
+  box-shadow: 0 0 30px var(--accent-dim), 0 8px 24px rgba(0,0,0,0.4);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.btn-ghost:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+  transform: translateY(-2px);
+}
+
+.btn svg { width: 16px; height: 16px; }
+
+/* ═══════════════════════════════════════════
+   FEATURES
+   ═══════════════════════════════════════════ */
+.features {
+  position: relative;
+  z-index: 1;
+  padding: 100px 0;
+}
+
+.features-header {
+  text-align: center;
+  margin-bottom: 56px;
+}
+
+.features-header .section-desc {
+  margin: 0 auto;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.feature-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px 24px;
+  transition:
+    border-color var(--transition-interactive),
+    box-shadow var(--transition-interactive),
+    transform var(--transition-interactive);
+}
+
+.feature-card:hover {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 24px rgba(0, 212, 170, 0.06), 0 8px 32px rgba(0,0,0,0.3);
+  transform: translateY(-2px);
+}
+
+.feature-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(0, 212, 170, 0.08);
+  margin-bottom: 16px;
+}
+
+.feature-icon svg {
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
+  stroke: var(--accent);
+  fill: none;
+}
+
+.feature-card h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.feature-card p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* ═══════════════════════════════════════════
+   HOW IT WORKS
+   ═══════════════════════════════════════════ */
+.how-it-works {
+  position: relative;
+  z-index: 1;
+  padding: 80px 0 100px;
+}
+
+.how-header {
+  text-align: center;
+  margin-bottom: 64px;
+}
+
+.steps {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.step {
+  flex: 1;
+  text-align: center;
+  position: relative;
+  padding: 0 20px;
+}
+
+.step-number {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(0, 212, 170, 0.1);
+  border: 2px solid var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+  position: relative;
+  z-index: 2;
+}
+
+.step-connector {
+  position: absolute;
+  top: 24px;
+  left: calc(50% + 32px);
+  width: calc(100% - 64px);
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-dim));
+  z-index: 1;
+}
+
+.step:last-child .step-connector { display: none; }
+
+.step h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.step p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ═══════════════════════════════════════════
+   INSTALL SECTION
+   ═══════════════════════════════════════════ */
+.install {
+  position: relative;
+  z-index: 1;
+  padding: 100px 0;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.install-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  align-items: start;
+}
+
+.install-steps { margin-top: 32px; }
+
+.install-step {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.install-step-num {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(0, 212, 170, 0.1);
+  border: 1px solid var(--accent-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-top: 2px;
+}
+
+.install-step-text h4 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.install-step-text p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.install-step-text a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--accent-dim);
+}
+
+.install-right {
+  padding-top: 24px;
+}
+
+.prereq-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.prereq-box h4 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.prereq-box ul {
+  list-style: none;
+}
+
+.prereq-box li {
+  font-size: 14px;
+  color: var(--text-secondary);
+  padding: 6px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.prereq-box li::before {
+  content: '›';
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.download-box {
+  background: linear-gradient(135deg, rgba(0, 212, 170, 0.06), rgba(0, 212, 170, 0.02));
+  border: 1px solid rgba(0, 212, 170, 0.2);
+  border-radius: 10px;
+  padding: 24px;
+  text-align: center;
+}
+
+.download-box .btn { margin-bottom: 16px; width: 100%; justify-content: center; }
+
+.code-inline {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(0,0,0,0.3);
+  border-radius: 6px;
+  padding: 10px 14px;
+  overflow-x: auto;
+  word-break: break-all;
+  text-align: left;
+}
+
+/* ═══════════════════════════════════════════
+   SERVER SETUP
+   ═══════════════════════════════════════════ */
+.server-setup {
+  position: relative;
+  z-index: 1;
+  padding: 100px 0;
+}
+
+.server-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  align-items: start;
+}
+
+.code-block {
+  background: #0d0d14;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.code-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.02);
+  border-bottom: 1px solid var(--border);
+}
+
+.code-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.code-dot.red { background: #ff5f56; }
+.code-dot.yellow { background: #ffbd2e; }
+.code-dot.green { background: #27c93f; }
+
+.code-body {
+  padding: 20px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+  overflow-x: auto;
+}
+
+.code-body .comment { color: var(--text-muted); }
+.code-body .cmd { color: var(--accent); }
+
+.server-note {
+  margin-top: 24px;
+  padding: 16px 20px;
+  background: rgba(255, 165, 2, 0.06);
+  border: 1px solid rgba(255, 165, 2, 0.15);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.server-note strong {
+  color: var(--orange);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+/* ═══════════════════════════════════════════
+   FOOTER
+   ═══════════════════════════════════════════ */
+.site-footer {
+  position: relative;
+  z-index: 1;
+  padding: 40px 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.footer-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.footer-logo {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+}
+
+.footer-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+}
+
+.footer-tagline {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.footer-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 12px;
+}
+
+.footer-right a {
+  color: var(--text-muted);
+  transition: color var(--transition-interactive);
+}
+
+.footer-right a:hover { color: var(--accent); }
+
+.footer-version {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+/* ═══════════════════════════════════════════
+   SCROLL REVEAL
+   ═══════════════════════════════════════════ */
+.reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.6s var(--ease-out), transform 0.6s var(--ease-out);
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Staggered children */
+.reveal-stagger .reveal {
+  transition-delay: calc(var(--i, 0) * 80ms);
+}
+
+/* ═══════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .features-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .install-grid,
+  .server-grid {
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+}
+
+@media (max-width: 640px) {
+  .nav-links { display: none; }
+  .nav-links.open {
+    display: flex;
+    flex-direction: column;
+    position: absolute;
+    top: 100%;
+    left: 0; right: 0;
+    background: rgba(10, 10, 15, 0.95);
+    backdrop-filter: blur(16px);
+    padding: 16px 24px;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .mobile-menu-btn { display: block; }
+  .features-grid { grid-template-columns: 1fr; }
+  .steps { flex-direction: column; gap: 24px; align-items: center; }
+  .step-connector { display: none !important; }
+  .step { padding: 0; }
+  .hero { min-height: auto; padding: 140px 24px 60px; }
+  .hero h1 { font-size: clamp(40px, 12vw, 64px); }
+  .footer-inner { flex-direction: column; align-items: flex-start; gap: 12px; }
+}
+
+/* ═══════════════════════════════════════════
+   DECORATIVE ACCENTS
+   ═══════════════════════════════════════════ */
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -200px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(0, 212, 170, 0.08) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.install::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -100px;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(0, 212, 170, 0.04) 0%, transparent 70%);
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+
+<!-- Background effects -->
+<div class="bg-grid" aria-hidden="true"></div>
+<div class="scanline" aria-hidden="true"></div>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<header class="site-header" id="top">
+  <div class="header-inner">
+    <a href="#top" class="logo" aria-label="WarBoard home">
+      <svg viewBox="0 0 28 28" fill="none" aria-hidden="true">
+        <rect x="2" y="2" width="24" height="24" rx="4" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="14" cy="14" r="5" stroke="#00d4aa" stroke-width="1.5"/>
+        <line x1="14" y1="2" x2="14" y2="9" stroke="#00d4aa" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="14" y1="19" x2="14" y2="26" stroke="#00d4aa" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="2" y1="14" x2="9" y2="14" stroke="#00d4aa" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="19" y1="14" x2="26" y2="14" stroke="#00d4aa" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <span class="logo-text">WARBOARD</span>
+    </a>
+    <nav>
+      <ul class="nav-links" id="navLinks">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#how-it-works">How It Works</a></li>
+        <li><a href="#install">Install</a></li>
+        <li><a href="#server">Server</a></li>
+      </ul>
+    </nav>
+    <button class="mobile-menu-btn" id="menuBtn" aria-label="Toggle menu">☰</button>
+  </div>
+</header>
+
+<!-- ═══════════════ HERO ═══════════════ -->
+<section class="hero" id="hero">
+  <div class="hero-content">
+    <div class="hero-badge reveal">
+      <span class="pulse-dot"></span>
+      LIVE COORDINATION
+    </div>
+    <h1 class="reveal">WARBOARD</h1>
+    <p class="hero-tagline reveal">Real-time faction war coordination for Torn</p>
+    <div class="hero-buttons reveal">
+      <a href="#install" class="btn btn-primary">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10"/></svg>
+        Install Script
+      </a>
+      <a href="#" class="btn btn-ghost">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        View on GitHub
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ FEATURES ═══════════════ -->
+<section class="features" id="features">
+  <div class="container">
+    <div class="features-header reveal">
+      <p class="section-label">Capabilities</p>
+      <h2 class="section-title">Built for War</h2>
+      <p class="section-desc">Every feature designed to give your faction the edge in ranked wars.</p>
+    </div>
+    <div class="features-grid reveal-stagger">
+
+      <!-- Target Calls -->
+      <div class="feature-card reveal" style="--i:0">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="6"/>
+            <circle cx="12" cy="12" r="2"/>
+            <line x1="12" y1="2" x2="12" y2="6"/>
+            <line x1="12" y1="18" x2="12" y2="22"/>
+            <line x1="2" y1="12" x2="6" y2="12"/>
+            <line x1="18" y1="12" x2="22" y2="12"/>
+          </svg>
+        </div>
+        <h3>Target Calls</h3>
+        <p>Reserve enemies in real-time. One click to call, instant sync across your faction. No more double-hits.</p>
+      </div>
+
+      <!-- Rally System -->
+      <div class="feature-card reveal" style="--i:1">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="7" r="3"/>
+            <circle cx="5" cy="17" r="3"/>
+            <circle cx="19" cy="17" r="3"/>
+            <line x1="12" y1="10" x2="5" y2="14"/>
+            <line x1="12" y1="10" x2="19" y2="14"/>
+          </svg>
+        </div>
+        <h3>Rally System</h3>
+        <p>Coordinate group attacks on tough targets. Start a rally, watch your faction stack up.</p>
+      </div>
+
+      <!-- Live Status -->
+      <div class="feature-card reveal" style="--i:2">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </div>
+        <h3>Live Status</h3>
+        <p>Hospital timers, travel ETAs, online detection. All counting down in real-time.</p>
+      </div>
+
+      <!-- Chain Watch -->
+      <div class="feature-card reveal" style="--i:3">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+          </svg>
+        </div>
+        <h3>Chain Watch</h3>
+        <p>Monitor enemy chains with bonus hit alerts. Know when they're 3 hits from a milestone.</p>
+      </div>
+
+      <!-- Auto-Sort -->
+      <div class="feature-card reveal" style="--i:4">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="4" y1="6" x2="16" y2="6"/>
+            <line x1="4" y1="12" x2="13" y2="12"/>
+            <line x1="4" y1="18" x2="10" y2="18"/>
+            <polyline points="18 9 21 12 18 15"/>
+          </svg>
+        </div>
+        <h3>Auto-Sort</h3>
+        <p>Available targets rise to the top. Hospitalized enemies sink. Zero manual work.</p>
+      </div>
+
+      <!-- Instant Sync -->
+      <div class="feature-card reveal" style="--i:5">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+            <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+            <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+            <circle cx="12" cy="20" r="1" fill="currentColor"/>
+          </svg>
+        </div>
+        <h3>Instant Sync</h3>
+        <p>WebSocket-powered. Every call, every status change, every rally — live across all tabs.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ HOW IT WORKS ═══════════════ -->
+<section class="how-it-works" id="how-it-works">
+  <div class="container">
+    <div class="how-header reveal">
+      <p class="section-label">Getting Started</p>
+      <h2 class="section-title">Three Steps to War</h2>
+    </div>
+    <div class="steps reveal">
+      <div class="step">
+        <div class="step-number">1</div>
+        <div class="step-connector"></div>
+        <h3>Install</h3>
+        <p>Add the userscript to Tampermonkey</p>
+      </div>
+      <div class="step">
+        <div class="step-number">2</div>
+        <div class="step-connector"></div>
+        <h3>Connect</h3>
+        <p>Enter your server URL and Torn API key</p>
+      </div>
+      <div class="step">
+        <div class="step-number">3</div>
+        <h3>Coordinate</h3>
+        <p>Open any faction war page — WarBoard activates automatically</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ INSTALLATION ═══════════════ -->
+<section class="install" id="install">
+  <div class="container">
+    <div class="install-grid">
+      <div class="install-left reveal">
+        <p class="section-label">Installation</p>
+        <h2 class="section-title">Get WarBoard Running</h2>
+        <p class="section-desc">Five minutes from zero to full war coordination.</p>
+
+        <div class="install-steps">
+          <div class="install-step">
+            <div class="install-step-num">1</div>
+            <div class="install-step-text">
+              <h4>Install a Userscript Manager</h4>
+              <p>Get <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a> for Chrome, Firefox, or Edge. <a href="https://violentmonkey.github.io/" target="_blank" rel="noopener">Violentmonkey</a> also works.</p>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">2</div>
+            <div class="install-step-text">
+              <h4>Install the WarBoard Script</h4>
+              <p>Click the download button to install the userscript into Tampermonkey.</p>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">3</div>
+            <div class="install-step-text">
+              <h4>Open WarBoard Settings</h4>
+              <p>Click the gear icon on any Torn war page to open configuration.</p>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">4</div>
+            <div class="install-step-text">
+              <h4>Enter Server URL &amp; API Key</h4>
+              <p>Your faction leader provides the server URL. Get your API key from Torn: Settings → API Keys.</p>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">5</div>
+            <div class="install-step-text">
+              <h4>Join a War</h4>
+              <p>Open any ranked war page and WarBoard activates automatically.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="install-right reveal">
+        <div class="prereq-box">
+          <h4>Prerequisites</h4>
+          <ul>
+            <li>A userscript manager: <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a> or <a href="https://violentmonkey.github.io/" target="_blank" rel="noopener">Violentmonkey</a></li>
+            <li>A Torn API key (Settings → API Keys on <a href="https://www.torn.com" target="_blank" rel="noopener">torn.com</a>)</li>
+          </ul>
+        </div>
+
+        <div class="download-box">
+          <a href="/download/warboard.user.js" class="btn btn-primary">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10"/></svg>
+            Download WarBoard v1.0.0
+          </a>
+          <code class="code-inline">// Direct install URL:<br>https://YOUR_SERVER/download/warboard.user.js</code>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ SERVER SETUP ═══════════════ -->
+<section class="server-setup" id="server">
+  <div class="container">
+    <div class="server-grid">
+      <div class="reveal">
+        <p class="section-label">Self-Hosted</p>
+        <h2 class="section-title">Server Setup</h2>
+        <p class="section-desc">For faction leaders who want to run their own coordination server.</p>
+
+        <div class="server-note" style="margin-top: 24px;">
+          <strong>NOTE</strong><br>
+          The server handles real-time coordination. You need one server per faction. Share the server URL with your faction members.
+        </div>
+      </div>
+
+      <div class="reveal">
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+          </div>
+          <div class="code-body">
+            <span class="comment"># Clone and setup</span><br>
+            <span class="cmd">git clone</span> https://github.com/your-repo/warboard.git<br>
+            <span class="cmd">cd</span> warboard/server<br>
+            <span class="cmd">npm install</span><br><br>
+            <span class="comment"># Configure environment</span><br>
+            <span class="cmd">cp</span> .env.example .env<br>
+            <span class="comment"># Edit .env with your JWT secret</span><br><br>
+            <span class="comment"># Start the server</span><br>
+            <span class="cmd">npm start</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ FOOTER ═══════════════ -->
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-inner">
+      <div class="footer-left">
+        <span class="footer-logo">WARBOARD</span>
+        <span class="footer-sep"></span>
+        <span class="footer-tagline">Built for Torn.com faction warfare</span>
+      </div>
+      <div class="footer-right">
+        <a href="https://www.perplexity.ai/computer" target="_blank" rel="noopener noreferrer">Created with Perplexity Computer</a>
+        <span class="footer-version">v1.0.0</span>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- ═══════════════ JAVASCRIPT ═══════════════ -->
+<script>
+(function() {
+  'use strict';
+
+  // Scroll-aware header
+  const header = document.querySelector('.site-header');
+  let lastScroll = 0;
+  function onScroll() {
+    const y = window.scrollY;
+    header.classList.toggle('scrolled', y > 40);
+    lastScroll = y;
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  // Mobile menu toggle
+  const menuBtn = document.getElementById('menuBtn');
+  const navLinks = document.getElementById('navLinks');
+  if (menuBtn && navLinks) {
+    menuBtn.addEventListener('click', function() {
+      navLinks.classList.toggle('open');
+      menuBtn.textContent = navLinks.classList.contains('open') ? '✕' : '☰';
+    });
+    navLinks.querySelectorAll('a').forEach(function(a) {
+      a.addEventListener('click', function() {
+        navLinks.classList.remove('open');
+        menuBtn.textContent = '☰';
+      });
+    });
+  }
+
+  // Scroll reveal with IntersectionObserver
+  const reveals = document.querySelectorAll('.reveal');
+  if ('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+    reveals.forEach(function(el) {
+      observer.observe(el);
+    });
+  } else {
+    // Fallback: show all
+    reveals.forEach(function(el) { el.classList.add('visible'); });
+  }
+})();
+</script>
+</body>
+</html>

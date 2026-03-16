@@ -1,0 +1,142 @@
+/**
+ * In-memory data store with JSON file persistence.
+ *
+ * All war state lives in memory for fast access. On every mutation the
+ * full state is flushed to disk so the server can resume after a restart.
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+
+const DATA_DIR = process.env.DATA_DIR || "./data";
+const WARS_FILE = path.join(DATA_DIR, "wars.json");
+
+// ── In-memory maps ──────────────────────────────────────────────────────
+
+/** @type {Map<string, import("./types.js").War>} warId → War */
+const wars = new Map();
+
+/**
+ * Connected players – tracks live socket sessions.
+ * @type {Map<string, { socketId: string, factionId: string, warId: string, name: string }>}
+ * playerId → session info
+ */
+const players = new Map();
+
+/**
+ * Stored Torn API keys – one per player, used for server-side API calls.
+ * @type {Map<string, string>} playerId → apiKey
+ */
+const apiKeys = new Map();
+
+// ── Persistence helpers ─────────────────────────────────────────────────
+
+function ensureDataDir() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
+
+/** Load persisted war state from disk (called once at startup). */
+export function loadState() {
+  ensureDataDir();
+  if (!fs.existsSync(WARS_FILE)) return;
+
+  try {
+    const raw = fs.readFileSync(WARS_FILE, "utf-8");
+    const data = JSON.parse(raw);
+    for (const [id, war] of Object.entries(data)) {
+      wars.set(id, war);
+    }
+    console.log(`[store] Loaded ${wars.size} war(s) from disk`);
+  } catch (err) {
+    console.error("[store] Failed to load persisted state:", err.message);
+  }
+}
+
+/** Persist current war state to disk. Called after every mutation. */
+export function saveState() {
+  ensureDataDir();
+  try {
+    const obj = Object.fromEntries(wars);
+    fs.writeFileSync(WARS_FILE, JSON.stringify(obj, null, 2));
+  } catch (err) {
+    console.error("[store] Failed to persist state:", err.message);
+  }
+}
+
+// ── War CRUD ────────────────────────────────────────────────────────────
+
+export function getWar(warId) {
+  return wars.get(warId) ?? null;
+}
+
+export function getOrCreateWar(warId, factionId, enemyFactionId = null) {
+  if (wars.has(warId)) return wars.get(warId);
+
+  const war = {
+    warId,
+    factionId,
+    enemyFactionId,
+    calls: {},
+    rallies: {},
+    enemyStatuses: {},
+    chainData: { current: 0, max: 0, timeout: 0, cooldown: 0 },
+  };
+  wars.set(warId, war);
+  saveState();
+  return war;
+}
+
+export function getAllWars() {
+  return wars;
+}
+
+// ── Player tracking ─────────────────────────────────────────────────────
+
+export function setPlayer(playerId, info) {
+  players.set(playerId, info);
+}
+
+export function getPlayer(playerId) {
+  return players.get(playerId) ?? null;
+}
+
+export function removePlayerBySocket(socketId) {
+  for (const [id, p] of players) {
+    if (p.socketId === socketId) {
+      players.delete(id);
+      return { playerId: id, ...p };
+    }
+  }
+  return null;
+}
+
+export function getOnlinePlayersForWar(warId) {
+  const result = [];
+  for (const [id, p] of players) {
+    if (p.warId === warId) result.push({ id, name: p.name });
+  }
+  return result;
+}
+
+// ── API key storage ─────────────────────────────────────────────────────
+
+export function storeApiKey(playerId, apiKey) {
+  apiKeys.set(playerId, apiKey);
+}
+
+/** Get any available API key for a faction (picks the first one found). */
+export function getApiKeyForFaction(factionId) {
+  for (const [playerId, key] of apiKeys) {
+    const player = players.get(playerId);
+    if (player && player.factionId === factionId) return key;
+  }
+  // Fallback: return any stored key for a player whose factionId we recorded
+  // even if they're offline – the key is still valid.
+  return apiKeys.values().next().value ?? null;
+}
+
+export function getApiKeyForPlayer(playerId) {
+  return apiKeys.get(playerId) ?? null;
+}
