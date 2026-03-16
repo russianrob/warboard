@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.49
+// @version      3.0.50
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -4768,8 +4768,10 @@ body.wb-chain-active {
             createSettingsGear();
         }
 
-        // 3b. Create heatmap toggle button
-        createHeatmapButton();
+        // 3b. Create heatmap toggle button (skip on faction/war pages — overlay header has its own)
+        if (!url.includes('factions.php') && !url.includes('war.php')) {
+            createHeatmapButton();
+        }
 
         // 4. Set up keyboard shortcuts
         setupKeyboardShortcuts();
