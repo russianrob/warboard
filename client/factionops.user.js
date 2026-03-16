@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.24
+// @version      3.0.25
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1190,15 +1190,17 @@ body.wb-chain-active {
     .fo-overlay { border-radius: 6px; margin: 4px 0; }
     .fo-header { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
     .fo-col-headers, .fo-row {
-        /* Prior | Target | (Lvl hidden) | BSP | Status | On | Call | Action */
-        grid-template-columns: 40px 1fr 0px 48px 68px 28px 72px 60px;
+        /* Prior | Target | (Lvl hidden) | (BSP hidden) | Status | On | Call | Action */
+        grid-template-columns: 40px 1fr 0px 0px 68px 28px 72px 60px;
         padding: 7px 12px;
         column-gap: 8px;
         font-size: 11px;
     }
-    /* Hide level column on mobile */
+    /* Hide level and BSP columns on mobile */
     .fo-col-headers > :nth-child(3),
-    .fo-row > :nth-child(3) { display: none; }
+    .fo-row > :nth-child(3),
+    .fo-col-headers > :nth-child(4),
+    .fo-row > :nth-child(4) { display: none; }
     .fo-footer { padding: 6px 12px; flex-wrap: wrap; gap: 4px; }
     .fo-footer-stats { gap: 10px; flex-wrap: wrap; }
     .fo-attack-btn { padding: 3px 8px; font-size: 9px; }
