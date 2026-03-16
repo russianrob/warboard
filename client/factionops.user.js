@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      1.1.1
+// @version      1.1.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -662,9 +662,9 @@ body.wb-chain-active {
             log('Loading Socket.IO from CDN...');
 
             if (IS_PDA) {
-                // PDA: Load via direct <script> tag — PDA's webview allows this
+                // PDA: Load from our own server to avoid CDN/CSP issues
                 const script = document.createElement('script');
-                script.src = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
+                script.src = `${CONFIG.SERVER_URL}/socket.io.min.js`;
                 script.onload = () => {
                     if (typeof window.io === 'function') {
                         log('Socket.IO loaded successfully (PDA)');

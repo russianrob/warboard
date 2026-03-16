@@ -68,6 +68,20 @@ app.get("/download/factionops.user.js", (_req, res) => {
   }
 });
 
+// ── Serve Socket.IO client (for PDA and CSP-restricted environments) ───
+app.get("/socket.io.min.js", (_req, res) => {
+  const sioPath = join(__dirname, "node_modules", "socket.io", "client-dist", "socket.io.min.js");
+  try {
+    const script = readFileSync(sioPath, "utf-8");
+    res.setHeader("Content-Type", "application/javascript");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(script);
+  } catch (err) {
+    console.error("[server] Failed to serve Socket.IO client:", err.message);
+    res.status(404).json({ error: "Socket.IO client not found" });
+  }
+});
+
 app.use(routes);
 
 // Health check
