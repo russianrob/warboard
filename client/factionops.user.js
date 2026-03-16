@@ -892,22 +892,43 @@ body.wb-chain-active {
     };
 
     /**
-     * Try to estimate remaining travel time from the status description.
-     * Returns a string like "~2h 10m" or null if unknown.
+     * Estimate when a traveling opponent will be back in Torn and attackable.
+     * - "Returning to Torn from X" → one-way flight time (they're on their way back)
+     * - "Traveling to X" → two-way minimum (outbound + return, not counting time abroad)
+     * - "In X" / abroad → one-way return flight at minimum
+     * Returns a string like "~2h 10m" or null if unknown destination.
      */
     function estimateTravelReturn(description) {
         if (!description) return null;
         const desc = description.toLowerCase();
-        for (const [dest, mins] of Object.entries(TRAVEL_ESTIMATES)) {
-            if (desc.includes(dest)) {
-                // Returning takes the same time; if description says "Returning"
-                // we still use the same estimate. Show as approximate.
-                const h = Math.floor(mins / 60);
-                const m = mins % 60;
-                return h > 0 ? `~${h}h ${m}m` : `~${m}m`;
-            }
+        let dest = null;
+        let mins = 0;
+        for (const [d, m] of Object.entries(TRAVEL_ESTIMATES)) {
+            if (desc.includes(d)) { dest = d; mins = m; break; }
         }
-        return null;
+        if (!dest) return null;
+
+        let estimate;
+        if (desc.includes('returning')) {
+            // Already heading back — one-way flight time
+            estimate = mins;
+        } else if (desc.includes('traveling to')) {
+            // Still outbound — outbound remainder unknown + full return
+            // Show at minimum the return flight
+            estimate = mins;
+            return formatEstimate(estimate) + '+';
+        } else {
+            // "In X" — abroad, needs to fly back
+            estimate = mins;
+            return formatEstimate(estimate) + '+';
+        }
+        return formatEstimate(estimate);
+    }
+
+    function formatEstimate(mins) {
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        return h > 0 ? `~${h}h ${m}m` : `~${m}m`;
     }
 
     // =========================================================================
