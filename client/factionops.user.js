@@ -627,6 +627,38 @@ html.wb-theme-light {
     opacity: 1;
 }
 
+/* ----- Copy faction list button ----- */
+.wb-copy-btn {
+    position: fixed;
+    bottom: 100px;
+    right: 16px;
+    z-index: 999996;
+    background: var(--wb-bg-secondary);
+    border: 1px solid var(--wb-border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: var(--wb-text);
+    font-family: monospace;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s, background 0.2s;
+    display: none;
+}
+.wb-copy-btn:hover {
+    opacity: 1;
+}
+.wb-copy-btn.wb-copying {
+    opacity: 1;
+    pointer-events: none;
+}
+.wb-copy-btn.wb-copy-done {
+    background: var(--wb-accent);
+    border-color: var(--wb-call-green);
+    opacity: 1;
+}
+
 /* ----- BSP / FFS stat display ----- */
 .wb-bsp-cell {
     display: inline-flex;
@@ -976,6 +1008,178 @@ body.wb-chain-active {
         });
 
         return 0;
+    }
+
+    // ── Copy faction list helpers ─────────────────────────────────────────
+
+    /** Read Xanax Viewer localStorage cache for a user. */
+    function getXanaxViewerCache(userId) {
+        try {
+            const raw = localStorage.getItem('xanaxviewer_cache');
+            if (!raw) return null;
+            const cache = JSON.parse(raw);
+            const entry = cache[userId] || cache[String(userId)];
+            return (entry && typeof entry.xantaken !== 'undefined') ? entry.xantaken : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    /** Fetch xanax & boosters from Torn API for a user. */
+    const _personalStatsCache = {};
+    function fetchPersonalStats(userId) {
+        if (_personalStatsCache[userId] !== undefined) {
+            return Promise.resolve(_personalStatsCache[userId]);
+        }
+        const apiKey = CONFIG.API_KEY;
+        if (!apiKey || apiKey === '###PDA-APIKEY###') return Promise.resolve(null);
+
+        return new Promise((resolve) => {
+            const url = `https://api.torn.com/user/${userId}?selections=personalstats&key=${apiKey}&stat=xantaken,boostersused&comment=FactionOps`;
+            httpRequest({
+                method: 'GET',
+                url: url,
+            }).then((data) => {
+                if (!data || data.error) {
+                    _personalStatsCache[userId] = null;
+                    resolve(null);
+                    return;
+                }
+                const ps = data.personalstats || {};
+                _personalStatsCache[userId] = {
+                    xantaken: ps.xantaken ?? null,
+                    boostersused: ps.boostersused ?? null,
+                };
+                resolve(_personalStatsCache[userId]);
+            }).catch(() => {
+                _personalStatsCache[userId] = null;
+                resolve(null);
+            });
+        });
+    }
+
+    /** Get xanax + boosters: Xanax Viewer cache first, then API. */
+    async function getPersonalStats(userId) {
+        const xanCached = getXanaxViewerCache(userId);
+        const apiStats = await fetchPersonalStats(userId);
+        return {
+            xantaken: xanCached ?? apiStats?.xantaken ?? null,
+            boostersused: apiStats?.boostersused ?? null,
+        };
+    }
+
+    /** Get level from the DOM row. */
+    function getMemberLevelFromRow(row) {
+        if (!row) return null;
+        // Try common level selectors
+        const lvlEl = row.querySelector('[class*="level"], .lvl, .member-level, td.level');
+        if (lvlEl) {
+            const m = lvlEl.textContent.match(/(\d+)/);
+            if (m) return parseInt(m[1], 10);
+        }
+        // Try text pattern
+        const pat = row.textContent.match(/(?:Lv|Lvl|Level)\s*(\d+)/i);
+        if (pat) return parseInt(pat[1], 10);
+        return null;
+    }
+
+    /** Format a number for copy output (e.g. 1.23B). */
+    function formatCopyNumber(num) {
+        if (typeof num !== 'number' || isNaN(num)) return 'N/A';
+        if (num < 1e3)  return String(Math.floor(num));
+        if (num < 1e6)  return +(num / 1e3).toFixed(2)  + 'K';
+        if (num < 1e9)  return +(num / 1e6).toFixed(2)  + 'M';
+        if (num < 1e12) return +(num / 1e9).toFixed(2)  + 'B';
+        return +(num / 1e12).toFixed(2) + 'T';
+    }
+
+    /** Build a stats string from BSP prediction or FFS fallback. */
+    async function getStatsString(userId) {
+        const pred = fetchBspPrediction(userId);
+        if (pred && pred.TBS != null) {
+            let tbs = Number(pred.TBS);
+            return `(Stats: ${isFinite(tbs) ? formatCopyNumber(tbs) : 'N/A'})`;
+        }
+        const ffs = await getFfScouterEstimate(userId);
+        if (ffs && ffs.total != null) {
+            const total = Number(ffs.total);
+            const str = ffs.human || (isFinite(total) ? formatCopyNumber(total) : 'N/A');
+            return `(FF: Est ${str})`;
+        }
+        return '(Stats: N/A)';
+    }
+
+    /**
+     * Copy all enemy faction members to clipboard.
+     * Format: Name - (Stats: 1.23B) - Lvl 85 - Xan: 1,234 - Boosters: 567
+     */
+    async function copyFactionList(btn) {
+        const rows = Array.from(document.querySelectorAll('[data-wb-target-id]'));
+        if (rows.length === 0) {
+            showToast('No members found', 'error');
+            return;
+        }
+
+        btn.classList.add('wb-copying');
+        const total = rows.length;
+        btn.textContent = `0/${total}`;
+
+        const lines = [];
+        let processed = 0;
+
+        for (const row of rows) {
+            const targetId = row.dataset.wbTargetId;
+            if (!targetId) continue;
+
+            try {
+                const name = getPlayerNameFromRow(row);
+                const statsStr = await getStatsString(targetId);
+
+                const extras = [];
+                const level = getMemberLevelFromRow(row);
+                if (level != null) extras.push(`Lvl ${level}`);
+
+                const pStats = await getPersonalStats(targetId);
+                if (pStats.xantaken != null) extras.push(`Xan: ${pStats.xantaken.toLocaleString()}`);
+                if (pStats.boostersused != null) extras.push(`Boosters: ${pStats.boostersused.toLocaleString()}`);
+
+                const extraStr = extras.length > 0 ? ` - ${extras.join(' - ')}` : '';
+                lines.push(`${name} - ${statsStr}${extraStr}`);
+            } catch (e) {
+                warn('Copy error for target', targetId, e);
+            }
+
+            processed++;
+            btn.textContent = `${processed}/${total}`;
+            // Yield to UI
+            await new Promise(r => setTimeout(r, 0));
+        }
+
+        if (lines.length > 0) {
+            try {
+                await navigator.clipboard.writeText(lines.join('\n'));
+            } catch (_) {
+                // Fallback
+                const ta = document.createElement('textarea');
+                ta.value = lines.join('\n');
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                ta.remove();
+            }
+            btn.textContent = `\u2705 ${lines.length}`;
+            btn.classList.remove('wb-copying');
+            btn.classList.add('wb-copy-done');
+            showToast(`Copied ${lines.length} members to clipboard`, 'info');
+        } else {
+            btn.textContent = '\u2753';
+            btn.classList.remove('wb-copying');
+        }
+
+        setTimeout(() => {
+            btn.textContent = '\uD83D\uDCCB Copy';
+            btn.classList.remove('wb-copy-done');
+        }, 3000);
     }
 
     function formatEstimate(mins) {
@@ -1612,6 +1816,22 @@ body.wb-chain-active {
             }
             sortMemberList();
         });
+
+        document.body.appendChild(btn);
+    }
+
+    /** Create the Copy faction list button (fixed bottom-right, above BSP sort). */
+    function createCopyButton() {
+        if (document.getElementById('wb-copy-list')) return;
+
+        const btn = document.createElement('button');
+        btn.id = 'wb-copy-list';
+        btn.className = 'wb-copy-btn';
+        btn.textContent = '\uD83D\uDCCB Copy';
+        btn.title = 'Copy enemy faction list with stats, level, xanax & boosters';
+        btn.style.display = 'block';
+
+        btn.addEventListener('click', () => copyFactionList(btn));
 
         document.body.appendChild(btn);
     }
@@ -2582,6 +2802,7 @@ body.wb-chain-active {
     function initWarPage() {
         createChainBar();
         createBspSortButton();
+        createCopyButton();
         startChainTimer();
         setupMutationObserver();
         startStatusTimers();
