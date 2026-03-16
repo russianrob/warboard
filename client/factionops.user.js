@@ -443,6 +443,22 @@ html.wb-theme-light {
 .wb-next-up-item.wb-next-imminent .wb-next-timer {
     color: var(--wb-bonus-warning);
 }
+.wb-next-up-call {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--wb-call-green);
+    background: transparent;
+    color: var(--wb-call-green);
+    cursor: pointer;
+    line-height: 1.2;
+    margin-left: 2px;
+}
+.wb-next-up-call:hover {
+    background: var(--wb-call-green);
+    color: #fff;
+}
 
 /* ----- FactionOps cell container — right-aligned in each row ----- */
 .wb-cell-container {
@@ -2050,22 +2066,69 @@ body.wb-chain-active {
             return;
         }
 
-        // Build the HTML — reuse existing elements when possible for smoothness
-        let html = '<span class="wb-next-up-label">Next Up:</span>';
-        for (const t of top3) {
-            // Resolve name from the DOM row
-            const row = document.querySelector(`[data-wb-target-id="${t.targetId}"]`);
-            const name = row ? getPlayerNameFromRow(row) : `#${t.targetId}`;
-            const imminent = t.until <= 120; // under 2 minutes
-            const cls = imminent ? 'wb-next-up-item wb-next-imminent' : 'wb-next-up-item';
-            const attackUrl = `https://www.torn.com/loader.php?sid=attack&user2ID=${t.targetId}`;
-            html += `<a href="${attackUrl}" class="${cls}" style="text-decoration:none;color:inherit;" title="Attack ${name}">`
-                + `<span>${name}</span>`
-                + `<span class="wb-next-timer">${formatTimer(t.until)}</span>`
-                + `</a>`;
+        // Check if the same targets are already rendered — only update timers
+        const currentIds = Array.from(container.querySelectorAll('[data-nu-id]')).map(el => el.dataset.nuId);
+        const newIds = top3.map(t => t.targetId);
+        const sameSet = currentIds.length === newIds.length && currentIds.every((id, i) => id === newIds[i]);
+
+        if (sameSet) {
+            // Just update timers and imminent class — no DOM rebuild
+            for (const t of top3) {
+                const item = container.querySelector(`[data-nu-id="${t.targetId}"]`);
+                if (!item) continue;
+                const timerSpan = item.querySelector('.wb-next-timer');
+                if (timerSpan) timerSpan.textContent = formatTimer(t.until);
+                const imminent = t.until <= 120;
+                item.classList.toggle('wb-next-imminent', imminent);
+            }
+            return;
         }
 
-        container.innerHTML = html;
+        // Full rebuild — targets changed
+        container.innerHTML = '';
+
+        const label = document.createElement('span');
+        label.className = 'wb-next-up-label';
+        label.textContent = 'Next Up:';
+        container.appendChild(label);
+
+        for (const t of top3) {
+            const row = document.querySelector(`[data-wb-target-id="${t.targetId}"]`);
+            const name = row ? getPlayerNameFromRow(row) : `#${t.targetId}`;
+            const imminent = t.until <= 120;
+
+            const item = document.createElement('span');
+            item.className = imminent ? 'wb-next-up-item wb-next-imminent' : 'wb-next-up-item';
+            item.dataset.nuId = t.targetId;
+
+            // Clickable name → attack link
+            const nameLink = document.createElement('a');
+            nameLink.href = `https://www.torn.com/loader.php?sid=attack&user2ID=${t.targetId}`;
+            nameLink.textContent = name;
+            nameLink.style.cssText = 'text-decoration:none;color:inherit;';
+            nameLink.title = `Attack ${name}`;
+            item.appendChild(nameLink);
+
+            // Timer
+            const timerSpan = document.createElement('span');
+            timerSpan.className = 'wb-next-timer';
+            timerSpan.textContent = formatTimer(t.until);
+            item.appendChild(timerSpan);
+
+            // Call button
+            const callBtn = document.createElement('button');
+            callBtn.className = 'wb-next-up-call';
+            callBtn.textContent = 'Call';
+            callBtn.title = `Call ${name}`;
+            callBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                emitCallTarget(t.targetId);
+            });
+            item.appendChild(callBtn);
+
+            container.appendChild(item);
+        }
     }
 
     // =========================================================================
