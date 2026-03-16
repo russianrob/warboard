@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.48
+// @version      3.0.49
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -897,6 +897,21 @@ body.wb-chain-active {
     width: 6px; height: 6px;
     border-radius: 50%; background: #00b894;
 }
+
+/* ── Chain info in header ── */
+.fo-chain-info {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; font-weight: 500;
+    padding: 3px 10px; border-radius: 20px;
+    background: rgba(0,184,148,0.1);
+    border: 1px solid rgba(0,184,148,0.2);
+    color: var(--wb-text);
+}
+.fo-chain-info .fo-chain-label { opacity: 0.6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+.fo-chain-info .fo-chain-count { color: #00b894; font-weight: 700; }
+.fo-chain-info .fo-chain-timeout { color: #fdcb6e; font-weight: 600; }
+.fo-chain-info .fo-chain-timeout.danger { color: var(--wb-hospital-red); }
+.fo-chain-info .fo-chain-bonus { color: var(--wb-bonus-warning); font-weight: 700; font-size: 10px; }
 
 /* ── Settings button in header ── */
 .fo-settings-btn {
@@ -2441,52 +2456,58 @@ body.wb-chain-active {
 
     /** Update chain bar contents and styling. */
     function updateChainBar() {
-        const bar = state.ui.chainBar;
-        if (!bar || bar.style.display === 'none') return;
-
-        const countEl = document.getElementById('wb-chain-count');
-        const timeoutEl = document.getElementById('wb-chain-timeout');
-        const bonusBadge = document.getElementById('wb-chain-bonus-badge');
-
-        if (countEl) {
-            countEl.textContent = `${state.chain.current}/${state.chain.max || '??'}`;
+        // Compute chain display values
+        const countText = `${state.chain.current || 0}/${state.chain.max || '??'}`;
+        let timeoutText = '--:--';
+        if (state.chain.timeout > 0) {
+            timeoutText = formatTimer(state.chain.timeout);
+        } else if (state.chain.cooldown > 0) {
+            timeoutText = `CD: ${formatTimer(state.chain.cooldown)}`;
         }
-
-        if (timeoutEl) {
-            if (state.chain.timeout > 0) {
-                timeoutEl.textContent = formatTimer(state.chain.timeout);
-            } else if (state.chain.cooldown > 0) {
-                timeoutEl.textContent = `CD: ${formatTimer(state.chain.cooldown)}`;
-            } else {
-                timeoutEl.textContent = '--:--';
-            }
-        }
-
-        // Bonus milestone logic
         const next = nextBonusMilestone(state.chain.current + 1);
         const hitsToBonus = next ? next - state.chain.current : null;
+        let bonusText = '';
+        let showBonus = false;
+        if (hitsToBonus !== null && hitsToBonus <= 10) {
+            showBonus = true;
+            bonusText = hitsToBonus <= 0 ? `BONUS ${next}!` : `BONUS in ${hitsToBonus}`;
+        }
+        const isDanger = state.chain.timeout > 0 && state.chain.timeout <= 30;
 
-        if (bonusBadge) {
-            if (hitsToBonus !== null && hitsToBonus <= 10) {
-                bonusBadge.style.display = 'inline';
-                if (hitsToBonus <= 0) {
-                    bonusBadge.textContent = `BONUS ${next}!`;
-                } else {
-                    bonusBadge.textContent = `BONUS in ${hitsToBonus}`;
-                }
+        // Update floating chain bar (if visible)
+        const bar = state.ui.chainBar;
+        if (bar && bar.style.display !== 'none') {
+            const countEl = document.getElementById('wb-chain-count');
+            const timeoutEl = document.getElementById('wb-chain-timeout');
+            const bonusBadge = document.getElementById('wb-chain-bonus-badge');
+            if (countEl) countEl.textContent = countText;
+            if (timeoutEl) timeoutEl.textContent = timeoutText;
+            if (bonusBadge) {
+                bonusBadge.style.display = showBonus ? 'inline' : 'none';
+                if (showBonus) bonusBadge.textContent = bonusText;
+            }
+            bar.classList.remove('wb-chain-safe', 'wb-chain-approaching', 'wb-chain-imminent');
+            if (hitsToBonus !== null && hitsToBonus <= 3) {
+                bar.classList.add('wb-chain-imminent');
+            } else if (hitsToBonus !== null && hitsToBonus <= 10) {
+                bar.classList.add('wb-chain-approaching');
             } else {
-                bonusBadge.style.display = 'none';
+                bar.classList.add('wb-chain-safe');
             }
         }
 
-        // Bar colour class
-        bar.classList.remove('wb-chain-safe', 'wb-chain-approaching', 'wb-chain-imminent');
-        if (hitsToBonus !== null && hitsToBonus <= 3) {
-            bar.classList.add('wb-chain-imminent');
-        } else if (hitsToBonus !== null && hitsToBonus <= 10) {
-            bar.classList.add('wb-chain-approaching');
-        } else {
-            bar.classList.add('wb-chain-safe');
+        // Update overlay header chain info (if visible)
+        const foCount = document.getElementById('fo-chain-count');
+        const foTimeout = document.getElementById('fo-chain-timeout');
+        const foBonus = document.getElementById('fo-chain-bonus');
+        if (foCount) foCount.textContent = countText;
+        if (foTimeout) {
+            foTimeout.textContent = timeoutText;
+            foTimeout.classList.toggle('danger', isDanger);
+        }
+        if (foBonus) {
+            foBonus.style.display = showBonus ? 'inline' : 'none';
+            if (showBonus) foBonus.textContent = bonusText;
         }
     }
 
@@ -3255,6 +3276,12 @@ body.wb-chain-active {
                     <strong id="fo-enemy-name">${escapeHtml(state.enemyFactionName || state.enemyFactionId || 'Enemy Faction')}</strong>
                 </div>
                 <div class="fo-header-right">
+                    <div class="fo-chain-info">
+                        <span class="fo-chain-label">Chain</span>
+                        <span class="fo-chain-count" id="fo-chain-count">${state.chain.current || 0}/${state.chain.max || '??'}</span>
+                        <span class="fo-chain-timeout" id="fo-chain-timeout">${state.chain.timeout > 0 ? formatTimer(state.chain.timeout) : '--:--'}</span>
+                        <span class="fo-chain-bonus" id="fo-chain-bonus" style="display:none;"></span>
+                    </div>
                     <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.onlinePlayers.length} online</span></div>
                     <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
