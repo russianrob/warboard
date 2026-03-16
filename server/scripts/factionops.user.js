@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.51
+// @version      3.0.52
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -974,30 +974,25 @@ body.wb-chain-active {
     background: rgba(0,184,148,0.15);
 }
 
-/* ── Activate FactionOps button wrapper ── */
-.fo-activate-wrap {
-    display: block; text-align: center;
-    padding: 8px 0; margin: 0;
-    background: transparent !important;
-    border: none !important;
-    height: auto !important;
-}
-/* ── Activate FactionOps button ── */
+/* ── Activate FactionOps button (full-width bar, matches PDA style) ── */
 .fo-activate-btn {
-    display: inline-flex; align-items: center; gap: 6px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; max-width: 500px;
+    margin: 10px auto; padding: 10px 16px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12px; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.08em;
-    padding: 8px 20px; border-radius: 20px;
-    border: 1.5px solid rgba(225,112,85,0.6);
-    background: rgba(225,112,85,0.15); color: #e17055;
+    font-size: 13px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    border-radius: 8px;
+    border: 1.5px solid rgba(225,112,85,0.5);
+    background: rgba(225,112,85,0.1); color: #e17055;
     cursor: pointer; transition: all 0.2s ease;
     white-space: nowrap;
+    box-sizing: border-box;
 }
 .fo-activate-btn:hover {
-    background: rgba(225,112,85,0.3);
+    background: rgba(225,112,85,0.25);
     border-color: rgba(225,112,85,0.8);
-    box-shadow: 0 0 12px rgba(225,112,85,0.25);
+    box-shadow: 0 0 12px rgba(225,112,85,0.2);
 }
 .fo-activate-btn .fo-activate-icon {
     font-size: 14px; line-height: 1;
@@ -3212,28 +3207,22 @@ body.wb-chain-active {
 
     /** Show an "Activate FactionOps" button on any faction/war page. */
     function showActivateButton() {
-        if (document.getElementById('fo-activate-wrap')) return;
-
-        const wrap = document.createElement('div');
-        wrap.id = 'fo-activate-wrap';
-        wrap.className = 'fo-activate-wrap';
+        if (document.getElementById('fo-activate-btn')) return;
 
         const btn = document.createElement('button');
         btn.id = 'fo-activate-btn';
         btn.className = 'fo-activate-btn';
         btn.innerHTML = '<span class="fo-activate-icon">&#x2694;</span> Activate FactionOps';
         btn.addEventListener('click', () => {
-            wrap.remove();
+            btn.remove();
             initWarOverlay();
         });
-
-        wrap.appendChild(btn);
 
         // Insert near the top of the page content
         const mainContent = document.getElementById('mainContainer')
             || document.querySelector('.content-wrapper')
             || document.body;
-        mainContent.prepend(wrap);
+        mainContent.prepend(btn);
     }
 
     function initWarOverlay() {
@@ -4865,8 +4854,8 @@ body.wb-chain-active {
         }
 
         // Remove FactionOps activate button and war overlay, restore hidden Torn elements
-        const foWrap = document.getElementById('fo-activate-wrap');
-        if (foWrap) foWrap.remove();
+        const foBtn = document.getElementById('fo-activate-btn');
+        if (foBtn) foBtn.remove();
         const foOverlay = document.getElementById('fo-overlay');
         if (foOverlay) foOverlay.remove();
 
