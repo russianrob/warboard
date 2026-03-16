@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      2.0.1
+// @version      2.0.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       FactionOps
 // @license      MIT
@@ -710,24 +710,37 @@ body.wb-chain-active {
 
     /**
      * GET with auth header.
-     * PDA: uses fetch() because PDA_httpGet doesn't support custom headers.
-     * Desktop: uses GM_xmlhttpRequest for cross-origin support.
+     * PDA: passes token as query parameter (PDA_httpGet/fetch can't set
+     *      cross-origin auth headers reliably).
+     * Desktop: uses GM_xmlhttpRequest with Authorization header.
      */
     function getAction(endpoint) {
         if (!state.jwtToken) return Promise.reject(new Error('Not authenticated'));
-        const url = `${CONFIG.SERVER_URL}${endpoint}`;
 
         if (IS_PDA) {
-            return fetch(url, {
-                method: 'GET',
-                headers: { 'Authorization': `Bearer ${state.jwtToken}` },
-            }).then(async (r) => {
+            // Append token as query param — server accepts it
+            const sep = endpoint.includes('?') ? '&' : '?';
+            const url = `${CONFIG.SERVER_URL}${endpoint}${sep}token=${encodeURIComponent(state.jwtToken)}`;
+
+            // Try PDA_httpGet first (best compatibility), fall back to fetch
+            if (typeof PDA_httpGet === 'function') {
+                return PDA_httpGet(url).then(r => {
+                    const text = typeof r === 'string' ? r : (r && r.responseText) || '';
+                    const data = safeParse(text);
+                    if (!data) throw new Error('Invalid JSON response');
+                    if (data.error) throw new Error(data.error);
+                    return data;
+                });
+            }
+
+            return fetch(url).then(async (r) => {
                 const data = await r.json().catch(() => null);
                 if (r.ok) return data;
                 throw new Error((data && data.error) || `HTTP ${r.status}`);
             });
         }
 
+        const url = `${CONFIG.SERVER_URL}${endpoint}`;
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: 'GET',

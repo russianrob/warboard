@@ -130,8 +130,15 @@ router.get("/api/faction/:factionId/chain", requireAuth, async (req, res) => {
 // ── GET /api/poll ────────────────────────────────────────────────────────
 // Returns full war state for the authenticated player's faction.
 // The client polls this endpoint at 1-2s intervals instead of using Socket.IO.
+// Accepts token via Authorization header OR ?token= query param (for PDA).
 
-router.get("/api/poll", requireAuth, (req, res) => {
+router.get("/api/poll", (req, res, next) => {
+  // Allow token in query string for PDA (PDA_httpGet can't set headers)
+  if (!req.headers.authorization && req.query.token) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
+  next();
+}, requireAuth, (req, res) => {
   const { playerId, playerName, factionId } = req.user;
   const { warId, enemyFactionId } = req.query;
 
