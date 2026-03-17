@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.5
+// @version      3.5.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3361,8 +3361,8 @@ body.wb-chain-active {
             return a.timer - b.timer;
         });
 
-        // Build/update rows in sorted order
-        const fragment = document.createDocumentFragment();
+        // Build/update rows in sorted order — reorder without detaching
+        let prevNode = null;
         for (const item of sorted) {
             let row = list.querySelector(`[data-fo-id="${item.targetId}"]`);
             if (row) {
@@ -3372,9 +3372,13 @@ body.wb-chain-active {
                 // Create new row
                 row = renderOverlayRow(item.targetId);
             }
-            fragment.appendChild(row);
+            // Only move the node if it's not already in the right position
+            const expectedNext = prevNode ? prevNode.nextSibling : list.firstChild;
+            if (row !== expectedNext) {
+                list.insertBefore(row, expectedNext);
+            }
+            prevNode = row;
         }
-        list.appendChild(fragment);
 
         // Update footer stats
         updateOverlayFooter();
@@ -3893,11 +3897,15 @@ body.wb-chain-active {
                 item.row.style.order = String(index);
             });
         } else {
-            // Physically re-order DOM nodes. We create a fragment and re-append.
-            // This triggers the CSS transition on .wb-sortable-row.
-            const fragment = document.createDocumentFragment();
-            sorted.forEach((item) => fragment.appendChild(item.row));
-            parent.appendChild(fragment);
+            // Physically re-order DOM nodes in-place (no detach/reattach flicker).
+            let prev = null;
+            for (const item of sorted) {
+                const expected = prev ? prev.nextSibling : parent.firstChild;
+                if (item.row !== expected) {
+                    parent.insertBefore(item.row, expected);
+                }
+                prev = item.row;
+            }
         }
     }
 
