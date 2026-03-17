@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.7.5
+// @version      3.7.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.7.6  - Fix: chain timer flicker — monotonic guard rejects stale cached timeouts unless chain count changes
 // v3.7.5  - Collapse unattackable members (traveling/abroad) into expandable section; hide federal/fallen
 // v3.7.4  - Fix: traveling/abroad members now display correctly with Travel status
 // v3.7.3  - Perf: reduce client chain poll to 30s (fixes scroll lag on PDA)
@@ -98,7 +99,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.7.5',
+        VERSION: '3.7.6',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2668,8 +2669,23 @@ body.wb-chain-active {
     // timeout from elapsed wall-clock time so the countdown never jumps.
     let chainTimeoutAnchor = 0;    // timeout value when last set (seconds)
     let chainTimeoutAnchorAt = 0;  // Date.now() when last set
+    let lastChainCurrent = -1;     // track chain count for monotonic guard
 
     function setChainTimeout(value) {
+        // Monotonic guard: chain timers only count DOWN, so reject values
+        // that are HIGHER than our current countdown — they come from stale
+        // cached API responses. Allow higher values only when chain count
+        // changed (a new hit legitimately resets the timer).
+        const chainCountChanged = state.chain.current !== lastChainCurrent;
+        if (!chainCountChanged && chainTimeoutAnchorAt > 0 && chainTimeoutAnchor > 0) {
+            const elapsed = (Date.now() - chainTimeoutAnchorAt) / 1000;
+            const currentCountdown = Math.max(0, chainTimeoutAnchor - elapsed);
+            // Only accept if new value is at or below current countdown (+2s tolerance)
+            if (value > currentCountdown + 2) {
+                return; // stale/cached — ignore
+            }
+        }
+        lastChainCurrent = state.chain.current;
         state.chain.timeout = value;
         chainTimeoutAnchor = value;
         chainTimeoutAnchorAt = Date.now();
