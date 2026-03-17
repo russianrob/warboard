@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.8.0
+// @version      3.8.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.8.1  - Sort: online targets float above idle/offline within each tier
 // v3.8.0  - Instant med-out detection: DOM MutationObserver watches Torn's member rows for status changes, forwards to server immediately
 // v3.7.9  - Fix: server converted Torn API Unix timestamps to seconds remaining (was showing raw epoch values)
 // v3.7.8  - Timers show days+hours for long durations (e.g. Xanax OD: "20530d 6h" instead of "492714h 36m")
@@ -103,7 +104,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.8.0',
+        VERSION: '3.8.1',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -4175,8 +4176,10 @@ body.wb-chain-active {
     /**
      * Sort priority for a target. Lower number = higher in the list.
      *  -1: Called by ME (pinned to top)
-     *   0: High priority (uncalled)
-     *   1: OK / idle / offline (uncalled)
+     *   0: High priority + online (uncalled)
+     *   0.5: High priority + offline/idle (uncalled)
+     *   1: OK + online
+     *   1.5: OK + idle/offline
      *   2: Hospital
      *   3: Traveling
      *   4: Jail
@@ -4189,18 +4192,19 @@ body.wb-chain-active {
         const isCalled = !!callData;
         const prio = state.priorities[targetId];
         const isHighPriority = prio && prio.level === 'high';
+        const isOnline = s && s.activity === 'online';
 
         // Called by ME → pin to top
         if (isCalled && callData.calledBy && String(callData.calledBy.id) === state.myPlayerId) return -1;
         // Called by others → sink to bottom
         if (isCalled) return 5;
 
-        // High priority + OK status floats above everything
-        if (isHighPriority && status === 'ok') return 0;
+        // High priority + OK status floats above everything (online first)
+        if (isHighPriority && status === 'ok') return isOnline ? 0 : 0.5;
 
         switch (status) {
             case 'ok':
-                return 1;
+                return isOnline ? 1 : 1.5;
             case 'hospital':
                 return 2;
             case 'traveling':
