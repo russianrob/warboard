@@ -20,15 +20,19 @@ export async function fetchFactionMembers(factionId, apiKey) {
     throw new Error(`Torn API error: ${data.error.error} (code ${data.error.code})`);
   }
 
+  const now = Math.floor(Date.now() / 1000);
   const statuses = {};
   if (data.members) {
     for (const [memberId, member] of Object.entries(data.members)) {
+      // Torn API returns `until` as a Unix timestamp; convert to seconds remaining
+      const untilTs = member.status?.until ?? 0;
+      const untilRemaining = untilTs > 0 ? Math.max(0, untilTs - now) : 0;
       statuses[memberId] = {
         name: member.name,
         level: member.level,
         status: (member.status?.state ?? "Okay").toLowerCase(),
         description: member.status?.description ?? "",
-        until: member.status?.until ?? 0,
+        until: untilRemaining,
         lastAction: member.last_action?.relative ?? "Unknown",
         online: member.last_action?.status ?? "Offline",
       };

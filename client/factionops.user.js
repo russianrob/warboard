@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.7.8
+// @version      3.7.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.7.9  - Fix: server converted Torn API Unix timestamps to seconds remaining (was showing raw epoch values)
 // v3.7.8  - Timers show days+hours for long durations (e.g. Xanax OD: "20530d 6h" instead of "492714h 36m")
 // v3.7.7  - Sort: my calls pinned to top, others' calls to bottom; Call button blue, Mine green, others red
 // v3.7.6  - Fix: chain timer flicker — monotonic guard rejects stale cached timeouts unless chain count changes
@@ -101,7 +102,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.7.8',
+        VERSION: '3.7.9',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
