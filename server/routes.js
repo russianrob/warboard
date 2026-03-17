@@ -5,7 +5,7 @@
 import { Router } from "express";
 import { verifyTornApiKey, issueToken, requireAuth } from "./auth.js";
 import * as store from "./store.js";
-import { fetchFactionMembers, fetchFactionChain } from "./torn-api.js";
+import { fetchFactionMembers, fetchFactionChain, fetchRankedWar } from "./torn-api.js";
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { startChainMonitor } from "./chain-monitor.js";
 
@@ -21,6 +21,10 @@ const callTimers = new Map(); // `${warId}:${targetId}` → timeoutId
 
 /** Track last refresh timestamp per warId. */
 const refreshCooldowns = new Map(); // warId → timestamp
+
+/** Track last ranked war detection timestamp per warId. */
+const rankedWarDetectCooldowns = new Map(); // warId → timestamp
+const RANKED_WAR_DETECT_COOLDOWN_MS = 60000; // only check once per minute
 
 function clearExistingTimer(timerKey) {
   if (callTimers.has(timerKey)) {
@@ -166,7 +170,7 @@ router.get("/api/poll", (req, res, next) => {
     req.headers.authorization = `Bearer ${req.query.token}`;
   }
   next();
-}, requireAuth, (req, res) => {
+}, requireAuth, async (req, res) => {
   const { playerId, playerName, factionId } = req.user;
   const { warId, enemyFactionId } = req.query;
 
@@ -180,6 +184,38 @@ router.get("/api/poll", (req, res, next) => {
   // Faction gate — if this war already belongs to another faction, reject
   if (war.factionId !== factionId) {
     return res.status(403).json({ error: "You are not a member of this war's faction" });
+  }
+
+  // Auto-detect ranked war enemy if not set
+  if (!war.enemyFactionId) {
+    const lastDetect = rankedWarDetectCooldowns.get(warId) || 0;
+    if (Date.now() - lastDetect > RANKED_WAR_DETECT_COOLDOWN_MS) {
+      rankedWarDetectCooldowns.set(warId, Date.now());
+      const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
+      if (apiKey) {
+        try {
+          const rw = await fetchRankedWar(factionId, apiKey);
+          if (rw && rw.enemyFactionId) {
+            war.enemyFactionId = rw.enemyFactionId;
+            war.enemyFactionName = rw.enemyFactionName;
+            console.log(`[api] Auto-detected ranked war: enemy faction ${rw.enemyFactionId} (${rw.enemyFactionName})`);
+
+            // Also fetch enemy members immediately
+            try {
+              const freshStatuses = await fetchFactionMembers(rw.enemyFactionId, apiKey);
+              war.enemyStatuses = freshStatuses;
+              console.log(`[api] Fetched ${Object.keys(freshStatuses).length} enemy members`);
+            } catch (err) {
+              console.error('[api] Failed to fetch enemy members:', err.message);
+            }
+
+            store.saveState();
+          }
+        } catch (err) {
+          console.error('[api] Ranked war detection failed:', err.message);
+        }
+      }
+    }
   }
 
   // Ensure chain monitor is running for this war (idempotent — no-op if already started)
@@ -197,6 +233,7 @@ router.get("/api/poll", (req, res, next) => {
     warId: war.warId,
     factionId: war.factionId,
     enemyFactionId: war.enemyFactionId,
+    enemyFactionName: war.enemyFactionName || null,
     calls: war.calls,
     priorities: war.priorities,
     enemyStatuses: war.enemyStatuses,

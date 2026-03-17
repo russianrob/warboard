@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.6.3
+// @version      3.6.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.4  - Auto-detect ranked war opponent via Torn API (no manual setup needed)
 // v3.6.3  - Fix: chain timer no longer pauses when leaving/re-entering FactionOps overlay
 // v3.6.2  - Chain timer syncs instantly from Torn's DOM (no more delay from server polling)
 // v3.6.1  - Chain poll interval 10s (was 30s), drift threshold 5s for tighter sync
@@ -86,7 +87,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.6.3',
+        VERSION: '3.6.4',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1472,6 +1473,7 @@ body.wb-chain-active {
         myFactionName: null,
         myFactionPosition: null,
         enemyFactionId: null,
+        enemyFactionName: null,
         onlinePlayers: [],
 
         // Map of targetId -> { calledBy: { id, name }, calledAt: timestamp }
@@ -1908,6 +1910,12 @@ body.wb-chain-active {
             // Store enemyFactionId from server if we didn't have it
             if (data.enemyFactionId && !state.enemyFactionId) {
                 state.enemyFactionId = data.enemyFactionId;
+            }
+            if (data.enemyFactionName) {
+                state.enemyFactionName = data.enemyFactionName;
+                // Update the header UI
+                const enemyEl = document.getElementById('fo-enemy-name');
+                if (enemyEl) enemyEl.textContent = data.enemyFactionName;
             }
 
             // Faction key status from server
@@ -4203,6 +4211,26 @@ body.wb-chain-active {
             updateChainBar();
             // Forward chain data to server so all faction members see it instantly
             forwardChainToServer(state.chain);
+        }
+
+        // Ranked war data — extract enemy faction
+        if (data.rankedwars && typeof data.rankedwars === 'object') {
+            for (const [wid, warData] of Object.entries(data.rankedwars)) {
+                const factions = warData.factions;
+                if (!factions || typeof factions !== 'object') continue;
+                const fids = Object.keys(factions);
+                if (fids.length !== 2) continue;
+                const myFid = state.myFactionId;
+                if (!myFid) continue;
+                const enemyFid = fids.find(f => String(f) !== String(myFid));
+                if (enemyFid && !state.enemyFactionId) {
+                    state.enemyFactionId = enemyFid;
+                    state.enemyFactionName = factions[enemyFid]?.name || null;
+                    log('Intercepted ranked war — enemy faction:', enemyFid, state.enemyFactionName);
+                    const enemyEl = document.getElementById('fo-enemy-name');
+                    if (enemyEl && state.enemyFactionName) enemyEl.textContent = state.enemyFactionName;
+                }
+            }
         }
 
         // Attack result
