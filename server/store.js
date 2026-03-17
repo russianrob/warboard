@@ -11,6 +11,7 @@ import path from "node:path";
 const DATA_DIR = process.env.DATA_DIR || "./data";
 const WARS_FILE = path.join(DATA_DIR, "wars.json");
 const FACTION_KEYS_FILE = path.join(DATA_DIR, "faction-keys.json");
+const PLAYER_KEYS_FILE = path.join(DATA_DIR, "player-keys.json");
 
 // ── In-memory maps ──────────────────────────────────────────────────────
 
@@ -151,6 +152,7 @@ export function getViewersForWar(warId) {
 
 export function storeApiKey(playerId, apiKey) {
   apiKeys.set(playerId, apiKey);
+  savePlayerKeys();
 }
 
 /** Get any available API key for a faction (picks the first one found). */
@@ -170,11 +172,40 @@ export function getApiKeyForPlayer(playerId) {
 
 export function removeApiKey(playerId) {
   apiKeys.delete(playerId);
+  savePlayerKeys();
 }
 
 /** Returns all stored player API keys as [playerId, apiKey] pairs. */
 export function getAllApiKeys() {
   return [...apiKeys.entries()];
+}
+
+/** Load player API keys from disk (called once at startup). */
+export function loadPlayerKeys() {
+  ensureDataDir();
+  if (!fs.existsSync(PLAYER_KEYS_FILE)) return;
+
+  try {
+    const raw = fs.readFileSync(PLAYER_KEYS_FILE, "utf-8");
+    const data = JSON.parse(raw);
+    for (const [playerId, key] of Object.entries(data)) {
+      apiKeys.set(playerId, key);
+    }
+    console.log(`[store] Loaded ${apiKeys.size} player API key(s) from disk`);
+  } catch (err) {
+    console.error("[store] Failed to load player keys:", err.message);
+  }
+}
+
+/** Persist player API keys to disk. */
+function savePlayerKeys() {
+  ensureDataDir();
+  try {
+    const obj = Object.fromEntries(apiKeys);
+    fs.writeFileSync(PLAYER_KEYS_FILE, JSON.stringify(obj, null, 2));
+  } catch (err) {
+    console.error("[store] Failed to persist player keys:", err.message);
+  }
 }
 
 // ── Faction API key storage ──────────────────────────────────────────────

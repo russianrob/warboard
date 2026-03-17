@@ -195,6 +195,7 @@ io.on("connection", (socket) => {
 
 store.loadState();
 store.loadFactionKeys();
+store.loadPlayerKeys();
 loadHeatmaps();
 
 // Resume chain monitors and war status monitors for any persisted wars with enemy factions
