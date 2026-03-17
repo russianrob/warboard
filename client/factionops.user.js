@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.6.7
+// @version      3.6.8
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.8  - Fix: chain timer no longer jumps (DOM-anchored wall-clock countdown)
 // v3.6.7  - Fix: stat numbers no longer cut off on mobile (tighter grid columns)
 // v3.6.6  - Activate button: restore original red/orange color
 // v3.6.5  - Activate button: smaller and left-aligned
@@ -90,7 +91,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.6.7',
+        VERSION: '3.6.8',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1868,16 +1869,15 @@ body.wb-chain-active {
                 // Always update hit count and max
                 state.chain.current = data.chainData.current ?? state.chain.current;
                 state.chain.max = data.chainData.max ?? state.chain.max;
-                // Timeout: only accept server value when chain count changes,
-                // local timer has expired, or server value differs by >5s
-                // (corrects drift without causing visible jitter)
+                // Timeout: only accept server value if DOM/intercepted-API
+                // reading is NOT active (DOM is the authoritative source).
                 const serverTimeout = data.chainData.timeout ?? 0;
                 const localTimeout = state.chain.timeout;
                 const drift = Math.abs(serverTimeout - localTimeout);
-                if (chainChanged || localTimeout <= 0 || drift > 5) {
+                if (!chainDomActive && (chainChanged || localTimeout <= 0 || drift > 5)) {
                     state.chain.timeout = serverTimeout;
-                    chainTimeoutSetAt = Date.now();
-                    chainTimeoutSetVal = serverTimeout;
+                    chainDomTimeout = serverTimeout;
+                    chainDomReadAt = Date.now();
                 }
                 // Cooldown always from server (not locally counted)
                 state.chain.cooldown = data.chainData.cooldown ?? 0;
@@ -2622,9 +2622,12 @@ body.wb-chain-active {
 
     // Client-side countdown for chain timeout/cooldown
     let chainTimerRAF = null;
-    // Wall-clock anchors — immune to rAF pausing when tab/overlay is hidden
-    let chainTimeoutSetAt = 0;   // Date.now() when timeout was last set
-    let chainTimeoutSetVal = 0;  // timeout value (seconds) at that moment
+    // DOM-anchored wall-clock timer — the intercepted API (Torn page) is the
+    // single source of truth for timeout; tick() derives from wall-clock elapsed.
+    let chainDomTimeout = 0;      // last timeout value read from intercepted API (seconds)
+    let chainDomReadAt = 0;       // Date.now() when we last read from intercepted API
+    let chainDomActive = false;   // true once we've received at least one intercepted chain update
+    // Cooldown wall-clock anchors (cooldown only comes from server, no conflict)
     let chainCooldownSetAt = 0;
     let chainCooldownSetVal = 0;
 
@@ -2632,11 +2635,12 @@ body.wb-chain-active {
         if (chainTimerRAF) return; // already running
 
         function tick() {
-            // Use wall-clock time so the countdown stays accurate even when
-            // requestAnimationFrame is paused (tab hidden / overlay closed).
-            if (chainTimeoutSetAt > 0 && chainTimeoutSetVal > 0) {
-                const elapsed = (Date.now() - chainTimeoutSetAt) / 1000;
-                state.chain.timeout = Math.max(0, chainTimeoutSetVal - elapsed);
+            // Derive timeout from wall-clock since last DOM/API read — never
+            // decrement state.chain.timeout directly (prevents jump when
+            // multiple sources set different values).
+            if (chainDomActive && chainDomReadAt > 0) {
+                const elapsed = (Date.now() - chainDomReadAt) / 1000;
+                state.chain.timeout = Math.max(0, chainDomTimeout - elapsed);
             }
             // Chain break sound alert
             if (CONFIG.CHAIN_ALERT && state.chain.timeout > 0 && state.chain.timeout <= CONFIG.CHAIN_ALERT_THRESHOLD && !state.chainAlertFired) {
@@ -2658,12 +2662,10 @@ body.wb-chain-active {
         chainTimerRAF = requestAnimationFrame(tick);
     }
 
-    // Re-sync chain timer immediately when the tab becomes visible again,
-    // so the user never sees a stale value after switching back.
+    // Re-sync chain timer immediately when the tab becomes visible again.
+    // Wall-clock approach already gives the correct value; just force a repaint.
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
-            // Wall-clock tick already computes the correct remaining time,
-            // but force a UI refresh right now so it appears instant.
             updateChainBar();
         }
     });
@@ -4196,14 +4198,19 @@ body.wb-chain-active {
             updateNextUp();
         }
 
-        // Chain data
+        // Chain data — intercepted API is the authoritative source for timeout
         if (data.chain) {
             const chain = data.chain;
             state.chain.current = chain.current || 0;
             state.chain.max = chain.max || 0;
-            state.chain.timeout = chain.timeout || 0;
-            chainTimeoutSetAt = Date.now();
-            chainTimeoutSetVal = state.chain.timeout;
+            // Anchor timeout to wall-clock so tick() can derive smoothly
+            chainDomTimeout = chain.timeout || 0;
+            chainDomReadAt = Date.now();
+            chainDomActive = true;
+            // Reset DOM active flag when chain ends
+            if (state.chain.current === 0) {
+                chainDomActive = false;
+            }
             state.chain.cooldown = chain.cooldown || 0;
             chainCooldownSetAt = Date.now();
             chainCooldownSetVal = state.chain.cooldown;
@@ -4497,14 +4504,19 @@ body.wb-chain-active {
                         if (msg.priorities) state.priorities = { ...state.priorities, ...msg.priorities };
                         if (msg.statuses) state.statuses = { ...state.statuses, ...msg.statuses };
                         if (msg.chain) {
-                            state.chain = { ...state.chain, ...msg.chain };
-                            if (msg.chain.timeout != null) {
-                                chainTimeoutSetAt = Date.now();
-                                chainTimeoutSetVal = state.chain.timeout;
+                            // Update count/max from other tabs, but skip
+                            // timeout when DOM/intercepted-API is active
+                            const { timeout, cooldown, ...rest } = msg.chain;
+                            Object.assign(state.chain, rest);
+                            if (timeout != null && !chainDomActive) {
+                                state.chain.timeout = timeout;
+                                chainDomTimeout = timeout;
+                                chainDomReadAt = Date.now();
                             }
-                            if (msg.chain.cooldown != null) {
+                            if (cooldown != null) {
+                                state.chain.cooldown = cooldown;
                                 chainCooldownSetAt = Date.now();
-                                chainCooldownSetVal = state.chain.cooldown;
+                                chainCooldownSetVal = cooldown;
                             }
                         }
                         refreshAllRows();
