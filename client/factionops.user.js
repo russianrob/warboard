@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.7.7
+// @version      3.7.8
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.7.8  - Timers show days+hours for long durations (e.g. Xanax OD: "20530d 6h" instead of "492714h 36m")
 // v3.7.7  - Sort: my calls pinned to top, others' calls to bottom; Call button blue, Mine green, others red
 // v3.7.6  - Fix: chain timer flicker — monotonic guard rejects stale cached timeouts unless chain count changes
 // v3.7.5  - Collapse unattackable members (traveling/abroad) into expandable section; hide federal/fallen
@@ -100,7 +101,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.7.7',
+        VERSION: '3.7.8',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1583,12 +1584,14 @@ body.wb-chain-active {
         return 'ok';
     }
 
-    /** Format seconds into "Xm Ys" or "Xh Ym". */
+    /** Format seconds into compact timer: "Xd Yh", "Xh Ym", or "Xm Ys". */
     function formatTimer(seconds) {
         if (seconds <= 0) return '0s';
-        const h = Math.floor(seconds / 3600);
+        const d = Math.floor(seconds / 86400);
+        const h = Math.floor((seconds % 86400) / 3600);
         const m = Math.floor((seconds % 3600) / 60);
         const s = Math.floor(seconds % 60);
+        if (d > 0) return `${d}d ${h}h`;
         if (h > 0) return `${h}h ${m}m`;
         if (m > 0) return `${m}m ${s < 10 ? '0' : ''}${s}s`;
         return `${s}s`;
