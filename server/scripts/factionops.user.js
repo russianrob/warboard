@@ -1106,6 +1106,7 @@ body.wb-chain-active {
     font-weight: 600; font-size: 12.5px; color: var(--wb-text);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.fo-name > div, .fo-next-up-item a.user.name > div { display: none; }
 
 .fo-player-name .fo-pid { font-size: 10px; color: #636e72; font-weight: 400; }
 .fo-sub-row { display: flex; align-items: center; gap: 5px; }
@@ -2681,10 +2682,14 @@ body.wb-chain-active {
             item.dataset.nuId = t.targetId;
 
             const nameLink = document.createElement('a');
-            nameLink.href = `https://www.torn.com/loader.php?sid=attack&user2ID=${t.targetId}`;
-            nameLink.textContent = name;
+            nameLink.className = 'user name';
+            nameLink.href = `/profiles.php?XID=${t.targetId}`;
+            nameLink.dataset.placeholder = `${name} [${t.targetId}]`;
             nameLink.style.cssText = 'text-decoration:none;color:inherit;';
-            nameLink.title = `Attack ${name}`;
+            nameLink.title = name;
+            nameLink.textContent = name;
+            const nlDiv = document.createElement('div');
+            nameLink.appendChild(nlDiv);
             item.appendChild(nameLink);
 
             const timerSpan = document.createElement('span');
@@ -3429,11 +3434,14 @@ body.wb-chain-active {
         nameRow.className = 'fo-name-row';
 
         const nameSpan = document.createElement('a');
-        nameSpan.className = 'fo-name';
-        nameSpan.textContent = s.name || 'Unknown';
-        nameSpan.href = `https://www.torn.com/profiles.php?XID=${targetId}`;
+        nameSpan.className = 'fo-name user name';
+        nameSpan.href = `/profiles.php?XID=${targetId}`;
+        nameSpan.dataset.placeholder = `${s.name || 'Unknown'} [${targetId}]`;
         nameSpan.style.textDecoration = 'none';
         nameSpan.style.color = 'inherit';
+        nameSpan.textContent = s.name || 'Unknown';
+        const nameDiv = document.createElement('div');
+        nameSpan.appendChild(nameDiv);
         nameRow.appendChild(nameSpan);
 
         // Eye badge for viewers
@@ -3715,9 +3723,12 @@ body.wb-chain-active {
 
         const s = state.statuses[targetId] || {};
 
-        // Update name
+        // Update name (preserve inner <div> for Torn mini-profile)
         const nameEl = row.querySelector('.fo-name');
-        if (nameEl && s.name) nameEl.textContent = s.name;
+        if (nameEl && s.name) {
+            nameEl.firstChild.textContent = s.name;
+            nameEl.dataset.placeholder = `${s.name} [${targetId}]`;
+        }
 
         // Update level
         const lvlEl = row.querySelector('.fo-level');
