@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.5.4
+// @version      3.5.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1265,6 +1265,39 @@ body.wb-chain-active {
 .fo-overlay ::-webkit-scrollbar-track { background: transparent; }
 .fo-overlay ::-webkit-scrollbar-thumb { background: var(--wb-border); border-radius: 3px; }
 .fo-overlay ::-webkit-scrollbar-thumb:hover { background: #636e72; }
+
+/* ── Mini Profile Popup ── */
+#fo-mini-profile {
+    position: fixed; z-index: 100000;
+    width: 200px; background: var(--wb-card, #1e2328); color: var(--wb-text, #dfe6e9);
+    border: 1px solid var(--wb-border, #3a3f44); border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5); font-size: 12px;
+    overflow: hidden; font-family: Arial, sans-serif;
+}
+.fo-mp-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 10px; background: var(--wb-header, #2d3436);
+    border-bottom: 1px solid var(--wb-border, #3a3f44);
+}
+.fo-mp-header strong { font-size: 12px; }
+.fo-mp-close {
+    cursor: pointer; font-size: 16px; line-height: 1; opacity: 0.6;
+    padding: 0 2px;
+}
+.fo-mp-close:hover { opacity: 1; }
+.fo-mp-body { padding: 8px 10px; line-height: 1.6; }
+.fo-mp-body div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fo-mp-actions {
+    display: flex; gap: 6px; padding: 6px 10px 8px;
+    border-top: 1px solid var(--wb-border, #3a3f44);
+}
+.fo-mp-btn {
+    flex: 1; text-align: center; padding: 4px 0; border-radius: 4px;
+    background: var(--wb-border, #3a3f44); color: var(--wb-text, #dfe6e9);
+    text-decoration: none; font-size: 11px; font-weight: 600;
+}
+.fo-mp-btn:hover { opacity: 0.85; }
+.fo-mp-atk { background: #e17055; color: #fff; }
 
 /* ── Responsive ── */
 @media (max-width: 700px) {
@@ -3327,28 +3360,78 @@ body.wb-chain-active {
     }
 
     /**
-     * Trigger Torn's native mini profile popup for a given player ID.
-     * Creates a temporary hidden link inside #mainContainer (where Torn's
-     * event delegation lives), dispatches a click, then cleans up.
-     * Falls back to navigating to the profile page if the popup doesn't appear.
+     * Show a mini profile popup for a given player.
+     * Fetches data from Torn's internal mini profile endpoint and
+     * renders a compact card near the clicked element.
      */
     function triggerMiniProfile(playerId, e) {
         if (e) e.preventDefault();
-        // Try to find Torn's content area for event delegation
-        const container = document.getElementById('mainContainer')
-            || document.querySelector('.content-wrapper')
-            || document.body;
-        const ghost = document.createElement('a');
-        ghost.className = 'user name';
-        ghost.href = `/profiles.php?XID=${playerId}`;
-        ghost.dataset.placeholder = `Player [${playerId}]`;
-        ghost.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;pointer-events:none;';
-        const innerDiv = document.createElement('div');
-        ghost.appendChild(innerDiv);
-        container.appendChild(ghost);
-        ghost.click();
-        // Clean up after a short delay to let Torn's handler fire
-        setTimeout(() => ghost.remove(), 200);
+        // Close any existing mini profile
+        const existing = document.getElementById('fo-mini-profile');
+        if (existing) existing.remove();
+
+        // Fetch mini profile data from Torn
+        fetch(`/page.php?sid=UserMiniProfile&userID=${playerId}`, { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(data => {
+                if (!data || !data.user) return;
+                const u = data.user;
+                const popup = document.createElement('div');
+                popup.id = 'fo-mini-profile';
+                const level = u.level || '?';
+                const name = u.name || 'Unknown';
+                const status = u.status ? (u.status.state || '') : '';
+                const lastAction = u.lastAction ? formatLastAction(u.lastAction.seconds) : '';
+                const faction = u.faction ? u.faction.factionName || '' : '';
+
+                popup.innerHTML = `
+                    <div class="fo-mp-header">
+                        <strong>${name} [${playerId}]</strong>
+                        <span class="fo-mp-close">&times;</span>
+                    </div>
+                    <div class="fo-mp-body">
+                        <div>Level: ${level}</div>
+                        ${status ? `<div>Status: ${status}</div>` : ''}
+                        ${faction ? `<div>Faction: ${faction}</div>` : ''}
+                        ${lastAction ? `<div>Last action: ${lastAction}</div>` : ''}
+                    </div>
+                    <div class="fo-mp-actions">
+                        <a href="/profiles.php?XID=${playerId}" class="fo-mp-btn">Profile</a>
+                        <a href="/loader.php?sid=attack&user2ID=${playerId}" class="fo-mp-btn fo-mp-atk">Attack</a>
+                    </div>
+                `;
+                document.body.appendChild(popup);
+
+                // Position near the click
+                if (e) {
+                    const x = e.clientX || 0;
+                    const y = e.clientY || 0;
+                    popup.style.left = Math.min(x, window.innerWidth - 220) + 'px';
+                    popup.style.top = Math.min(y + 10, window.innerHeight - 200) + 'px';
+                }
+
+                // Close handlers
+                popup.querySelector('.fo-mp-close').addEventListener('click', () => popup.remove());
+                const closeOnOutside = (ev) => {
+                    if (!popup.contains(ev.target)) {
+                        popup.remove();
+                        document.removeEventListener('click', closeOnOutside, true);
+                    }
+                };
+                setTimeout(() => document.addEventListener('click', closeOnOutside, true), 50);
+            })
+            .catch(() => {
+                // Fallback: navigate to profile
+                window.location.href = `/profiles.php?XID=${playerId}`;
+            });
+    }
+
+    function formatLastAction(seconds) {
+        if (!seconds && seconds !== 0) return '';
+        if (seconds < 60) return 'just now';
+        if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+        if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+        return Math.floor(seconds / 86400) + 'd ago';
     }
 
     /**
