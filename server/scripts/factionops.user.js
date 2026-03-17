@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.5.9
+// @version      3.6.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,7 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v3.5.9  - Fix: chain timer jitter — smooth client countdown, no server reset loop
+// v3.6.0  - Fix: chain timer smooth countdown (no more jitter from server polls) — smooth client countdown, no server reset loop
 // v3.5.8  - Chain updates instantly via intercepted Torn data (no more 30s delay)
 // v3.5.7  - Fix: replace DELETE HTTP methods with POST for PDA compatibility
 //           (fixes "network error" when removing faction API key)
@@ -83,7 +83,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.5.9',
+        VERSION: '3.6.0',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1864,13 +1864,17 @@ body.wb-chain-active {
                 // Always update hit count and max
                 state.chain.current = data.chainData.current ?? state.chain.current;
                 state.chain.max = data.chainData.max ?? state.chain.max;
-                // Only update timeout/cooldown when the chain count changes
-                // (a new hit resets the timer) — otherwise let the client
-                // countdown tick smoothly without server jitter
-                if (chainChanged || state.chain.timeout <= 0) {
-                    state.chain.timeout = data.chainData.timeout ?? 0;
-                    state.chain.cooldown = data.chainData.cooldown ?? 0;
+                // Timeout: only accept server value when chain count changes,
+                // local timer has expired, or server value differs by >15s
+                // (corrects drift without causing visible jitter)
+                const serverTimeout = data.chainData.timeout ?? 0;
+                const localTimeout = state.chain.timeout;
+                const drift = Math.abs(serverTimeout - localTimeout);
+                if (chainChanged || localTimeout <= 0 || drift > 15) {
+                    state.chain.timeout = serverTimeout;
                 }
+                // Cooldown always from server (not locally counted)
+                state.chain.cooldown = data.chainData.cooldown ?? 0;
                 updateChainBar();
 
                 // Bonus hit notification
