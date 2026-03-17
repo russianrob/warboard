@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.7.6
+// @version      3.7.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.7.7  - Sort: my calls pinned to top, others' calls to bottom; Call button blue, Mine green, others red
 // v3.7.6  - Fix: chain timer flicker — monotonic guard rejects stale cached timeouts unless chain count changes
 // v3.7.5  - Collapse unattackable members (traveling/abroad) into expandable section; hide federal/fallen
 // v3.7.4  - Fix: traveling/abroad members now display correctly with Travel status
@@ -99,7 +100,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.7.6',
+        VERSION: '3.7.7',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -218,6 +219,7 @@
     --wb-accent-30: rgba(15,52,96,0.3);
     --wb-call-green: #00b894;
     --wb-call-red: #e17055;
+    --wb-call-blue: #0984e3;
     --wb-hospital-red: #d63031;
     --wb-travel-blue: #0984e3;
     --wb-jail-gray: #636e72;
@@ -533,15 +535,15 @@ html.wb-theme-light {
     font-weight: 700;
     padding: 1px 5px;
     border-radius: 3px;
-    border: 1px solid var(--wb-call-green);
+    border: 1px solid var(--wb-call-blue);
     background: transparent;
-    color: var(--wb-call-green);
+    color: var(--wb-call-blue);
     cursor: pointer;
     line-height: 1.2;
     margin-left: 2px;
 }
 .wb-next-up-call:hover {
-    background: var(--wb-call-green);
+    background: var(--wb-call-blue);
     color: #fff;
 }
 
@@ -608,11 +610,12 @@ html.wb-theme-light {
     white-space: nowrap;
 }
 .wb-call-btn {
-    background: var(--wb-accent);
-    color: var(--wb-text);
+    background: rgba(9,132,227,0.15);
+    color: var(--wb-call-blue);
+    border-color: var(--wb-call-blue);
 }
 .wb-call-btn:hover {
-    background: var(--wb-call-green);
+    background: var(--wb-call-blue);
     color: #fff;
     transform: scale(1.05);
 }
@@ -622,9 +625,9 @@ html.wb-theme-light {
     font-weight: bold;
 }
 .wb-call-btn.wb-called-other {
-    background: var(--wb-bg-secondary);
-    color: var(--wb-call-green);
-    border-color: var(--wb-call-green);
+    background: rgba(225,112,85,0.15);
+    color: var(--wb-call-red);
+    border-color: var(--wb-call-red);
     cursor: default;
 }
 .wb-uncall-btn {
@@ -1254,25 +1257,33 @@ body.wb-chain-active {
     font-size: 10px; font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.04em;
     padding: 4px 10px; border-radius: 20px;
-    border: 1px solid rgba(0,184,148,0.35);
-    background: rgba(0,184,148,0.08); color: #00b894;
+    border: 1px solid rgba(9,132,227,0.4);
+    background: rgba(9,132,227,0.1); color: #0984e3;
     cursor: pointer; transition: all 0.15s ease;
     white-space: nowrap; line-height: 1;
 }
 .fo-call-btn:hover {
-    background: rgba(0,184,148,0.18);
-    border-color: rgba(0,184,148,0.5);
-    box-shadow: 0 0 8px rgba(0,184,148,0.15);
+    background: rgba(9,132,227,0.22);
+    border-color: rgba(9,132,227,0.6);
+    box-shadow: 0 0 8px rgba(9,132,227,0.2);
 }
 
 .fo-called-tag {
     display: flex; align-items: center; gap: 4px;
     font-size: 10px; font-weight: 500;
     padding: 3px 8px; border-radius: 20px;
+    white-space: nowrap; line-height: 1;
+    min-width: 0; overflow: hidden; flex-shrink: 1;
+}
+.fo-called-tag.fo-called-mine {
     background: rgba(0,184,148,0.12);
     border: 1px solid rgba(0,184,148,0.25);
-    color: #00b894; white-space: nowrap; line-height: 1;
-    min-width: 0; overflow: hidden; flex-shrink: 1;
+    color: #00b894;
+}
+.fo-called-tag.fo-called-other {
+    background: rgba(225,112,85,0.12);
+    border: 1px solid rgba(225,112,85,0.25);
+    color: #e17055;
 }
 .fo-called-tag .fo-caller-name { max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
 
@@ -4025,10 +4036,10 @@ body.wb-chain-active {
 
         if (callData) {
             const tag = document.createElement('span');
-            tag.className = 'fo-called-tag';
+            const isMine = callData.calledBy && String(callData.calledBy.id) === state.myPlayerId;
+            tag.className = 'fo-called-tag ' + (isMine ? 'fo-called-mine' : 'fo-called-other');
             const callerName = document.createElement('span');
             callerName.className = 'fo-caller-name';
-            const isMine = callData.calledBy && String(callData.calledBy.id) === state.myPlayerId;
             callerName.textContent = isMine ? 'Mine' : (callData.calledBy ? callData.calledBy.name : 'Someone');
             tag.appendChild(callerName);
             cell.appendChild(tag);
@@ -4158,21 +4169,25 @@ body.wb-chain-active {
 
     /**
      * Sort priority for a target. Lower number = higher in the list.
+     *  -1: Called by ME (pinned to top)
      *   0: High priority (uncalled)
      *   1: OK / idle / offline (uncalled)
      *   2: Hospital
      *   3: Traveling
      *   4: Jail
-     *   5: Called (sinks to bottom)
+     *   5: Called by others (sinks to bottom)
      */
     function sortPriority(targetId) {
         const s = state.statuses[targetId];
         const status = normalizeStatus(s ? s.status : 'ok');
-        const isCalled = !!state.calls[targetId];
+        const callData = state.calls[targetId];
+        const isCalled = !!callData;
         const prio = state.priorities[targetId];
         const isHighPriority = prio && prio.level === 'high';
 
-        // Called targets sink to bottom
+        // Called by ME → pin to top
+        if (isCalled && callData.calledBy && String(callData.calledBy.id) === state.myPlayerId) return -1;
+        // Called by others → sink to bottom
         if (isCalled) return 5;
 
         // High priority + OK status floats above everything
