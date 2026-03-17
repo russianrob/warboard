@@ -272,7 +272,7 @@ router.post("/api/call", requireAuth, (req, res) => {
 // ── POST /api/priority ──────────────────────────────────────────────────
 // Set or clear a priority tag on a target. Leader/co-leader only.
 
-const LEADER_POSITIONS = ["leader", "co-leader"];
+const LEADER_POSITIONS = ["leader", "co-leader", "war leader"];
 
 router.post("/api/priority", requireAuth, (req, res) => {
   const { playerId, playerName, factionPosition } = req.user;
@@ -464,7 +464,7 @@ router.get("/api/heatmap", requireAuth, (req, res) => {
 router.delete("/api/heatmap", requireAuth, (req, res) => {
   const { factionId, factionPosition } = req.user;
   const pos = (factionPosition || "").toLowerCase();
-  if (!["leader", "co-leader"].includes(pos)) {
+  if (!LEADER_POSITIONS.includes(pos)) {
     return res.status(403).json({ error: "Only leaders and co-leaders can reset the heatmap" });
   }
   resetHeatmap(factionId);

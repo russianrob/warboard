@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.55
+// @version      3.0.56
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2079,10 +2079,10 @@ body.wb-chain-active {
             });
     }
 
-    /** Check if current user is a faction leader or co-leader. */
+    /** Check if current user is a faction leader, co-leader, or war leader. */
     function isLeader() {
         const pos = state.myFactionPosition || '';
-        return pos === 'leader' || pos === 'co-leader';
+        return pos === 'leader' || pos === 'co-leader' || pos === 'war leader';
     }
 
     // =========================================================================
