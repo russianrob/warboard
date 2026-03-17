@@ -21,6 +21,54 @@
 // @run-at       document-idle
 // ==/UserScript==
 
+// =============================================================================
+// CHANGELOG
+// =============================================================================
+// v3.5.7  - Fix: replace DELETE HTTP methods with POST for PDA compatibility
+//           (fixes "network error" when removing faction API key)
+// v3.5.6  - Revert mini profile popup (not compatible with PDA)
+// v3.5.5  - Custom mini profile popup via Torn internal API
+// v3.5.4  - Fix: persist player API keys to disk across server restarts
+//           - Mini profile popup improvements
+// v3.5.3  - Fix: mini profile popup on target name links
+// v3.5.2  - Version bump for update detection
+// v3.5.1  - Fix: row flicker on DOM reorder (use insertBefore in-place)
+// v3.5.0  - Overlay hides entire Torn page content, takes over full page
+//           - Version shown in download button text
+//           - Weekly Tuesday membership check (purge non-faction members)
+//           - Server auth locked to faction 42055
+// v3.0.58 - Fix: high priority only floats to top when target is OK status
+// v3.0.57 - High priority targets sort above all others
+// v3.0.56 - Grant War Leader access to priority tagging + heatmap reset
+// v3.0.55 - Remove BSP sort option and dead code
+// v3.0.54 - UI: move activate button below Torn nav bar, rounded corners
+// v3.0.50 - Fix: hide floating heatmap FAB on faction/war pages
+// v3.0.49 - Chain count + timer in overlay header
+// v3.0.48 - Move heatmap button into overlay header next to settings gear
+// v3.0.46 - Theme toggle applies to entire UI (CSS variables refactor)
+// v3.0.44 - Fix: activate button on all faction pages, not just war context
+// v3.0.38 - Compliance refactor: server-side war polling, faction API key
+//           setup, remove interceptor forwarding
+// v3.0.37 - Show BSP stats inline next to player name/ID
+// v3.0.35 - Next Up queue inside overlay header
+//           - Activate FactionOps button on war page (no auto-start)
+// v3.0.34 - Settings gear button in overlay header
+// v3.0.33 - Toast on call conflict
+// v3.0.32 - Optimistic call/uncall with rollback on failure
+// v3.0.31 - Show "Mine" on your calls, caller name for others
+// v3.0.29 - Clickable target names (links to Torn profile)
+// v3.0.25 - Hide BSP column on mobile
+// v3.0.21 - Mobile responsive grid improvements (v3.0.1 - v3.0.21)
+// v3.0.0  - Full dark overlay replaces Torn war page
+// v2.0.5  - Add Attack button to war page rows
+// v2.0.3  - PDA compatibility: PDA_httpGet/PDA_httpPost bridge
+// v2.0.0  - Replace Socket.IO with HTTP polling
+// v1.2.0  - Bundle Socket.IO client inline (zero external deps for PDA)
+// v1.1.0  - Torn PDA auto-detection and API key support
+// v1.0.1  - Auto-update URLs, HTTPS release
+// v1.0.0  - Initial release
+// =============================================================================
+
 (function () {
     'use strict';
 
