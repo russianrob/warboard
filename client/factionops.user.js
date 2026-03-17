@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.7.1
+// @version      3.7.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.7.2  - Chain timer: compensate for Torn API cache age (sub-second accuracy)
 // v3.7.1  - Direct Torn API chain polling (5s) for real-time chain accuracy
 // v3.7.0  - Fix: chain timer accuracy — removed unreliable DOM reader, uses intercepted API + server poll
 // v3.6.9  - Activate button: dark/black style
@@ -94,7 +95,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.7.1',
+        VERSION: '3.7.2',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2701,7 +2702,14 @@ body.wb-chain-active {
                             const oldCurrent = state.chain.current;
                             state.chain.current = chain.current || 0;
                             state.chain.max = chain.max || 0;
-                            setChainTimeout(chain.timeout || 0);
+                            let adjustedTimeout = chain.timeout || 0;
+                            if (data.timestamp && adjustedTimeout > 0) {
+                                const cacheAge = Math.floor(Date.now() / 1000) - data.timestamp;
+                                if (cacheAge > 0 && cacheAge < 300) {
+                                    adjustedTimeout = Math.max(0, adjustedTimeout - cacheAge);
+                                }
+                            }
+                            setChainTimeout(adjustedTimeout);
                             state.chain.cooldown = chain.cooldown || 0;
                             updateChainBar();
 
@@ -4266,7 +4274,15 @@ body.wb-chain-active {
             const chain = data.chain;
             state.chain.current = chain.current || 0;
             state.chain.max = chain.max || 0;
-            setChainTimeout(chain.timeout || 0);
+            let adjustedTimeout = chain.timeout || 0;
+            // Compensate for Torn API cache age
+            if (data.timestamp && adjustedTimeout > 0) {
+                const cacheAge = Math.floor(Date.now() / 1000) - data.timestamp;
+                if (cacheAge > 0 && cacheAge < 300) {
+                    adjustedTimeout = Math.max(0, adjustedTimeout - cacheAge);
+                }
+            }
+            setChainTimeout(adjustedTimeout);
             state.chain.cooldown = chain.cooldown || 0;
             chainCooldownSetAt = Date.now();
             chainCooldownSetVal = state.chain.cooldown;

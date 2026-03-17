@@ -36,6 +36,13 @@ export function startChainMonitor(io, warId) {
     try {
       const chain = await fetchFactionChain(war.factionId, apiKey);
 
+      // Compensate for API cache age
+      if (chain.timestamp && chain.timeout > 0) {
+          const cacheAge = Math.floor(Date.now() / 1000) - chain.timestamp;
+          if (cacheAge > 0 && cacheAge < 300) {
+              chain.timeout = Math.max(0, chain.timeout - cacheAge);
+          }
+      }
       war.chainData = chain;
       store.saveState();
 

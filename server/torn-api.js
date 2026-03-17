@@ -61,6 +61,7 @@ export async function fetchFactionChain(factionId, apiKey) {
     max: chain.max ?? 0,
     timeout: chain.timeout ?? 0,
     cooldown: chain.cooldown ?? 0,
+    timestamp: data.timestamp ?? 0,
   };
 }
 
