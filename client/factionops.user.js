@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.57
+// @version      3.0.58
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3824,8 +3824,8 @@ body.wb-chain-active {
         // Called targets sink to bottom
         if (isCalled) return 5;
 
-        // High priority floats above everything
-        if (isHighPriority) return 0;
+        // High priority + OK status floats above everything
+        if (isHighPriority && (status === 'ok' || status === 'okay')) return 0;
 
         switch (status) {
             case 'okay':
