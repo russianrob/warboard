@@ -23,6 +23,7 @@ import { registerSocketHandlers } from "./socket-handlers.js";
 import { startChainMonitor, stopAll as stopAllChainMonitors } from "./chain-monitor.js";
 import { startWarStatusMonitor, stopAll as stopAllWarStatusMonitors } from "./war-status-monitor.js";
 import { loadHeatmaps, stopFlush as stopHeatmapFlush } from "./activity-heatmap.js";
+import { startMembershipSchedule, stopMembershipSchedule } from "./membership-check.js";
 import * as store from "./store.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -204,6 +205,9 @@ for (const [warId, war] of store.getAllWars()) {
   }
 }
 
+// Schedule weekly membership verification (every Tuesday)
+startMembershipSchedule();
+
 httpServer.listen(PORT, () => {
   console.log(`[server] FactionOps server listening on port ${PORT}`);
   console.log(`[server] Landing page: http://localhost:${PORT}`);
@@ -219,6 +223,7 @@ function shutdown(signal) {
   stopAllChainMonitors();
   stopAllWarStatusMonitors();
   stopHeatmapFlush();
+  stopMembershipSchedule();
   store.saveState();
   httpServer.close(() => {
     console.log("[server] Server closed");

@@ -168,6 +168,15 @@ export function getApiKeyForPlayer(playerId) {
   return apiKeys.get(playerId) ?? null;
 }
 
+export function removeApiKey(playerId) {
+  apiKeys.delete(playerId);
+}
+
+/** Returns all stored player API keys as [playerId, apiKey] pairs. */
+export function getAllApiKeys() {
+  return [...apiKeys.entries()];
+}
+
 // ── Faction API key storage ──────────────────────────────────────────────
 
 /** Load faction API keys from disk (called once at startup). */
