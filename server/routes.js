@@ -357,12 +357,16 @@ router.post("/api/faction-key", requireAuth, async (req, res) => {
 // ── DELETE /api/faction-key ──────────────────────────────────────────────
 // Remove the faction-dedicated API key.
 
-router.delete("/api/faction-key", requireAuth, (req, res) => {
+function handleRemoveFactionKey(req, res) {
   const { factionId } = req.user;
   store.removeFactionApiKey(factionId);
   console.log(`[api] Faction API key removed for faction ${factionId}`);
   return res.json({ ok: true });
-});
+}
+
+router.delete("/api/faction-key", requireAuth, handleRemoveFactionKey);
+// POST alias for PDA compatibility (PDA's WebView only supports GET/POST)
+router.post("/api/faction-key/remove", requireAuth, handleRemoveFactionKey);
 
 // ── POST /api/status ─────────────────────────────────────────────────────
 // Bulk update enemy statuses or report chain data.
@@ -468,7 +472,7 @@ router.get("/api/heatmap", requireAuth, (req, res) => {
 // ── DELETE /api/heatmap ──────────────────────────────────────────────────
 // Reset the activity heatmap for the faction. Leader/co-leader only.
 
-router.delete("/api/heatmap", requireAuth, (req, res) => {
+function handleResetHeatmap(req, res) {
   const { factionId, factionPosition } = req.user;
   const pos = (factionPosition || "").toLowerCase();
   if (!LEADER_POSITIONS.includes(pos)) {
@@ -476,6 +480,10 @@ router.delete("/api/heatmap", requireAuth, (req, res) => {
   }
   resetHeatmap(factionId);
   return res.json({ ok: true });
-});
+}
+
+router.delete("/api/heatmap", requireAuth, handleResetHeatmap);
+// POST alias for PDA compatibility (PDA's WebView only supports GET/POST)
+router.post("/api/heatmap/remove", requireAuth, handleResetHeatmap);
 
 export default router;

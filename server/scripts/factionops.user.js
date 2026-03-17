@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.5.6
+// @version      3.5.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -33,6 +33,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
+        VERSION: '3.5.7',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1703,18 +1704,20 @@ body.wb-chain-active {
         });
     }
 
-    /** DELETE with auth header. */
-    function deleteAction(endpoint) {
+    /** POST-based remove action with auth header (PDA compatible — no DELETE method). */
+    function removeAction(endpoint) {
         return new Promise((resolve, reject) => {
             if (!state.jwtToken) return reject(new Error('Not authenticated'));
             const url = `${CONFIG.SERVER_URL}${endpoint}`;
 
             httpRequest({
-                method: 'DELETE',
+                method: 'POST',
                 url,
                 headers: {
                     'Authorization': `Bearer ${state.jwtToken}`,
+                    'Content-Type': 'application/json',
                 },
+                data: '{}',
                 onload(res) {
                     const data = safeParse(res.responseText);
                     if (res.status >= 200 && res.status < 300) resolve(data);
@@ -2297,7 +2300,7 @@ body.wb-chain-active {
             statusEl.textContent = 'Removing...';
             statusEl.style.color = 'var(--wb-idle-yellow)';
             try {
-                const resp = await deleteAction('/api/faction-key');
+                const resp = await removeAction('/api/faction-key/remove');
                 if (resp && resp.ok) {
                     statusEl.textContent = '';
                     state.factionKeyStored = false;
@@ -4492,21 +4495,7 @@ body.wb-chain-active {
     /** Ask the server to reset heatmap data. */
     async function resetServerHeatmap() {
         try {
-            await new Promise((resolve, reject) => {
-                httpRequest({
-                    method: 'DELETE',
-                    url: `${CONFIG.SERVER_URL}/api/heatmap`,
-                    headers: {
-                        'Authorization': `Bearer ${state.jwtToken}`,
-                        'Content-Type': 'application/json',
-                    },
-                    onload(r) {
-                        if (r.status >= 200 && r.status < 300) resolve();
-                        else reject(new Error(`HTTP ${r.status}`));
-                    },
-                    onerror() { reject(new Error('Network error')); },
-                });
-            });
+            await removeAction('/api/heatmap/remove');
         } catch (e) {
             warn('Failed to reset heatmap:', e.message);
             showToast('Failed to reset heatmap: ' + e.message, 'error');
