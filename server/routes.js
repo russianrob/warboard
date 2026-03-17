@@ -11,6 +11,7 @@ import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 const router = Router();
 
 const CALL_EXPIRE_MS = parseInt(process.env.CALL_EXPIRE_MS, 10) || 5 * 60 * 1000; // 5 minutes
+const ALLOWED_FACTION_ID = "42055";
 const SOFT_UNCALL_MS = 30_000; // 30 seconds after hospital detection
 const REFRESH_COOLDOWN_MS = 30_000; // 30 seconds between refreshes per war
 
@@ -69,6 +70,12 @@ router.post("/api/auth", async (req, res) => {
 
   try {
     const info = await verifyTornApiKey(apiKey);
+
+    // Faction lock — only members of the allowed faction can use the system
+    if (info.factionId !== ALLOWED_FACTION_ID) {
+      console.log(`[auth] Rejected ${info.playerName} (${info.playerId}) — faction ${info.factionId} not allowed`);
+      return res.status(403).json({ error: "This system is restricted to authorized factions only" });
+    }
 
     // Store the API key server-side for later Torn API calls
     store.storeApiKey(info.playerId, apiKey);
