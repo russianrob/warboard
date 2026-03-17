@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.5.7
+// @version      3.5.8
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.5.8  - Chain updates instantly via intercepted Torn data (no more 30s delay)
 // v3.5.7  - Fix: replace DELETE HTTP methods with POST for PDA compatibility
 //           (fixes "network error" when removing faction API key)
 // v3.5.6  - Revert mini profile popup (not compatible with PDA)
@@ -81,7 +82,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.5.7',
+        VERSION: '3.5.8',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2486,6 +2487,29 @@ body.wb-chain-active {
 
 
 
+    /**
+     * Forward intercepted chain data to the server so all faction members
+     * see the update instantly (instead of waiting for the 30s poll).
+     */
+    let _lastForwardedChain = 0;
+    function forwardChainToServer(chain) {
+        const warId = deriveWarId();
+        if (!warId || !state.jwtToken) return;
+        // Throttle: don't send more than once every 3 seconds
+        const now = Date.now();
+        if (now - _lastForwardedChain < 3000) return;
+        _lastForwardedChain = now;
+        postAction('/api/update', {
+            warId,
+            chainData: {
+                current: chain.current || 0,
+                max: chain.max || 0,
+                timeout: chain.timeout || 0,
+                cooldown: chain.cooldown || 0,
+            },
+        }).catch(() => { /* silent — server poll is the fallback */ });
+    }
+
     /** Update chain bar contents and styling. */
     function updateChainBar() {
         // Compute chain display values
@@ -4055,7 +4079,7 @@ body.wb-chain-active {
             const response = await originalFetch.apply(this, args);
             try {
                 const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url);
-                if (typeof url === 'string' && url.includes('api.torn.com')) {
+                if (typeof url === 'string' && (url.includes('api.torn.com') || url.includes('torn.com'))) {
                     const clone = response.clone();
                     clone.json().then((data) => {
                         handleInterceptedData(url, data);
@@ -4135,6 +4159,8 @@ body.wb-chain-active {
             state.chain.timeout = chain.timeout || 0;
             state.chain.cooldown = chain.cooldown || 0;
             updateChainBar();
+            // Forward chain data to server so all faction members see it instantly
+            forwardChainToServer(state.chain);
         }
 
         // Attack result
