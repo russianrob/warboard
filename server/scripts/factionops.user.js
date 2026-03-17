@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.6.8
+// @version      3.6.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.9  - Activate button: dark/black style
 // v3.6.8  - Fix: chain timer no longer jumps (DOM-anchored wall-clock countdown)
 // v3.6.7  - Fix: stat numbers no longer cut off on mobile (tighter grid columns)
 // v3.6.6  - Activate button: restore original red/orange color
@@ -91,7 +92,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.6.8',
+        VERSION: '3.6.9',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1043,17 +1044,17 @@ body.wb-chain-active {
     padding: 4px 10px !important;
     font-family: Arial, sans-serif !important;
     font-size: 11px !important; font-weight: 600 !important;
-    border: 1px solid rgba(225,112,85,0.6) !important;
+    border: 1px solid #555 !important;
     border-radius: 12px !important;
-    background: rgba(225,112,85,0.15) !important; color: #e17055 !important;
+    background: rgba(30,30,30,0.9) !important; color: #e0e0e0 !important;
     cursor: pointer !important; transition: all 0.2s ease !important;
     white-space: nowrap !important;
     box-sizing: border-box !important;
 }
 #fo-activate-btn:hover {
-    background: rgba(225,112,85,0.3) !important;
-    border-color: rgba(225,112,85,0.8) !important;
-    box-shadow: 0 2px 8px rgba(225,112,85,0.25) !important;
+    background: rgba(50,50,50,0.95) !important;
+    border-color: #777 !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
 }
 #fo-activate-btn .fo-activate-icon {
     font-size: 12px; line-height: 1;
