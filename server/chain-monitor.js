@@ -20,7 +20,7 @@ const intervals = new Map();
 
 /**
  * Start chain monitoring for a war room.
- * @param {import("socket.io").Server} io
+ * @param {import("socket.io").Server|null} io  Socket.IO server (optional, may be null for HTTP-only)
  * @param {string} warId
  */
 export function startChainMonitor(io, warId) {
@@ -28,14 +28,13 @@ export function startChainMonitor(io, warId) {
 
   const poll = async () => {
     const war = store.getWar(warId);
-    if (!war || !war.enemyFactionId) return;
+    if (!war || !war.factionId) return;
 
     const apiKey = store.getFactionApiKey(war.factionId) || store.getApiKeyForFaction(war.factionId);
     if (!apiKey) return; // no key available, skip silently
 
     try {
       const chain = await fetchFactionChain(war.factionId, apiKey);
-      const previous = { ...war.chainData };
 
       war.chainData = chain;
       store.saveState();
@@ -43,33 +42,34 @@ export function startChainMonitor(io, warId) {
       // Determine next bonus hit
       const nextBonus = BONUS_HITS.find((b) => b > chain.current) ?? null;
 
-      const payload = {
-        factionId: war.factionId,
-        current: chain.current,
-        max: chain.max,
-        timeout: chain.timeout,
-        cooldown: chain.cooldown,
-        bonusHits: BONUS_HITS,
-        nextBonus,
-      };
-
-      io.to(`war_${warId}`).emit("chain_update", payload);
-
-      // Alert if approaching a bonus hit (within 3 hits)
-      if (nextBonus && chain.current >= nextBonus - 3 && chain.current < nextBonus) {
-        io.to(`war_${warId}`).emit("chain_bonus_alert", {
+      // Broadcast via Socket.IO if available (HTTP polling clients get it from /api/poll)
+      if (io) {
+        const payload = {
+          factionId: war.factionId,
           current: chain.current,
-          nextBonus,
-          hitsAway: nextBonus - chain.current,
-        });
-      }
-
-      // Alert if chain timeout is low (under 60 seconds) and chain is active
-      if (chain.current > 0 && chain.timeout > 0 && chain.timeout < 60) {
-        io.to(`war_${warId}`).emit("chain_timeout_warning", {
-          current: chain.current,
+          max: chain.max,
           timeout: chain.timeout,
-        });
+          cooldown: chain.cooldown,
+          bonusHits: BONUS_HITS,
+          nextBonus,
+        };
+
+        io.to(`war_${warId}`).emit("chain_update", payload);
+
+        if (nextBonus && chain.current >= nextBonus - 3 && chain.current < nextBonus) {
+          io.to(`war_${warId}`).emit("chain_bonus_alert", {
+            current: chain.current,
+            nextBonus,
+            hitsAway: nextBonus - chain.current,
+          });
+        }
+
+        if (chain.current > 0 && chain.timeout > 0 && chain.timeout < 60) {
+          io.to(`war_${warId}`).emit("chain_timeout_warning", {
+            current: chain.current,
+            timeout: chain.timeout,
+          });
+        }
       }
     } catch (err) {
       console.error(`[chain] Poll failed for war ${warId}:`, err.message);

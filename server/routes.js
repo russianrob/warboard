@@ -7,6 +7,7 @@ import { verifyTornApiKey, issueToken, requireAuth } from "./auth.js";
 import * as store from "./store.js";
 import { fetchFactionMembers, fetchFactionChain } from "./torn-api.js";
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
+import { startChainMonitor } from "./chain-monitor.js";
 
 const router = Router();
 
@@ -180,6 +181,9 @@ router.get("/api/poll", (req, res, next) => {
   if (war.factionId !== factionId) {
     return res.status(403).json({ error: "You are not a member of this war's faction" });
   }
+
+  // Ensure chain monitor is running for this war (idempotent — no-op if already started)
+  startChainMonitor(null, warId);
 
   // Track player as online (use playerId as pseudo-socketId for polling clients)
   store.setPlayer(playerId, {

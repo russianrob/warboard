@@ -178,13 +178,15 @@ io.on("connection", (socket) => {
   console.log(`[ws] Socket connected: ${socket.id} (player: ${socket.user.playerName})`);
   registerSocketHandlers(io, socket);
 
-  // When a player joins a war that has an enemy faction, ensure chain monitoring is running
+  // When a player joins a war, ensure chain monitoring is running
   socket.on("join_war", ({ warId }) => {
     // Small delay to let the war get created/loaded first
     setTimeout(() => {
       const war = store.getWar(warId);
-      if (war?.enemyFactionId) {
+      if (war?.factionId) {
         startChainMonitor(io, warId);
+      }
+      if (war?.enemyFactionId) {
         startWarStatusMonitor(io, warId);
       }
     }, 100);
@@ -198,10 +200,12 @@ store.loadFactionKeys();
 store.loadPlayerKeys();
 loadHeatmaps();
 
-// Resume chain monitors and war status monitors for any persisted wars with enemy factions
+// Resume chain monitors and war status monitors for any persisted wars
 for (const [warId, war] of store.getAllWars()) {
-  if (war.enemyFactionId) {
+  if (war.factionId) {
     startChainMonitor(io, warId);
+  }
+  if (war.enemyFactionId) {
     startWarStatusMonitor(io, warId);
   }
 }
