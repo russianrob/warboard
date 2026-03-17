@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.8.1
+// @version      3.8.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.8.2  - Sort: remove high priority idle/offline tier; high priority always tier 0
 // v3.8.1  - Sort: online targets float above idle/offline within each tier
 // v3.8.0  - Instant med-out detection: DOM MutationObserver watches Torn's member rows for status changes, forwards to server immediately
 // v3.7.9  - Fix: server converted Torn API Unix timestamps to seconds remaining (was showing raw epoch values)
@@ -4177,7 +4178,6 @@ body.wb-chain-active {
      * Sort priority for a target. Lower number = higher in the list.
      *  -1: Called by ME (pinned to top)
      *   0: High priority + online (uncalled)
-     *   0.5: High priority + offline/idle (uncalled)
      *   1: OK + online
      *   1.5: OK + idle/offline
      *   2: Hospital
@@ -4199,8 +4199,8 @@ body.wb-chain-active {
         // Called by others → sink to bottom
         if (isCalled) return 5;
 
-        // High priority + OK status floats above everything (online first)
-        if (isHighPriority && status === 'ok') return isOnline ? 0 : 0.5;
+        // High priority + OK status floats above everything
+        if (isHighPriority && status === 'ok') return 0;
 
         switch (status) {
             case 'ok':
