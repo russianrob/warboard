@@ -43,7 +43,7 @@ export function startWarStatusMonitor(io, warId) {
       try {
         const ourMembers = await fetchFactionMembers(war.factionId, apiKey);
         const onlineCount = Object.values(ourMembers).filter(
-          (m) => m.online === "Online" || m.online === "Idle",
+          (m) => m.activity === "online" || m.activity === "idle",
         ).length;
         recordSample(war.factionId, onlineCount);
       } catch (_) {

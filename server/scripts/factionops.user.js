@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.8.5
+// @version      3.8.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.8.6  - Fix: online/idle/offline dots now work — server field renamed from 'online' to 'activity'
 // v3.8.5  - UI: Next Up timer color changed to bright red for better visibility
 // v3.8.4  - Fix: timer flicker — sub-second precision + strict monotonic guard (Math.min, zero tolerance)
 // v3.8.3  - Fix: hospital timer flicker — monotonic guard prevents server polls from bumping timers up

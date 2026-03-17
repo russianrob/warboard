@@ -39,7 +39,7 @@ export async function fetchFactionMembers(factionId, apiKey) {
         description: member.status?.description ?? "",
         until: untilRemaining,
         lastAction: member.last_action?.relative ?? "Unknown",
-        online: member.last_action?.status ?? "Offline",
+        activity: (member.last_action?.status ?? "Offline").toLowerCase(),
       };
     }
   }
