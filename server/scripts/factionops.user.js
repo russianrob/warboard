@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.8.6
+// @version      3.8.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.8.7  - Remove attack page info box overlay
 // v3.8.6  - Fix: online/idle/offline dots now work — server field renamed from 'online' to 'activity'
 // v3.8.5  - UI: Next Up timer color changed to bright red for better visibility
 // v3.8.4  - Fix: timer flicker — sub-second precision + strict monotonic guard (Math.min, zero tolerance)
@@ -4861,16 +4862,12 @@ body.wb-chain-active {
 
     /** Initialise attack page enhancements. */
     function initAttackPage() {
-        createAttackOverlay();
         startStatusTimers();
 
-        // Report viewing target to server + refresh overlay
+        // Report viewing target to server (so war page shows who's on which attack)
         const targetId = getAttackTargetId();
         if (targetId) {
-            // Tell server we're on this attack page
             reportViewing(targetId);
-            // Poll local state for overlay updates
-            setInterval(() => updateAttackOverlay(targetId), 2000);
         }
     }
 
