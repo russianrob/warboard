@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.6.6
+// @version      3.6.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.7  - Fix: stat numbers no longer cut off on mobile (tighter grid columns)
 // v3.6.6  - Activate button: restore original red/orange color
 // v3.6.5  - Activate button: smaller and left-aligned
 // v3.6.4  - Auto-detect ranked war opponent via Torn API (no manual setup needed)
@@ -89,7 +90,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.6.6',
+        VERSION: '3.6.7',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1325,7 +1326,7 @@ body.wb-chain-active {
     .fo-header { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
     .fo-col-headers, .fo-row {
         /* Prior | Target | (Lvl hidden) | (BSP hidden) | Status | On | Call | Action */
-        grid-template-columns: 36px 1fr 0px 0px 62px 26px 66px 58px;
+        grid-template-columns: 30px 1fr 0px 0px 40px 18px 56px 52px;
         padding: 7px 8px;
         column-gap: 6px;
         font-size: 11px;
@@ -1342,7 +1343,7 @@ body.wb-chain-active {
     .fo-called-tag { padding: 2px 6px; font-size: 9px; }
     .fo-called-tag .fo-caller-name { max-width: 34px; }
     .fo-call-cell { overflow: hidden; max-width: 100%; }
-    .fo-status-pill { padding: 2px 6px; font-size: 10px; }
+    .fo-status-pill { padding: 2px 4px; font-size: 9px; min-width: 0; max-width: 38px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fo-player-name .fo-name { font-size: 11.5px; }
     .fo-player-name .fo-pid { font-size: 9px; }
     .fo-bsp-stat { font-size: 10px; }
