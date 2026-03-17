@@ -145,21 +145,8 @@ router.get("/api/faction/:factionId/chain", requireAuth, async (req, res) => {
   }
 
   try {
-    // Fetch chain data for the enemy faction referenced in any active war
-    // For simplicity, find the first war for this faction
-    let enemyFactionId = null;
-    for (const [, war] of store.getAllWars()) {
-      if (war.factionId === factionId && war.enemyFactionId) {
-        enemyFactionId = war.enemyFactionId;
-        break;
-      }
-    }
-
-    if (!enemyFactionId) {
-      return res.json({ chain: { current: 0, max: 0, timeout: 0, cooldown: 0 } });
-    }
-
-    const chain = await fetchFactionChain(enemyFactionId, apiKey);
+    // Fetch our own faction's chain data
+    const chain = await fetchFactionChain(factionId, apiKey);
     return res.json({ chain });
   } catch (err) {
     console.error("[chain] Failed to fetch chain data:", err.message);

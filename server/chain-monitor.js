@@ -34,7 +34,7 @@ export function startChainMonitor(io, warId) {
     if (!apiKey) return; // no key available, skip silently
 
     try {
-      const chain = await fetchFactionChain(war.enemyFactionId, apiKey);
+      const chain = await fetchFactionChain(war.factionId, apiKey);
       const previous = { ...war.chainData };
 
       war.chainData = chain;
@@ -44,7 +44,7 @@ export function startChainMonitor(io, warId) {
       const nextBonus = BONUS_HITS.find((b) => b > chain.current) ?? null;
 
       const payload = {
-        factionId: war.enemyFactionId,
+        factionId: war.factionId,
         current: chain.current,
         max: chain.max,
         timeout: chain.timeout,
