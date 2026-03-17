@@ -1106,7 +1106,7 @@ body.wb-chain-active {
     font-weight: 600; font-size: 12.5px; color: var(--wb-text);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.fo-name > div, .fo-next-up-item a.user.name > div { display: none; }
+
 
 .fo-player-name .fo-pid { font-size: 10px; color: #636e72; font-weight: 400; }
 .fo-sub-row { display: flex; align-items: center; gap: 5px; }
@@ -2683,13 +2683,12 @@ body.wb-chain-active {
 
             const nameLink = document.createElement('a');
             nameLink.className = 'user name';
-            nameLink.href = `/profiles.php?XID=${t.targetId}`;
+            nameLink.href = `https://www.torn.com/profiles.php?XID=${t.targetId}`;
             nameLink.dataset.placeholder = `${name} [${t.targetId}]`;
             nameLink.style.cssText = 'text-decoration:none;color:inherit;';
             nameLink.title = name;
             nameLink.textContent = name;
-            const nlDiv = document.createElement('div');
-            nameLink.appendChild(nlDiv);
+            nameLink.addEventListener('click', (e) => triggerMiniProfile(t.targetId, e));
             item.appendChild(nameLink);
 
             const timerSpan = document.createElement('span');
@@ -3328,6 +3327,31 @@ body.wb-chain-active {
     }
 
     /**
+     * Trigger Torn's native mini profile popup for a given player ID.
+     * Creates a temporary hidden link inside #mainContainer (where Torn's
+     * event delegation lives), dispatches a click, then cleans up.
+     * Falls back to navigating to the profile page if the popup doesn't appear.
+     */
+    function triggerMiniProfile(playerId, e) {
+        if (e) e.preventDefault();
+        // Try to find Torn's content area for event delegation
+        const container = document.getElementById('mainContainer')
+            || document.querySelector('.content-wrapper')
+            || document.body;
+        const ghost = document.createElement('a');
+        ghost.className = 'user name';
+        ghost.href = `/profiles.php?XID=${playerId}`;
+        ghost.dataset.placeholder = `Player [${playerId}]`;
+        ghost.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;pointer-events:none;';
+        const innerDiv = document.createElement('div');
+        ghost.appendChild(innerDiv);
+        container.appendChild(ghost);
+        ghost.click();
+        // Clean up after a short delay to let Torn's handler fire
+        setTimeout(() => ghost.remove(), 200);
+    }
+
+    /**
      * Full render/re-render of all overlay rows from state.statuses.
      * Uses DOM diffing: updates existing rows in-place, adds new ones,
      * removes stale ones.
@@ -3435,13 +3459,12 @@ body.wb-chain-active {
 
         const nameSpan = document.createElement('a');
         nameSpan.className = 'fo-name user name';
-        nameSpan.href = `/profiles.php?XID=${targetId}`;
+        nameSpan.href = `https://www.torn.com/profiles.php?XID=${targetId}`;
         nameSpan.dataset.placeholder = `${s.name || 'Unknown'} [${targetId}]`;
         nameSpan.style.textDecoration = 'none';
         nameSpan.style.color = 'inherit';
         nameSpan.textContent = s.name || 'Unknown';
-        const nameDiv = document.createElement('div');
-        nameSpan.appendChild(nameDiv);
+        nameSpan.addEventListener('click', (e) => triggerMiniProfile(targetId, e));
         nameRow.appendChild(nameSpan);
 
         // Eye badge for viewers
@@ -3723,10 +3746,10 @@ body.wb-chain-active {
 
         const s = state.statuses[targetId] || {};
 
-        // Update name (preserve inner <div> for Torn mini-profile)
+        // Update name
         const nameEl = row.querySelector('.fo-name');
         if (nameEl && s.name) {
-            nameEl.firstChild.textContent = s.name;
+            nameEl.textContent = s.name;
             nameEl.dataset.placeholder = `${s.name} [${targetId}]`;
         }
 
