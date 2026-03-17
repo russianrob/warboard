@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.6.4
+// @version      3.6.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.5  - Activate button: smaller and left-aligned
 // v3.6.4  - Auto-detect ranked war opponent via Torn API (no manual setup needed)
 // v3.6.3  - Fix: chain timer no longer pauses when leaving/re-entering FactionOps overlay
 // v3.6.2  - Chain timer syncs instantly from Torn's DOM (no more delay from server polling)
@@ -1029,34 +1030,30 @@ body.wb-chain-active {
     background: rgba(0,184,148,0.15);
 }
 
-/* ── Activate FactionOps button (fixed top banner, avoids Torn layout issues) ── */
+/* ── Activate FactionOps button (compact pill, left-aligned) ── */
 #fo-activate-btn {
     position: fixed !important;
-    top: 38px !important; left: 50% !important;
-    transform: translateX(-50%) !important;
-    z-index: 999998 !important;
-    display: flex !important; align-items: center !important; justify-content: center !important; gap: 8px !important;
-    width: auto !important; min-width: 320px !important; max-width: 500px !important;
-    height: 38px !important;
-    margin: 0 !important; padding: 0 16px !important;
-    font-family: 'JetBrains Mono', monospace !important;
-    font-size: 13px !important; font-weight: 700 !important;
-    text-transform: uppercase !important; letter-spacing: 0.1em !important;
-    border: 1.5px solid rgba(225,112,85,0.5) !important;
-    border-radius: 8px !important;
-    background: rgba(225,112,85,0.12) !important; color: #e17055 !important;
-    backdrop-filter: blur(8px) !important; -webkit-backdrop-filter: blur(8px) !important;
+    top: 38px !important;
+    left: 10px !important;
+    z-index: 99999 !important;
+    display: flex !important; align-items: center !important; gap: 4px !important;
+    padding: 4px 10px !important;
+    font-family: Arial, sans-serif !important;
+    font-size: 11px !important; font-weight: 600 !important;
+    border: 1px solid #555 !important;
+    border-radius: 12px !important;
+    background: rgba(30,30,30,0.9) !important; color: #e0e0e0 !important;
     cursor: pointer !important; transition: all 0.2s ease !important;
     white-space: nowrap !important;
     box-sizing: border-box !important;
 }
 #fo-activate-btn:hover {
-    background: rgba(225,112,85,0.3) !important;
-    border-color: rgba(225,112,85,0.8) !important;
-    box-shadow: 0 4px 16px rgba(225,112,85,0.25) !important;
+    background: rgba(60,60,60,0.95) !important;
+    border-color: #888 !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
 }
 #fo-activate-btn .fo-activate-icon {
-    font-size: 14px; line-height: 1;
+    font-size: 12px; line-height: 1;
 }
 
 /* ── Column labels ── */
