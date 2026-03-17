@@ -8,7 +8,7 @@
 import * as store from "./store.js";
 import { fetchFactionChain } from "./torn-api.js";
 
-const POLL_INTERVAL_MS = 30_000; // 30 seconds
+const POLL_INTERVAL_MS = 10_000; // 10 seconds
 
 /** Bonus hit thresholds in Torn chain mechanics. */
 const BONUS_HITS = [

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.6.0
+// @version      3.6.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.1  - Chain poll interval 10s (was 30s), drift threshold 5s for tighter sync
 // v3.6.0  - Fix: chain timer smooth countdown (no more jitter from server polls) — smooth client countdown, no server reset loop
 // v3.5.8  - Chain updates instantly via intercepted Torn data (no more 30s delay)
 // v3.5.7  - Fix: replace DELETE HTTP methods with POST for PDA compatibility
@@ -83,7 +84,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.6.0',
+        VERSION: '3.6.1',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1865,12 +1866,12 @@ body.wb-chain-active {
                 state.chain.current = data.chainData.current ?? state.chain.current;
                 state.chain.max = data.chainData.max ?? state.chain.max;
                 // Timeout: only accept server value when chain count changes,
-                // local timer has expired, or server value differs by >15s
+                // local timer has expired, or server value differs by >5s
                 // (corrects drift without causing visible jitter)
                 const serverTimeout = data.chainData.timeout ?? 0;
                 const localTimeout = state.chain.timeout;
                 const drift = Math.abs(serverTimeout - localTimeout);
-                if (chainChanged || localTimeout <= 0 || drift > 15) {
+                if (chainChanged || localTimeout <= 0 || drift > 5) {
                     state.chain.timeout = serverTimeout;
                 }
                 // Cooldown always from server (not locally counted)
