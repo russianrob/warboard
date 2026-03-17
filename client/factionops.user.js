@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.8.2
+// @version      3.8.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.8.3  - Fix: hospital timer flicker — monotonic guard prevents server polls from bumping timers up
 // v3.8.2  - Sort: remove high priority idle/offline tier; high priority always tier 0
 // v3.8.1  - Sort: online targets float above idle/offline within each tier
 // v3.8.0  - Instant med-out detection: DOM MutationObserver watches Torn's member rows for status changes, forwards to server immediately
@@ -1588,6 +1589,44 @@ body.wb-chain-active {
         return 'ok';
     }
 
+    /**
+     * Merge incoming statuses into state.statuses with a monotonic guard
+     * on `until` timers. Prevents server polls from bumping hospital/jail
+     * timers UP when a stale Torn API cache is served.
+     *
+     * Rules:
+     *  - If the status CHANGED (e.g. ok→hospital), accept the new until.
+     *  - If the status is the same and the new until is HIGHER, keep the
+     *    current (lower) value — it's been counting down locally.
+     *  - Allow up to 3s tolerance so legitimate server corrections aren't blocked.
+     */
+    function mergeStatusesMonotonic(incoming) {
+        for (const [targetId, newData] of Object.entries(incoming)) {
+            const existing = state.statuses[targetId];
+            if (!existing) {
+                state.statuses[targetId] = newData;
+                continue;
+            }
+            const oldStatus = normalizeStatus(existing.status);
+            const newStatus = normalizeStatus(newData.status);
+            const statusChanged = oldStatus !== newStatus;
+
+            // Merge all fields
+            state.statuses[targetId] = {
+                ...existing,
+                ...newData,
+            };
+
+            // Monotonic guard on `until` — only if status didn't change
+            if (!statusChanged && existing.until > 0 && newData.until > 0) {
+                if (newData.until > existing.until + 3) {
+                    // New value jumped UP — keep our local countdown
+                    state.statuses[targetId].until = existing.until;
+                }
+            }
+        }
+    }
+
     /** Format seconds into compact timer: "Xd Yh", "Xh Ym", or "Xm Ys". */
     function formatTimer(seconds) {
         if (seconds <= 0) return '0s';
@@ -1922,7 +1961,7 @@ body.wb-chain-active {
 
             // ── Statuses ──
             if (data.enemyStatuses) {
-                state.statuses = data.enemyStatuses;
+                mergeStatusesMonotonic(data.enemyStatuses);
             }
 
             // ── Chain ──
@@ -4430,17 +4469,20 @@ body.wb-chain-active {
             for (const [memberId, member] of Object.entries(data.members)) {
                 const statusInfo = parseInterceptedMemberStatus(member);
                 if (statusInfo) {
+                    // Preserve existing name/level if this payload doesn't provide them
+                    const existing = state.statuses[String(memberId)] || {};
+                    if (!statusInfo.name && existing.name) statusInfo.name = existing.name;
+                    if (statusInfo.level == null && existing.level != null) statusInfo.level = existing.level;
                     statusBatch[String(memberId)] = statusInfo;
                 }
-                // Also update local state immediately, preserving existing name/level if not in this payload
-                const existing = state.statuses[String(memberId)] || {};
-                state.statuses[String(memberId)] = {
-                    ...existing,
-                    ...statusInfo,
-                    name: statusInfo.name || existing.name || null,
-                    level: statusInfo.level != null ? statusInfo.level : (existing.level != null ? existing.level : null),
-                };
-                updateTargetRow(String(memberId));
+            }
+
+            // Use monotonic merge so intercepted API can't bump timers up
+            mergeStatusesMonotonic(statusBatch);
+
+            // Update DOM for each affected target
+            for (const targetId of Object.keys(statusBatch)) {
+                updateTargetRow(targetId);
             }
 
             // Refresh the Next Up queue after status changes
@@ -4888,7 +4930,7 @@ body.wb-chain-active {
                         // Another tab pushed a state change
                         if (msg.calls) state.calls = { ...state.calls, ...msg.calls };
                         if (msg.priorities) state.priorities = { ...state.priorities, ...msg.priorities };
-                        if (msg.statuses) state.statuses = { ...state.statuses, ...msg.statuses };
+                        if (msg.statuses) mergeStatusesMonotonic(msg.statuses);
                         if (msg.chain) {
                             const { timeout, cooldown, ...rest } = msg.chain;
                             Object.assign(state.chain, rest);

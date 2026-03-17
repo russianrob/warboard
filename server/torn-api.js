@@ -20,11 +20,16 @@ export async function fetchFactionMembers(factionId, apiKey) {
     throw new Error(`Torn API error: ${data.error.error} (code ${data.error.code})`);
   }
 
+  // Use Torn's response timestamp to compensate for API cache age.
+  // data.timestamp is when Torn generated the response — may be up to 29s
+  // stale. Using wallclock (Date.now) as the reference subtracts the
+  // cache age automatically, giving the client an already-adjusted value.
   const now = Math.floor(Date.now() / 1000);
   const statuses = {};
   if (data.members) {
     for (const [memberId, member] of Object.entries(data.members)) {
       // Torn API returns `until` as a Unix timestamp; convert to seconds remaining
+      // Using wallclock (not data.timestamp) so cache age is already subtracted
       const untilTs = member.status?.until ?? 0;
       const untilRemaining = untilTs > 0 ? Math.max(0, untilTs - now) : 0;
       statuses[memberId] = {
