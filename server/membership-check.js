@@ -62,15 +62,15 @@ export function startMembershipSchedule() {
     const now = new Date();
     if (
       now.getUTCDay() === 2 &&       // Tuesday
-      now.getUTCHours() === 0 &&      // midnight UTC
-      now.getUTCMinutes() === 5       // :05
+      now.getUTCHours() === 11 &&     // 6am EST (11:00 UTC)
+      now.getUTCMinutes() === 0       // :00
     ) {
       console.log("[membership] Tuesday check triggered");
       runMembershipCheck();
     }
   }, 60_000);
 
-  console.log("[membership] Weekly Tuesday check scheduled (00:05 UTC)");
+  console.log("[membership] Weekly Tuesday check scheduled (11:00 UTC / 6am EST)");
 }
 
 export function stopMembershipSchedule() {
