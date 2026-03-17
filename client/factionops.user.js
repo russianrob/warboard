@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.7.4
+// @version      3.7.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.7.5  - Collapse unattackable members (traveling/abroad) into expandable section; hide federal/fallen
 // v3.7.4  - Fix: traveling/abroad members now display correctly with Travel status
 // v3.7.3  - Perf: reduce client chain poll to 30s (fixes scroll lag on PDA)
 // v3.7.2  - Chain timer: compensate for Torn API cache age (sub-second accuracy)
@@ -97,7 +98,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.7.4',
+        VERSION: '3.7.5',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1459,6 +1460,26 @@ body.wb-chain-active {
     justify-content: space-between;
     border-top: 1px solid var(--wb-border);
 }
+.fo-unavailable-section {
+    border-top: 1px solid var(--wb-border);
+    margin-top: 2px;
+}
+.fo-unavail-header {
+    padding: 8px 12px;
+    font-size: 11px;
+    color: #636e72;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.fo-unavail-header:hover {
+    color: var(--wb-text);
+    background: var(--wb-accent-10);
+}
+.fo-unavail-list .fo-row {
+    opacity: 0.45;
+}
 `;
         GM_addStyle(css);
         log('Styles injected');
@@ -1541,8 +1562,10 @@ body.wb-chain-active {
         if (!raw) return 'ok';
         const s = raw.toLowerCase();
         if (s === 'hospital' || s.includes('hospital')) return 'hospital';
-        if (s === 'jail' || s.includes('jail') || s.includes('federal')) return 'jail';
-        if (s === 'traveling' || s === 'abroad' || s.includes('traveling') || s.includes('abroad')) return 'traveling';
+        if (s === 'federal' || s.includes('federal')) return 'federal';
+        if (s === 'jail' || s.includes('jail')) return 'jail';
+        if (s === 'abroad' || s.includes('abroad')) return 'abroad';
+        if (s === 'traveling' || s.includes('traveling')) return 'traveling';
         if (s === 'okay' || s === 'ok') return 'ok';
         if (s === 'fallen') return 'fallen';
         return 'ok';
@@ -3543,12 +3566,31 @@ body.wb-chain-active {
         const list = document.getElementById('fo-target-list');
         if (!list) return;
 
-        const targetIds = Object.keys(state.statuses);
+        const allIds = Object.keys(state.statuses);
+        const travelingStatuses = ['traveling', 'abroad'];
+        const hiddenStatuses = ['federal', 'fallen'];
 
-        // Build a set of current targets for stale-removal
+        const targetIds = [];      // attackable: ok, hospital, jail
+        const travelingIds = [];   // collapsed section
+        // federal/fallen are simply excluded from everything
+
+        for (const tid of allIds) {
+            const s = state.statuses[tid];
+            const status = normalizeStatus(s ? s.status : 'ok');
+            if (hiddenStatuses.includes(status)) {
+                // Completely hidden — skip
+                continue;
+            } else if (travelingStatuses.includes(status)) {
+                travelingIds.push(tid);
+            } else {
+                targetIds.push(tid);
+            }
+        }
+
+        // Build a set of current attackable targets for stale-removal
         const currentSet = new Set(targetIds);
 
-        // Remove stale rows
+        // Remove stale rows (including members who transitioned to traveling/hidden)
         const existingRows = list.querySelectorAll('[data-fo-id]');
         existingRows.forEach((row) => {
             if (!currentSet.has(row.dataset.foId)) {
@@ -3585,6 +3627,79 @@ body.wb-chain-active {
                 list.insertBefore(row, expectedNext);
             }
             prevNode = row;
+        }
+
+        // Render collapsed traveling section
+        let unavailSection = document.getElementById('fo-unavailable-section');
+        if (travelingIds.length > 0) {
+            if (!unavailSection) {
+                unavailSection = document.createElement('div');
+                unavailSection.id = 'fo-unavailable-section';
+                unavailSection.className = 'fo-unavailable-section';
+                list.parentElement.appendChild(unavailSection);
+            }
+
+            // Count by status type
+            const counts = {};
+            for (const tid of travelingIds) {
+                const s = state.statuses[tid];
+                const status = normalizeStatus(s ? s.status : 'ok');
+                counts[status] = (counts[status] || 0) + 1;
+            }
+
+            const countParts = [];
+            if (counts.traveling) countParts.push(`${counts.traveling} traveling`);
+            if (counts.abroad) countParts.push(`${counts.abroad} abroad`);
+
+            const isExpanded = unavailSection.dataset.expanded === 'true';
+            const toggleIcon = isExpanded ? '\u25BC' : '\u25B6';
+
+            // Header toggle
+            let header = unavailSection.querySelector('.fo-unavail-header');
+            if (!header) {
+                header = document.createElement('div');
+                header.className = 'fo-unavail-header';
+                header.style.cursor = 'pointer';
+                header.addEventListener('click', () => {
+                    const section = document.getElementById('fo-unavailable-section');
+                    const expanded = section.dataset.expanded === 'true';
+                    section.dataset.expanded = expanded ? 'false' : 'true';
+                    renderOverlay(); // re-render to toggle visibility
+                });
+                unavailSection.appendChild(header);
+            }
+            header.innerHTML = `<span style="margin-right:6px;">${toggleIcon}</span>Traveling (${travelingIds.length})${countParts.length ? ': ' + countParts.join(', ') : ''}`;
+
+            // Render unavailable rows if expanded
+            let unavailList = unavailSection.querySelector('.fo-unavail-list');
+            if (!unavailList) {
+                unavailList = document.createElement('div');
+                unavailList.className = 'fo-unavail-list';
+                unavailSection.appendChild(unavailList);
+            }
+
+            if (isExpanded) {
+                unavailList.style.display = '';
+                // Remove stale
+                unavailList.querySelectorAll('[data-fo-id]').forEach(r => {
+                    if (!travelingIds.includes(r.dataset.foId)) r.remove();
+                });
+                // Add/update
+                for (const tid of travelingIds) {
+                    let row = unavailList.querySelector(`[data-fo-id="${tid}"]`);
+                    if (row) {
+                        updateOverlayRow(row, tid);
+                    } else {
+                        row = renderOverlayRow(tid);
+                        row.style.opacity = '0.45';
+                        unavailList.appendChild(row);
+                    }
+                }
+            } else {
+                unavailList.style.display = 'none';
+            }
+        } else if (unavailSection) {
+            unavailSection.remove();
         }
 
         // Update footer stats
@@ -3749,8 +3864,8 @@ body.wb-chain-active {
         const isHigh = prio && prio.level === 'high';
 
         row.classList.toggle('is-hospital', status === 'hospital');
-        row.classList.toggle('is-jail', status === 'jail');
-        row.classList.toggle('is-travel', status === 'traveling');
+        row.classList.toggle('is-jail', status === 'jail' || status === 'federal');
+        row.classList.toggle('is-travel', status === 'traveling' || status === 'abroad');
         row.classList.toggle('is-called', isCalled);
         row.classList.toggle('is-high-priority', isHigh);
     }
@@ -3797,10 +3912,13 @@ body.wb-chain-active {
         if (status === 'hospital') {
             pillClass = 'hosp';
             label = 'Hosp';
+        } else if (status === 'federal') {
+            pillClass = 'jail';
+            label = 'Federal';
         } else if (status === 'jail') {
             pillClass = 'jail';
             label = 'Jail';
-        } else if (status === 'traveling') {
+        } else if (status === 'traveling' || status === 'abroad') {
             pillClass = 'travel';
             label = 'Travel';
         }
@@ -3995,12 +4113,14 @@ body.wb-chain-active {
     /** Update footer stats. */
     function updateOverlayFooter() {
         const ids = Object.keys(state.statuses);
-        const total = ids.length;
-        let available = 0, called = 0, hosp = 0;
+        const hiddenStatuses = ['federal', 'fallen', 'traveling', 'abroad'];
+        let total = 0, available = 0, called = 0, hosp = 0;
 
         for (const tid of ids) {
             const s = state.statuses[tid] || {};
             const status = normalizeStatus(s.status);
+            if (hiddenStatuses.includes(status)) continue; // skip traveling/hidden from counts
+            total++;
             if (status === 'ok') available++;
             if (status === 'hospital') hosp++;
             if (state.calls[tid]) called++;
@@ -4048,9 +4168,13 @@ body.wb-chain-active {
             case 'hospital':
                 return 2;
             case 'traveling':
+            case 'abroad':
                 return 3;
             case 'jail':
                 return 4;
+            case 'federal':
+            case 'fallen':
+                return 7;
             default:
                 return 6;
         }
@@ -4358,11 +4482,13 @@ body.wb-chain-active {
             if (state_str === 'hospital') {
                 status = 'hospital';
                 until = s.until ? Math.max(0, s.until - Math.floor(Date.now() / 1000)) : 0;
+            } else if (state_str === 'federal' || state_str === 'fallen') {
+                status = state_str;
             } else if (state_str === 'jail') {
                 status = 'jail';
                 until = s.until ? Math.max(0, s.until - Math.floor(Date.now() / 1000)) : 0;
             } else if (state_str === 'traveling' || state_str === 'abroad') {
-                status = 'traveling';
+                status = state_str;
                 description = s.description || '';
                 until = s.until ? Math.max(0, s.until - Math.floor(Date.now() / 1000)) : 0;
             } else {
