@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.6.2
+// @version      3.6.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.3  - Fix: chain timer no longer pauses when leaving/re-entering FactionOps overlay
 // v3.6.2  - Chain timer syncs instantly from Torn's DOM (no more delay from server polling)
 // v3.6.1  - Chain poll interval 10s (was 30s), drift threshold 5s for tighter sync
 // v3.6.0  - Fix: chain timer smooth countdown (no more jitter from server polls) — smooth client countdown, no server reset loop
@@ -85,7 +86,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.6.2',
+        VERSION: '3.6.3',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1874,9 +1875,13 @@ body.wb-chain-active {
                 const drift = Math.abs(serverTimeout - localTimeout);
                 if (chainChanged || localTimeout <= 0 || drift > 5) {
                     state.chain.timeout = serverTimeout;
+                    chainTimeoutSetAt = Date.now();
+                    chainTimeoutSetVal = serverTimeout;
                 }
                 // Cooldown always from server (not locally counted)
                 state.chain.cooldown = data.chainData.cooldown ?? 0;
+                chainCooldownSetAt = Date.now();
+                chainCooldownSetVal = data.chainData.cooldown ?? 0;
                 updateChainBar();
 
                 // Bonus hit notification
@@ -2610,18 +2615,21 @@ body.wb-chain-active {
 
     // Client-side countdown for chain timeout/cooldown
     let chainTimerRAF = null;
-    let chainTimerLast = 0;
+    // Wall-clock anchors — immune to rAF pausing when tab/overlay is hidden
+    let chainTimeoutSetAt = 0;   // Date.now() when timeout was last set
+    let chainTimeoutSetVal = 0;  // timeout value (seconds) at that moment
+    let chainCooldownSetAt = 0;
+    let chainCooldownSetVal = 0;
 
     function startChainTimer() {
         if (chainTimerRAF) return; // already running
-        chainTimerLast = performance.now();
 
-        function tick(now) {
-            const dt = (now - chainTimerLast) / 1000;
-            chainTimerLast = now;
-
-            if (state.chain.timeout > 0) {
-                state.chain.timeout = Math.max(0, state.chain.timeout - dt);
+        function tick() {
+            // Use wall-clock time so the countdown stays accurate even when
+            // requestAnimationFrame is paused (tab hidden / overlay closed).
+            if (chainTimeoutSetAt > 0 && chainTimeoutSetVal > 0) {
+                const elapsed = (Date.now() - chainTimeoutSetAt) / 1000;
+                state.chain.timeout = Math.max(0, chainTimeoutSetVal - elapsed);
             }
             // Chain break sound alert
             if (CONFIG.CHAIN_ALERT && state.chain.timeout > 0 && state.chain.timeout <= CONFIG.CHAIN_ALERT_THRESHOLD && !state.chainAlertFired) {
@@ -2631,8 +2639,9 @@ body.wb-chain-active {
             if (state.chain.timeout > CONFIG.CHAIN_ALERT_THRESHOLD) {
                 state.chainAlertFired = false;
             }
-            if (state.chain.cooldown > 0) {
-                state.chain.cooldown = Math.max(0, state.chain.cooldown - dt);
+            if (chainCooldownSetAt > 0 && chainCooldownSetVal > 0) {
+                const elapsed = (Date.now() - chainCooldownSetAt) / 1000;
+                state.chain.cooldown = Math.max(0, chainCooldownSetVal - elapsed);
             }
 
             updateChainBar();
@@ -2641,6 +2650,16 @@ body.wb-chain-active {
 
         chainTimerRAF = requestAnimationFrame(tick);
     }
+
+    // Re-sync chain timer immediately when the tab becomes visible again,
+    // so the user never sees a stale value after switching back.
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            // Wall-clock tick already computes the correct remaining time,
+            // but force a UI refresh right now so it appears instant.
+            updateChainBar();
+        }
+    });
 
     // =========================================================================
     // SECTION 11: STATUS COUNTDOWN TIMERS
@@ -3303,6 +3322,8 @@ body.wb-chain-active {
         startChainTimer();
         startStatusTimers();
         startCallPruner();
+        // Refresh chain display immediately so overlay shows current value
+        updateChainBar();
 
         // Hide Torn's main content area so the overlay takes over the full page
         const mainContent = document.getElementById('mainContainer')
@@ -4174,7 +4195,11 @@ body.wb-chain-active {
             state.chain.current = chain.current || 0;
             state.chain.max = chain.max || 0;
             state.chain.timeout = chain.timeout || 0;
+            chainTimeoutSetAt = Date.now();
+            chainTimeoutSetVal = state.chain.timeout;
             state.chain.cooldown = chain.cooldown || 0;
+            chainCooldownSetAt = Date.now();
+            chainCooldownSetVal = state.chain.cooldown;
             updateChainBar();
             // Forward chain data to server so all faction members see it instantly
             forwardChainToServer(state.chain);
@@ -4444,7 +4469,17 @@ body.wb-chain-active {
                         if (msg.calls) state.calls = { ...state.calls, ...msg.calls };
                         if (msg.priorities) state.priorities = { ...state.priorities, ...msg.priorities };
                         if (msg.statuses) state.statuses = { ...state.statuses, ...msg.statuses };
-                        if (msg.chain) state.chain = { ...state.chain, ...msg.chain };
+                        if (msg.chain) {
+                            state.chain = { ...state.chain, ...msg.chain };
+                            if (msg.chain.timeout != null) {
+                                chainTimeoutSetAt = Date.now();
+                                chainTimeoutSetVal = state.chain.timeout;
+                            }
+                            if (msg.chain.cooldown != null) {
+                                chainCooldownSetAt = Date.now();
+                                chainCooldownSetVal = state.chain.cooldown;
+                            }
+                        }
                         refreshAllRows();
                         updateChainBar();
                         break;
