@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.7.2
+// @version      3.7.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.7.3  - Perf: reduce client chain poll to 30s (fixes scroll lag on PDA)
 // v3.7.2  - Chain timer: compensate for Torn API cache age (sub-second accuracy)
 // v3.7.1  - Direct Torn API chain polling (5s) for real-time chain accuracy
 // v3.7.0  - Fix: chain timer accuracy — removed unreliable DOM reader, uses intercepted API + server poll
@@ -95,7 +96,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.7.2',
+        VERSION: '3.7.3',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2680,7 +2681,7 @@ body.wb-chain-active {
     // Direct Torn API chain polling — uses the player's own API key to get
     // chain data every 5 seconds, independent of the server poll.
     let chainPollInterval = null;
-    const CHAIN_POLL_MS = 5000;
+    const CHAIN_POLL_MS = 30000; // 30 seconds (Torn API caches for 29s anyway)
 
     function startDirectChainPoll() {
         if (chainPollInterval) return; // already running

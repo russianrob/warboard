@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "agent_handler": {
+    "agent-handler": {
       "command": "npx",
       "args": [
         "-y",
@@ -10,7 +10,7 @@
         "Authorization: Bearer ${AUTH_TOKEN}"
       ],
       "env": {
-        "AUTH_TOKEN": "agp_019cfbfc-0857-7323-8898-8bc2882d35de"
+        "AUTH_TOKEN": "agp_019cfc32-a23f-7ab3-a7f0-717950df4d9e"
       }
     }
   }
