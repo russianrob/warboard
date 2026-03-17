@@ -9,6 +9,16 @@
 // @updateURL    https://tornwar.com/scripts/torn-oc-loan-manager-pda.meta.js
 // ==/UserScript==
 
+// =============================================================================
+// CHANGELOG
+// =============================================================================
+// v1.5.2-pda - Update URLs to tornwar.com hosting
+// v1.5.1-pda - Fix: retrieve role parameter (use "retrieve" not "return")
+// v1.5.0-pda - Unused tab card UI with Retrieve Item button
+// v1.4.1-pda - Initial PDA-compatible release: highlights over-loaned items,
+//              helps loan missing OC tools, split calculator
+// =============================================================================
+
 (function () {
     'use strict';
 

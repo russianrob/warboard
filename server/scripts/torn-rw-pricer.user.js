@@ -16,6 +16,29 @@
 // @connect      tornwar.com
 // ==/UserScript==
 
+// =============================================================================
+// CHANGELOG
+// =============================================================================
+// v2.9.9  - Update URLs to tornwar.com hosting, serve prices from VPS
+// v2.9.8  - Full BONUS_COLOR_RANGES cross-check and correction using
+//           forum reference data
+// v2.9.7  - Correct bonus color ranges: Focus red [26,32],
+//           Double-Edged Y[10,14] O[16,22] R[23,32]
+// v2.9.6  - Fix: bonus color ranges — Focus and Double-Edged red tier
+//           now [25,32] instead of [32,32]
+// v2.9.5  - Fix: combo rarity uses weapon rarity instead of bonus color
+//           tier for combo lookups and tooltip labels
+// v2.9.4  - Extract bonus from item detail page (inventory) for combo pricing
+// v2.9.3  - Fix: combo array length check (>=4 not ===4)
+// v2.9.2  - Show bonus quality % on combo Max rows
+// v2.9.1  - Add bonus quality % to max sale display
+// v2.9.0  - Show bonus name(s) on max-priced weapon sale
+// v2.8.0  - Tooltip flips above badge when near bottom of screen
+// v2.7.0  - Sync and hosting improvements
+// v2.6.1  - Initial public release: inline price badges for RW weapons
+//           and armour using daily-refreshed auction data
+// =============================================================================
+
 (function() {
     'use strict';
 

@@ -16,6 +16,17 @@
 // @updateURL    https://tornwar.com/scripts/torn-profile-link-formatter.meta.js
 // ==/UserScript==
 
+// =============================================================================
+// CHANGELOG
+// =============================================================================
+// v3.6.1  - Update URLs to tornwar.com hosting
+// v3.6.0  - BSP prediction TBS with FF Scouter V2 fallback
+//           - Strip BSP TBS prefixes from copied names
+//           - Dedupe lines by ID
+//           - War JSON faction IDs (Dead Fragment 42055 separated from enemy)
+//           - Faction copy includes member level and Xanax taken
+// =============================================================================
+
 (function() {
     'use strict';
 

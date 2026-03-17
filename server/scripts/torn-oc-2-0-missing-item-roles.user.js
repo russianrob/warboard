@@ -12,6 +12,14 @@
 // @updateURL    https://tornwar.com/scripts/torn-oc-2-0-missing-item-roles.meta.js
 // ==/UserScript==
 
+// =============================================================================
+// CHANGELOG
+// =============================================================================
+// v2.5.1  - Update URLs to tornwar.com hosting
+// v2.5.0  - Initial public release: floating box listing OC 2.0 Planning
+//           crimes with roles missing items
+// =============================================================================
+
 (function() {
     'use strict';
 

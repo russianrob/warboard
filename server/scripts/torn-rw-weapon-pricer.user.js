@@ -15,6 +15,16 @@
 // @updateURL    https://tornwar.com/scripts/torn-rw-weapon-pricer.meta.js
 // ==/UserScript==
 
+// =============================================================================
+// CHANGELOG
+// =============================================================================
+// v1.2.1  - Update URLs to tornwar.com hosting
+// v1.2.0  - Fix: add 24 missing weapon IDs to floating panel
+// v1.1.0  - Add armour pricing
+// v1.0.0  - Initial release: RW weapon price estimator using real
+//           auction house data (p25/median/p75 by weapon, quality, bonus)
+// =============================================================================
+
 (function() {
     'use strict';
 
