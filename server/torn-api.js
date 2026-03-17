@@ -26,7 +26,8 @@ export async function fetchFactionMembers(factionId, apiKey) {
       statuses[memberId] = {
         name: member.name,
         level: member.level,
-        status: member.status?.description ?? "Unknown",
+        status: (member.status?.state ?? "Okay").toLowerCase(),
+        description: member.status?.description ?? "",
         until: member.status?.until ?? 0,
         lastAction: member.last_action?.relative ?? "Unknown",
         online: member.last_action?.status ?? "Offline",

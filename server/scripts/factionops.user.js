@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.7.3
+// @version      3.7.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.7.4  - Fix: traveling/abroad members now display correctly with Travel status
 // v3.7.3  - Perf: reduce client chain poll to 30s (fixes scroll lag on PDA)
 // v3.7.2  - Chain timer: compensate for Torn API cache age (sub-second accuracy)
 // v3.7.1  - Direct Torn API chain polling (5s) for real-time chain accuracy
@@ -96,7 +97,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.7.3',
+        VERSION: '3.7.4',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1532,6 +1533,21 @@ body.wb-chain-active {
     // SECTION 5: UTILITY HELPERS
     // =========================================================================
 
+    /**
+     * Normalize a raw status string to one of: 'ok', 'hospital', 'jail', 'traveling', 'fallen'.
+     * Handles both server-normalized states ("traveling") and raw descriptions ("Traveling to Mexico").
+     */
+    function normalizeStatus(raw) {
+        if (!raw) return 'ok';
+        const s = raw.toLowerCase();
+        if (s === 'hospital' || s.includes('hospital')) return 'hospital';
+        if (s === 'jail' || s.includes('jail') || s.includes('federal')) return 'jail';
+        if (s === 'traveling' || s === 'abroad' || s.includes('traveling') || s.includes('abroad')) return 'traveling';
+        if (s === 'okay' || s === 'ok') return 'ok';
+        if (s === 'fallen') return 'fallen';
+        return 'ok';
+    }
+
     /** Format seconds into "Xm Ys" or "Xh Ym". */
     function formatTimer(seconds) {
         if (seconds <= 0) return '0s';
@@ -2808,7 +2824,7 @@ body.wb-chain-active {
         // Collect hospital targets that aren't called and still have a timer
         const hospitalTargets = [];
         for (const [targetId, s] of Object.entries(state.statuses)) {
-            if (s.status === 'hospital' && s.until > 0 && !state.calls[targetId]) {
+            if (normalizeStatus(s.status) === 'hospital' && s.until > 0 && !state.calls[targetId]) {
                 hospitalTargets.push({ targetId, until: s.until, name: s.name || `#${targetId}` });
             }
         }
@@ -3153,8 +3169,8 @@ body.wb-chain-active {
             ? `<span id="wb-timer-${targetId}">${formatTimer(statusData.until)}</span>`
             : '';
 
-        switch (statusData.status) {
-            case 'okay':
+        const normalizedSt = normalizeStatus(statusData.status);
+        switch (normalizedSt) {
             case 'ok':
                 badge.className = 'wb-status-badge wb-status-ok';
                 badge.innerHTML = `${dot} OK`;
@@ -3163,8 +3179,7 @@ body.wb-chain-active {
                 badge.className = 'wb-status-badge wb-status-hospital';
                 badge.innerHTML = `${dot} Hosp: ${timerSpan}`;
                 break;
-            case 'traveling':
-            case 'travel': {
+            case 'traveling': {
                 badge.className = 'wb-status-badge wb-status-travel';
                 const travelTimer = timerSpan || '';
                 const estimate = !travelTimer ? estimateTravelReturn(statusData.description) : null;
@@ -3728,14 +3743,14 @@ body.wb-chain-active {
     /** Apply status/call/priority classes to an overlay row. */
     function applyOverlayRowClasses(row, targetId) {
         const s = state.statuses[targetId] || {};
-        const status = (s.status || 'ok').toLowerCase();
+        const status = normalizeStatus(s.status);
         const isCalled = !!state.calls[targetId];
         const prio = state.priorities[targetId];
         const isHigh = prio && prio.level === 'high';
 
         row.classList.toggle('is-hospital', status === 'hospital');
         row.classList.toggle('is-jail', status === 'jail');
-        row.classList.toggle('is-travel', status === 'traveling' || status === 'travel');
+        row.classList.toggle('is-travel', status === 'traveling');
         row.classList.toggle('is-called', isCalled);
         row.classList.toggle('is-high-priority', isHigh);
     }
@@ -3774,7 +3789,7 @@ body.wb-chain-active {
     function renderOverlayStatusCell(cell, targetId) {
         cell.innerHTML = '';
         const s = state.statuses[targetId] || {};
-        const status = (s.status || 'ok').toLowerCase();
+        const status = normalizeStatus(s.status);
 
         let pillClass = 'ok';
         let label = 'OK';
@@ -3785,7 +3800,7 @@ body.wb-chain-active {
         } else if (status === 'jail') {
             pillClass = 'jail';
             label = 'Jail';
-        } else if (status === 'traveling' || status === 'travel') {
+        } else if (status === 'traveling') {
             pillClass = 'travel';
             label = 'Travel';
         }
@@ -3985,8 +4000,8 @@ body.wb-chain-active {
 
         for (const tid of ids) {
             const s = state.statuses[tid] || {};
-            const status = (s.status || 'ok').toLowerCase();
-            if (status === 'ok' || status === 'okay') available++;
+            const status = normalizeStatus(s.status);
+            if (status === 'ok') available++;
             if (status === 'hospital') hosp++;
             if (state.calls[tid]) called++;
         }
@@ -4016,7 +4031,7 @@ body.wb-chain-active {
      */
     function sortPriority(targetId) {
         const s = state.statuses[targetId];
-        const status = s ? (s.status || 'ok') : 'ok';
+        const status = normalizeStatus(s ? s.status : 'ok');
         const isCalled = !!state.calls[targetId];
         const prio = state.priorities[targetId];
         const isHighPriority = prio && prio.level === 'high';
@@ -4025,16 +4040,14 @@ body.wb-chain-active {
         if (isCalled) return 5;
 
         // High priority + OK status floats above everything
-        if (isHighPriority && (status === 'ok' || status === 'okay')) return 0;
+        if (isHighPriority && status === 'ok') return 0;
 
         switch (status) {
-            case 'okay':
             case 'ok':
                 return 1;
             case 'hospital':
                 return 2;
             case 'traveling':
-            case 'travel':
                 return 3;
             case 'jail':
                 return 4;
