@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.8.7
+// @version      3.8.8
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.8.8  - Remove heatmap and settings buttons from attack page
 // v3.8.7  - Remove attack page info box overlay
 // v3.8.6  - Fix: online/idle/offline dots now work — server field renamed from 'online' to 'activity'
 // v3.8.5  - UI: Next Up timer color changed to bright red for better visibility
@@ -5298,14 +5299,15 @@ body.wb-chain-active {
         // 2. Apply theme
         applyTheme();
 
-        // 3. Create settings gear (skip on faction/war pages — overlay has its own button)
+        // 3. Create settings gear (only on non-war, non-attack pages)
         const url = window.location.href;
-        if (!url.includes('factions.php') && !url.includes('war.php')) {
+        const isWarOrAttack = url.includes('factions.php') || url.includes('war.php') || url.includes('loader.php?sid=attack');
+        if (!isWarOrAttack) {
             createSettingsGear();
         }
 
-        // 3b. Create heatmap toggle button (skip on faction/war pages — overlay header has its own)
-        if (!url.includes('factions.php') && !url.includes('war.php')) {
+        // 3b. Create heatmap toggle button (only on non-war, non-attack pages)
+        if (!isWarOrAttack) {
             createHeatmapButton();
         }
 
