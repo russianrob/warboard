@@ -3209,14 +3209,12 @@ body.wb-chain-active {
         startStatusTimers();
         startCallPruner();
 
-        // Hide Torn's native war list container
-        for (const sel of MEMBER_CONTAINER_SELECTORS) {
-            const el = document.querySelector(sel);
-            if (el) {
-                el.dataset.foHidden = 'true';
-                el.style.display = 'none';
-                break;
-            }
+        // Hide Torn's main content area so the overlay takes over the full page
+        const mainContent = document.getElementById('mainContainer')
+            || document.querySelector('.content-wrapper');
+        if (mainContent) {
+            mainContent.dataset.foHidden = 'true';
+            mainContent.style.display = 'none';
         }
 
         // Create the overlay if it doesn't already exist
@@ -3280,15 +3278,12 @@ body.wb-chain-active {
             </div>
         `;
 
-        // Insert after the hidden container, or at the top of main content
-        const mainContent = document.getElementById('mainContainer')
-            || document.querySelector('.content-wrapper')
-            || document.body;
-        const hiddenEl = document.querySelector('[data-fo-hidden="true"]');
-        if (hiddenEl && hiddenEl.parentNode) {
-            hiddenEl.parentNode.insertBefore(overlay, hiddenEl.nextSibling);
+        // Insert after the hidden main content, taking over the page
+        const hiddenMain = document.querySelector('[data-fo-hidden="true"]');
+        if (hiddenMain && hiddenMain.parentNode) {
+            hiddenMain.parentNode.insertBefore(overlay, hiddenMain.nextSibling);
         } else {
-            mainContent.prepend(overlay);
+            document.body.appendChild(overlay);
         }
 
         renderOverlay();
