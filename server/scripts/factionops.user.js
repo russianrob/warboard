@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.8.4
+// @version      3.8.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.8.5  - UI: Next Up timer color changed to bright red for better visibility
 // v3.8.4  - Fix: timer flicker — sub-second precision + strict monotonic guard (Math.min, zero tolerance)
 // v3.8.3  - Fix: hospital timer flicker — monotonic guard prevents server polls from bumping timers up
 // v3.8.2  - Sort: remove high priority idle/offline tier; high priority always tier 0
@@ -527,15 +528,15 @@ html.wb-theme-light {
 }
 .wb-next-up-item .wb-next-timer {
     font-family: monospace;
-    color: var(--wb-hospital-red);
-    font-weight: 600;
+    color: #e74c3c;
+    font-weight: 700;
 }
 .wb-next-up-item.wb-next-imminent {
     background: rgba(214,48,49,0.2);
     animation: wb-pulse 1s ease-in-out infinite;
 }
 .wb-next-up-item.wb-next-imminent .wb-next-timer {
-    color: var(--wb-bonus-warning);
+    color: #ff4444;
 }
 .wb-next-up-call {
     font-size: 9px;
@@ -1031,14 +1032,14 @@ body.wb-chain-active {
 .fo-next-up-item a { text-decoration: none; color: var(--wb-text); font-weight: 500; }
 .fo-next-up-timer {
     font-family: 'JetBrains Mono', monospace;
-    color: #e17055; font-weight: 600; font-size: 10px;
+    color: #e74c3c; font-weight: 700; font-size: 10px;
 }
 .fo-next-up-item.imminent {
     background: rgba(214,48,49,0.15);
     border-color: rgba(214,48,49,0.3);
 }
 .fo-next-up-item.imminent .fo-next-up-timer {
-    color: #fdcb6e;
+    color: #ff4444;
 }
 .fo-next-up-call {
     font-size: 8px; font-weight: 700;
