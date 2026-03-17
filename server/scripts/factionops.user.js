@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.5.8
+// @version      3.5.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.5.9  - Fix: chain timer jitter — smooth client countdown, no server reset loop
 // v3.5.8  - Chain updates instantly via intercepted Torn data (no more 30s delay)
 // v3.5.7  - Fix: replace DELETE HTTP methods with POST for PDA compatibility
 //           (fixes "network error" when removing faction API key)
@@ -82,7 +83,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.5.8',
+        VERSION: '3.5.9',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1859,11 +1860,21 @@ body.wb-chain-active {
             // ── Chain ──
             if (data.chainData) {
                 const oldCurrent = state.chain.current;
-                state.chain = { ...state.chain, ...data.chainData };
+                const chainChanged = data.chainData.current !== oldCurrent;
+                // Always update hit count and max
+                state.chain.current = data.chainData.current ?? state.chain.current;
+                state.chain.max = data.chainData.max ?? state.chain.max;
+                // Only update timeout/cooldown when the chain count changes
+                // (a new hit resets the timer) — otherwise let the client
+                // countdown tick smoothly without server jitter
+                if (chainChanged || state.chain.timeout <= 0) {
+                    state.chain.timeout = data.chainData.timeout ?? 0;
+                    state.chain.cooldown = data.chainData.cooldown ?? 0;
+                }
                 updateChainBar();
 
                 // Bonus hit notification
-                if (data.chainData.current && data.chainData.current !== oldCurrent) {
+                if (data.chainData.current && chainChanged) {
                     const next = nextBonusMilestone(data.chainData.current + 1);
                     const hitsToBonus = next ? next - data.chainData.current : null;
                     if (hitsToBonus !== null && hitsToBonus <= 3 && hitsToBonus > 0) {
