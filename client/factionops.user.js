@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.0.56
+// @version      3.0.57
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3807,6 +3807,7 @@ body.wb-chain-active {
 
     /**
      * Sort priority for a target. Lower number = higher in the list.
+     *   0: High priority (uncalled)
      *   1: OK / idle / offline (uncalled)
      *   2: Hospital
      *   3: Traveling
@@ -3817,9 +3818,14 @@ body.wb-chain-active {
         const s = state.statuses[targetId];
         const status = s ? (s.status || 'ok') : 'ok';
         const isCalled = !!state.calls[targetId];
+        const prio = state.priorities[targetId];
+        const isHighPriority = prio && prio.level === 'high';
 
         // Called targets sink to bottom
         if (isCalled) return 5;
+
+        // High priority floats above everything
+        if (isHighPriority) return 0;
 
         switch (status) {
             case 'okay':
