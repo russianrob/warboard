@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.8.3
+// @version      3.8.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.8.4  - Fix: timer flicker — sub-second precision + strict monotonic guard (Math.min, zero tolerance)
 // v3.8.3  - Fix: hospital timer flicker — monotonic guard prevents server polls from bumping timers up
 // v3.8.2  - Sort: remove high priority idle/offline tier; high priority always tier 0
 // v3.8.1  - Sort: online targets float above idle/offline within each tier
@@ -1598,7 +1599,7 @@ body.wb-chain-active {
      *  - If the status CHANGED (e.g. ok→hospital), accept the new until.
      *  - If the status is the same and the new until is HIGHER, keep the
      *    current (lower) value — it's been counting down locally.
-     *  - Allow up to 3s tolerance so legitimate server corrections aren't blocked.
+     *  - Zero tolerance: timers only go down, never up (even by 1s).
      */
     function mergeStatusesMonotonic(incoming) {
         for (const [targetId, newData] of Object.entries(incoming)) {
@@ -1619,10 +1620,8 @@ body.wb-chain-active {
 
             // Monotonic guard on `until` — only if status didn't change
             if (!statusChanged && existing.until > 0 && newData.until > 0) {
-                if (newData.until > existing.until + 3) {
-                    // New value jumped UP — keep our local countdown
-                    state.statuses[targetId].until = existing.until;
-                }
+                // Timer must only count DOWN — keep whichever is lower
+                state.statuses[targetId].until = Math.min(existing.until, newData.until);
             }
         }
     }
@@ -4561,18 +4560,21 @@ body.wb-chain-active {
         if (member.status) {
             const s = member.status;
             const state_str = (s.state || '').toLowerCase();
+            // Use Date.now()/1000 (not Math.floor) for sub-second precision —
+            // avoids rounding that causes timers to jump up by ~1s.
+            const nowSec = Date.now() / 1000;
             if (state_str === 'hospital') {
                 status = 'hospital';
-                until = s.until ? Math.max(0, s.until - Math.floor(Date.now() / 1000)) : 0;
+                until = s.until ? Math.max(0, s.until - nowSec) : 0;
             } else if (state_str === 'federal' || state_str === 'fallen') {
                 status = state_str;
             } else if (state_str === 'jail') {
                 status = 'jail';
-                until = s.until ? Math.max(0, s.until - Math.floor(Date.now() / 1000)) : 0;
+                until = s.until ? Math.max(0, s.until - nowSec) : 0;
             } else if (state_str === 'traveling' || state_str === 'abroad') {
                 status = state_str;
                 description = s.description || '';
-                until = s.until ? Math.max(0, s.until - Math.floor(Date.now() / 1000)) : 0;
+                until = s.until ? Math.max(0, s.until - nowSec) : 0;
             } else {
                 status = 'ok';
             }
