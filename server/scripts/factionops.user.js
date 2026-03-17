@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.7.9
+// @version      3.8.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.8.0  - Instant med-out detection: DOM MutationObserver watches Torn's member rows for status changes, forwards to server immediately
 // v3.7.9  - Fix: server converted Torn API Unix timestamps to seconds remaining (was showing raw epoch values)
 // v3.7.8  - Timers show days+hours for long durations (e.g. Xanax OD: "20530d 6h" instead of "492714h 36m")
 // v3.7.7  - Sort: my calls pinned to top, others' calls to bottom; Call button blue, Mine green, others red
@@ -102,7 +103,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.7.9',
+        VERSION: '3.8.0',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -4549,8 +4550,124 @@ body.wb-chain-active {
     let observer = null;
 
     /**
+     * Read a member's status directly from Torn's DOM row.
+     * Torn uses icon classes and text to indicate hospital/jail/travel/ok.
+     * Returns { status, until } or null if unreadable.
+     */
+    function readStatusFromDOM(row) {
+        if (!row) return null;
+
+        // Clone the row but exclude our injected FactionOps elements
+        // so we only read Torn's original DOM
+        const clone = row.cloneNode(true);
+        const injected = clone.querySelectorAll('.wb-cell-container, .wb-sortable-row-overlay');
+        injected.forEach((el) => el.remove());
+        const text = clone.textContent.toLowerCase();
+
+        // Look for status icons (Torn uses SVG icons with title attributes, or
+        // elements with specific classes like .icon_*)
+        const icons = clone.querySelectorAll('[class*="icon"], [title], svg title');
+        for (const icon of icons) {
+            const t = (icon.getAttribute('title') || icon.textContent || '').toLowerCase();
+            if (t.includes('hospital')) return { status: 'hospital' };
+            if (t.includes('jail')) return { status: 'jail' };
+            if (t.includes('federal')) return { status: 'federal' };
+            if (t.includes('travel')) return { status: 'traveling' };
+            if (t.includes('abroad')) return { status: 'abroad' };
+            if (t.includes('fallen')) return { status: 'fallen' };
+        }
+
+        // Fallback: scan text content for status keywords
+        if (text.includes('hospital')) return { status: 'hospital' };
+        if (text.includes('jail')) return { status: 'jail' };
+        if (text.includes('federal')) return { status: 'federal' };
+        if (text.includes('traveling') || text.includes('abroad')) return { status: 'traveling' };
+        if (text.includes('fallen')) return { status: 'fallen' };
+
+        // Also check for status-indicating CSS classes on the row or children
+        const allEls = [clone, ...clone.querySelectorAll('*')];
+        for (const el of allEls) {
+            const cls = el.className;
+            if (typeof cls !== 'string') continue;
+            if (cls.includes('hospital')) return { status: 'hospital' };
+            if (cls.includes('jail')) return { status: 'jail' };
+            if (cls.includes('travel')) return { status: 'traveling' };
+        }
+
+        // If none of the above matched, member is likely OK/Online
+        return { status: 'ok' };
+    }
+
+    /**
+     * Check all enhanced member rows for DOM status changes.
+     * Compares DOM-read status against state.statuses and forwards
+     * any changes to the server so all faction members see them instantly.
+     */
+    let _lastDomStatusCheck = 0;
+    function checkDOMStatusChanges() {
+        const now = Date.now();
+        // Throttle to at most once per 500ms
+        if (now - _lastDomStatusCheck < 500) return;
+        _lastDomStatusCheck = now;
+
+        const rows = document.querySelectorAll('.wb-sortable-row');
+        const changedStatuses = {};
+        let changeCount = 0;
+
+        rows.forEach((row) => {
+            const targetId = row.dataset.wbTargetId;
+            if (!targetId) return;
+
+            const domStatus = readStatusFromDOM(row);
+            if (!domStatus) return;
+
+            const current = state.statuses[targetId];
+            const currentNorm = normalizeStatus(current ? current.status : 'ok');
+            const domNorm = normalizeStatus(domStatus.status);
+
+            if (currentNorm !== domNorm) {
+                log(`DOM status change detected: #${targetId} ${currentNorm} → ${domNorm}`);
+
+                // Update local state immediately
+                if (!state.statuses[targetId]) {
+                    state.statuses[targetId] = {};
+                }
+                state.statuses[targetId].status = domNorm;
+                // If transitioning FROM hospital/jail TO ok, clear the timer
+                if (domNorm === 'ok') {
+                    state.statuses[targetId].until = 0;
+                }
+
+                changedStatuses[targetId] = {
+                    status: domNorm,
+                    until: domNorm === 'ok' ? 0 : (state.statuses[targetId].until || 0),
+                };
+                changeCount++;
+
+                // Update the UI row immediately
+                updateTargetRow(targetId);
+            }
+        });
+
+        if (changeCount > 0) {
+            log(`Forwarding ${changeCount} DOM-detected status change(s) to server`);
+            // Forward to server so all faction members see it instantly
+            const warId = deriveWarId();
+            if (warId && state.jwtToken) {
+                postAction('/api/status', {
+                    warId,
+                    statuses: changedStatuses,
+                }).catch((e) => warn('Failed to forward DOM status:', e.message));
+            }
+            if (CONFIG.AUTO_SORT) debouncedSort();
+            updateNextUp();
+        }
+    }
+
+    /**
      * Set up MutationObserver to watch for Torn dynamically loading faction
-     * member lists. Torn uses AJAX to load content, so we can't just run once
+     * member lists AND for status changes within existing rows.
+     * Torn uses AJAX to load content, so we can't just run once
      * on page load — we need to continuously watch.
      */
     function setupMutationObserver() {
@@ -4562,23 +4679,41 @@ body.wb-chain-active {
         log('Setting up MutationObserver on:', container.tagName, container.id || container.className);
 
         const debouncedScan = debounce(scanAndEnhanceRows, 200);
+        const debouncedStatusCheck = debounce(checkDOMStatusChanges, 300);
 
         observer = new MutationObserver((mutations) => {
             let shouldScan = false;
+            let shouldCheckStatus = false;
             for (const mutation of mutations) {
+                // Skip mutations caused by our own injected elements
+                const target = mutation.target;
+                if (target && target.closest && (
+                    target.closest('.wb-cell-container') ||
+                    target.closest('.fo-overlay') ||
+                    target.closest('#wb-chain-bar')
+                )) continue;
+
                 if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
                     shouldScan = true;
-                    break;
+                    shouldCheckStatus = true;
+                } else if (mutation.type === 'characterData' || mutation.type === 'attributes') {
+                    shouldCheckStatus = true;
                 }
             }
             if (shouldScan) {
                 debouncedScan();
+            }
+            if (shouldCheckStatus) {
+                debouncedStatusCheck();
             }
         });
 
         observer.observe(container, {
             childList: true,
             subtree: true,
+            characterData: true,
+            attributes: true,
+            attributeFilter: ['class', 'title'],
         });
 
         // Initial scan
