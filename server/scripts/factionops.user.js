@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.7.0
+// @version      3.7.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.7.1  - Direct Torn API chain polling (5s) for real-time chain accuracy
 // v3.7.0  - Fix: chain timer accuracy — removed unreliable DOM reader, uses intercepted API + server poll
 // v3.6.9  - Activate button: dark/black style
 // v3.6.8  - Fix: chain timer no longer jumps (DOM-anchored wall-clock countdown)
@@ -93,7 +94,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.7.0',
+        VERSION: '3.7.1',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2675,6 +2676,62 @@ body.wb-chain-active {
         }
     });
 
+    // Direct Torn API chain polling — uses the player's own API key to get
+    // chain data every 5 seconds, independent of the server poll.
+    let chainPollInterval = null;
+    const CHAIN_POLL_MS = 5000;
+
+    function startDirectChainPoll() {
+        if (chainPollInterval) return; // already running
+
+        function pollChain() {
+            if (!CONFIG.API_KEY || !state.myFactionId) return;
+
+            const url = `https://api.torn.com/faction/${state.myFactionId}?selections=chain&key=${encodeURIComponent(CONFIG.API_KEY)}`;
+
+            httpRequest({
+                method: 'GET',
+                url,
+                onload(res) {
+                    try {
+                        const data = JSON.parse(res.responseText);
+                        if (data.error) return;
+                        if (data.chain) {
+                            const chain = data.chain;
+                            const oldCurrent = state.chain.current;
+                            state.chain.current = chain.current || 0;
+                            state.chain.max = chain.max || 0;
+                            setChainTimeout(chain.timeout || 0);
+                            state.chain.cooldown = chain.cooldown || 0;
+                            updateChainBar();
+
+                            if (chain.current !== oldCurrent) {
+                                forwardChainToServer(state.chain);
+                            }
+                        }
+                    } catch (e) {
+                        // Parse error — skip silently
+                    }
+                },
+                onerror() {
+                    // Network error — skip silently
+                },
+            });
+        }
+
+        pollChain();
+        chainPollInterval = setInterval(pollChain, CHAIN_POLL_MS);
+        log('Direct chain poll started (every 5s)');
+    }
+
+    function stopDirectChainPoll() {
+        if (chainPollInterval) {
+            clearInterval(chainPollInterval);
+            chainPollInterval = null;
+            log('Direct chain poll stopped');
+        }
+    }
+
     // =========================================================================
     // SECTION 11: STATUS COUNTDOWN TIMERS
     // =========================================================================
@@ -3334,6 +3391,7 @@ body.wb-chain-active {
     function initWarOverlay() {
         // Timers — no chain bar in overlay mode
         startChainTimer();
+        startDirectChainPoll();
         startStatusTimers();
         startCallPruner();
         // Refresh chain display immediately so overlay shows current value
@@ -4987,6 +5045,7 @@ body.wb-chain-active {
             cancelAnimationFrame(chainTimerRAF);
             chainTimerRAF = null;
         }
+        stopDirectChainPoll();
 
         // Re-detect page and init
         setTimeout(() => detectPageAndInit(), 500);
