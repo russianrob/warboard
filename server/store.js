@@ -54,6 +54,11 @@ export function loadState() {
     const raw = fs.readFileSync(WARS_FILE, "utf-8");
     const data = JSON.parse(raw);
     for (const [id, war] of Object.entries(data)) {
+      // Backfill fields that may be missing in wars created before they existed
+      if (!war.priorities) war.priorities = {};
+      if (!war.calls) war.calls = {};
+      if (!war.enemyStatuses) war.enemyStatuses = {};
+      if (!war.chainData) war.chainData = { current: 0, max: 0, timeout: 0, cooldown: 0 };
       wars.set(id, war);
     }
     console.log(`[store] Loaded ${wars.size} war(s) from disk`);

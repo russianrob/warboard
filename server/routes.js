@@ -335,6 +335,9 @@ router.post("/api/priority", requireAuth, (req, res) => {
       : undefined;
   }
 
+  // Ensure priorities map exists (wars created before this field may lack it)
+  if (!war.priorities) war.priorities = {};
+
   if (priority === null) {
     delete war.priorities[targetId];
   } else {
