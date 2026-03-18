@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.9.4
+// @version      3.9.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.9.5  - Chain bar: retry with delay + DOM diagnostic for PDA compatibility
 // v3.9.4  - Clone Torn's native #barChain into overlay header (live updates from Torn JS)
 // v3.9.3  - Revert to simple full-page overlay; re-add chain info to header from server data
 // v3.9.0  - Remove chain info from overlay header too; Torn's native chain fully visible
@@ -115,7 +116,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.9.4',
+        VERSION: '3.9.5',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -3569,22 +3570,44 @@ body.wb-chain-active {
     let tornChainOriginalParent = null; // remember where #barChain came from
     let tornChainOriginalNext = null;   // sibling reference for restore
 
-    function moveTornChainBar() {
+    function moveTornChainBar(retryCount) {
+        retryCount = retryCount || 0;
         const container = document.getElementById('fo-torn-chain');
         if (!container) return;
 
-        // Find Torn's chain bar inside the (hidden) DOM
-        const chainBar = document.getElementById('barChain');
+        // Try multiple selectors for Torn's chain bar
+        // Desktop: a#barChain  |  PDA may use different structure
+        const chainBar = document.getElementById('barChain')
+            || document.querySelector('a#barChain')
+            || document.querySelector('[class*="chain-bar"]')
+            || document.querySelector('[class*="chainBar"]');
+
         if (chainBar) {
             // Remember original position so we can put it back on cleanup
             tornChainOriginalParent = chainBar.parentNode;
             tornChainOriginalNext = chainBar.nextSibling;
             // Move (not clone) — Torn's JS keeps updating it in place
             container.appendChild(chainBar);
-            log('Moved Torn #barChain into overlay header');
+            log('Moved Torn chain bar into overlay header');
+        } else if (retryCount < 10) {
+            // Chain bar may not have loaded yet — retry with increasing delay
+            const delay = 500 * (retryCount + 1);
+            // On first retry, dump DOM diagnostic to help identify chain bar
+            if (retryCount === 0) {
+                try {
+                    const mc = document.getElementById('mainContainer');
+                    const allIds = mc ? Array.from(mc.querySelectorAll('[id]')).map(el => el.id).join(', ') : 'no mainContainer';
+                    const barEls = document.querySelectorAll('[id*="bar"], [class*="bar-"], [class*="chain"]');
+                    const barInfo = Array.from(barEls).map(el => `${el.tagName}#${el.id||''}.[${el.className||''}]`).join(' | ');
+                    log(`[DOM DIAG] IDs in mainContainer: ${allIds}`);
+                    log(`[DOM DIAG] bar/chain elements: ${barInfo || 'none found'}`);
+                } catch (e) { log('[DOM DIAG] error: ' + e.message); }
+            }
+            log(`Torn chain bar not found yet, retry ${retryCount + 1}/10 in ${delay}ms`);
+            setTimeout(() => moveTornChainBar(retryCount + 1), delay);
         } else {
-            // Torn chain bar not found (PDA or different DOM) — show fallback
-            log('Torn #barChain not found — showing fallback chain info');
+            // All retries exhausted — show fallback custom chain display
+            log('Torn chain bar not found after 10 retries — showing fallback chain info');
             container.style.display = 'none';
             const fallback = document.getElementById('fo-chain-fallback');
             if (fallback) fallback.style.display = '';
