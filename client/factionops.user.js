@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.9.8
+// @version      3.9.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -118,7 +118,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.9.8',
+        VERSION: '3.9.9',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2948,8 +2948,10 @@ body.wb-chain-active {
     let chainDOMObserver = null;
     let chainDOMReadInterval = null;
 
+    let chainBarRef = null; // cached reference to the moved #barChain element
+
     function parseChainFromDOM() {
-        const bar = document.getElementById('barChain');
+        const bar = chainBarRef || document.getElementById('barChain');
         if (!bar) return false;
 
         // bar-stats contains text like "1/10" or "Chain: 1,234/100,000"
@@ -3002,14 +3004,15 @@ body.wb-chain-active {
         return true;
     }
 
-    function startChainDOMObserver() {
+    function startChainDOMObserver(barElement) {
         if (chainDOMObserver) return; // already running
 
-        const bar = document.getElementById('barChain');
+        const bar = barElement || chainBarRef || document.getElementById('barChain');
         if (!bar) {
             log('Cannot start chain DOM observer — #barChain not found');
             return false;
         }
+        chainBarRef = bar; // cache for parseChainFromDOM
 
         // Initial read
         parseChainFromDOM();
@@ -3041,6 +3044,7 @@ body.wb-chain-active {
             clearInterval(chainDOMReadInterval);
             chainDOMReadInterval = null;
         }
+        chainBarRef = null;
     }
 
     // =========================================================================
@@ -3722,12 +3726,16 @@ body.wb-chain-active {
             container.appendChild(chainBar);
             log('Moved Torn chain bar into overlay header');
 
+            // Cache reference before Torn's JS can lose the ID
+            chainBarRef = chainBar;
+
             // If API poll was started as a fallback, stop it now
             stopDirectChainPoll();
 
             // Give PDA's DOM a tick to settle after the move, then start observer
+            // Pass the element directly — getElementById may fail after move in PDA
             setTimeout(() => {
-                if (startChainDOMObserver()) {
+                if (startChainDOMObserver(chainBar)) {
                     usingChainDOM = true;
                     log('Using DOM chain reader — no API calls for chain data');
                 } else {
@@ -3771,13 +3779,14 @@ body.wb-chain-active {
             tornChainOriginalParent = chainBar.parentNode;
             tornChainOriginalNext = chainBar.nextSibling;
             container.appendChild(chainBar);
+            chainBarRef = chainBar;
             container.style.display = '';
             const fallback = document.getElementById('fo-chain-fallback');
             if (fallback) fallback.style.display = 'none';
 
             stopDirectChainPoll();
             setTimeout(() => {
-                if (startChainDOMObserver()) {
+                if (startChainDOMObserver(chainBar)) {
                     usingChainDOM = true;
                     log('Switched to DOM chain reader after late detection');
                 } else {
