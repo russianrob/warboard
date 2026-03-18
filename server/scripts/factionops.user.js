@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.9.0
+// @version      3.9.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.9.1  - Overlay no longer hides Torn's main content; chain bar now visible
 // v3.9.0  - Remove chain info from overlay header too; Torn's native chain fully visible
 // v3.8.9  - Remove chain bar entirely; standalone Next Up bar below Torn's UI
 // v3.8.8  - Remove heatmap and settings buttons from attack page
@@ -3549,12 +3550,13 @@ body.wb-chain-active {
         startStatusTimers();
         startCallPruner();
 
-        // Hide Torn's main content area so the overlay takes over the full page
-        const mainContent = document.getElementById('mainContainer')
-            || document.querySelector('.content-wrapper');
-        if (mainContent) {
-            mainContent.dataset.foHidden = 'true';
-            mainContent.style.display = 'none';
+        // Hide only the faction member list area, keep Torn's chain/header visible
+        const memberList = document.querySelector('.faction-war-wraper')
+            || document.querySelector('.members-list')
+            || document.querySelector('.f-war-list');
+        if (memberList) {
+            memberList.dataset.foHidden = 'true';
+            memberList.style.display = 'none';
         }
 
         // Create the overlay if it doesn't already exist
