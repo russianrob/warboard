@@ -307,7 +307,7 @@ router.post("/api/call", requireAuth, (req, res) => {
 // ── POST /api/priority ──────────────────────────────────────────────────
 // Set or clear a priority tag on a target. Leader/co-leader only.
 
-const LEADER_POSITIONS = ["leader", "co-leader", "war leader"];
+const LEADER_POSITIONS = ["leader", "co-leader", "war leader", "banker"];
 
 router.post("/api/priority", requireAuth, (req, res) => {
   const { playerId, playerName, factionPosition } = req.user;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.10.5
+// @version      3.10.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -118,7 +118,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.10.5',
+        VERSION: '3.10.6',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2359,10 +2359,10 @@ body.wb-chain-active {
             });
     }
 
-    /** Check if current user is a faction leader, co-leader, or war leader. */
+    /** Check if current user has an elevated faction role (leader, co-leader, war leader, banker). */
     function isLeader() {
         const pos = state.myFactionPosition || '';
-        return pos === 'leader' || pos === 'co-leader' || pos === 'war leader';
+        return pos === 'leader' || pos === 'co-leader' || pos === 'war leader' || pos === 'banker';
     }
 
     // =========================================================================
