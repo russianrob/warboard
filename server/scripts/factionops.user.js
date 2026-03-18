@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.11.0
+// @version      3.11.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.11.1 - Online badge: "us" count from server-side Torn API poll (all faction members, not just FactionOps users)
 // v3.11.0 - Online badge: show both faction (us) and enemy online counts
 // v3.10.9 - Fix: FF badge truncation on mobile (sub-row flex-wrap)
 // v3.10.8 - Inline Fair Fight scores from ffscouter.com API (per-user, color coded, visible on PDA)
@@ -1643,6 +1644,7 @@ body.wb-chain-active {
         enemyFactionId: null,
         enemyFactionName: null,
         onlinePlayers: [],
+        ourFactionOnline: null, // { online, idle, total } from server
 
         // Map of targetId -> { calledBy: { id, name }, calledAt: timestamp }
         calls: {},
@@ -2253,6 +2255,11 @@ body.wb-chain-active {
             // ── Viewers (who is on which attack page) ──
             if (data.viewers) {
                 state.viewers = data.viewers;
+            }
+
+            // ── Our faction online counts (from server-side Torn API poll) ──
+            if (data.ourFactionOnline) {
+                state.ourFactionOnline = data.ourFactionOnline;
             }
 
             // Store enemyFactionId from server if we didn't have it
@@ -3938,7 +3945,12 @@ body.wb-chain-active {
         if (CONFIG.AUTO_SORT && !overlayActive) debouncedSort();
         updateNextUp();
 
-        // Update enemy online count in header
+        // Update online counts in header
+        const usOnlineEl = document.getElementById('fo-online-count');
+        if (usOnlineEl) {
+            const usCount = state.ourFactionOnline ? state.ourFactionOnline.online : state.onlinePlayers.length;
+            usOnlineEl.textContent = `${usCount} us`;
+        }
         const enemyOnlineEl = document.getElementById('fo-enemy-online-count');
         if (enemyOnlineEl) {
             const enemyOnline = Object.values(state.statuses).filter(
@@ -4160,7 +4172,7 @@ body.wb-chain-active {
                         <span class="fo-chain-timeout" id="fo-chain-timeout">${state.chain.timeout > 0 ? formatTimer(state.chain.timeout) : '--:--'}</span>
                         <span class="fo-chain-bonus" id="fo-chain-bonus" style="display:none;"></span>
                     </div>
-                    <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.onlinePlayers.length} us</span> · <span id="fo-enemy-online-count">0 enemy</span></div>
+                    <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.ourFactionOnline ? state.ourFactionOnline.online : state.onlinePlayers.length} us</span> · <span id="fo-enemy-online-count">0 enemy</span></div>
                     <div class="fo-energy-display" id="fo-energy-display" title="Energy">
                         <span class="fo-energy-label">E</span>
                         <span class="fo-energy-value" id="fo-energy-value">--/--</span>
@@ -4420,9 +4432,12 @@ body.wb-chain-active {
             dot.title = state.connected ? 'Connected' : 'Disconnected';
         }
 
-        // Update online counts (us = FactionOps connected, enemy = Torn online status)
+        // Update online counts (us = server-side Torn API poll, enemy = Torn online status)
         const onlineEl = document.getElementById('fo-online-count');
-        if (onlineEl) onlineEl.textContent = `${state.onlinePlayers.length} us`;
+        if (onlineEl) {
+            const usCount = state.ourFactionOnline ? state.ourFactionOnline.online : state.onlinePlayers.length;
+            onlineEl.textContent = `${usCount} us`;
+        }
 
         const enemyOnlineEl = document.getElementById('fo-enemy-online-count');
         if (enemyOnlineEl) {

@@ -53,13 +53,19 @@ export function startWarStatusMonitor(io, warId) {
 
       io.to(`war_${warId}`).emit("status_update", freshStatuses);
 
-      // Record our faction's online count for the activity heatmap
+      // Record our faction's online count for the activity heatmap + header display
       try {
         const ourMembers = await fetchFactionMembers(war.factionId, apiKey);
-        const onlineCount = Object.values(ourMembers).filter(
-          (m) => m.activity === "online" || m.activity === "idle",
+        const ourOnline = Object.values(ourMembers).filter(
+          (m) => m.activity === "online",
         ).length;
-        recordSample(war.factionId, onlineCount);
+        const ourIdle = Object.values(ourMembers).filter(
+          (m) => m.activity === "idle",
+        ).length;
+        const ourTotal = Object.keys(ourMembers).length;
+        recordSample(war.factionId, ourOnline + ourIdle);
+        // Store on war for poll response
+        war.ourFactionOnline = { online: ourOnline, idle: ourIdle, total: ourTotal };
       } catch (_) {
         // Non-critical — skip silently
       }

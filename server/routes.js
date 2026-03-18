@@ -240,6 +240,7 @@ router.get("/api/poll", (req, res, next) => {
     chainData: war.chainData,
     onlinePlayers: store.getOnlinePlayersForWar(warId),
     viewers: store.getViewersForWar(warId),
+    ourFactionOnline: war.ourFactionOnline || null,
     factionKeyStored: !!store.getFactionApiKey(factionId),
   });
 });
