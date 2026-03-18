@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.8.8
+// @version      3.8.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.8.9  - Remove chain bar entirely; standalone Next Up bar below Torn's UI
 // v3.8.8  - Remove heatmap and settings buttons from attack page
 // v3.8.7  - Remove attack page info box overlay
 // v3.8.6  - Fix: online/idle/offline dots now work — server field renamed from 'online' to 'activity'
@@ -506,7 +507,19 @@ html.wb-theme-light {
     opacity: 1;
 }
 
-/* ----- Next Up queue (in chain bar) ----- */
+/* ----- Standalone Next Up bar (replaces chain bar) ----- */
+.wb-next-up-standalone {
+    padding: 6px 12px;
+    background: var(--wb-bg);
+    border-bottom: 1px solid var(--wb-border);
+    font-family: Arial, sans-serif;
+}
+.wb-next-up-standalone:empty,
+.wb-next-up-standalone .wb-next-up:empty {
+    display: none;
+}
+
+/* ----- Next Up queue ----- */
 .wb-next-up {
     display: flex;
     align-items: center;
@@ -2578,6 +2591,24 @@ body.wb-chain-active {
     // =========================================================================
     // SECTION 10: CHAIN MONITOR BAR
     // =========================================================================
+
+    /** Create a standalone Next Up bar (no chain info) inserted into the page flow. */
+    function createStandaloneNextUp() {
+        if (document.getElementById('wb-next-up-standalone')) return;
+
+        const bar = document.createElement('div');
+        bar.id = 'wb-next-up-standalone';
+        bar.className = 'wb-next-up-standalone';
+        bar.innerHTML = '<div class="wb-next-up" id="wb-next-up"></div>';
+
+        // Insert before the member list or at top of content
+        const content = document.querySelector('.faction-war') || document.querySelector('.content-wrapper') || document.querySelector('#mainContainer');
+        if (content && content.firstChild) {
+            content.insertBefore(bar, content.firstChild);
+        } else {
+            document.body.prepend(bar);
+        }
+    }
 
     /** Create or update the chain monitor bar fixed to the top of the page. */
     function createChainBar() {
@@ -4854,8 +4885,7 @@ body.wb-chain-active {
 
     /** Initialise war/faction page enhancements. */
     function initWarPage() {
-        createChainBar();
-        startChainTimer();
+        createStandaloneNextUp();
         setupMutationObserver();
         startStatusTimers();
         startCallPruner();
