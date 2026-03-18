@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.10.7
+// @version      3.10.8
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -118,7 +118,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.10.7',
+        VERSION: '3.10.8',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1332,6 +1332,15 @@ body.wb-chain-active {
     opacity: 0.5; display: block; margin-top: 1px;
 }
 
+/* Fair Fight inline badge (sits in sub-row next to BSP) */
+.fo-ff-inline {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px; font-weight: 700;
+    padding: 1px 5px; border-radius: 8px;
+    line-height: 1; white-space: nowrap;
+    display: inline-block;
+}
+
 /* Status Pill */
 .fo-status-pill {
     display: inline-flex; align-items: center; gap: 5px;
@@ -1851,6 +1860,135 @@ body.wb-chain-active {
         return 'c';
     }
 
+    // ── Fair Fight (ffscouter.com) ─────────────────────────────────────────
+
+    /** In-memory FF cache: targetId → { value, lastUpdated, bsHuman, fetchedAt } */
+    const ffCache = {};
+    const FF_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+    let ffFetchInFlight = false;
+
+    /**
+     * Batch-fetch FF values from ffscouter.com for all current enemy targets.
+     * Caches results in memory for 1 hour. Skips targets already cached.
+     */
+    function fetchFairFightBatch() {
+        if (ffFetchInFlight) return;
+        const apiKey = CONFIG.API_KEY;
+        if (!apiKey) return;
+
+        const allIds = Object.keys(state.statuses);
+        const now = Date.now();
+        const needed = allIds.filter((id) => {
+            const c = ffCache[id];
+            return !c || (now - c.fetchedAt) > FF_CACHE_TTL;
+        });
+        if (needed.length === 0) return;
+
+        // ffscouter API accepts comma-separated target IDs
+        const batchSize = 50;
+        const batch = needed.slice(0, batchSize);
+        const url = `https://ffscouter.com/api/v1/get-stats?key=${encodeURIComponent(apiKey)}&targets=${batch.join(',')}`;
+
+        ffFetchInFlight = true;
+        log('FF: fetching', batch.length, 'targets from ffscouter.com');
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: url,
+            timeout: 15000,
+            onload: function (resp) {
+                ffFetchInFlight = false;
+                if (resp.status !== 200) {
+                    log('FF: API returned', resp.status);
+                    return;
+                }
+                try {
+                    const data = JSON.parse(resp.responseText);
+                    if (data && data.error) {
+                        log('FF: API error:', data.error);
+                        return;
+                    }
+                    if (!Array.isArray(data)) return;
+                    const ts = Date.now();
+                    for (const entry of data) {
+                        if (!entry || !entry.player_id) continue;
+                        const id = String(entry.player_id);
+                        if (entry.fair_fight == null) {
+                            ffCache[id] = { value: null, lastUpdated: 0, bsHuman: null, fetchedAt: ts };
+                        } else {
+                            ffCache[id] = {
+                                value: entry.fair_fight,
+                                lastUpdated: entry.last_updated || 0,
+                                bsHuman: entry.bs_estimate_human || null,
+                                fetchedAt: ts,
+                            };
+                        }
+                    }
+                    // Re-render inline FF badges
+                    updateAllFfBadges();
+                } catch (e) {
+                    log('FF: parse error', e);
+                }
+            },
+            onerror: function () { ffFetchInFlight = false; },
+            ontimeout: function () { ffFetchInFlight = false; },
+        });
+    }
+
+    /** Colour for FF value — blue→green→red gradient matching FF Scouter V2. */
+    function ffColor(value) {
+        let r, g, b;
+        if (value <= 1) {
+            r = 0x28; g = 0x28; b = 0xc6;
+        } else if (value <= 3) {
+            const t = (value - 1) / 2;
+            r = 0x28;
+            g = Math.round(0x28 + (0xc6 - 0x28) * t);
+            b = Math.round(0xc6 - (0xc6 - 0x28) * t);
+        } else if (value <= 5) {
+            const t = (value - 3) / 2;
+            r = Math.round(0x28 + (0xc6 - 0x28) * t);
+            g = Math.round(0xc6 - (0xc6 - 0x28) * t);
+            b = 0x28;
+        } else {
+            r = 0xc6; g = 0x28; b = 0x28;
+        }
+        return `rgb(${r},${g},${b})`;
+    }
+
+    /** Render an inline FF badge element. */
+    function renderInlineFf(el, targetId) {
+        el.textContent = '';
+        el.className = 'fo-ff-inline';
+        const cached = ffCache[targetId];
+        if (!cached || cached.value == null) {
+            el.textContent = '';
+            el.style.color = '';
+            el.style.background = '';
+            return;
+        }
+        const ff = cached.value;
+        const now = Date.now() / 1000;
+        const age = now - cached.lastUpdated;
+        const stale = age > 14 * 24 * 60 * 60; // >14 days
+        const label = `FF:${ff.toFixed(2)}${stale ? '?' : ''}`;
+        el.textContent = label;
+        el.style.color = ffColor(ff);
+        el.style.background = 'rgba(255,255,255,0.06)';
+        el.title = stale
+            ? `Fair Fight ${ff.toFixed(2)} (stale data)`
+            : `Fair Fight ${ff.toFixed(2)}`;
+    }
+
+    /** Update all rendered FF badges from cache. */
+    function updateAllFfBadges() {
+        const badges = document.querySelectorAll('[id^="fo-ff-inline-"]');
+        badges.forEach((el) => {
+            const tid = el.id.replace('fo-ff-inline-', '');
+            renderInlineFf(el, tid);
+        });
+    }
+
     /**
      * Estimated one-way travel times in minutes (standard / airstrip).
      * Used as a rough fallback when the API doesn't provide an exact timer.
@@ -2122,6 +2260,9 @@ body.wb-chain-active {
 
             // Refresh UI rows
             refreshAllRows();
+
+            // Trigger FF fetch if we have new targets without cached FF data
+            fetchFairFightBatch();
 
         } catch (err) {
             pollErrorCount++;
@@ -4044,6 +4185,10 @@ body.wb-chain-active {
         moveTornChainBar();
         startEnergyPoll();
 
+        // Fetch Fair Fight data from ffscouter.com (initial + periodic refresh)
+        fetchFairFightBatch();
+        setInterval(fetchFairFightBatch, 5 * 60 * 1000); // refresh every 5 min
+
         // Wire up heatmap button in overlay header
         const heatmapHeaderBtn = document.getElementById('fo-heatmap-header-btn');
         if (heatmapHeaderBtn) {
@@ -4331,6 +4476,13 @@ body.wb-chain-active {
         bspBadge.id = `fo-bsp-inline-${targetId}`;
         renderInlineBsp(bspBadge, targetId);
         subRow.appendChild(bspBadge);
+
+        // Inline FF badge
+        const ffBadge = document.createElement('span');
+        ffBadge.className = 'fo-ff-inline';
+        ffBadge.id = `fo-ff-inline-${targetId}`;
+        renderInlineFf(ffBadge, targetId);
+        subRow.appendChild(ffBadge);
 
         playerName.appendChild(subRow);
 
