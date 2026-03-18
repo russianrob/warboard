@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.10.0
+// @version      3.10.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -118,7 +118,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.10.0',
+        VERSION: '3.10.1',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -3896,14 +3896,8 @@ body.wb-chain-active {
                     <strong id="fo-enemy-name">${escapeHtml(state.enemyFactionName || state.enemyFactionId || 'Enemy Faction')}</strong>
                 </div>
                 <div class="fo-header-right">
-                    <div class="fo-torn-chain" id="fo-torn-chain" style="display:none;">
-                        <!-- Torn's native #barChain moved here (hidden — used for DOM reading only) -->
-                    </div>
-                    <div class="fo-chain-live" id="fo-chain-live">
-                        <span class="fo-chain-live-count" id="fo-chain-live-count">${state.chain.current || 0}/${state.chain.max || '??'}</span>
-                        <span class="fo-chain-live-sep">&middot;</span>
-                        <span class="fo-chain-live-timer" id="fo-chain-live-timer">${state.chain.timeout > 0 ? formatTimer(state.chain.timeout) : '--:--'}</span>
-                        <span class="fo-chain-live-bonus" id="fo-chain-live-bonus" style="display:none;"></span>
+                    <div class="fo-torn-chain" id="fo-torn-chain">
+                        <!-- Torn's native #barChain will be moved here -->
                     </div>
                     <div class="fo-chain-info" id="fo-chain-fallback" style="display:none;">
                         <span class="fo-chain-label">Chain</span>
