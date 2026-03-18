@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.11.1
+// @version      3.11.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.11.2 - UI: Move settings gear and heatmap buttons next to logo/connection dot (left side of header)
 // v3.11.1 - Online badge: "us" count from server-side Torn API poll (all faction members, not just FactionOps users)
 // v3.11.0 - Online badge: show both faction (us) and enemy online counts
 // v3.10.9 - Fix: FF badge truncation on mobile (sub-row flex-wrap)
@@ -4156,6 +4157,8 @@ body.wb-chain-active {
                         <span class="fo-logo-text">FactionOps</span>
                     </div>
                     <div class="fo-status-dot${state.connected ? '' : ' disconnected'}" id="fo-conn-dot" title="${state.connected ? 'Connected' : 'Disconnected'}"></div>
+                    <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
+                    <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                 </div>
                 <div class="fo-header-center">
                     <span class="fo-war-badge" id="fo-war-type">War</span>
@@ -4178,8 +4181,6 @@ body.wb-chain-active {
                         <span class="fo-energy-value" id="fo-energy-value">--/--</span>
                         <span class="fo-energy-timer" id="fo-energy-timer"></span>
                     </div>
-                    <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
-                    <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                 </div>
             </div>
             <div class="fo-next-up-bar" id="fo-next-up"></div>
