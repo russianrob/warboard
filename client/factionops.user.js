@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.8.9
+// @version      3.9.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.9.0  - Remove chain info from overlay header too; Torn's native chain fully visible
 // v3.8.9  - Remove chain bar entirely; standalone Next Up bar below Torn's UI
 // v3.8.8  - Remove heatmap and settings buttons from attack page
 // v3.8.7  - Remove attack page info box overlay
@@ -3543,13 +3544,10 @@ body.wb-chain-active {
     }
 
     function initWarOverlay() {
-        // Timers — no chain bar in overlay mode
-        startChainTimer();
+        startChainTimer(); // keeps chain alert sound functional
         startDirectChainPoll();
         startStatusTimers();
         startCallPruner();
-        // Refresh chain display immediately so overlay shows current value
-        updateChainBar();
 
         // Hide Torn's main content area so the overlay takes over the full page
         const mainContent = document.getElementById('mainContainer')
@@ -3586,12 +3584,6 @@ body.wb-chain-active {
                     <strong id="fo-enemy-name">${escapeHtml(state.enemyFactionName || state.enemyFactionId || 'Enemy Faction')}</strong>
                 </div>
                 <div class="fo-header-right">
-                    <div class="fo-chain-info">
-                        <span class="fo-chain-label">Chain</span>
-                        <span class="fo-chain-count" id="fo-chain-count">${state.chain.current || 0}/${state.chain.max || '??'}</span>
-                        <span class="fo-chain-timeout" id="fo-chain-timeout">${state.chain.timeout > 0 ? formatTimer(state.chain.timeout) : '--:--'}</span>
-                        <span class="fo-chain-bonus" id="fo-chain-bonus" style="display:none;"></span>
-                    </div>
                     <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.onlinePlayers.length} online</span></div>
                     <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
