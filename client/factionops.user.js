@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.10.2
+// @version      3.10.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -118,7 +118,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.10.2',
+        VERSION: '3.10.3',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1044,50 +1044,20 @@ body.wb-chain-active {
     color: #00b894 !important;
     font-weight: 700 !important;
 }
-/* Energy bar in overlay header */
-.fo-torn-energy {
-    display: flex;
-    align-items: center;
-    flex-shrink: 0;
+/* Energy bar display in overlay header */
+.fo-energy-display {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 600;
+    padding: 3px 10px; border-radius: 20px;
+    background: rgba(44,62,80,0.7);
+    border: 1px solid rgba(116,185,255,0.25);
+    white-space: nowrap;
+    cursor: default;
 }
-.fo-torn-energy #barEnergy,
-.fo-torn-energy a#barEnergy,
-.fo-torn-energy [id="barEnergy"] {
-    display: flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    position: relative !important;
-    width: auto !important;
-    min-width: 100px;
-    max-width: 200px;
-    height: auto !important;
-    min-height: 20px;
-    border-radius: 12px;
-    overflow: visible !important;
-    background: rgba(44,62,80,0.6) !important;
-    padding: 2px 10px !important;
-    align-items: center;
-    gap: 4px;
-}
-.fo-torn-energy #barEnergy p,
-.fo-torn-energy #barEnergy span {
-    display: inline !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    position: relative !important;
-    font-size: 11px !important;
-    line-height: 18px !important;
-    color: #dfe6e9 !important;
-    white-space: nowrap !important;
-}
-.fo-torn-energy #barEnergy p[class*="bar-timeleft"] {
-    color: #74b9ff !important;
-    font-weight: 600 !important;
-}
-.fo-torn-energy #barEnergy p[class*="bar-stats"] {
-    color: #55efc4 !important;
-    font-weight: 700 !important;
-}
+.fo-energy-label { color: rgba(255,255,255,0.45); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+.fo-energy-value { color: #74b9ff; font-weight: 700; font-variant-numeric: tabular-nums; }
+.fo-energy-value.full { color: #55efc4; }
+.fo-energy-timer { color: #fdcb6e; font-size: 10px; font-weight: 500; font-variant-numeric: tabular-nums; }
 
 /* Live chain count + timer display */
 .fo-chain-live {
@@ -2940,6 +2910,7 @@ body.wb-chain-active {
             }
 
             updateChainBar();
+            updateEnergyDisplay();
             chainTimerRAF = requestAnimationFrame(tick);
         }
 
@@ -3014,6 +2985,80 @@ body.wb-chain-active {
             clearInterval(chainPollInterval);
             chainPollInterval = null;
             log('Direct chain poll stopped');
+        }
+    }
+
+    // ---- Energy bar via API ----
+    const ENERGY_POLL_MS = 60000; // 60 seconds
+    let energyPollInterval = null;
+    let energyState = { current: 0, max: 0, ticktime: 0, fulltime: 0 };
+    let energyTickAnchorAt = 0; // wall-clock when we last set ticktime
+    let energyTickAnchorVal = 0; // ticktime value at anchor
+
+    function pollEnergy() {
+        if (!CONFIG.API_KEY) return;
+        const url = `https://api.torn.com/user/?selections=bars&key=${encodeURIComponent(CONFIG.API_KEY)}`;
+        httpRequest({
+            method: 'GET',
+            url,
+            onload(res) {
+                try {
+                    const data = JSON.parse(res.responseText);
+                    if (data.error) return;
+                    if (data.energy) {
+                        energyState.current = data.energy.current || 0;
+                        energyState.max = data.energy.maximum || 0;
+                        energyState.ticktime = data.energy.ticktime || 0;
+                        energyState.fulltime = data.energy.fulltime || 0;
+                        energyTickAnchorVal = energyState.ticktime;
+                        energyTickAnchorAt = Date.now();
+                        updateEnergyDisplay();
+                    }
+                } catch (e) { /* silent */ }
+            },
+            onerror() { /* silent */ },
+        });
+    }
+
+    function startEnergyPoll() {
+        if (energyPollInterval) return;
+        pollEnergy();
+        energyPollInterval = setInterval(pollEnergy, ENERGY_POLL_MS);
+        log('Energy poll started (every 60s)');
+    }
+
+    function stopEnergyPoll() {
+        if (energyPollInterval) {
+            clearInterval(energyPollInterval);
+            energyPollInterval = null;
+        }
+    }
+
+    function updateEnergyDisplay() {
+        const valEl = document.getElementById('fo-energy-value');
+        const timerEl = document.getElementById('fo-energy-timer');
+        if (!valEl) return;
+
+        valEl.textContent = `${energyState.current}/${energyState.max}`;
+        valEl.classList.toggle('full', energyState.current >= energyState.max);
+
+        if (timerEl) {
+            if (energyState.current >= energyState.max) {
+                timerEl.textContent = '';
+            } else if (energyState.fulltime > 0) {
+                // Show time until full
+                const elapsed = (Date.now() - energyTickAnchorAt) / 1000;
+                const remaining = Math.max(0, energyState.fulltime - elapsed);
+                if (remaining > 0) {
+                    const mins = Math.floor(remaining / 60);
+                    const secs = Math.floor(remaining % 60);
+                    timerEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+                } else {
+                    timerEl.textContent = '';
+                }
+            } else {
+                timerEl.textContent = '';
+            }
         }
     }
 
@@ -3895,51 +3940,6 @@ body.wb-chain-active {
         tornChainOriginalNext = null;
     }
 
-    // ── Move / restore Torn's native energy bar ──
-    let tornEnergyOriginalParent = null;
-    let tornEnergyOriginalNext = null;
-    let energyBarRef = null;
-
-    function moveTornEnergyBar(retryCount) {
-        retryCount = retryCount || 0;
-        const container = document.getElementById('fo-torn-energy');
-        if (!container) return;
-
-        const energyBar = document.getElementById('barEnergy')
-            || document.querySelector('a#barEnergy')
-            || document.querySelector('[id="barEnergy"]');
-
-        if (energyBar) {
-            tornEnergyOriginalParent = energyBar.parentNode;
-            tornEnergyOriginalNext = energyBar.nextSibling;
-            container.appendChild(energyBar);
-            energyBarRef = energyBar;
-            log('Moved Torn energy bar into overlay header');
-        } else if (retryCount < 10) {
-            const delay = 500 * (retryCount + 1);
-            setTimeout(() => moveTornEnergyBar(retryCount + 1), delay);
-        } else {
-            log('Torn energy bar not found after 10 retries');
-            container.style.display = 'none';
-        }
-    }
-
-    function restoreTornEnergyBar() {
-        if (!tornEnergyOriginalParent) return;
-        const energyBar = energyBarRef || document.getElementById('barEnergy');
-        if (energyBar && tornEnergyOriginalParent) {
-            if (tornEnergyOriginalNext) {
-                tornEnergyOriginalParent.insertBefore(energyBar, tornEnergyOriginalNext);
-            } else {
-                tornEnergyOriginalParent.appendChild(energyBar);
-            }
-            log('Restored Torn #barEnergy to original location');
-        }
-        tornEnergyOriginalParent = null;
-        tornEnergyOriginalNext = null;
-        energyBarRef = null;
-    }
-
     // Track whether we're using DOM-based chain reading (no API calls)
     let usingChainDOM = false;
 
@@ -3996,8 +3996,10 @@ body.wb-chain-active {
                         <span class="fo-chain-bonus" id="fo-chain-bonus" style="display:none;"></span>
                     </div>
                     <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.onlinePlayers.length} online</span></div>
-                    <div class="fo-torn-energy" id="fo-torn-energy">
-                        <!-- Torn's native #barEnergy will be moved here -->
+                    <div class="fo-energy-display" id="fo-energy-display" title="Energy">
+                        <span class="fo-energy-label">E</span>
+                        <span class="fo-energy-value" id="fo-energy-value">--/--</span>
+                        <span class="fo-energy-timer" id="fo-energy-timer"></span>
                     </div>
                     <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
@@ -4038,7 +4040,7 @@ body.wb-chain-active {
 
         // Move Torn's native #barChain into our overlay header
         moveTornChainBar();
-        moveTornEnergyBar();
+        startEnergyPoll();
 
         // Wire up heatmap button in overlay header
         const heatmapHeaderBtn = document.getElementById('fo-heatmap-header-btn');
@@ -5841,7 +5843,6 @@ body.wb-chain-active {
 
         // Restore Torn's chain bar to its original position before removing overlay
         restoreTornChainBar();
-        restoreTornEnergyBar();
 
         // Remove FactionOps activate button and war overlay, restore hidden Torn elements
         const foBtn = document.getElementById('fo-activate-btn');
@@ -5866,6 +5867,7 @@ body.wb-chain-active {
         }
         stopDirectChainPoll();
         stopChainDOMObserver();
+        stopEnergyPoll();
         if (lateChainWatcher) {
             lateChainWatcher.disconnect();
             lateChainWatcher = null;
