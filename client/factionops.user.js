@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.10.4
+// @version      3.10.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -118,7 +118,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.10.4',
+        VERSION: '3.10.5',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -3768,8 +3768,9 @@ body.wb-chain-active {
 
     /** Re-render all enhanced rows (after bulk state update). */
     function refreshAllRows() {
-        // If the overlay is active, re-render it
-        if (document.getElementById('fo-overlay')) {
+        const overlayActive = !!document.getElementById('fo-overlay');
+        // If the overlay is active, re-render it (renderOverlay already sorts)
+        if (overlayActive) {
             renderOverlay();
         }
 
@@ -3779,7 +3780,8 @@ body.wb-chain-active {
             const targetId = row.dataset.wbTargetId;
             updateTargetRow(targetId);
         });
-        if (CONFIG.AUTO_SORT) debouncedSort();
+        // Only trigger sort when overlay is NOT active — overlay handles its own sorting
+        if (CONFIG.AUTO_SORT && !overlayActive) debouncedSort();
         updateNextUp();
     }
 
@@ -4129,23 +4131,43 @@ body.wb-chain-active {
             return a.timer - b.timer;
         });
 
-        // Build/update rows in sorted order — reorder without detaching
-        let prevNode = null;
+        // Build a map of existing rows for O(1) lookup instead of O(n) querySelectorAll
+        const existingMap = new Map();
+        for (const child of list.querySelectorAll('[data-fo-id]')) {
+            existingMap.set(child.dataset.foId, child);
+        }
+
+        // Phase 1: Update row content (classes, text, etc.) without moving DOM nodes
+        const orderedRows = [];
         for (const item of sorted) {
-            let row = list.querySelector(`[data-fo-id="${item.targetId}"]`);
+            let row = existingMap.get(item.targetId);
             if (row) {
-                // Update in-place
                 updateOverlayRow(row, item.targetId);
             } else {
-                // Create new row
                 row = renderOverlayRow(item.targetId);
             }
-            // Only move the node if it's not already in the right position
-            const expectedNext = prevNode ? prevNode.nextSibling : list.firstChild;
-            if (row !== expectedNext) {
-                list.insertBefore(row, expectedNext);
+            orderedRows.push(row);
+        }
+
+        // Phase 2: Reorder DOM nodes only if the order actually differs.
+        // Compare current DOM order to desired order — skip reordering entirely
+        // if they already match, preventing layout thrashing and CSS transition flicker.
+        const currentChildren = Array.from(list.querySelectorAll('[data-fo-id]'));
+        let orderChanged = currentChildren.length !== orderedRows.length;
+        if (!orderChanged) {
+            for (let i = 0; i < orderedRows.length; i++) {
+                if (currentChildren[i] !== orderedRows[i]) { orderChanged = true; break; }
             }
-            prevNode = row;
+        }
+        if (orderChanged) {
+            let prevNode = null;
+            for (const row of orderedRows) {
+                const expectedNext = prevNode ? prevNode.nextSibling : list.firstChild;
+                if (row !== expectedNext) {
+                    list.insertBefore(row, expectedNext);
+                }
+                prevNode = row;
+            }
         }
 
         // Render collapsed traveling section
@@ -4374,7 +4396,10 @@ body.wb-chain-active {
         return li;
     }
 
-    /** Apply status/call/priority classes to an overlay row. */
+    /** Apply status/call/priority classes to an overlay row.
+     *  Uses conditional toggle to avoid re-triggering CSS transitions
+     *  when the class state hasn't actually changed.
+     */
     function applyOverlayRowClasses(row, targetId) {
         const s = state.statuses[targetId] || {};
         const status = normalizeStatus(s.status);
@@ -4382,11 +4407,19 @@ body.wb-chain-active {
         const prio = state.priorities[targetId];
         const isHigh = prio && prio.level === 'high';
 
-        row.classList.toggle('is-hospital', status === 'hospital');
-        row.classList.toggle('is-jail', status === 'jail' || status === 'federal');
-        row.classList.toggle('is-travel', status === 'traveling' || status === 'abroad');
-        row.classList.toggle('is-called', isCalled);
-        row.classList.toggle('is-high-priority', isHigh);
+        // Only toggle when the desired state differs from current — prevents
+        // CSS transition flicker caused by remove-then-readd of the same class.
+        const pairs = [
+            ['is-hospital', status === 'hospital'],
+            ['is-jail', status === 'jail' || status === 'federal'],
+            ['is-travel', status === 'traveling' || status === 'abroad'],
+            ['is-called', isCalled],
+            ['is-high-priority', isHigh],
+        ];
+        for (const [cls, want] of pairs) {
+            const has = row.classList.contains(cls);
+            if (has !== want) row.classList.toggle(cls, want);
+        }
     }
 
     /** Render the priority cell for overlay rows. */
