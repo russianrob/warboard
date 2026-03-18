@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.9.6
+// @version      3.9.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.9.7  - DOM-based chain reader: zero API calls for chain data; server chain polling disabled
 // v3.9.6  - Chain bar CSS fix for readable display; server exponential backoff on API failures
 // v3.9.5  - Chain bar: retry with delay + DOM diagnostic for PDA compatibility
 // v3.9.4  - Clone Torn's native #barChain into overlay header (live updates from Torn JS)
@@ -117,7 +118,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.9.6',
+        VERSION: '3.9.7',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2941,6 +2942,107 @@ body.wb-chain-active {
         }
     }
 
+    // ---- DOM-based chain reader (zero API calls) ----
+    // Watches Torn's native #barChain element for changes and extracts
+    // chain count + timer directly from the DOM text content.
+    let chainDOMObserver = null;
+    let chainDOMReadInterval = null;
+
+    function parseChainFromDOM() {
+        const bar = document.getElementById('barChain');
+        if (!bar) return false;
+
+        // bar-stats contains text like "1/10" or "Chain: 1,234/100,000"
+        const statsEl = bar.querySelector('p[class*="bar-stats"]');
+        // bar-timeleft contains text like "04:21" or "4:21"
+        const timeleftEl = bar.querySelector('p[class*="bar-timeleft"]');
+        // bar-value may contain the progress bar fill
+
+        let changed = false;
+
+        if (statsEl) {
+            const text = statsEl.textContent.trim();
+            // Extract numbers from "Chain: 1,234 / 100,000" or "1/10" etc.
+            const match = text.match(/(\d[\d,]*)\s*\/\s*(\d[\d,]*)/);
+            if (match) {
+                const current = parseInt(match[1].replace(/,/g, ''), 10);
+                const max = parseInt(match[2].replace(/,/g, ''), 10);
+                if (!isNaN(current) && current !== state.chain.current) {
+                    state.chain.current = current;
+                    changed = true;
+                }
+                if (!isNaN(max)) state.chain.max = max;
+            }
+        }
+
+        if (timeleftEl) {
+            const text = timeleftEl.textContent.trim();
+            // Parse "MM:SS" or "M:SS" or "HH:MM:SS" into seconds
+            const parts = text.split(':').map(p => parseInt(p, 10));
+            let seconds = 0;
+            if (parts.length === 2 && parts.every(p => !isNaN(p))) {
+                seconds = parts[0] * 60 + parts[1];
+            } else if (parts.length === 3 && parts.every(p => !isNaN(p))) {
+                seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+            }
+            if (seconds > 0) {
+                setChainTimeout(seconds);
+            } else if (text === '' || text === '00:00') {
+                // Chain not active or expired
+                state.chain.timeout = 0;
+                chainTimeoutAnchor = 0;
+                chainTimeoutAnchorAt = 0;
+            }
+        }
+
+        if (changed) {
+            forwardChainToServer(state.chain);
+        }
+
+        return true;
+    }
+
+    function startChainDOMObserver() {
+        if (chainDOMObserver) return; // already running
+
+        const bar = document.getElementById('barChain');
+        if (!bar) {
+            log('Cannot start chain DOM observer — #barChain not found');
+            return false;
+        }
+
+        // Initial read
+        parseChainFromDOM();
+
+        // Watch for mutations (Torn's JS updates text content)
+        chainDOMObserver = new MutationObserver(() => {
+            parseChainFromDOM();
+        });
+        chainDOMObserver.observe(bar, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+        });
+
+        // Backup: poll every 2s in case MutationObserver misses something
+        // (e.g. Torn replaces elements instead of updating text)
+        chainDOMReadInterval = setInterval(parseChainFromDOM, 2000);
+
+        log('Chain DOM observer started (zero API calls)');
+        return true;
+    }
+
+    function stopChainDOMObserver() {
+        if (chainDOMObserver) {
+            chainDOMObserver.disconnect();
+            chainDOMObserver = null;
+        }
+        if (chainDOMReadInterval) {
+            clearInterval(chainDOMReadInterval);
+            chainDOMReadInterval = null;
+        }
+    }
+
     // =========================================================================
     // SECTION 11: STATUS COUNTDOWN TIMERS
     // =========================================================================
@@ -3619,6 +3721,15 @@ body.wb-chain-active {
             // Move (not clone) — Torn's JS keeps updating it in place
             container.appendChild(chainBar);
             log('Moved Torn chain bar into overlay header');
+
+            // Start DOM-based chain reading (zero API calls)
+            if (startChainDOMObserver()) {
+                usingChainDOM = true;
+                log('Using DOM chain reader — no API calls for chain data');
+            } else {
+                // Observer couldn't start even though bar was found — fall back
+                startDirectChainPoll();
+            }
         } else if (retryCount < 10) {
             // Chain bar may not have loaded yet — retry with increasing delay
             const delay = 500 * (retryCount + 1);
@@ -3626,10 +3737,12 @@ body.wb-chain-active {
             setTimeout(() => moveTornChainBar(retryCount + 1), delay);
         } else {
             // All retries exhausted — show fallback custom chain display
-            log('Torn chain bar not found after 10 retries — showing fallback chain info');
+            log('Torn chain bar not found after 10 retries — falling back to API poll');
             container.style.display = 'none';
             const fallback = document.getElementById('fo-chain-fallback');
             if (fallback) fallback.style.display = '';
+            // Fall back to API-based chain polling
+            startDirectChainPoll();
         }
     }
 
@@ -3649,9 +3762,13 @@ body.wb-chain-active {
         tornChainOriginalNext = null;
     }
 
+    // Track whether we're using DOM-based chain reading (no API calls)
+    let usingChainDOM = false;
+
     function initWarOverlay() {
         startChainTimer();
-        startDirectChainPoll();
+        // Chain data source will be decided after overlay is built
+        // (we need #barChain to be in the DOM first)
         startStatusTimers();
         startCallPruner();
         updateChainBar();
@@ -5565,6 +5682,8 @@ body.wb-chain-active {
             chainTimerRAF = null;
         }
         stopDirectChainPoll();
+        stopChainDOMObserver();
+        usingChainDOM = false;
 
         // Re-detect page and init
         setTimeout(() => detectPageAndInit(), 500);

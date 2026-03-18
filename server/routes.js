@@ -218,8 +218,8 @@ router.get("/api/poll", (req, res, next) => {
     }
   }
 
-  // Ensure chain monitor is running for this war (idempotent — no-op if already started)
-  startChainMonitor(null, warId);
+  // Chain data now comes from clients via DOM reading — no server-side chain polling
+  // startChainMonitor(null, warId);
 
   // Track player as online (use playerId as pseudo-socketId for polling clients)
   store.setPlayer(playerId, {

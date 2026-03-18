@@ -178,14 +178,12 @@ io.on("connection", (socket) => {
   console.log(`[ws] Socket connected: ${socket.id} (player: ${socket.user.playerName})`);
   registerSocketHandlers(io, socket);
 
-  // When a player joins a war, ensure chain monitoring is running
+  // When a player joins a war, ensure status monitoring is running
+  // Chain data comes from clients via DOM reading — no server-side chain polling needed
   socket.on("join_war", ({ warId }) => {
     // Small delay to let the war get created/loaded first
     setTimeout(() => {
       const war = store.getWar(warId);
-      if (war?.factionId) {
-        startChainMonitor(io, warId);
-      }
       if (war?.enemyFactionId) {
         startWarStatusMonitor(io, warId);
       }
@@ -200,11 +198,9 @@ store.loadFactionKeys();
 store.loadPlayerKeys();
 loadHeatmaps();
 
-// Resume chain monitors and war status monitors for any persisted wars
+// Resume war status monitors for any persisted wars
+// Chain data comes from clients via DOM reading — no server-side chain polling needed
 for (const [warId, war] of store.getAllWars()) {
-  if (war.factionId) {
-    startChainMonitor(io, warId);
-  }
   if (war.enemyFactionId) {
     startWarStatusMonitor(io, warId);
   }
