@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.11.3
+// @version      3.11.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.11.4 - UI: Compact 2-row header (logo+stats row 1, war info centered row 2)
 // v3.11.3 - Fix: Center "War vs" line on mobile when header wraps
 // v3.11.2 - UI: Move settings gear and heatmap buttons next to logo/connection dot (left side of header)
 // v3.11.1 - Online badge: "us" count from server-side Torn API poll (all faction members, not just FactionOps users)
@@ -923,12 +924,13 @@ body.wb-chain-active {
 /* ── Header Bar ── */
 .fo-header {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 16px;
+    padding: 8px 12px;
     background: var(--wb-bg-secondary);
     border-bottom: 1px solid var(--wb-border);
-    gap: 12px;
+    gap: 4px 10px;
 }
 
 .fo-header-left {
@@ -936,6 +938,12 @@ body.wb-chain-active {
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
+}
+
+.fo-header-center {
+    flex: 0 0 100%;
+    justify-content: center;
+    order: 10;
 }
 
 .fo-logo-mark {
@@ -980,6 +988,7 @@ body.wb-chain-active {
     font-size: 12px;
     color: var(--wb-text-muted);
     white-space: nowrap;
+    /* flex/order/width set in .fo-header > .fo-header-center rule above */
 }
 
 .fo-header-center strong { color: var(--wb-text); font-weight: 600; }
@@ -996,8 +1005,9 @@ body.wb-chain-active {
 .fo-header-right {
     display: flex;
     align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
+    gap: 8px;
+    flex-shrink: 1;
+    flex-wrap: wrap;
 }
 
 .fo-online-badge {
@@ -1475,8 +1485,7 @@ body.wb-chain-active {
 /* ── Responsive ── */
 @media (max-width: 700px) {
     .fo-overlay { border-radius: 6px; margin: 4px 0; }
-    .fo-header { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
-    .fo-header-center { flex: 0 0 100%; justify-content: center; }
+    .fo-header { gap: 4px 8px; padding: 6px 10px; }
     .fo-col-headers, .fo-row {
         /* Prior | Target | (Lvl hidden) | (BSP hidden) | Status | On | Call | Action */
         grid-template-columns: 30px 1fr 0px 0px 40px 18px 56px 52px;
