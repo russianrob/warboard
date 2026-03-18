@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.10.3
+// @version      3.10.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -118,7 +118,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.10.3',
+        VERSION: '3.10.4',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -5587,8 +5587,7 @@ body.wb-chain-active {
         const existing = document.getElementById('wb-heatmap-panel');
         if (existing) existing.remove();
 
-        const utcData = await fetchHeatmapData();
-        const data = utcHeatmapToLocal(utcData);
+        const data = await fetchHeatmapData(); // Already in UTC = TCT
 
         // Find max average for color scaling
         let maxAvg = 0;
@@ -5621,7 +5620,7 @@ body.wb-chain-active {
         // Header
         const header = document.createElement('div');
         header.className = 'wb-heatmap-header';
-        header.innerHTML = '<span>Member Activity Heatmap</span>';
+        header.innerHTML = '<span>Member Activity Heatmap <span style="font-size:10px;opacity:0.5;">(TCT)</span></span>';
         const closeBtn = document.createElement('button');
         closeBtn.textContent = '\u00D7';
         closeBtn.className = 'wb-heatmap-close';
@@ -5695,7 +5694,7 @@ body.wb-chain-active {
                 const intensity = maxAvg > 0 ? avg / maxAvg : 0;
                 cell.style.backgroundColor = `rgba(0, 184, 148, ${(intensity * 0.9 + 0.1).toFixed(2)})`;
                 if (bucket.samples === 0) cell.style.backgroundColor = 'rgba(255,255,255,0.05)';
-                cell.title = `${DAY_LABELS[d]} ${String(h).padStart(2, '0')}:00 \u2014 Avg ${avg.toFixed(1)} members online (${bucket.samples} samples)`;
+                cell.title = `${DAY_LABELS[d]} ${String(h).padStart(2, '0')}:00 TCT \u2014 Avg ${avg.toFixed(1)} members online (${bucket.samples} samples)`;
                 grid.appendChild(cell);
             }
         }
