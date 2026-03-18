@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.10.8
+// @version      3.10.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -118,7 +118,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.10.8',
+        VERSION: '3.10.9',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1282,7 +1282,7 @@ body.wb-chain-active {
 
 
 .fo-player-name .fo-pid { font-size: 10px; color: #636e72; font-weight: 400; }
-.fo-sub-row { display: flex; align-items: center; gap: 5px; }
+.fo-sub-row { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
 .fo-bsp-inline {
     font-family: 'JetBrains Mono', monospace;
     font-size: 9px; font-weight: 600;
