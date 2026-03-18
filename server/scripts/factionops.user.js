@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.9.3
+// @version      3.9.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.9.4  - Clone Torn's native #barChain into overlay header (live updates from Torn JS)
 // v3.9.3  - Revert to simple full-page overlay; re-add chain info to header from server data
 // v3.9.0  - Remove chain info from overlay header too; Torn's native chain fully visible
 // v3.8.9  - Remove chain bar entirely; standalone Next Up bar below Torn's UI
@@ -114,7 +115,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.8.1',
+        VERSION: '3.9.4',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -994,7 +995,24 @@ body.wb-chain-active {
     border-radius: 50%; background: #00b894;
 }
 
-/* ── Chain info in header ── */
+/* ── Torn native chain bar in header ── */
+.fo-torn-chain {
+    display: flex;
+    align-items: center;
+    max-width: 200px;
+    overflow: hidden;
+}
+.fo-torn-chain a#barChain {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: relative !important;
+    width: 180px;
+    height: 22px;
+    border-radius: 12px;
+    overflow: hidden;
+}
+/* Fallback: custom chain info when Torn bar not found */
 .fo-chain-info {
     display: flex; align-items: center; gap: 8px;
     font-size: 11px; font-weight: 500;
@@ -2716,18 +2734,21 @@ body.wb-chain-active {
             }
         }
 
-        // Update overlay header chain info (if visible)
-        const foCount = document.getElementById('fo-chain-count');
-        const foTimeout = document.getElementById('fo-chain-timeout');
-        const foBonus = document.getElementById('fo-chain-bonus');
-        if (foCount) foCount.textContent = countText;
-        if (foTimeout) {
-            foTimeout.textContent = timeoutText;
-            foTimeout.classList.toggle('danger', isDanger);
-        }
-        if (foBonus) {
-            foBonus.style.display = showBonus ? 'inline' : 'none';
-            if (showBonus) foBonus.textContent = bonusText;
+        // Update overlay header fallback chain info (only when Torn native bar wasn't found)
+        const fallback = document.getElementById('fo-chain-fallback');
+        if (fallback && fallback.style.display !== 'none') {
+            const foCount = document.getElementById('fo-chain-count');
+            const foTimeout = document.getElementById('fo-chain-timeout');
+            const foBonus = document.getElementById('fo-chain-bonus');
+            if (foCount) foCount.textContent = countText;
+            if (foTimeout) {
+                foTimeout.textContent = timeoutText;
+                foTimeout.classList.toggle('danger', isDanger);
+            }
+            if (foBonus) {
+                foBonus.style.display = showBonus ? 'inline' : 'none';
+                if (showBonus) foBonus.textContent = bonusText;
+            }
         }
     }
 
@@ -3544,6 +3565,48 @@ body.wb-chain-active {
         document.body.appendChild(btn);
     }
 
+    // ── Move / restore Torn's native chain bar ──
+    let tornChainOriginalParent = null; // remember where #barChain came from
+    let tornChainOriginalNext = null;   // sibling reference for restore
+
+    function moveTornChainBar() {
+        const container = document.getElementById('fo-torn-chain');
+        if (!container) return;
+
+        // Find Torn's chain bar inside the (hidden) DOM
+        const chainBar = document.getElementById('barChain');
+        if (chainBar) {
+            // Remember original position so we can put it back on cleanup
+            tornChainOriginalParent = chainBar.parentNode;
+            tornChainOriginalNext = chainBar.nextSibling;
+            // Move (not clone) — Torn's JS keeps updating it in place
+            container.appendChild(chainBar);
+            log('Moved Torn #barChain into overlay header');
+        } else {
+            // Torn chain bar not found (PDA or different DOM) — show fallback
+            log('Torn #barChain not found — showing fallback chain info');
+            container.style.display = 'none';
+            const fallback = document.getElementById('fo-chain-fallback');
+            if (fallback) fallback.style.display = '';
+        }
+    }
+
+    function restoreTornChainBar() {
+        if (!tornChainOriginalParent) return;
+        const chainBar = document.getElementById('barChain');
+        if (chainBar && tornChainOriginalParent) {
+            // Put it back where it was
+            if (tornChainOriginalNext) {
+                tornChainOriginalParent.insertBefore(chainBar, tornChainOriginalNext);
+            } else {
+                tornChainOriginalParent.appendChild(chainBar);
+            }
+            log('Restored Torn #barChain to original location');
+        }
+        tornChainOriginalParent = null;
+        tornChainOriginalNext = null;
+    }
+
     function initWarOverlay() {
         startChainTimer();
         startDirectChainPoll();
@@ -3586,7 +3649,10 @@ body.wb-chain-active {
                     <strong id="fo-enemy-name">${escapeHtml(state.enemyFactionName || state.enemyFactionId || 'Enemy Faction')}</strong>
                 </div>
                 <div class="fo-header-right">
-                    <div class="fo-chain-info">
+                    <div class="fo-torn-chain" id="fo-torn-chain">
+                        <!-- Torn's native #barChain will be moved here -->
+                    </div>
+                    <div class="fo-chain-info" id="fo-chain-fallback" style="display:none;">
                         <span class="fo-chain-label">Chain</span>
                         <span class="fo-chain-count" id="fo-chain-count">${state.chain.current || 0}/${state.chain.max || '??'}</span>
                         <span class="fo-chain-timeout" id="fo-chain-timeout">${state.chain.timeout > 0 ? formatTimer(state.chain.timeout) : '--:--'}</span>
@@ -3629,6 +3695,9 @@ body.wb-chain-active {
         }
 
         renderOverlay();
+
+        // Move Torn's native #barChain into our overlay header
+        moveTornChainBar();
 
         // Wire up heatmap button in overlay header
         const heatmapHeaderBtn = document.getElementById('fo-heatmap-header-btn');
@@ -5428,6 +5497,9 @@ body.wb-chain-active {
             attackOverlay.remove();
             clearViewing(); // Tell server we left the attack page
         }
+
+        // Restore Torn's chain bar to its original position before removing overlay
+        restoreTornChainBar();
 
         // Remove FactionOps activate button and war overlay, restore hidden Torn elements
         const foBtn = document.getElementById('fo-activate-btn');
