@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.9.7
+// @version      3.9.8
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -118,7 +118,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.9.7',
+        VERSION: '3.9.8',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2931,7 +2931,7 @@ body.wb-chain-active {
 
         pollChain();
         chainPollInterval = setInterval(pollChain, CHAIN_POLL_MS);
-        log('Direct chain poll started (every 5s)');
+        log(`Direct chain poll started (every ${CHAIN_POLL_MS / 1000}s)`);
     }
 
     function stopDirectChainPoll() {
@@ -3722,14 +3722,20 @@ body.wb-chain-active {
             container.appendChild(chainBar);
             log('Moved Torn chain bar into overlay header');
 
-            // Start DOM-based chain reading (zero API calls)
-            if (startChainDOMObserver()) {
-                usingChainDOM = true;
-                log('Using DOM chain reader — no API calls for chain data');
-            } else {
-                // Observer couldn't start even though bar was found — fall back
-                startDirectChainPoll();
-            }
+            // If API poll was started as a fallback, stop it now
+            stopDirectChainPoll();
+
+            // Give PDA's DOM a tick to settle after the move, then start observer
+            setTimeout(() => {
+                if (startChainDOMObserver()) {
+                    usingChainDOM = true;
+                    log('Using DOM chain reader — no API calls for chain data');
+                } else {
+                    // Observer couldn't start even though bar was found — fall back
+                    log('DOM observer failed after move — falling back to API poll');
+                    startDirectChainPoll();
+                }
+            }, 50);
         } else if (retryCount < 10) {
             // Chain bar may not have loaded yet — retry with increasing delay
             const delay = 500 * (retryCount + 1);
@@ -3743,7 +3749,50 @@ body.wb-chain-active {
             if (fallback) fallback.style.display = '';
             // Fall back to API-based chain polling
             startDirectChainPoll();
+
+            // Keep watching — bar might appear later (PDA slow load)
+            watchForLateChainBar(container);
         }
+    }
+
+    /** Watch for #barChain appearing late (after retries exhausted) */
+    let lateChainWatcher = null;
+    function watchForLateChainBar(container) {
+        if (lateChainWatcher) return;
+        lateChainWatcher = new MutationObserver(() => {
+            const chainBar = document.getElementById('barChain');
+            if (!chainBar || chainBar.closest('#fo-torn-chain')) return; // already moved
+
+            // Found it late — move it and switch to DOM reader
+            log('Late-detected #barChain — moving into overlay and switching to DOM reader');
+            lateChainWatcher.disconnect();
+            lateChainWatcher = null;
+
+            tornChainOriginalParent = chainBar.parentNode;
+            tornChainOriginalNext = chainBar.nextSibling;
+            container.appendChild(chainBar);
+            container.style.display = '';
+            const fallback = document.getElementById('fo-chain-fallback');
+            if (fallback) fallback.style.display = 'none';
+
+            stopDirectChainPoll();
+            setTimeout(() => {
+                if (startChainDOMObserver()) {
+                    usingChainDOM = true;
+                    log('Switched to DOM chain reader after late detection');
+                } else {
+                    startDirectChainPoll();
+                }
+            }, 50);
+        });
+        lateChainWatcher.observe(document.body, { childList: true, subtree: true });
+        // Auto-stop after 60s to avoid indefinite watching
+        setTimeout(() => {
+            if (lateChainWatcher) {
+                lateChainWatcher.disconnect();
+                lateChainWatcher = null;
+            }
+        }, 60000);
     }
 
     function restoreTornChainBar() {
@@ -5683,6 +5732,10 @@ body.wb-chain-active {
         }
         stopDirectChainPoll();
         stopChainDOMObserver();
+        if (lateChainWatcher) {
+            lateChainWatcher.disconnect();
+            lateChainWatcher = null;
+        }
         usingChainDOM = false;
 
         // Re-detect page and init
