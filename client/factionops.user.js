@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.9.9
+// @version      3.10.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -118,7 +118,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.9.9',
+        VERSION: '3.10.0',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1044,6 +1044,22 @@ body.wb-chain-active {
     color: #00b894 !important;
     font-weight: 700 !important;
 }
+/* Live chain count + timer display */
+.fo-chain-live {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600;
+    padding: 3px 12px; border-radius: 20px;
+    background: rgba(44,62,80,0.7);
+    border: 1px solid rgba(0,184,148,0.25);
+    white-space: nowrap;
+}
+.fo-chain-live-count { color: #00b894; font-weight: 700; }
+.fo-chain-live-sep { color: rgba(255,255,255,0.3); font-weight: 400; }
+.fo-chain-live-timer { color: #fdcb6e; font-weight: 600; font-variant-numeric: tabular-nums; }
+.fo-chain-live-timer.danger { color: #e17055; animation: fo-pulse 0.6s infinite alternate; }
+.fo-chain-live-bonus { color: #e17055; font-weight: 700; font-size: 10px; margin-left: 2px; }
+@keyframes fo-pulse { from { opacity: 1; } to { opacity: 0.4; } }
+
 /* Fallback: custom chain info when Torn bar not found */
 .fo-chain-info {
     display: flex; align-items: center; gap: 8px;
@@ -2766,6 +2782,20 @@ body.wb-chain-active {
             }
         }
 
+        // Update live chain display in overlay header
+        const liveCount = document.getElementById('fo-chain-live-count');
+        const liveTimer = document.getElementById('fo-chain-live-timer');
+        const liveBonus = document.getElementById('fo-chain-live-bonus');
+        if (liveCount) liveCount.textContent = countText;
+        if (liveTimer) {
+            liveTimer.textContent = timeoutText;
+            liveTimer.classList.toggle('danger', isDanger);
+        }
+        if (liveBonus) {
+            liveBonus.style.display = showBonus ? 'inline' : 'none';
+            if (showBonus) liveBonus.textContent = bonusText;
+        }
+
         // Update overlay header fallback chain info (only when Torn native bar wasn't found)
         const fallback = document.getElementById('fo-chain-fallback');
         if (fallback && fallback.style.display !== 'none') {
@@ -3866,8 +3896,14 @@ body.wb-chain-active {
                     <strong id="fo-enemy-name">${escapeHtml(state.enemyFactionName || state.enemyFactionId || 'Enemy Faction')}</strong>
                 </div>
                 <div class="fo-header-right">
-                    <div class="fo-torn-chain" id="fo-torn-chain">
-                        <!-- Torn's native #barChain will be moved here -->
+                    <div class="fo-torn-chain" id="fo-torn-chain" style="display:none;">
+                        <!-- Torn's native #barChain moved here (hidden — used for DOM reading only) -->
+                    </div>
+                    <div class="fo-chain-live" id="fo-chain-live">
+                        <span class="fo-chain-live-count" id="fo-chain-live-count">${state.chain.current || 0}/${state.chain.max || '??'}</span>
+                        <span class="fo-chain-live-sep">&middot;</span>
+                        <span class="fo-chain-live-timer" id="fo-chain-live-timer">${state.chain.timeout > 0 ? formatTimer(state.chain.timeout) : '--:--'}</span>
+                        <span class="fo-chain-live-bonus" id="fo-chain-live-bonus" style="display:none;"></span>
                     </div>
                     <div class="fo-chain-info" id="fo-chain-fallback" style="display:none;">
                         <span class="fo-chain-label">Chain</span>
