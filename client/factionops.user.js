@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.10.6
+// @version      3.10.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -118,7 +118,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.10.6',
+        VERSION: '3.10.7',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -4440,9 +4440,14 @@ body.wb-chain-active {
                 if (val === (level || '')) opt.selected = true;
                 sel.appendChild(opt);
             });
+            // Mark cell as active while user interacts — prevents re-render from destroying it
+            sel.addEventListener('focus', () => { cell.dataset.foActive = '1'; });
+            sel.addEventListener('mousedown', () => { cell.dataset.foActive = '1'; });
             sel.addEventListener('change', () => {
+                delete cell.dataset.foActive;
                 emitSetPriority(targetId, sel.value || null);
             });
+            sel.addEventListener('blur', () => { delete cell.dataset.foActive; });
             cell.appendChild(sel);
         } else if (level) {
             const badge = document.createElement('span');
@@ -4645,9 +4650,11 @@ body.wb-chain-active {
             }
         }
 
-        // Re-render volatile cells
+        // Re-render volatile cells (skip priority if user is interacting with dropdown)
         const prioCell = document.getElementById(`fo-priority-${targetId}`);
-        if (prioCell) renderOverlayPriorityCell(prioCell, targetId);
+        if (prioCell && !prioCell.dataset.foActive) {
+            renderOverlayPriorityCell(prioCell, targetId);
+        }
 
         const statusCell = document.getElementById(`fo-status-${targetId}`);
         if (statusCell) renderOverlayStatusCell(statusCell, targetId);
