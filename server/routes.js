@@ -74,27 +74,43 @@ router.post("/api/gate", async (req, res) => {
     return res.status(400).json({ error: "API key is required" });
   }
 
-  try {
-    const info = await verifyTornApiKey(apiKey);
-
-    if (info.factionId !== ALLOWED_FACTION_ID) {
-      return res.status(403).json({ error: "Access restricted to faction members only" });
+  // Retry once on transient Torn API failures
+  let info;
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      info = await verifyTornApiKey(apiKey);
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      // If it's a Torn API error (invalid key), don't retry
+      if (err.message.includes("Torn API error")) break;
+      // Otherwise (network/timeout), wait 1s and retry
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 1000));
     }
-
-    // Issue a gate-specific JWT (24h) stored as a cookie
-    const gateToken = issueToken({ playerId: info.playerId, playerName: info.playerName, gate: true });
-    res.cookie("fo_gate", gateToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "strict",
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    });
-
-    return res.json({ ok: true, playerName: info.playerName });
-  } catch (err) {
-    console.error("[gate] Verification failed:", err.message);
-    return res.status(401).json({ error: "Invalid API key" });
   }
+
+  if (lastErr) {
+    console.error("[gate] Verification failed:", lastErr.message);
+    const msg = lastErr.message.includes("Torn API error") ? "Invalid API key" : "Verification failed — please try again";
+    return res.status(401).json({ error: msg });
+  }
+
+  if (info.factionId !== ALLOWED_FACTION_ID) {
+    return res.status(403).json({ error: "Access restricted to faction members only" });
+  }
+
+  // Issue a gate-specific JWT (24h) stored as a cookie
+  const gateToken = issueToken({ playerId: info.playerId, playerName: info.playerName, gate: true });
+  res.cookie("fo_gate", gateToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "strict",
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+  });
+
+  return res.json({ ok: true, playerName: info.playerName });
 });
 
 /**

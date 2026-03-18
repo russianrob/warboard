@@ -16,7 +16,14 @@ const JWT_EXPIRY = "24h";
 export async function verifyTornApiKey(apiKey) {
   const url = `https://api.torn.com/user/?selections=basic,profile&key=${encodeURIComponent(apiKey)}`;
 
-  const res = await fetch(url);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+  let res;
+  try {
+    res = await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!res.ok) {
     throw new Error(`Torn API returned HTTP ${res.status}`);
   }

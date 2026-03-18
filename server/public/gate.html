@@ -107,28 +107,44 @@ document.getElementById('gate-form').addEventListener('submit', async (e) => {
   spinner.classList.add('active');
   errorEl.textContent = '';
 
-  try {
-    const res = await fetch('/api/gate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey }),
-    });
-    const data = await res.json();
+  const maxRetries = 2;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const res = await fetch('/api/gate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
 
-    if (res.ok) {
-      btnText.textContent = 'Welcome, ' + data.playerName;
-      setTimeout(() => { window.location.href = '/'; }, 600);
-    } else {
-      errorEl.textContent = data.error || 'Verification failed';
+      const data = await res.json();
+
+      if (res.ok) {
+        btnText.textContent = 'Welcome, ' + data.playerName;
+        spinner.classList.remove('active');
+        setTimeout(() => { window.location.href = '/'; }, 600);
+        return;
+      } else {
+        errorEl.textContent = data.error || 'Verification failed';
+        btn.disabled = false;
+        btnText.textContent = 'Verify';
+        spinner.classList.remove('active');
+        return;
+      }
+    } catch (err) {
+      if (attempt < maxRetries - 1) {
+        // Wait 1s then retry
+        await new Promise(r => setTimeout(r, 1000));
+        continue;
+      }
+      errorEl.textContent = 'Network error — please try again';
       btn.disabled = false;
       btnText.textContent = 'Verify';
       spinner.classList.remove('active');
     }
-  } catch (err) {
-    errorEl.textContent = 'Network error — try again';
-    btn.disabled = false;
-    btnText.textContent = 'Verify';
-    spinner.classList.remove('active');
   }
 });
 </script>
