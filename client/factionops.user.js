@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.11.5
+// @version      3.11.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.11.6 - Fix: auto-retry on network error for call/uncall/priority actions (1s delay, 10s timeout)
 // v3.11.5 - Jailed members moved to collapsed Unavailable section; hospital pill shows countdown timer
 // v3.11.4 - UI: Compact 2-row header (logo+stats row 1, war info centered row 2)
 // v3.11.3 - Fix: Center "War vs" line on mobile when header wraps
@@ -2101,8 +2102,9 @@ body.wb-chain-active {
     /**
      * POST a JSON action to the server.
      * On PDA uses fetch(); elsewhere uses GM_xmlhttpRequest.
+     * Auto-retries once on network error after 1s delay.
      */
-    function postAction(endpoint, body) {
+    function postAction(endpoint, body, _retried) {
         return new Promise((resolve, reject) => {
             if (!state.jwtToken) return reject(new Error('Not authenticated'));
             const url = `${CONFIG.SERVER_URL}${endpoint}`;
@@ -2116,18 +2118,37 @@ body.wb-chain-active {
                     'Authorization': `Bearer ${state.jwtToken}`,
                 },
                 data: json,
+                timeout: 10000,
                 onload(res) {
                     const data = safeParse(res.responseText);
                     if (res.status >= 200 && res.status < 300) resolve(data);
                     else reject(new Error((data && data.error) || `HTTP ${res.status}`));
                 },
-                onerror() { reject(new Error('Network error')); },
+                onerror() {
+                    if (!_retried) {
+                        // Retry once after 1s
+                        setTimeout(() => {
+                            postAction(endpoint, body, true).then(resolve, reject);
+                        }, 1000);
+                    } else {
+                        reject(new Error('Network error'));
+                    }
+                },
+                ontimeout() {
+                    if (!_retried) {
+                        setTimeout(() => {
+                            postAction(endpoint, body, true).then(resolve, reject);
+                        }, 1000);
+                    } else {
+                        reject(new Error('Request timed out'));
+                    }
+                },
             });
         });
     }
 
-    /** POST-based remove action with auth header (PDA compatible — no DELETE method). */
-    function removeAction(endpoint) {
+    /** POST-based remove action with auth header (PDA compatible — no DELETE method). Auto-retries once. */
+    function removeAction(endpoint, _retried) {
         return new Promise((resolve, reject) => {
             if (!state.jwtToken) return reject(new Error('Not authenticated'));
             const url = `${CONFIG.SERVER_URL}${endpoint}`;
@@ -2140,12 +2161,26 @@ body.wb-chain-active {
                     'Content-Type': 'application/json',
                 },
                 data: '{}',
+                timeout: 10000,
                 onload(res) {
                     const data = safeParse(res.responseText);
                     if (res.status >= 200 && res.status < 300) resolve(data);
                     else reject(new Error((data && data.error) || `HTTP ${res.status}`));
                 },
-                onerror() { reject(new Error('Network error')); },
+                onerror() {
+                    if (!_retried) {
+                        setTimeout(() => removeAction(endpoint, true).then(resolve, reject), 1000);
+                    } else {
+                        reject(new Error('Network error'));
+                    }
+                },
+                ontimeout() {
+                    if (!_retried) {
+                        setTimeout(() => removeAction(endpoint, true).then(resolve, reject), 1000);
+                    } else {
+                        reject(new Error('Request timed out'));
+                    }
+                },
             });
         });
     }
