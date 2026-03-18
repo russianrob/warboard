@@ -3,7 +3,7 @@
  */
 
 import { Router } from "express";
-import { verifyTornApiKey, issueToken, requireAuth } from "./auth.js";
+import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.js";
 import * as store from "./store.js";
 import { fetchFactionMembers, fetchFactionChain, fetchRankedWar } from "./torn-api.js";
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
@@ -64,6 +64,80 @@ function uncallTarget(warId, targetId) {
 router.get("/api/health", (req, res) => {
   res.json({ status: "ok", uptime: Math.floor(process.uptime()) });
 });
+
+// ── POST /api/gate ──────────────────────────────────────────────────────
+// Verify Torn API key for landing page access. Sets a cookie on success.
+
+router.post("/api/gate", async (req, res) => {
+  const { apiKey } = req.body ?? {};
+  if (!apiKey || typeof apiKey !== "string") {
+    return res.status(400).json({ error: "API key is required" });
+  }
+
+  try {
+    const info = await verifyTornApiKey(apiKey);
+
+    if (info.factionId !== ALLOWED_FACTION_ID) {
+      return res.status(403).json({ error: "Access restricted to faction members only" });
+    }
+
+    // Issue a gate-specific JWT (24h) stored as a cookie
+    const gateToken = issueToken({ playerId: info.playerId, playerName: info.playerName, gate: true });
+    res.cookie("fo_gate", gateToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "strict",
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    });
+
+    return res.json({ ok: true, playerName: info.playerName });
+  } catch (err) {
+    console.error("[gate] Verification failed:", err.message);
+    return res.status(401).json({ error: "Invalid API key" });
+  }
+});
+
+/**
+ * Middleware: gate the landing page behind faction membership.
+ * Exempt: /api/*, /scripts/*, gate page assets.
+ */
+export function gateMiddleware(req, res, next) {
+  // Always allow API routes, script routes, and the gate page itself
+  if (
+    req.path.startsWith("/api/") ||
+    req.path.startsWith("/scripts/") ||
+    req.path === "/gate.html" ||
+    req.path === "/download/factionops.user.js"
+  ) {
+    return next();
+  }
+
+  // Check for gate cookie
+  const token = parseCookie(req.headers.cookie, "fo_gate");
+  if (token) {
+    try {
+      verifyToken(token);
+      return next(); // Valid — let through
+    } catch (_) {
+      // Expired or invalid — fall through to gate
+    }
+  }
+
+  // Redirect to gate page
+  if (req.path === "/" || req.path === "/index.html") {
+    return res.redirect("/gate.html");
+  }
+
+  // Block other static assets for unauthenticated users
+  return res.redirect("/gate.html");
+}
+
+/** Simple cookie parser — no dependency needed. */
+function parseCookie(cookieHeader, name) {
+  if (!cookieHeader) return null;
+  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
 
 // ── POST /api/auth ──────────────────────────────────────────────────────
 

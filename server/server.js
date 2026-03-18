@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 
-import routes from "./routes.js";
+import routes, { gateMiddleware } from "./routes.js";
 import { socketAuth } from "./auth.js";
 import { registerSocketHandlers } from "./socket-handlers.js";
 import { startChainMonitor, stopAll as stopAllChainMonitors } from "./chain-monitor.js";
@@ -52,6 +52,9 @@ app.use(
   }),
 );
 app.use(express.json());
+
+// ── Landing page gate (faction members only) ──────────────────────────────
+app.use(gateMiddleware);
 
 // ── Static files (landing page) ─────────────────────────────────────────
 app.use(express.static(join(__dirname, "public")));
