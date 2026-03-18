@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.11.4
+// @version      3.11.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.11.5 - Jailed members moved to collapsed Unavailable section; hospital pill shows countdown timer
 // v3.11.4 - UI: Compact 2-row header (logo+stats row 1, war info centered row 2)
 // v3.11.3 - Fix: Center "War vs" line on mobile when header wraps
 // v3.11.2 - UI: Move settings gear and heatmap buttons next to logo/connection dot (left side of header)
@@ -1505,7 +1506,7 @@ body.wb-chain-active {
     .fo-called-tag { padding: 2px 6px; font-size: 9px; }
     .fo-called-tag .fo-caller-name { max-width: 34px; }
     .fo-call-cell { overflow: hidden; max-width: 100%; }
-    .fo-status-pill { padding: 2px 4px; font-size: 9px; min-width: 0; max-width: 38px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fo-status-pill { padding: 2px 4px; font-size: 9px; min-width: 0; max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fo-player-name .fo-name { font-size: 11.5px; }
     .fo-player-name .fo-pid { font-size: 9px; }
     .fo-bsp-stat { font-size: 10px; }
@@ -4279,11 +4280,11 @@ body.wb-chain-active {
         if (!list) return;
 
         const allIds = Object.keys(state.statuses);
-        const travelingStatuses = ['traveling', 'abroad'];
+        const unavailableStatuses = ['traveling', 'abroad', 'jail'];
         const hiddenStatuses = ['federal', 'fallen'];
 
-        const targetIds = [];      // attackable: ok, hospital, jail
-        const travelingIds = [];   // collapsed section
+        const targetIds = [];      // attackable: ok, hospital
+        const unavailableIds = []; // collapsed section: traveling, abroad, jail
         // federal/fallen are simply excluded from everything
 
         for (const tid of allIds) {
@@ -4292,8 +4293,8 @@ body.wb-chain-active {
             if (hiddenStatuses.includes(status)) {
                 // Completely hidden — skip
                 continue;
-            } else if (travelingStatuses.includes(status)) {
-                travelingIds.push(tid);
+            } else if (unavailableStatuses.includes(status)) {
+                unavailableIds.push(tid);
             } else {
                 targetIds.push(tid);
             }
@@ -4361,9 +4362,9 @@ body.wb-chain-active {
             }
         }
 
-        // Render collapsed traveling section
+        // Render collapsed unavailable section (traveling + jail)
         let unavailSection = document.getElementById('fo-unavailable-section');
-        if (travelingIds.length > 0) {
+        if (unavailableIds.length > 0) {
             if (!unavailSection) {
                 unavailSection = document.createElement('div');
                 unavailSection.id = 'fo-unavailable-section';
@@ -4373,7 +4374,7 @@ body.wb-chain-active {
 
             // Count by status type
             const counts = {};
-            for (const tid of travelingIds) {
+            for (const tid of unavailableIds) {
                 const s = state.statuses[tid];
                 const status = normalizeStatus(s ? s.status : 'ok');
                 counts[status] = (counts[status] || 0) + 1;
@@ -4382,6 +4383,7 @@ body.wb-chain-active {
             const countParts = [];
             if (counts.traveling) countParts.push(`${counts.traveling} traveling`);
             if (counts.abroad) countParts.push(`${counts.abroad} abroad`);
+            if (counts.jail) countParts.push(`${counts.jail} jailed`);
 
             const isExpanded = unavailSection.dataset.expanded === 'true';
             const toggleIcon = isExpanded ? '\u25BC' : '\u25B6';
@@ -4400,7 +4402,7 @@ body.wb-chain-active {
                 });
                 unavailSection.appendChild(header);
             }
-            header.innerHTML = `<span style="margin-right:6px;">${toggleIcon}</span>Traveling (${travelingIds.length})${countParts.length ? ': ' + countParts.join(', ') : ''}`;
+            header.innerHTML = `<span style="margin-right:6px;">${toggleIcon}</span>Unavailable (${unavailableIds.length})${countParts.length ? ': ' + countParts.join(', ') : ''}`;
 
             // Render unavailable rows if expanded
             let unavailList = unavailSection.querySelector('.fo-unavail-list');
@@ -4414,10 +4416,10 @@ body.wb-chain-active {
                 unavailList.style.display = '';
                 // Remove stale
                 unavailList.querySelectorAll('[data-fo-id]').forEach(r => {
-                    if (!travelingIds.includes(r.dataset.foId)) r.remove();
+                    if (!unavailableIds.includes(r.dataset.foId)) r.remove();
                 });
                 // Add/update
-                for (const tid of travelingIds) {
+                for (const tid of unavailableIds) {
                     let row = unavailList.querySelector(`[data-fo-id="${tid}"]`);
                     if (row) {
                         updateOverlayRow(row, tid);
@@ -4677,7 +4679,12 @@ body.wb-chain-active {
 
         if (status === 'hospital') {
             pillClass = 'hosp';
-            label = 'Hosp';
+            // Show timer instead of "Hosp" text
+            if (s.until && s.until > 0) {
+                label = formatTimer(s.until);
+            } else {
+                label = 'Hosp';
+            }
         } else if (status === 'federal') {
             pillClass = 'jail';
             label = 'Federal';
@@ -4691,10 +4698,12 @@ body.wb-chain-active {
 
         const pill = document.createElement('span');
         pill.className = `fo-status-pill ${pillClass}`;
-        pill.innerHTML = `<span class="fo-s-dot"></span>${label}`;
+        // For hospital, the label IS the timer — give it the timer ID for live ticking
+        const labelId = (status === 'hospital' && s.until && s.until > 0) ? `fo-timer-${targetId}` : '';
+        pill.innerHTML = `<span class="fo-s-dot"></span><span class="fo-s-label"${labelId ? ` id="${labelId}"` : ''}>${label}</span>`;
 
-        // Timer
-        if (s.until && s.until > 0) {
+        // Timer (for non-hospital statuses that have timers)
+        if (status !== 'hospital' && s.until && s.until > 0) {
             const timer = document.createElement('span');
             timer.id = `fo-timer-${targetId}`;
             timer.style.marginLeft = '4px';
