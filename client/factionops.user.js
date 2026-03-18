@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.9.5
+// @version      3.9.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.9.6  - Chain bar CSS fix for readable display; server exponential backoff on API failures
 // v3.9.5  - Chain bar: retry with delay + DOM diagnostic for PDA compatibility
 // v3.9.4  - Clone Torn's native #barChain into overlay header (live updates from Torn JS)
 // v3.9.3  - Revert to simple full-page overlay; re-add chain info to header from server data
@@ -116,7 +117,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.9.5',
+        VERSION: '3.9.6',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1000,18 +1001,47 @@ body.wb-chain-active {
 .fo-torn-chain {
     display: flex;
     align-items: center;
-    max-width: 200px;
-    overflow: hidden;
+    flex-shrink: 0;
 }
-.fo-torn-chain a#barChain {
-    display: block !important;
+.fo-torn-chain #barChain,
+.fo-torn-chain a#barChain,
+.fo-torn-chain [id="barChain"] {
+    display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
     position: relative !important;
-    width: 180px;
-    height: 22px;
+    width: auto !important;
+    min-width: 160px;
+    max-width: 260px;
+    height: auto !important;
+    min-height: 20px;
     border-radius: 12px;
-    overflow: hidden;
+    overflow: visible !important;
+    background: rgba(44,62,80,0.6) !important;
+    padding: 2px 10px !important;
+    align-items: center;
+    gap: 4px;
+}
+.fo-torn-chain #barChain p,
+.fo-torn-chain #barChain span {
+    display: inline !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: relative !important;
+    font-size: 11px !important;
+    line-height: 18px !important;
+    color: #dfe6e9 !important;
+    white-space: nowrap !important;
+}
+/* Make the timer text stand out */
+.fo-torn-chain #barChain p[class*="bar-timeleft"] {
+    color: #fdcb6e !important;
+    font-weight: 600 !important;
+}
+/* Make the chain count stand out */
+.fo-torn-chain #barChain p[class*="bar-stats"] {
+    color: #00b894 !important;
+    font-weight: 700 !important;
 }
 /* Fallback: custom chain info when Torn bar not found */
 .fo-chain-info {
@@ -3592,17 +3622,6 @@ body.wb-chain-active {
         } else if (retryCount < 10) {
             // Chain bar may not have loaded yet — retry with increasing delay
             const delay = 500 * (retryCount + 1);
-            // On first retry, dump DOM diagnostic to help identify chain bar
-            if (retryCount === 0) {
-                try {
-                    const mc = document.getElementById('mainContainer');
-                    const allIds = mc ? Array.from(mc.querySelectorAll('[id]')).map(el => el.id).join(', ') : 'no mainContainer';
-                    const barEls = document.querySelectorAll('[id*="bar"], [class*="bar-"], [class*="chain"]');
-                    const barInfo = Array.from(barEls).map(el => `${el.tagName}#${el.id||''}.[${el.className||''}]`).join(' | ');
-                    log(`[DOM DIAG] IDs in mainContainer: ${allIds}`);
-                    log(`[DOM DIAG] bar/chain elements: ${barInfo || 'none found'}`);
-                } catch (e) { log('[DOM DIAG] error: ' + e.message); }
-            }
             log(`Torn chain bar not found yet, retry ${retryCount + 1}/10 in ${delay}ms`);
             setTimeout(() => moveTornChainBar(retryCount + 1), delay);
         } else {

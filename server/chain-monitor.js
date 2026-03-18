@@ -9,13 +9,19 @@ import * as store from "./store.js";
 import { fetchFactionChain } from "./torn-api.js";
 
 const POLL_INTERVAL_MS = 10_000; // 10 seconds
+const MAX_BACKOFF_MS = 120_000;   // max 2 minutes between retries on failure
 
 /** Bonus hit thresholds in Torn chain mechanics. */
 const BONUS_HITS = [
   10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 25_000, 50_000, 100_000,
 ];
 
-/** Active polling interval IDs per warId so we can clean them up. */
+/** Active polling timeout IDs per warId so we can clean them up. */
+const timeouts = new Map();
+/** Current backoff delay per warId (resets on success). */
+const backoffs = new Map();
+
+// Legacy — keep for stopAll compat
 const intervals = new Map();
 
 /**
@@ -24,14 +30,19 @@ const intervals = new Map();
  * @param {string} warId
  */
 export function startChainMonitor(io, warId) {
-  if (intervals.has(warId)) return; // already monitoring
+  if (timeouts.has(warId)) return; // already monitoring
+
+  const scheduleNext = (delay) => {
+    const tid = setTimeout(poll, delay);
+    timeouts.set(warId, tid);
+  };
 
   const poll = async () => {
     const war = store.getWar(warId);
-    if (!war || !war.factionId) return;
+    if (!war || !war.factionId) { scheduleNext(POLL_INTERVAL_MS); return; }
 
     const apiKey = store.getFactionApiKey(war.factionId) || store.getApiKeyForFaction(war.factionId);
-    if (!apiKey) return; // no key available, skip silently
+    if (!apiKey) { scheduleNext(POLL_INTERVAL_MS); return; }
 
     try {
       const chain = await fetchFactionChain(war.factionId, apiKey);
@@ -45,6 +56,9 @@ export function startChainMonitor(io, warId) {
       }
       war.chainData = chain;
       store.saveState();
+
+      // Success — reset backoff
+      backoffs.set(warId, POLL_INTERVAL_MS);
 
       // Determine next bonus hit
       const nextBonus = BONUS_HITS.find((b) => b > chain.current) ?? null;
@@ -78,14 +92,21 @@ export function startChainMonitor(io, warId) {
           });
         }
       }
+
+      scheduleNext(POLL_INTERVAL_MS);
     } catch (err) {
-      console.error(`[chain] Poll failed for war ${warId}:`, err.message);
+      // Exponential backoff on failure — double the delay, cap at MAX_BACKOFF_MS
+      const current = backoffs.get(warId) || POLL_INTERVAL_MS;
+      const next = Math.min(current * 2, MAX_BACKOFF_MS);
+      backoffs.set(warId, next);
+      console.error(`[chain] Poll failed for war ${warId}: ${err.message} (retry in ${Math.round(next/1000)}s)`);
+      scheduleNext(next);
     }
   };
 
-  // Run immediately, then on interval
+  // Run immediately, schedule via setTimeout chain (not setInterval)
+  backoffs.set(warId, POLL_INTERVAL_MS);
   poll();
-  intervals.set(warId, setInterval(poll, POLL_INTERVAL_MS));
   console.log(`[chain] Started monitoring for war ${warId}`);
 }
 
@@ -94,21 +115,30 @@ export function startChainMonitor(io, warId) {
  * @param {string} warId
  */
 export function stopChainMonitor(warId) {
-  const id = intervals.get(warId);
-  if (id) {
-    clearInterval(id);
-    intervals.delete(warId);
-    console.log(`[chain] Stopped monitoring for war ${warId}`);
+  const tid = timeouts.get(warId);
+  if (tid) {
+    clearTimeout(tid);
+    timeouts.delete(warId);
   }
+  backoffs.delete(warId);
+  // Legacy cleanup
+  const id = intervals.get(warId);
+  if (id) clearInterval(id);
+  intervals.delete(warId);
+  console.log(`[chain] Stopped monitoring for war ${warId}`);
 }
 
 /**
  * Stop all chain monitors (for graceful shutdown).
  */
 export function stopAll() {
-  for (const [warId, id] of intervals) {
-    clearInterval(id);
+  for (const [warId, tid] of timeouts) {
+    clearTimeout(tid);
     console.log(`[chain] Stopped monitoring for war ${warId}`);
   }
+  timeouts.clear();
+  backoffs.clear();
+  // Legacy cleanup
+  for (const [, id] of intervals) clearInterval(id);
   intervals.clear();
 }

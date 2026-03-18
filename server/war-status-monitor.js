@@ -10,8 +10,14 @@ import { fetchFactionMembers } from "./torn-api.js";
 import { recordSample } from "./activity-heatmap.js";
 
 const POLL_INTERVAL_MS = 15_000; // 15 seconds
+const MAX_BACKOFF_MS = 120_000;   // max 2 minutes between retries on failure
 
-/** Active polling interval IDs per warId. */
+/** Active polling timeout IDs per warId. */
+const timeouts = new Map();
+/** Current backoff delay per warId (resets on success). */
+const backoffs = new Map();
+
+// Legacy compat
 const intervals = new Map();
 
 /**
@@ -20,22 +26,30 @@ const intervals = new Map();
  * @param {string} warId
  */
 export function startWarStatusMonitor(io, warId) {
-  if (intervals.has(warId)) return; // already monitoring
+  if (timeouts.has(warId)) return; // already monitoring
+
+  const scheduleNext = (delay) => {
+    const tid = setTimeout(poll, delay);
+    timeouts.set(warId, tid);
+  };
 
   const poll = async () => {
     const war = store.getWar(warId);
-    if (!war || !war.enemyFactionId) return;
+    if (!war || !war.enemyFactionId) { scheduleNext(POLL_INTERVAL_MS); return; }
 
     // Prefer faction-dedicated key, fall back to any player key
     const apiKey =
       store.getFactionApiKey(war.factionId) ||
       store.getApiKeyForFaction(war.factionId);
-    if (!apiKey) return; // no key available, skip silently
+    if (!apiKey) { scheduleNext(POLL_INTERVAL_MS); return; }
 
     try {
       const freshStatuses = await fetchFactionMembers(war.enemyFactionId, apiKey);
       war.enemyStatuses = freshStatuses;
       store.saveState();
+
+      // Success — reset backoff
+      backoffs.set(warId, POLL_INTERVAL_MS);
 
       io.to(`war_${warId}`).emit("status_update", freshStatuses);
 
@@ -49,14 +63,21 @@ export function startWarStatusMonitor(io, warId) {
       } catch (_) {
         // Non-critical — skip silently
       }
+
+      scheduleNext(POLL_INTERVAL_MS);
     } catch (err) {
-      console.error(`[war-status] Poll failed for war ${warId}:`, err.message);
+      // Exponential backoff on failure
+      const current = backoffs.get(warId) || POLL_INTERVAL_MS;
+      const next = Math.min(current * 2, MAX_BACKOFF_MS);
+      backoffs.set(warId, next);
+      console.error(`[war-status] Poll failed for war ${warId}: ${err.message} (retry in ${Math.round(next/1000)}s)`);
+      scheduleNext(next);
     }
   };
 
-  // Run immediately, then on interval
+  // Run immediately, schedule via setTimeout chain (not setInterval)
+  backoffs.set(warId, POLL_INTERVAL_MS);
   poll();
-  intervals.set(warId, setInterval(poll, POLL_INTERVAL_MS));
   console.log(`[war-status] Started monitoring for war ${warId}`);
 }
 
@@ -65,21 +86,28 @@ export function startWarStatusMonitor(io, warId) {
  * @param {string} warId
  */
 export function stopWarStatusMonitor(warId) {
-  const id = intervals.get(warId);
-  if (id) {
-    clearInterval(id);
-    intervals.delete(warId);
-    console.log(`[war-status] Stopped monitoring for war ${warId}`);
+  const tid = timeouts.get(warId);
+  if (tid) {
+    clearTimeout(tid);
+    timeouts.delete(warId);
   }
+  backoffs.delete(warId);
+  const id = intervals.get(warId);
+  if (id) clearInterval(id);
+  intervals.delete(warId);
+  console.log(`[war-status] Stopped monitoring for war ${warId}`);
 }
 
 /**
  * Stop all war status monitors (for graceful shutdown).
  */
 export function stopAll() {
-  for (const [warId, id] of intervals) {
-    clearInterval(id);
+  for (const [warId, tid] of timeouts) {
+    clearTimeout(tid);
     console.log(`[war-status] Stopped monitoring for war ${warId}`);
   }
+  timeouts.clear();
+  backoffs.clear();
+  for (const [, id] of intervals) clearInterval(id);
   intervals.clear();
 }
