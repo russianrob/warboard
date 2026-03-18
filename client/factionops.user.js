@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.9.2
+// @version      3.9.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,7 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v3.9.2  - Full-page overlay restored; Torn's chain bar preserved above overlay
+// v3.9.3  - Revert to simple full-page overlay; re-add chain info to header from server data
 // v3.9.0  - Remove chain info from overlay header too; Torn's native chain fully visible
 // v3.8.9  - Remove chain bar entirely; standalone Next Up bar below Torn's UI
 // v3.8.8  - Remove heatmap and settings buttons from attack page
@@ -3545,32 +3545,18 @@ body.wb-chain-active {
     }
 
     function initWarOverlay() {
-        startChainTimer(); // keeps chain alert sound functional
+        startChainTimer();
         startDirectChainPoll();
         startStatusTimers();
         startCallPruner();
+        updateChainBar();
 
-        // Hide main content but preserve Torn's chain bar
+        // Hide Torn's main content so the overlay takes over
         const mainContent = document.getElementById('mainContainer')
             || document.querySelector('.content-wrapper');
         if (mainContent) {
             mainContent.dataset.foHidden = 'true';
             mainContent.style.display = 'none';
-        }
-
-        // Move Torn's chain bar out of the hidden container so it stays visible
-        const chainBar = document.getElementById('barChain')
-            || document.querySelector('[class*="chain-bar"]')
-            || document.querySelector('a#barChain');
-        if (chainBar) {
-            const chainParent = chainBar.closest('[class*="chain"]') || chainBar.parentElement;
-            if (chainParent && mainContent && mainContent.contains(chainParent)) {
-                chainParent.dataset.foChainPreserved = 'true';
-                document.body.insertBefore(chainParent, mainContent);
-            } else if (chainBar && mainContent && mainContent.contains(chainBar)) {
-                chainBar.dataset.foChainPreserved = 'true';
-                document.body.insertBefore(chainBar, mainContent);
-            }
         }
 
         // Create the overlay if it doesn't already exist
@@ -3600,6 +3586,12 @@ body.wb-chain-active {
                     <strong id="fo-enemy-name">${escapeHtml(state.enemyFactionName || state.enemyFactionId || 'Enemy Faction')}</strong>
                 </div>
                 <div class="fo-header-right">
+                    <div class="fo-chain-info">
+                        <span class="fo-chain-label">Chain</span>
+                        <span class="fo-chain-count" id="fo-chain-count">${state.chain.current || 0}/${state.chain.max || '??'}</span>
+                        <span class="fo-chain-timeout" id="fo-chain-timeout">${state.chain.timeout > 0 ? formatTimer(state.chain.timeout) : '--:--'}</span>
+                        <span class="fo-chain-bonus" id="fo-chain-bonus" style="display:none;"></span>
+                    </div>
                     <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.onlinePlayers.length} online</span></div>
                     <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
@@ -5443,13 +5435,7 @@ body.wb-chain-active {
         const foOverlay = document.getElementById('fo-overlay');
         if (foOverlay) foOverlay.remove();
 
-        // Restore preserved chain bar back into main content
-        const preservedChain = document.querySelector('[data-fo-chain-preserved="true"]');
         const hiddenEl = document.querySelector('[data-fo-hidden="true"]');
-        if (preservedChain && hiddenEl) {
-            hiddenEl.prepend(preservedChain);
-            delete preservedChain.dataset.foChainPreserved;
-        }
         if (hiddenEl) {
             hiddenEl.style.display = '';
             delete hiddenEl.dataset.foHidden;
