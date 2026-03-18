@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.10.9
+// @version      3.11.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.11.0 - Online badge: show both faction (us) and enemy online counts
 // v3.10.9 - Fix: FF badge truncation on mobile (sub-row flex-wrap)
 // v3.10.8 - Inline Fair Fight scores from ffscouter.com API (per-user, color coded, visible on PDA)
 // v3.10.7 - Fix: priority dropdown no longer destroyed by poll re-renders
@@ -130,7 +131,7 @@
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.10.9',
+        VERSION: '3.11.0',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -3936,6 +3937,15 @@ body.wb-chain-active {
         // Only trigger sort when overlay is NOT active — overlay handles its own sorting
         if (CONFIG.AUTO_SORT && !overlayActive) debouncedSort();
         updateNextUp();
+
+        // Update enemy online count in header
+        const enemyOnlineEl = document.getElementById('fo-enemy-online-count');
+        if (enemyOnlineEl) {
+            const enemyOnline = Object.values(state.statuses).filter(
+                (s) => s.activity && s.activity.toLowerCase() === 'online'
+            ).length;
+            enemyOnlineEl.textContent = `${enemyOnline} enemy`;
+        }
     }
 
     /**
@@ -4150,7 +4160,7 @@ body.wb-chain-active {
                         <span class="fo-chain-timeout" id="fo-chain-timeout">${state.chain.timeout > 0 ? formatTimer(state.chain.timeout) : '--:--'}</span>
                         <span class="fo-chain-bonus" id="fo-chain-bonus" style="display:none;"></span>
                     </div>
-                    <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.onlinePlayers.length} online</span></div>
+                    <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.onlinePlayers.length} us</span> · <span id="fo-enemy-online-count">0 enemy</span></div>
                     <div class="fo-energy-display" id="fo-energy-display" title="Energy">
                         <span class="fo-energy-label">E</span>
                         <span class="fo-energy-value" id="fo-energy-value">--/--</span>
@@ -4410,9 +4420,17 @@ body.wb-chain-active {
             dot.title = state.connected ? 'Connected' : 'Disconnected';
         }
 
-        // Update online count
+        // Update online counts (us = FactionOps connected, enemy = Torn online status)
         const onlineEl = document.getElementById('fo-online-count');
-        if (onlineEl) onlineEl.textContent = `${state.onlinePlayers.length} online`;
+        if (onlineEl) onlineEl.textContent = `${state.onlinePlayers.length} us`;
+
+        const enemyOnlineEl = document.getElementById('fo-enemy-online-count');
+        if (enemyOnlineEl) {
+            const enemyOnline = Object.values(state.statuses).filter(
+                (s) => s.activity && s.activity.toLowerCase() === 'online'
+            ).length;
+            enemyOnlineEl.textContent = `${enemyOnline} enemy`;
+        }
 
         // Update enemy name
         const enemyEl = document.getElementById('fo-enemy-name');
