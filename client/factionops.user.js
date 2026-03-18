@@ -24,6 +24,18 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.10.9 - Fix: FF badge truncation on mobile (sub-row flex-wrap)
+// v3.10.8 - Inline Fair Fight scores from ffscouter.com API (per-user, color coded, visible on PDA)
+// v3.10.7 - Fix: priority dropdown no longer destroyed by poll re-renders
+// v3.10.6 - Grant Banker role priority-setting permissions
+// v3.10.5 - Fix: priority border line flickering (eliminate double-render, conditional class toggles, batched DOM reorder)
+// v3.10.4 - Activity heatmap switched to TCT (UTC)
+// v3.10.3 - API-based energy bar in overlay header
+// v3.10.2 - Energy bar poll (user bars API)
+// v3.10.1 - Revert to visible Torn native chain bar in header
+// v3.10.0 - Custom live chain display (count + timer)
+// v3.9.9  - Fix: PDA chain bar — cached element ref, pass directly to observer
+// v3.9.8  - Fix: chain bar race — stopDirectChainPoll before observer, settle delay
 // v3.9.7  - DOM-based chain reader: zero API calls for chain data; server chain polling disabled
 // v3.9.6  - Chain bar CSS fix for readable display; server exponential backoff on API failures
 // v3.9.5  - Chain bar: retry with delay + DOM diagnostic for PDA compatibility
