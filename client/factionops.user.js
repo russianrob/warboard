@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.11.2
+// @version      3.11.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,6 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.11.3 - Fix: Center "War vs" line on mobile when header wraps
 // v3.11.2 - UI: Move settings gear and heatmap buttons next to logo/connection dot (left side of header)
 // v3.11.1 - Online badge: "us" count from server-side Torn API poll (all faction members, not just FactionOps users)
 // v3.11.0 - Online badge: show both faction (us) and enemy online counts
@@ -1475,6 +1476,7 @@ body.wb-chain-active {
 @media (max-width: 700px) {
     .fo-overlay { border-radius: 6px; margin: 4px 0; }
     .fo-header { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
+    .fo-header-center { flex: 0 0 100%; justify-content: center; }
     .fo-col-headers, .fo-row {
         /* Prior | Target | (Lvl hidden) | (BSP hidden) | Status | On | Call | Action */
         grid-template-columns: 30px 1fr 0px 0px 40px 18px 56px 52px;
