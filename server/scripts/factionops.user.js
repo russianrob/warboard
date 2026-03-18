@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.9.1
+// @version      3.9.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -24,7 +24,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v3.9.1  - Overlay no longer hides Torn's main content; chain bar now visible
+// v3.9.2  - Full-page overlay restored; Torn's chain bar preserved above overlay
 // v3.9.0  - Remove chain info from overlay header too; Torn's native chain fully visible
 // v3.8.9  - Remove chain bar entirely; standalone Next Up bar below Torn's UI
 // v3.8.8  - Remove heatmap and settings buttons from attack page
@@ -3550,13 +3550,27 @@ body.wb-chain-active {
         startStatusTimers();
         startCallPruner();
 
-        // Hide only the faction member list area, keep Torn's chain/header visible
-        const memberList = document.querySelector('.faction-war-wraper')
-            || document.querySelector('.members-list')
-            || document.querySelector('.f-war-list');
-        if (memberList) {
-            memberList.dataset.foHidden = 'true';
-            memberList.style.display = 'none';
+        // Hide main content but preserve Torn's chain bar
+        const mainContent = document.getElementById('mainContainer')
+            || document.querySelector('.content-wrapper');
+        if (mainContent) {
+            mainContent.dataset.foHidden = 'true';
+            mainContent.style.display = 'none';
+        }
+
+        // Move Torn's chain bar out of the hidden container so it stays visible
+        const chainBar = document.getElementById('barChain')
+            || document.querySelector('[class*="chain-bar"]')
+            || document.querySelector('a#barChain');
+        if (chainBar) {
+            const chainParent = chainBar.closest('[class*="chain"]') || chainBar.parentElement;
+            if (chainParent && mainContent && mainContent.contains(chainParent)) {
+                chainParent.dataset.foChainPreserved = 'true';
+                document.body.insertBefore(chainParent, mainContent);
+            } else if (chainBar && mainContent && mainContent.contains(chainBar)) {
+                chainBar.dataset.foChainPreserved = 'true';
+                document.body.insertBefore(chainBar, mainContent);
+            }
         }
 
         // Create the overlay if it doesn't already exist
@@ -5429,7 +5443,13 @@ body.wb-chain-active {
         const foOverlay = document.getElementById('fo-overlay');
         if (foOverlay) foOverlay.remove();
 
+        // Restore preserved chain bar back into main content
+        const preservedChain = document.querySelector('[data-fo-chain-preserved="true"]');
         const hiddenEl = document.querySelector('[data-fo-hidden="true"]');
+        if (preservedChain && hiddenEl) {
+            hiddenEl.prepend(preservedChain);
+            delete preservedChain.dataset.foChainPreserved;
+        }
         if (hiddenEl) {
             hiddenEl.style.display = '';
             delete hiddenEl.dataset.foHidden;
