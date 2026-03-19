@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.13.3
+// @version      3.13.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2423,6 +2423,13 @@ body.wb-chain-active {
     function connectRealtime() {
         if (realtimeSocket) return; // already connected or connecting
         if (!state.jwtToken) return;
+
+        // PDA webview blocks cross-origin XHR/WebSocket — Socket.IO cannot connect
+        if (IS_PDA) {
+            log('PDA detected — realtime not supported, using polling');
+            updateRtBadge(false);
+            return;
+        }
 
         // Debug: log all possible io locations
         log('RT debug: typeof io =', typeof io);
