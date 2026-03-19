@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.13.1
+// @version      3.13.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2449,12 +2449,12 @@ body.wb-chain-active {
 
         realtimeSocket = ioFn(serverUrl, {
             auth: { token: state.jwtToken },
-            transports: ['websocket', 'polling'],
+            transports: IS_PDA ? ['polling'] : ['websocket', 'polling'],
             reconnection: true,
-            reconnectionAttempts: Infinity,
+            reconnectionAttempts: IS_PDA ? 5 : Infinity,
             reconnectionDelay: 2000,
             reconnectionDelayMax: 30000,
-            timeout: 10000,
+            timeout: IS_PDA ? 20000 : 10000,
         });
 
         realtimeSocket.on('connect', () => {
