@@ -8,6 +8,7 @@ import * as store from "./store.js";
 import { fetchFactionMembers, fetchFactionChain, fetchRankedWar } from "./torn-api.js";
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { startChainMonitor } from "./chain-monitor.js";
+import * as push from "./push-notifications.js";
 
 const router = Router();
 
@@ -427,6 +428,11 @@ router.post("/api/call", requireAuth, (req, res) => {
 
   broadcastWarUpdate(warId);
   console.log(`[api] ${playerName} called target ${targetId} in war ${warId}`);
+
+  // Push notification to war room (except the caller)
+  const warPlayers = store.getOnlinePlayersForWar(warId);
+  push.notifyTargetCalled(warPlayers, warId, playerName, targetName || targetId, playerId);
+
   return res.json({ ok: true, call: callData });
 });
 
@@ -548,14 +554,17 @@ router.post("/api/status", requireAuth, async (req, res) => {
   if (statuses && typeof statuses === "object") {
     for (const [targetId, statusData] of Object.entries(statuses)) {
       const existing = war.enemyStatuses[targetId] || {};
+      const wasHospital = existing.status && existing.status.toLowerCase().includes("hospital");
       war.enemyStatuses[targetId] = {
         ...existing,
         ...statusData,
       };
 
-      // If hospital, soft-uncall after delay
       const st = statusData.status || "";
-      if (st.toLowerCase().includes("hospital") && war.calls[targetId]) {
+      const isHospital = st.toLowerCase().includes("hospital");
+
+      // If hospital, soft-uncall after delay
+      if (isHospital && war.calls[targetId]) {
         const timerKey = `${warId}:${targetId}`;
         clearExistingTimer(timerKey);
         callTimers.set(
@@ -565,14 +574,43 @@ router.post("/api/status", requireAuth, async (req, res) => {
           }, SOFT_UNCALL_MS),
         );
       }
+
+      // Push notification: target left hospital (was hospital, now isn't)
+      if (wasHospital && !isHospital) {
+        const targetName = statusData.name || existing.name || targetId;
+        // Notify all subscribed war members
+        const warPlayers = store.getOnlinePlayersForWar(warId);
+        for (const p of warPlayers) {
+          push.notifyHospitalPop(p.id, targetName, targetId);
+        }
+      }
     }
     store.saveState();
   }
 
   // Chain data update from intercepted data
   if (chainData && typeof chainData === "object") {
+    const prevChain = { ...war.chainData };
     war.chainData = { ...war.chainData, ...chainData };
     store.saveState();
+
+    // Push chain-break alert if timeout is dangerously low (< 30s)
+    const timeout = chainData.timeout ?? war.chainData.timeout;
+    const current = chainData.current ?? war.chainData.current;
+    if (timeout > 0 && timeout <= 30 && current > 0) {
+      const warPlayers = store.getOnlinePlayersForWar(warId);
+      push.notifyChainAlert(warPlayers, warId, current, timeout, timeout);
+    }
+
+    // Push bonus-imminent alert (within 2 hits of a milestone)
+    const BONUSES = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000];
+    if (current > 0) {
+      const nextBonus = BONUSES.find((b) => b > current);
+      if (nextBonus && nextBonus - current <= 2 && (prevChain.current || 0) < current) {
+        const warPlayers = store.getOnlinePlayersForWar(warId);
+        push.notifyBonusImminent(warPlayers, warId, current, nextBonus);
+      }
+    }
   }
 
   // Broadcast if anything changed
@@ -654,5 +692,59 @@ function handleResetHeatmap(req, res) {
 router.delete("/api/heatmap", requireAuth, handleResetHeatmap);
 // POST alias for PDA compatibility (PDA's WebView only supports GET/POST)
 router.post("/api/heatmap/remove", requireAuth, handleResetHeatmap);
+
+// ── Push notification auth ─────────────────────────────────────────────
+// Landing page is ungated, so push endpoints authenticate via Bearer JWT
+// obtained from /api/auth (stored in localStorage on the client).
+
+// ── GET /api/push/vapid-key ────────────────────────────────────────────
+// Returns the VAPID public key for client-side push subscription.
+// Unauthenticated — needed before login for early subscription.
+
+router.get("/api/push/vapid-key", (_req, res) => {
+  const key = push.getPublicKey();
+  if (!key) {
+    return res.status(503).json({ error: "Push notifications not configured" });
+  }
+  return res.json({ publicKey: key });
+});
+
+// ── POST /api/push/subscribe ──────────────────────────────────────────
+// Subscribe a device for push notifications.
+
+router.post("/api/push/subscribe", requireAuth, (req, res) => {
+  const { playerId } = req.user;
+  const { subscription } = req.body ?? {};
+
+  if (!subscription || !subscription.endpoint) {
+    return res.status(400).json({ error: "Push subscription object is required" });
+  }
+
+  push.subscribe(playerId, subscription);
+  return res.json({ ok: true });
+});
+
+// ── POST /api/push/unsubscribe ────────────────────────────────────────
+// Unsubscribe a device from push notifications.
+
+router.post("/api/push/unsubscribe", requireAuth, (req, res) => {
+  const { playerId } = req.user;
+  const { endpoint } = req.body ?? {};
+
+  if (!endpoint) {
+    return res.status(400).json({ error: "endpoint is required" });
+  }
+
+  push.unsubscribe(playerId, endpoint);
+  return res.json({ ok: true });
+});
+
+// ── GET /api/push/status ──────────────────────────────────────────────
+// Check if the authenticated player has push subscriptions.
+
+router.get("/api/push/status", requireAuth, (req, res) => {
+  const { playerId } = req.user;
+  return res.json({ subscribed: push.isSubscribed(playerId) });
+});
 
 export default router;

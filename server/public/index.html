@@ -10,6 +10,11 @@
 <meta property="og:type" content="website">
 <meta property="og:image" content="/og-image.png">
 <meta name="theme-color" content="#0a0a0f">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FactionOps">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -865,6 +870,243 @@ img { max-width: 100%; display: block; }
 }
 
 /* ═══════════════════════════════════════════
+   NOTIFICATIONS
+   ═══════════════════════════════════════════ */
+.notifications {
+  position: relative;
+  z-index: 1;
+  padding: 100px 0;
+}
+
+.notifications-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  align-items: start;
+}
+
+.notifications-left .section-desc {
+  max-width: 480px;
+  margin-bottom: 40px;
+}
+
+.notif-features {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.notif-feature {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.notif-icon {
+  font-size: 24px;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-card);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.notif-feature h4 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.notif-feature p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.notif-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px;
+  position: sticky;
+  top: 100px;
+}
+
+.notif-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.notif-card-header svg {
+  color: var(--accent);
+}
+
+.notif-status {
+  margin-bottom: 16px;
+}
+
+.notif-status-checking {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.notif-panel {
+  animation: notifFadeIn 300ms var(--ease-out);
+}
+
+@keyframes notifFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.notif-msg {
+  font-size: 14px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.notif-msg-warn {
+  color: var(--orange);
+}
+
+.notif-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.notif-btn {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 12px;
+  padding: 14px 24px;
+  font-size: 14px;
+}
+
+.notif-btn-sm {
+  width: 100%;
+  justify-content: center;
+  margin-top: 12px;
+  padding: 10px 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: all var(--transition-interactive);
+}
+
+.notif-btn-sm:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.notif-active {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: rgba(0, 212, 170, 0.08);
+  border: 1px solid rgba(0, 212, 170, 0.2);
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--accent);
+}
+
+.notif-active-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: notifPulse 2s ease-in-out infinite;
+}
+
+@keyframes notifPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.notif-pwa-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: rgba(255, 165, 2, 0.08);
+  border: 1px solid rgba(255, 165, 2, 0.2);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--orange);
+  line-height: 1.5;
+}
+
+.notif-pwa-hint svg {
+  flex-shrink: 0;
+  color: var(--orange);
+}
+
+.notif-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.notif-input {
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition-interactive);
+}
+
+.notif-input:focus {
+  border-color: var(--accent);
+}
+
+.notif-input::placeholder {
+  color: var(--text-muted);
+}
+
+.notif-error {
+  font-size: 12px;
+  color: var(--red);
+  margin-top: 8px;
+}
+
+@media (max-width: 900px) {
+  .notifications-grid {
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+  .notif-card {
+    position: static;
+  }
+}
+
+/* ═══════════════════════════════════════════
    SCRIPTS SHOWCASE
    ═══════════════════════════════════════════ */
 .scripts {
@@ -1165,6 +1407,7 @@ img { max-width: 100%; display: block; }
         <li><a href="#features">Features</a></li>
         <li><a href="#how-it-works">How It Works</a></li>
         <li><a href="#install">Install</a></li>
+        <li><a href="#notifications">Notifications</a></li>
         <li><a href="#scripts">Scripts</a></li>
         <li><a href="#terms">Terms</a></li>
       </ul>
@@ -1443,7 +1686,109 @@ img { max-width: 100%; display: block; }
   </div>
 </section>
 
+<!-- ═══════════════ NOTIFICATIONS ═══════════════ -->
+<section class="notifications" id="notifications">
+  <div class="container">
+    <div class="notifications-grid">
+      <div class="notifications-left reveal">
+        <p class="section-label">Push Alerts</p>
+        <h2 class="section-title">Never Miss a War Event</h2>
+        <p class="section-desc">Get push notifications for target calls, chain breaks, hospital pops, and bonus milestones — even when Torn isn't open.</p>
 
+        <div class="notif-features">
+          <div class="notif-feature">
+            <span class="notif-icon">🎯</span>
+            <div>
+              <h4>Target Calls</h4>
+              <p>Know instantly when a teammate calls a target</p>
+            </div>
+          </div>
+          <div class="notif-feature">
+            <span class="notif-icon">⚠️</span>
+            <div>
+              <h4>Chain Break Alerts</h4>
+              <p>Urgent notification when the chain timer drops below 30s</p>
+            </div>
+          </div>
+          <div class="notif-feature">
+            <span class="notif-icon">🏥</span>
+            <div>
+              <h4>Hospital Pops</h4>
+              <p>Get alerted the moment a target leaves the hospital</p>
+            </div>
+          </div>
+          <div class="notif-feature">
+            <span class="notif-icon">💥</span>
+            <div>
+              <h4>Bonus Milestones</h4>
+              <p>Know when a bonus hit is 1–2 attacks away</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="notifications-right reveal">
+        <div class="notif-card">
+          <div class="notif-card-header">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            <span>Push Notifications</span>
+          </div>
+
+          <div id="notif-status" class="notif-status">
+            <div class="notif-status-checking">Checking notification support...</div>
+          </div>
+
+          <div id="notif-unsupported" class="notif-panel" style="display:none">
+            <p class="notif-msg">Your browser doesn't support push notifications.</p>
+            <p class="notif-hint">For iOS: add this page to your Home Screen first, then open it from there.</p>
+          </div>
+
+          <div id="notif-need-auth" class="notif-panel" style="display:none">
+            <p class="notif-msg">Enter your Torn API key to enable push notifications.</p>
+            <div class="notif-auth-form">
+              <input type="text" id="notif-api-key" class="notif-input" placeholder="Torn API Key" autocomplete="off" spellcheck="false">
+              <button id="notif-auth-btn" class="btn btn-primary notif-btn">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </svg>
+                Enable Notifications
+              </button>
+            </div>
+            <p id="notif-auth-error" class="notif-error" style="display:none"></p>
+            <p class="notif-hint">Your key is used to verify your identity. It's never stored in the browser.</p>
+          </div>
+
+          <div id="notif-subscribed" class="notif-panel" style="display:none">
+            <div class="notif-active">
+              <span class="notif-active-dot"></span>
+              <span id="notif-player-name">Notifications active on this device</span>
+            </div>
+            <button id="notif-unsubscribe-btn" class="btn btn-ghost notif-btn-sm">
+              Disable Notifications
+            </button>
+          </div>
+
+          <div id="notif-denied" class="notif-panel" style="display:none">
+            <p class="notif-msg notif-msg-warn">Notifications are blocked.</p>
+            <p class="notif-hint">Open your browser settings for tornwar.com and allow notifications, then refresh this page.</p>
+          </div>
+
+          <div class="notif-pwa-hint" id="notif-pwa-hint" style="display:none">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="5" y="2" width="14" height="20" rx="2"/>
+              <line x1="12" y1="18" x2="12.01" y2="18"/>
+            </svg>
+            <span>On iOS, add to Home Screen first: tap <strong>Share → Add to Home Screen</strong></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
 <!-- ═══════════════ SCRIPTS SHOWCASE ═══════════════ -->
 <section class="scripts" id="scripts">
@@ -1695,6 +2040,220 @@ img { max-width: 100%; display: block; }
       });
     });
   }
+
+  // ── Push Notifications ──
+  (function initPushNotifications() {
+    var statusEl = document.getElementById('notif-status');
+    var unsupportedEl = document.getElementById('notif-unsupported');
+    var needAuthEl = document.getElementById('notif-need-auth');
+    var subscribedEl = document.getElementById('notif-subscribed');
+    var deniedEl = document.getElementById('notif-denied');
+    var pwaHintEl = document.getElementById('notif-pwa-hint');
+    var playerNameEl = document.getElementById('notif-player-name');
+    var apiKeyInput = document.getElementById('notif-api-key');
+    var authBtn = document.getElementById('notif-auth-btn');
+    var authError = document.getElementById('notif-auth-error');
+    var unsubscribeBtn = document.getElementById('notif-unsubscribe-btn');
+
+    var STORAGE_KEY = 'fo_push_token';
+    var STORAGE_NAME = 'fo_push_name';
+    var swRegistration = null;
+
+    if (!statusEl) return;
+
+    function hideAll() {
+      statusEl.style.display = 'none';
+      unsupportedEl.style.display = 'none';
+      needAuthEl.style.display = 'none';
+      subscribedEl.style.display = 'none';
+      deniedEl.style.display = 'none';
+    }
+
+    function show(el) {
+      hideAll();
+      el.style.display = 'block';
+    }
+
+    // Detect iOS not in standalone mode
+    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+
+    // Check if push is supported
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      show(unsupportedEl);
+      if (isIOS && !isStandalone) {
+        pwaHintEl.style.display = 'flex';
+      }
+      return;
+    }
+
+    // Show iOS PWA hint even if supported (in case they're in Safari)
+    if (isIOS && !isStandalone) {
+      pwaHintEl.style.display = 'flex';
+    }
+
+    // Register service worker
+    navigator.serviceWorker.register('/sw.js').then(function(reg) {
+      console.log('[push] SW registered');
+      swRegistration = reg;
+      checkState();
+    }).catch(function(err) {
+      console.error('[push] SW registration failed:', err);
+      show(unsupportedEl);
+    });
+
+    function getStoredToken() {
+      try { return localStorage.getItem(STORAGE_KEY); } catch(e) { return null; }
+    }
+
+    function getStoredName() {
+      try { return localStorage.getItem(STORAGE_NAME); } catch(e) { return null; }
+    }
+
+    function storeAuth(token, name) {
+      try {
+        localStorage.setItem(STORAGE_KEY, token);
+        localStorage.setItem(STORAGE_NAME, name);
+      } catch(e) { /* private browsing */ }
+    }
+
+    function clearAuth() {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(STORAGE_NAME);
+      } catch(e) {}
+    }
+
+    function authHeaders() {
+      var token = getStoredToken();
+      return token ? { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token } : null;
+    }
+
+    function checkState() {
+      if (Notification.permission === 'denied') {
+        show(deniedEl);
+        return;
+      }
+
+      // Check if already subscribed in the browser
+      if (!swRegistration) { show(needAuthEl); return; }
+
+      swRegistration.pushManager.getSubscription().then(function(sub) {
+        if (sub && getStoredToken()) {
+          // Already subscribed
+          var name = getStoredName();
+          if (name) playerNameEl.textContent = 'Notifications active for ' + name;
+          show(subscribedEl);
+        } else {
+          if (sub) sub.unsubscribe(); // stale browser sub with no token
+          show(needAuthEl);
+        }
+      });
+    }
+
+    // Auth + Subscribe button
+    if (authBtn) {
+      authBtn.addEventListener('click', function() {
+        var apiKey = (apiKeyInput.value || '').trim();
+        if (!apiKey) {
+          authError.textContent = 'Please enter your Torn API key';
+          authError.style.display = 'block';
+          return;
+        }
+
+        authBtn.disabled = true;
+        authError.style.display = 'none';
+        authBtn.textContent = 'Verifying...';
+
+        // Step 1: Authenticate with Torn API key
+        fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ apiKey: apiKey }),
+        }).then(function(r) {
+          if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || 'Auth failed'); });
+          return r.json();
+        }).then(function(authData) {
+          storeAuth(authData.token, authData.player.playerName);
+          authBtn.textContent = 'Subscribing...';
+
+          // Step 2: Get VAPID key
+          return fetch('/api/push/vapid-key').then(function(r) { return r.json(); }).then(function(vapid) {
+            if (!vapid.publicKey) throw new Error('Push not configured on server');
+
+            // Step 3: Subscribe in the browser
+            return swRegistration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlBase64ToUint8Array(vapid.publicKey),
+            });
+          }).then(function(subscription) {
+            // Step 4: Register subscription on server
+            return fetch('/api/push/subscribe', {
+              method: 'POST',
+              headers: authHeaders(),
+              body: JSON.stringify({ subscription: subscription.toJSON() }),
+            });
+          }).then(function(res) {
+            if (!res.ok) throw new Error('Server subscription failed');
+            playerNameEl.textContent = 'Notifications active for ' + authData.player.playerName;
+            show(subscribedEl);
+          });
+        }).catch(function(err) {
+          console.error('[push] Error:', err);
+          if (Notification.permission === 'denied') {
+            show(deniedEl);
+          } else {
+            authError.textContent = err.message || 'Something went wrong';
+            authError.style.display = 'block';
+            authBtn.disabled = false;
+            authBtn.textContent = 'Enable Notifications';
+          }
+        });
+      });
+
+      // Allow Enter key to submit
+      if (apiKeyInput) {
+        apiKeyInput.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') authBtn.click();
+        });
+      }
+    }
+
+    // Unsubscribe button
+    if (unsubscribeBtn) {
+      unsubscribeBtn.addEventListener('click', function() {
+        var headers = authHeaders();
+        swRegistration.pushManager.getSubscription().then(function(sub) {
+          if (!sub) return;
+          var endpoint = sub.endpoint;
+          return sub.unsubscribe().then(function() {
+            if (headers) {
+              return fetch('/api/push/unsubscribe', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({ endpoint: endpoint }),
+              });
+            }
+          });
+        }).then(function() {
+          clearAuth();
+          show(needAuthEl);
+        });
+      });
+    }
+
+    // Helper: convert VAPID key from base64url to Uint8Array
+    function urlBase64ToUint8Array(base64String) {
+      var padding = '='.repeat((4 - base64String.length % 4) % 4);
+      var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      var rawData = window.atob(base64);
+      var outputArray = new Uint8Array(rawData.length);
+      for (var i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    }
+  })();
 
   // Scroll reveal with IntersectionObserver
   const reveals = document.querySelectorAll('.reveal');

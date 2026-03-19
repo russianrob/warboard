@@ -25,6 +25,7 @@ import { startWarStatusMonitor, stopAll as stopAllWarStatusMonitors } from "./wa
 import { loadHeatmaps, stopFlush as stopHeatmapFlush } from "./activity-heatmap.js";
 import { startMembershipSchedule, stopMembershipSchedule } from "./membership-check.js";
 import * as store from "./store.js";
+import { loadSubscriptions } from "./push-notifications.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -206,6 +207,7 @@ store.loadState();
 store.loadFactionKeys();
 store.loadPlayerKeys();
 loadHeatmaps();
+loadSubscriptions();
 
 // Resume war status monitors for any persisted wars
 // Chain data comes from clients via DOM reading — no server-side chain polling needed
