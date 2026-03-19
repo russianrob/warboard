@@ -1209,6 +1209,50 @@ img { max-width: 100%; display: block; }
   transition: opacity 300ms ease;
 }
 
+.notif-test-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.notif-test-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.notif-test-btn {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-interactive);
+  font-family: 'Inter', sans-serif;
+}
+
+.notif-test-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.notif-test-btn:active {
+  transform: scale(0.97);
+}
+
+.notif-test-chain {
+  border-color: rgba(255, 71, 87, 0.3);
+  color: var(--red);
+}
+
+.notif-test-chain:hover {
+  border-color: var(--red);
+  background: rgba(255, 71, 87, 0.08);
+  color: var(--red);
+}
+
 @media (max-width: 900px) {
   .notifications-grid {
     grid-template-columns: 1fr;
@@ -1931,6 +1975,19 @@ img { max-width: 100%; display: block; }
               <p class="notif-settings-status" id="notif-settings-status"></p>
             </div>
 
+            <div class="notif-test-section">
+              <div class="notif-settings-header">
+                <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                </svg>
+                <span>Test Alerts</span>
+              </div>
+              <div class="notif-test-buttons">
+                <button id="notif-test-regular" class="btn btn-ghost notif-test-btn">Send Test Notification</button>
+                <button id="notif-test-chain" class="btn btn-ghost notif-test-btn notif-test-chain">🚨 Test Chain Alert</button>
+              </div>
+            </div>
+
             <p class="notif-hint" style="margin-top:16px">Your API key is stored on the server for war polling — never in the browser. Alerts stay active on this device until you disable them.</p>
             <button id="notif-unsubscribe-btn" class="btn btn-ghost notif-btn-sm">
               Disable Notifications
@@ -2514,6 +2571,43 @@ img { max-width: 100%; display: block; }
             });
           }
         }).then(finish).catch(finish);
+      });
+    }
+
+    // Test notification buttons
+    var testRegularBtn = document.getElementById('notif-test-regular');
+    var testChainBtn = document.getElementById('notif-test-chain');
+
+    function sendTestNotification(type, btn) {
+      var headers = authHeaders();
+      if (!headers) return;
+      var origText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+
+      fetch('/api/push/test', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ type: type }),
+      }).then(function(r) {
+        if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || 'Failed'); });
+        btn.textContent = 'Sent!';
+        setTimeout(function() { btn.textContent = origText; btn.disabled = false; }, 2000);
+      }).catch(function(err) {
+        btn.textContent = err.message || 'Error';
+        setTimeout(function() { btn.textContent = origText; btn.disabled = false; }, 2000);
+      });
+    }
+
+    if (testRegularBtn) {
+      testRegularBtn.addEventListener('click', function() {
+        sendTestNotification('regular', testRegularBtn);
+      });
+    }
+
+    if (testChainBtn) {
+      testChainBtn.addEventListener('click', function() {
+        sendTestNotification('chain', testChainBtn);
       });
     }
 

@@ -798,4 +798,42 @@ router.post("/api/push/preferences", requireAuth, (req, res) => {
   return res.json({ ok: true, preferences: push.getPreferences(playerId) });
 });
 
+// ── POST /api/push/test ────────────────────────────────────────────────────
+// Send a test push notification to the authenticated player.
+
+router.post("/api/push/test", requireAuth, async (req, res) => {
+  const { playerId } = req.user;
+  const { type } = req.body ?? {};
+
+  if (!push.isSubscribed(playerId)) {
+    return res.status(400).json({ error: "No push subscription found" });
+  }
+
+  try {
+    if (type === "chain") {
+      // Simulate an urgent chain-breaking alert
+      await push.sendToPlayer(playerId, {
+        title: "🚨 CHAIN BREAKING!",
+        body: "TEST — Chain 248 — 12s remaining! Attack now!",
+        tag: "chain-alert-test",
+        icon: "/icon-192.png",
+        data: { type: "chain-alert" },
+      }, null, { urgency: "high", TTL: 30 });
+    } else {
+      // Regular test notification
+      await push.sendToPlayer(playerId, {
+        title: "🎯 Target Called",
+        body: "TEST — RussianRob called EnemyTarget [1]",
+        tag: "test-notification",
+        icon: "/icon-192.png",
+        data: { type: "call" },
+      });
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[push] Test notification failed:", err.message);
+    return res.status(500).json({ error: "Failed to send test notification" });
+  }
+});
+
 export default router;
