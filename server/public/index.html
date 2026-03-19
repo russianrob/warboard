@@ -1096,6 +1096,119 @@ img { max-width: 100%; display: block; }
   margin-top: 8px;
 }
 
+.notif-settings {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.notif-settings-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 14px;
+}
+
+.notif-settings-header svg {
+  color: var(--text-muted);
+}
+
+.notif-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.notif-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(42, 42, 58, 0.5);
+}
+
+.notif-toggle-row:last-child {
+  border-bottom: none;
+}
+
+.notif-toggle-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.notif-toggle-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 1px;
+}
+
+.notif-toggle-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.notif-switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+
+.notif-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.notif-switch-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  transition: all 200ms ease;
+}
+
+.notif-switch-slider::before {
+  content: '';
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: all 200ms ease;
+}
+
+.notif-switch input:checked + .notif-switch-slider {
+  background: rgba(0, 212, 170, 0.15);
+  border-color: var(--accent);
+}
+
+.notif-switch input:checked + .notif-switch-slider::before {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
+.notif-settings-status {
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 8px;
+  min-height: 16px;
+  transition: opacity 300ms ease;
+}
+
 @media (max-width: 900px) {
   .notifications-grid {
     grid-template-columns: 1fr;
@@ -1693,7 +1806,7 @@ img { max-width: 100%; display: block; }
       <div class="notifications-left reveal">
         <p class="section-label">Push Alerts</p>
         <h2 class="section-title">Never Miss a War Event</h2>
-        <p class="section-desc">Get push notifications for target calls, chain breaks, hospital pops, and bonus milestones — even when Torn isn't open.</p>
+        <p class="section-desc">Get push notifications for war events — even when Torn isn't open. Choose exactly which alerts you want.</p>
 
         <div class="notif-features">
           <div class="notif-feature">
@@ -1722,6 +1835,20 @@ img { max-width: 100%; display: block; }
             <div>
               <h4>Bonus Milestones</h4>
               <p>Know when a bonus hit is 1–2 attacks away</p>
+            </div>
+          </div>
+          <div class="notif-feature">
+            <span class="notif-icon">🚨</span>
+            <div>
+              <h4>Enemy Online Surge</h4>
+              <p>Alert when multiple enemies come online at once</p>
+            </div>
+          </div>
+          <div class="notif-feature">
+            <span class="notif-icon">👁️</span>
+            <div>
+              <h4>Call Contested</h4>
+              <p>Know when someone views a target you called</p>
             </div>
           </div>
         </div>
@@ -1767,6 +1894,22 @@ img { max-width: 100%; display: block; }
               <span class="notif-active-dot"></span>
               <span id="notif-player-name">Notifications active on this device</span>
             </div>
+
+            <!-- Settings Panel -->
+            <div class="notif-settings" id="notif-settings">
+              <div class="notif-settings-header">
+                <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+                <span>Alert Preferences</span>
+              </div>
+              <div class="notif-toggles" id="notif-toggles">
+                <!-- Populated by JS from /api/push/types -->
+              </div>
+              <p class="notif-settings-status" id="notif-settings-status"></p>
+            </div>
+
             <button id="notif-unsubscribe-btn" class="btn btn-ghost notif-btn-sm">
               Disable Notifications
             </button>
@@ -2129,6 +2272,94 @@ img { max-width: 100%; display: block; }
       return token ? { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token } : null;
     }
 
+    // ── Settings Panel Logic ──
+    var settingsContainer = document.getElementById('notif-toggles');
+    var settingsStatus = document.getElementById('notif-settings-status');
+    var settingsLoaded = false;
+    var saveTimeout = null;
+
+    function loadSettings() {
+      if (settingsLoaded || !settingsContainer) return;
+      var headers = authHeaders();
+      if (!headers) return;
+
+      // Fetch available types + current preferences in parallel
+      Promise.all([
+        fetch('/api/push/types').then(function(r) { return r.json(); }).then(function(d) { return d.types; }),
+        fetch('/api/push/preferences', { headers: headers }).then(function(r) { return r.json(); }).then(function(d) { return d.preferences; })
+      ]).then(function(results) {
+        var types = results[0];
+        var prefs = results[1];
+        settingsContainer.innerHTML = '';
+
+        Object.keys(types).forEach(function(key) {
+          var t = types[key];
+          var enabled = prefs[key] !== undefined ? prefs[key] : t.default;
+
+          var row = document.createElement('div');
+          row.className = 'notif-toggle-row';
+
+          var info = document.createElement('div');
+          info.className = 'notif-toggle-info';
+          info.innerHTML = '<div class="notif-toggle-label">' + t.label + '</div>' +
+            '<div class="notif-toggle-desc">' + t.description + '</div>';
+
+          var toggle = document.createElement('label');
+          toggle.className = 'notif-switch';
+          var input = document.createElement('input');
+          input.type = 'checkbox';
+          input.checked = enabled;
+          input.dataset.type = key;
+          var slider = document.createElement('span');
+          slider.className = 'notif-switch-slider';
+          toggle.appendChild(input);
+          toggle.appendChild(slider);
+
+          input.addEventListener('change', function() {
+            saveSetting(this.dataset.type, this.checked);
+          });
+
+          row.appendChild(info);
+          row.appendChild(toggle);
+          settingsContainer.appendChild(row);
+        });
+
+        settingsLoaded = true;
+      }).catch(function(err) {
+        console.error('[push] Failed to load settings:', err);
+      });
+    }
+
+    function saveSetting(type, enabled) {
+      var headers = authHeaders();
+      if (!headers) return;
+
+      var prefs = {};
+      prefs[type] = enabled;
+
+      fetch('/api/push/preferences', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ preferences: prefs }),
+      }).then(function(r) {
+        if (!r.ok) throw new Error('Save failed');
+        if (settingsStatus) {
+          settingsStatus.textContent = 'Saved';
+          settingsStatus.style.opacity = '1';
+          clearTimeout(saveTimeout);
+          saveTimeout = setTimeout(function() {
+            settingsStatus.style.opacity = '0';
+          }, 1500);
+        }
+      }).catch(function(err) {
+        console.error('[push] Failed to save preference:', err);
+        if (settingsStatus) {
+          settingsStatus.textContent = 'Failed to save';
+          settingsStatus.style.color = 'var(--red)';
+        }
+      });
+    }
+
     function checkState() {
       if (Notification.permission === 'denied') {
         show(deniedEl);
@@ -2144,6 +2375,7 @@ img { max-width: 100%; display: block; }
           var name = getStoredName();
           if (name) playerNameEl.textContent = 'Notifications active for ' + name;
           show(subscribedEl);
+          loadSettings();
         } else {
           if (sub) sub.unsubscribe(); // stale browser sub with no token
           show(needAuthEl);
@@ -2197,6 +2429,7 @@ img { max-width: 100%; display: block; }
             if (!res.ok) throw new Error('Server subscription failed');
             playerNameEl.textContent = 'Notifications active for ' + authData.player.playerName;
             show(subscribedEl);
+            loadSettings();
           });
         }).catch(function(err) {
           console.error('[push] Error:', err);

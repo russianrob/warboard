@@ -657,13 +657,29 @@ router.post("/api/status", requireAuth, async (req, res) => {
 // Send targetId = null when leaving the attack page.
 
 router.post("/api/viewing", requireAuth, (req, res) => {
-  const { playerId } = req.user;
+  const { playerId, playerName } = req.user;
   const { targetId } = req.body ?? {};
   store.setViewingTarget(playerId, targetId || null);
 
   // Broadcast viewer change — need warId from the player's current session
   const player = store.getPlayer(playerId);
-  if (player?.warId) broadcastWarUpdate(player.warId);
+  if (player?.warId) {
+    broadcastWarUpdate(player.warId);
+
+    // Call-stolen detection: if this target is called by someone else, notify the caller
+    if (targetId) {
+      const war = store.getWar(player.warId);
+      if (war) {
+        const call = war.calls[targetId];
+        if (call && call.calledBy.id !== playerId) {
+          // Someone is viewing a target called by another player
+          const targetInfo = war.enemyStatuses[targetId];
+          const targetName = targetInfo?.name || targetId;
+          push.notifyCallStolen(call.calledBy.id, playerName, targetName, targetId);
+        }
+      }
+    }
+  }
 
   return res.json({ ok: true });
 });
@@ -745,6 +761,37 @@ router.post("/api/push/unsubscribe", requireAuth, (req, res) => {
 router.get("/api/push/status", requireAuth, (req, res) => {
   const { playerId } = req.user;
   return res.json({ subscribed: push.isSubscribed(playerId) });
+});
+
+// ── GET /api/push/types ──────────────────────────────────────────────
+// Returns all notification types with labels and descriptions.
+// Unauthenticated — needed for the settings UI before login.
+
+router.get("/api/push/types", (_req, res) => {
+  return res.json({ types: push.NOTIFICATION_TYPES });
+});
+
+// ── GET /api/push/preferences ────────────────────────────────────────
+// Returns the authenticated player's notification preferences.
+
+router.get("/api/push/preferences", requireAuth, (req, res) => {
+  const { playerId } = req.user;
+  return res.json({ preferences: push.getPreferences(playerId) });
+});
+
+// ── POST /api/push/preferences ───────────────────────────────────────
+// Update the authenticated player's notification preferences.
+
+router.post("/api/push/preferences", requireAuth, (req, res) => {
+  const { playerId } = req.user;
+  const { preferences: prefs } = req.body ?? {};
+
+  if (!prefs || typeof prefs !== "object") {
+    return res.status(400).json({ error: "preferences object is required" });
+  }
+
+  push.setPreferences(playerId, prefs);
+  return res.json({ ok: true, preferences: push.getPreferences(playerId) });
 });
 
 export default router;
