@@ -865,6 +865,129 @@ img { max-width: 100%; display: block; }
 }
 
 /* ═══════════════════════════════════════════
+   SCRIPTS SHOWCASE
+   ═══════════════════════════════════════════ */
+.scripts {
+  position: relative;
+  z-index: 1;
+  padding: 100px 0;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.scripts-header {
+  text-align: center;
+  margin-bottom: 56px;
+}
+
+.scripts-header .section-desc {
+  margin: 0 auto;
+}
+
+.scripts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.script-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  transition:
+    border-color var(--transition-interactive),
+    box-shadow var(--transition-interactive),
+    transform var(--transition-interactive);
+}
+
+.script-card:hover {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 24px rgba(0, 212, 170, 0.06), 0 8px 32px rgba(0,0,0,0.3);
+  transform: translateY(-2px);
+}
+
+.script-card-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(0, 212, 170, 0.08);
+  margin-bottom: 16px;
+}
+
+.script-card-icon svg {
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
+  stroke: var(--accent);
+  fill: none;
+}
+
+.script-card h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.script-card-version {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.script-card p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  flex: 1;
+}
+
+.script-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 16px;
+}
+
+.script-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(0, 212, 170, 0.08);
+  border: 1px solid rgba(0, 212, 170, 0.15);
+  border-radius: 4px;
+  padding: 3px 8px;
+}
+
+.script-card .btn {
+  margin-top: 20px;
+  width: 100%;
+  justify-content: center;
+  font-size: 12px;
+  padding: 12px 20px;
+}
+
+@media (max-width: 640px) {
+  .scripts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ═══════════════════════════════════════════
    FOOTER
    ═══════════════════════════════════════════ */
 .site-footer {
@@ -1042,6 +1165,7 @@ img { max-width: 100%; display: block; }
         <li><a href="#features">Features</a></li>
         <li><a href="#how-it-works">How It Works</a></li>
         <li><a href="#install">Install</a></li>
+        <li><a href="#scripts">Scripts</a></li>
         <li><a href="#terms">Terms</a></li>
       </ul>
     </nav>
@@ -1320,6 +1444,61 @@ img { max-width: 100%; display: block; }
 </section>
 
 
+
+<!-- ═══════════════ SCRIPTS SHOWCASE ═══════════════ -->
+<section class="scripts" id="scripts">
+  <div class="container">
+    <div class="scripts-header reveal">
+      <p class="section-label">Userscripts</p>
+      <h2 class="section-title">More Scripts by RussianRob</h2>
+      <p class="section-desc">Standalone Torn userscripts — free to install, PDA compatible, and auto-updating from tornwar.com.</p>
+    </div>
+
+    <div class="scripts-grid reveal-stagger">
+
+      <!-- Torn RW Pricer -->
+      <div class="script-card reveal" style="--i:0">
+        <div class="script-card-icon">
+          <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+        <h3>Torn RW Pricer</h3>
+        <span class="script-card-version">v2.9.9</span>
+        <p>Inline price badges for RW weapons and armour using daily-refreshed auction data. Works on Item Market, Bazaar, and Auction House pages.</p>
+        <div class="script-card-tags">
+          <span class="script-tag">Item Market</span>
+          <span class="script-tag">Bazaar</span>
+          <span class="script-tag">Auction</span>
+          <span class="script-tag">PDA</span>
+        </div>
+        <a href="/scripts/torn-rw-pricer.user.js" class="btn btn-primary">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10"/></svg>
+          Install v2.9.9
+        </a>
+      </div>
+
+      <!-- Torn Faction Offline Highlighter -->
+      <div class="script-card reveal" style="--i:1">
+        <div class="script-card-icon">
+          <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <h3>Faction Offline Highlighter</h3>
+        <span class="script-card-version">v1.9.2</span>
+        <p>Highlights faction members red who have been offline for over 24 hours. Shows OC inactivity badges in chat globally. Configurable threshold.</p>
+        <div class="script-card-tags">
+          <span class="script-tag">Faction</span>
+          <span class="script-tag">Activity</span>
+          <span class="script-tag">OC Tracking</span>
+          <span class="script-tag">PDA</span>
+        </div>
+        <a href="/scripts/torn-faction-offline-highlight.user.js" class="btn btn-primary">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10"/></svg>
+          Install v1.9.2
+        </a>
+      </div>
+
+    </div>
+  </div>
+</section>
 
 <!-- ═══════════════ TERMS OF SERVICE ═══════════════ -->
 <section class="terms" id="terms">
