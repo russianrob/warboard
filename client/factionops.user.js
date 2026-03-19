@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.12.4
+// @version      3.12.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2405,18 +2405,29 @@ body.wb-chain-active {
     /**
      * Dynamically load Socket.IO client when @require is not supported (e.g. Torn PDA).
      */
-    function loadSocketIO() {
-        return new Promise((resolve, reject) => {
-            if (typeof io === 'function') return resolve();
-            const script = document.createElement('script');
-            script.src = CONFIG.SERVER_URL + '/socket.io.min.js';
-            script.onload = () => {
-                log('Socket.IO client loaded dynamically');
-                resolve();
-            };
-            script.onerror = () => reject(new Error('Script load failed'));
-            document.head.appendChild(script);
-        });
+    async function loadSocketIO() {
+        if (typeof io === 'function') return;
+        const url = CONFIG.SERVER_URL + '/socket.io.min.js';
+        log('Fetching Socket.IO client from', url);
+        try {
+            // Try <script> tag first (works on desktop Tampermonkey)
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = url;
+                script.onload = resolve;
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+            if (typeof io === 'function') { log('Socket.IO loaded via script tag'); return; }
+        } catch (_) { /* script tag blocked, try fetch+eval */ }
+        // Fallback: fetch + eval (for PDA / restricted webviews)
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const code = await resp.text();
+        const fn = new Function(code);
+        fn();
+        if (typeof io !== 'function') throw new Error('io not defined after eval');
+        log('Socket.IO loaded via fetch+eval');
     }
 
     /**
