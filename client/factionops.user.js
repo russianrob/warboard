@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.13.0
+// @version      3.13.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -33,6 +33,8 @@
 //# sourceMappingURL=socket.io.min.js.map
 
 /* SOCKET_IO_END */
+// Capture io from wherever the UMD wrapper put it
+var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof self !== 'undefined' && self.io) || (typeof window !== 'undefined' && window.io);
 
 // =============================================================================
 // CHANGELOG
@@ -2422,16 +2424,22 @@ body.wb-chain-active {
         if (realtimeSocket) return; // already connected or connecting
         if (!state.jwtToken) return;
 
-        if (typeof io !== 'function') {
-            warn('Socket.IO client not available — using polling only');
+        const ioFn = (typeof io === 'function') ? io
+            : (typeof window !== 'undefined' && typeof window.io === 'function') ? window.io
+            : (typeof globalThis !== 'undefined' && typeof globalThis.io === 'function') ? globalThis.io
+            : (typeof self !== 'undefined' && typeof self.io === 'function') ? self.io
+            : null;
+        if (!ioFn) {
+            warn('Socket.IO client not available — checked io, window.io, globalThis.io, self.io');
             updateRtBadge(false);
             return;
         }
+        log('Socket.IO client found:', ioFn === io ? 'io' : ioFn === window.io ? 'window.io' : ioFn === globalThis.io ? 'globalThis.io' : 'self.io');
 
         const serverUrl = CONFIG.SERVER_URL;
         log('Connecting Socket.IO to', serverUrl);
 
-        realtimeSocket = io(serverUrl, {
+        realtimeSocket = ioFn(serverUrl, {
             auth: { token: state.jwtToken },
             transports: ['websocket', 'polling'],
             reconnection: true,
