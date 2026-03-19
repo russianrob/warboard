@@ -97,14 +97,23 @@ export function registerSocketHandlers(io, socket) {
       timestamp: callData.timestamp,
     });
 
-    // Set auto-expire timer
+    // Set auto-expire timer — extend if target is in hospital
     const timerKey = `${player.warId}:${targetId}`;
     clearExistingTimer(timerKey);
+    let expireMs = CALL_EXPIRE_MS;
+    const targetStatus = war.enemyStatuses[targetId];
+    if (targetStatus && targetStatus.status && targetStatus.status.toLowerCase().includes('hospital') && targetStatus.until > 0) {
+      const hospRemainingMs = (targetStatus.until - Math.floor(Date.now() / 1000)) * 1000;
+      if (hospRemainingMs > 0) {
+        expireMs = hospRemainingMs + CALL_EXPIRE_MS;
+        console.log(`[ws] Target ${targetId} in hospital — call expires in ${Math.round(expireMs / 1000)}s (hosp ${Math.round(hospRemainingMs / 1000)}s + ${CALL_EXPIRE_MS / 1000}s)`);
+      }
+    }
     callTimers.set(
       timerKey,
       setTimeout(() => {
         uncallTarget(io, player.warId, targetId, "expired");
-      }, CALL_EXPIRE_MS),
+      }, expireMs),
     );
 
     console.log(`[ws] ${user.playerName} called target ${targetId} in war ${player.warId}`);
@@ -163,8 +172,10 @@ export function registerSocketHandlers(io, socket) {
       updatedBy: { id: user.playerId, name: user.playerName },
     });
 
-    // If target is in hospital and is currently called, soft-uncall after delay
-    if (status.toLowerCase().includes("hospital")) {
+    // If target NEWLY enters hospital and is currently called, soft-uncall after delay
+    // Skip if target was already in hospital when called (caller intended to reserve them)
+    const wasHospital = existing.status && existing.status.toLowerCase().includes("hospital");
+    if (status.toLowerCase().includes("hospital") && !wasHospital) {
       const call = war.calls[targetId];
       if (call) {
         const timerKey = `${player.warId}:${targetId}`;
