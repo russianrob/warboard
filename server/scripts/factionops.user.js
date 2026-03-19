@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.0
+// @version      3.14.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -4813,25 +4813,29 @@ body.wb-chain-active {
         const level = prio ? prio.level : null;
 
         if (isLeader()) {
-            // Leaders get a dropdown
+            // Leaders get a dropdown — hidden until a priority is set or cell is tapped
             const sel = document.createElement('select');
             sel.className = 'fo-priority-select';
             sel.title = 'Set priority';
+            if (!level) sel.style.opacity = '0'; // invisible when no priority
             ['', 'high', 'med', 'low'].forEach((val) => {
                 const opt = document.createElement('option');
                 opt.value = val;
-                opt.textContent = val ? val.toUpperCase() : '\u2014';
+                opt.textContent = val ? val.toUpperCase() : '';
                 if (val === (level || '')) opt.selected = true;
                 sel.appendChild(opt);
             });
-            // Mark cell as active while user interacts — prevents re-render from destroying it
-            sel.addEventListener('focus', () => { cell.dataset.foActive = '1'; });
-            sel.addEventListener('mousedown', () => { cell.dataset.foActive = '1'; });
+            // Show on interaction
+            sel.addEventListener('focus', () => { sel.style.opacity = '1'; cell.dataset.foActive = '1'; });
+            sel.addEventListener('mousedown', () => { sel.style.opacity = '1'; cell.dataset.foActive = '1'; });
             sel.addEventListener('change', () => {
                 delete cell.dataset.foActive;
                 emitSetPriority(targetId, sel.value || null);
             });
-            sel.addEventListener('blur', () => { delete cell.dataset.foActive; });
+            sel.addEventListener('blur', () => {
+                delete cell.dataset.foActive;
+                if (!sel.value) sel.style.opacity = '0';
+            });
             cell.appendChild(sel);
         } else if (level) {
             const badge = document.createElement('span');
