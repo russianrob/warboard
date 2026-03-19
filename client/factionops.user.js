@@ -144,10 +144,6 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 (function () {
     'use strict';
 
-    // ── Remove iOS Smart App Banner (Torn PDA "Open in app" bar) ────────
-    const smartBannerMeta = document.querySelector('meta[name="apple-itunes-app"]');
-    if (smartBannerMeta) smartBannerMeta.remove();
-
     // =========================================================================
     // SECTION 1: CONFIGURATION
     // =========================================================================
