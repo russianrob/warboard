@@ -54,7 +54,8 @@ app.use(
 app.use(express.json());
 
 // ── Landing page gate (faction members only) ──────────────────────────────
-app.use(gateMiddleware);
+// Disabled for now — landing page is public
+// app.use(gateMiddleware);
 
 // ── Static files (landing page) ─────────────────────────────────────────
 app.use(express.static(join(__dirname, "public")));
