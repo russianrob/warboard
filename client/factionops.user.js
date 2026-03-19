@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.13.9
+// @version      3.14.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1246,6 +1246,7 @@ body.wb-chain-active {
     gap: 0; align-items: center;
     padding: 8px 16px;
     border-bottom: 1px solid rgba(45,52,54,0.5);
+    background: var(--wb-bg);
     transition: background 0.15s ease;
     position: relative;
 }
@@ -3961,50 +3962,42 @@ body.wb-chain-active {
         const prioData = state.priorities[targetId];
         const level = prioData ? prioData.level : null;
 
-        if (level) {
-            // Show priority badge (visible to everyone)
+        if (isLeader()) {
+            // Show a dropdown selector for leaders
+            const select = document.createElement('select');
+            select.className = 'wb-priority-select';
+            select.title = 'Set target priority';
+
+            const options = [
+                { value: '', label: '\u2014' },
+                { value: 'high', label: '\u{1F534} High' },
+                { value: 'medium', label: '\u{1F7E1} Med' },
+                { value: 'low', label: '\u{1F535} Low' },
+            ];
+            for (const opt of options) {
+                const el = document.createElement('option');
+                el.value = opt.value;
+                el.textContent = opt.label;
+                if (opt.value === (level || '')) el.selected = true;
+                select.appendChild(el);
+            }
+
+            select.addEventListener('change', (e) => {
+                e.stopPropagation();
+                const val = select.value || null;
+                emitSetPriority(targetId, val);
+            });
+            select.addEventListener('click', (e) => e.stopPropagation());
+
+            container.appendChild(select);
+        } else if (level) {
+            // Non-leaders see a read-only badge
             const badge = document.createElement('span');
             badge.className = `wb-priority-badge wb-priority-${level}`;
             const labels = { high: '\u{1F534} HIGH', medium: '\u{1F7E1} MED', low: '\u{1F535} LOW' };
             badge.textContent = labels[level] || level.toUpperCase();
             badge.title = prioData.setBy ? `Set by ${prioData.setBy.name}` : '';
             container.appendChild(badge);
-        }
-
-        if (isLeader()) {
-            // Leaders can click the cell to open a dropdown
-            container.style.cursor = 'pointer';
-            container.title = level ? 'Change priority' : 'Set priority';
-            container.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (container.querySelector('.wb-priority-select')) return;
-                container.innerHTML = '';
-                const select = document.createElement('select');
-                select.className = 'wb-priority-select';
-                const options = [
-                    { value: '', label: '\u2014' },
-                    { value: 'high', label: '\u{1F534} High' },
-                    { value: 'medium', label: '\u{1F7E1} Med' },
-                    { value: 'low', label: '\u{1F535} Low' },
-                ];
-                for (const opt of options) {
-                    const el = document.createElement('option');
-                    el.value = opt.value;
-                    el.textContent = opt.label;
-                    if (opt.value === (level || '')) el.selected = true;
-                    select.appendChild(el);
-                }
-                select.addEventListener('change', (e) => {
-                    e.stopPropagation();
-                    emitSetPriority(targetId, select.value || null);
-                });
-                select.addEventListener('click', (e) => e.stopPropagation());
-                select.addEventListener('blur', () => {
-                    renderPriorityCell(container, targetId);
-                });
-                container.appendChild(select);
-                select.focus();
-            });
         }
     }
 
@@ -4819,44 +4812,32 @@ body.wb-chain-active {
         const prio = state.priorities[targetId];
         const level = prio ? prio.level : null;
 
-        if (level) {
-            // Show priority badge (visible to everyone)
+        if (isLeader()) {
+            // Leaders get a dropdown
+            const sel = document.createElement('select');
+            sel.className = 'fo-priority-select';
+            sel.title = 'Set priority';
+            ['', 'high', 'med', 'low'].forEach((val) => {
+                const opt = document.createElement('option');
+                opt.value = val;
+                opt.textContent = val ? val.toUpperCase() : '\u2014';
+                if (val === (level || '')) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            // Mark cell as active while user interacts — prevents re-render from destroying it
+            sel.addEventListener('focus', () => { cell.dataset.foActive = '1'; });
+            sel.addEventListener('mousedown', () => { cell.dataset.foActive = '1'; });
+            sel.addEventListener('change', () => {
+                delete cell.dataset.foActive;
+                emitSetPriority(targetId, sel.value || null);
+            });
+            sel.addEventListener('blur', () => { delete cell.dataset.foActive; });
+            cell.appendChild(sel);
+        } else if (level) {
             const badge = document.createElement('span');
             badge.className = `fo-priority-badge ${level}`;
             badge.textContent = level.charAt(0).toUpperCase() + level.slice(1);
             cell.appendChild(badge);
-        }
-
-        if (isLeader()) {
-            // Leaders can tap the cell to open a dropdown
-            cell.style.cursor = 'pointer';
-            cell.title = level ? 'Change priority' : 'Set priority';
-            cell.addEventListener('click', (e) => {
-                e.stopPropagation();
-                // Don't re-open if already editing
-                if (cell.querySelector('.fo-priority-select')) return;
-                cell.innerHTML = '';
-                cell.dataset.foActive = '1';
-                const sel = document.createElement('select');
-                sel.className = 'fo-priority-select';
-                ['', 'high', 'med', 'low'].forEach((val) => {
-                    const opt = document.createElement('option');
-                    opt.value = val;
-                    opt.textContent = val ? val.toUpperCase() : '\u2014';
-                    if (val === (level || '')) opt.selected = true;
-                    sel.appendChild(opt);
-                });
-                sel.addEventListener('change', () => {
-                    delete cell.dataset.foActive;
-                    emitSetPriority(targetId, sel.value || null);
-                });
-                sel.addEventListener('blur', () => {
-                    delete cell.dataset.foActive;
-                    renderOverlayPriorityCell(cell, targetId);
-                });
-                cell.appendChild(sel);
-                sel.focus();
-            });
         }
     }
 
