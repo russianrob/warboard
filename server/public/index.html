@@ -2509,6 +2509,20 @@ img { max-width: 100%; display: block; }
     }
   })();
 
+  // ── Chain Alert Alarm Sound ──
+  // Service worker posts 'chain-alarm' message for urgent chain break alerts
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', function(event) {
+      if (event.data && event.data.type === 'chain-alarm') {
+        try {
+          var alarm = new Audio('/chain-alert.mp3');
+          alarm.volume = 1.0;
+          alarm.play().catch(function() { /* autoplay blocked */ });
+        } catch(e) { /* audio not supported */ }
+      }
+    });
+  }
+
   // Scroll reveal with IntersectionObserver
   const reveals = document.querySelectorAll('.reveal');
   if ('IntersectionObserver' in window) {

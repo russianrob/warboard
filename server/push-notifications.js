@@ -215,8 +215,9 @@ export function isSubscribed(playerId) {
  * @param {string} playerId
  * @param {object} payload - { title, body, icon?, tag?, url?, data? }
  * @param {string} [notifType] - Notification type key for preference check
+ * @param {object} [pushOptions] - web-push options (e.g. { urgency: 'high' })
  */
-export async function sendToPlayer(playerId, payload, notifType) {
+export async function sendToPlayer(playerId, payload, notifType, pushOptions) {
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return;
 
   // Check preference if a type is specified
@@ -230,7 +231,7 @@ export async function sendToPlayer(playerId, payload, notifType) {
 
   for (const sub of subs) {
     try {
-      await webPush.sendNotification(sub, message);
+      await webPush.sendNotification(sub, message, pushOptions);
     } catch (err) {
       if (err.statusCode === 410 || err.statusCode === 404) {
         // Subscription expired or invalid — mark for removal
@@ -254,9 +255,10 @@ export async function sendToPlayer(playerId, payload, notifType) {
  * @param {string[]} playerIds
  * @param {object} payload - { title, body, icon?, tag?, url?, data? }
  * @param {string} [notifType] - Notification type key for preference check
+ * @param {object} [pushOptions] - web-push options (e.g. { urgency: 'high' })
  */
-export async function sendToPlayers(playerIds, payload, notifType) {
-  await Promise.allSettled(playerIds.map((id) => sendToPlayer(id, payload, notifType)));
+export async function sendToPlayers(playerIds, payload, notifType, pushOptions) {
+  await Promise.allSettled(playerIds.map((id) => sendToPlayer(id, payload, notifType, pushOptions)));
 }
 
 /**
@@ -266,8 +268,9 @@ export async function sendToPlayers(playerIds, payload, notifType) {
  * @param {object} payload
  * @param {string} [notifType] - Notification type key
  * @param {string} [excludePlayerId] - don't notify this player (the actor)
+ * @param {object} [pushOptions] - web-push options (e.g. { urgency: 'high' })
  */
-export async function sendToWar(getPlayersForWar, warId, payload, notifType, excludePlayerId) {
+export async function sendToWar(getPlayersForWar, warId, payload, notifType, excludePlayerId, pushOptions) {
   const warPlayers = getPlayersForWar(warId);
   if (!warPlayers || warPlayers.length === 0) return;
 
@@ -276,7 +279,7 @@ export async function sendToWar(getPlayersForWar, warId, payload, notifType, exc
     .filter((id) => id !== excludePlayerId && isSubscribed(id));
 
   if (targets.length > 0) {
-    await sendToPlayers(targets, payload, notifType);
+    await sendToPlayers(targets, payload, notifType, pushOptions);
   }
 }
 
@@ -309,13 +312,14 @@ export async function notifyChainAlert(warPlayers, warId, current, timeout, time
   await sendToPlayers(
     playerIds.filter((id) => isSubscribed(id)),
     {
-      title: "⚠️ Chain Breaking!",
+      title: "🚨 CHAIN BREAKING!",
       body: `Chain ${current} — ${timeLeft}s remaining! Attack now!`,
       tag: "chain-alert",
       icon: "/icon-192.png",
       data: { type: "chain-alert", warId },
     },
     "chain_alert",
+    { urgency: "high", TTL: 30 },
   );
 }
 

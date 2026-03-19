@@ -15,26 +15,43 @@ self.addEventListener("push", (event) => {
     payload = { title: "FactionOps", body: event.data.text() };
   }
 
+  const type = payload.data?.type;
+  const isUrgent = type === "chain-alert";
+
   const options = {
     body: payload.body || "",
     icon: payload.icon || "/icon-192.png",
     badge: "/icon-badge.png",
     tag: payload.tag || "factionops",
     renotify: true,
-    vibrate: [200, 100, 200],
+    vibrate: isUrgent ? [300, 100, 300, 100, 300, 100, 300] : [200, 100, 200],
     data: payload.data || {},
     actions: [],
+    requireInteraction: isUrgent,
+    silent: false,
   };
 
   // Add contextual actions based on notification type
-  const type = payload.data?.type;
   if (type === "call" || type === "hospital-pop") {
     options.actions = [{ action: "attack", title: "Attack" }];
   } else if (type === "chain-alert" || type === "bonus") {
     options.actions = [{ action: "attack", title: "Attack Now" }];
   }
 
-  event.waitUntil(self.registration.showNotification(payload.title || "FactionOps", options));
+  // For chain alerts, play alarm sound via any open client window
+  const showNotif = self.registration.showNotification(payload.title || "FactionOps", options);
+
+  if (isUrgent) {
+    const playAlarm = clients.matchAll({ type: "window", includeUncontrolled: true }).then((cls) => {
+      for (const client of cls) {
+        client.postMessage({ type: "chain-alarm" });
+        break; // one client is enough
+      }
+    });
+    event.waitUntil(Promise.all([showNotif, playAlarm]));
+  } else {
+    event.waitUntil(showNotif);
+  }
 });
 
 // ── Notification Click Handler ───────────────────────────────────────────
