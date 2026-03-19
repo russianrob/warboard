@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.3
+// @version      3.14.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -143,6 +143,10 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 
 (function () {
     'use strict';
+
+    // ── Remove iOS Smart App Banner (Torn PDA "Open in app" bar) ────────
+    const smartBannerMeta = document.querySelector('meta[name="apple-itunes-app"]');
+    if (smartBannerMeta) smartBannerMeta.remove();
 
     // =========================================================================
     // SECTION 1: CONFIGURATION
