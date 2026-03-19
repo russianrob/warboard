@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.13.6
+// @version      3.13.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -4965,15 +4965,18 @@ body.wb-chain-active {
             tag.appendChild(callerName);
             cell.appendChild(tag);
 
-            const uncallBtn = document.createElement('button');
-            uncallBtn.className = 'fo-uncall-btn';
-            uncallBtn.title = 'Uncall';
-            uncallBtn.textContent = '\u2715';
-            uncallBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                emitUncallTarget(targetId);
-            });
-            cell.appendChild(uncallBtn);
+            // Only the caller can uncall their own target
+            if (isMine) {
+                const uncallBtn = document.createElement('button');
+                uncallBtn.className = 'fo-uncall-btn';
+                uncallBtn.title = 'Uncall';
+                uncallBtn.textContent = '\u2715';
+                uncallBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    emitUncallTarget(targetId);
+                });
+                cell.appendChild(uncallBtn);
+            }
         } else {
             const btn = document.createElement('button');
             btn.className = 'fo-call-btn';
