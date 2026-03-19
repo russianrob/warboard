@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.12.3
+// @version      3.12.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2403,16 +2403,45 @@ body.wb-chain-active {
     }
 
     /**
+     * Dynamically load Socket.IO client when @require is not supported (e.g. Torn PDA).
+     */
+    function loadSocketIO() {
+        return new Promise((resolve, reject) => {
+            if (typeof io === 'function') return resolve();
+            const script = document.createElement('script');
+            script.src = CONFIG.SERVER_URL + '/socket.io.min.js';
+            script.onload = () => {
+                log('Socket.IO client loaded dynamically');
+                resolve();
+            };
+            script.onerror = () => reject(new Error('Script load failed'));
+            document.head.appendChild(script);
+        });
+    }
+
+    /**
      * Connect Socket.IO for real-time push updates.
      * Falls back to polling if connection fails.
      */
-    function connectRealtime() {
+    async function connectRealtime() {
         if (realtimeSocket) return; // already connected or connecting
         if (!state.jwtToken) return;
 
-        // Socket.IO client loaded via @require
+        // Socket.IO client loaded via @require — if not available, inject dynamically (PDA)
+        if (typeof io !== 'function') {
+            log('Socket.IO not loaded via @require — injecting dynamically');
+            try {
+                await loadSocketIO();
+            } catch (e) {
+                warn('Failed to load Socket.IO client:', e.message);
+                updateRtBadge(false);
+                return;
+            }
+        }
+
         if (typeof io !== 'function') {
             log('Socket.IO client not available — using polling only');
+            updateRtBadge(false);
             return;
         }
 
