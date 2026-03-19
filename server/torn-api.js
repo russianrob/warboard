@@ -127,3 +127,40 @@ export async function fetchRankedWar(factionId, apiKey) {
 
   return null; // no active ranked war found
 }
+
+/**
+ * Fetch a player's energy, nerve bars and cooldowns.
+ * Returns { energy: { current, maximum, fulltime }, nerve: { current, maximum, fulltime }, cooldowns: { drug, medical, booster } }.
+ */
+export async function fetchUserBars(apiKey) {
+  const url = `https://api.torn.com/user/?selections=bars,cooldowns&key=${encodeURIComponent(apiKey)}`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Torn API returned HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+
+  if (data.error) {
+    throw new Error(`Torn API error: ${data.error.error} (code ${data.error.code})`);
+  }
+
+  return {
+    energy: {
+      current: data.energy?.current ?? 0,
+      maximum: data.energy?.maximum ?? 0,
+      fulltime: data.energy?.fulltime ?? 0,
+    },
+    nerve: {
+      current: data.nerve?.current ?? 0,
+      maximum: data.nerve?.maximum ?? 0,
+      fulltime: data.nerve?.fulltime ?? 0,
+    },
+    cooldowns: {
+      drug: data.cooldowns?.drug ?? 0,
+      medical: data.cooldowns?.medical ?? 0,
+      booster: data.cooldowns?.booster ?? 0,
+    },
+  };
+}

@@ -42,6 +42,9 @@ export const NOTIFICATION_TYPES = {
   bonus_imminent:  { label: "Bonus Milestones",      description: "When a bonus hit is 1–2 attacks away",              default: true  },
   enemy_surge:     { label: "Enemy Online Surge",    description: "When multiple enemies come online at once",         default: true  },
   call_stolen:     { label: "Call Contested",        description: "When someone else views a target you called",       default: true  },
+  full_energy:     { label: "Full Energy",           description: "When your energy bar is full",                      default: true  },
+  full_nerve:      { label: "Full Nerve",            description: "When your nerve bar is full",                       default: true  },
+  drug_cooldown:   { label: "Drug Cooldown Done",    description: "When your drug cooldown expires",                   default: true  },
 };
 
 // ── Subscription Storage ────────────────────────────────────────────────
@@ -383,4 +386,45 @@ export async function notifyCallStolen(playerId, viewerName, targetName, targetI
     icon: "/icon-192.png",
     data: { type: "call-contested", targetId },
   }, "call_stolen");
+}
+
+// ── Personal Alert Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Notify a player their energy is full.
+ */
+export async function notifyFullEnergy(playerId, current, maximum) {
+  await sendToPlayer(playerId, {
+    title: "⚡ Energy Full",
+    body: `Your energy is full (${current}/${maximum}) — time to train or attack!`,
+    tag: "full-energy",
+    icon: "/icon-192.png",
+    data: { type: "full-energy" },
+  }, "full_energy");
+}
+
+/**
+ * Notify a player their nerve is full.
+ */
+export async function notifyFullNerve(playerId, current, maximum) {
+  await sendToPlayer(playerId, {
+    title: "💢 Nerve Full",
+    body: `Your nerve is full (${current}/${maximum}) — go commit some crimes!`,
+    tag: "full-nerve",
+    icon: "/icon-192.png",
+    data: { type: "full-nerve" },
+  }, "full_nerve");
+}
+
+/**
+ * Notify a player their drug cooldown is done.
+ */
+export async function notifyDrugCooldown(playerId) {
+  await sendToPlayer(playerId, {
+    title: "💊 Drug Cooldown Done",
+    body: "Your drug cooldown has expired — you can use drugs again.",
+    tag: "drug-cooldown",
+    icon: "/icon-192.png",
+    data: { type: "drug-cooldown" },
+  }, "drug_cooldown");
 }
