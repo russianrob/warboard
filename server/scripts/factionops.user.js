@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.2
+// @version      3.14.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2341,13 +2341,14 @@ body.wb-chain-active {
                     // Only toast for NEW calls after initial load (skip on page refresh)
                     if (hasReceivedInitialData && String(callData.calledBy.id) !== state.myPlayerId) {
                         const targetName = state.statuses[tid]?.name || `#${tid}`;
-                        showToast(`${callData.calledBy.name} called target ${targetName}`, 'info');
+                        showCallToast(tid, `${callData.calledBy.name} called target ${targetName}`);
                     }
                     broadcastStateChange({ type: 'call_update', targetId: tid });
                 }
             }
             for (const tid of Object.keys(oldCalls)) {
                 if (!data.calls[tid]) {
+                    removeCallToast(tid);
                     broadcastStateChange({ type: 'call_update', targetId: tid });
                 }
             }
@@ -5878,6 +5879,65 @@ body.wb-chain-active {
      * Show a brief toast notification at the top of the page.
      * Used for events like "Target called" or "Chain approaching bonus".
      */
+    // ── Persistent call toasts (stay until uncalled) ──
+    const activeCallToasts = new Map(); // targetId → toast element
+
+    function ensureCallToastContainer() {
+        let container = document.getElementById('fo-call-toast-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'fo-call-toast-container';
+            container.style.cssText = `
+                position: fixed;
+                top: ${state.ui.chainBar ? '52px' : '10px'};
+                left: 50%;
+                transform: translateX(-50%);
+                z-index: 1000001;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 6px;
+                pointer-events: none;
+            `;
+            document.body.appendChild(container);
+        }
+        return container;
+    }
+
+    function showCallToast(targetId, message) {
+        // Remove existing toast for this target if any
+        removeCallToast(targetId);
+
+        const container = ensureCallToastContainer();
+        const toast = document.createElement('div');
+        toast.style.cssText = `
+            padding: 8px 18px;
+            border-radius: 6px;
+            font-family: Arial, sans-serif;
+            font-size: 13px;
+            color: #fff;
+            background: var(--wb-accent);
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            white-space: nowrap;
+        `;
+        toast.textContent = message;
+        container.appendChild(toast);
+        activeCallToasts.set(targetId, toast);
+
+        requestAnimationFrame(() => { toast.style.opacity = '1'; });
+    }
+
+    function removeCallToast(targetId) {
+        const toast = activeCallToasts.get(targetId);
+        if (toast) {
+            toast.style.opacity = '0';
+            setTimeout(() => toast.remove(), 300);
+            activeCallToasts.delete(targetId);
+        }
+    }
+
     function showToast(message, type = 'info') {
         const toast = document.createElement('div');
         toast.style.cssText = `
