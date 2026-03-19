@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.12.6
+// @version      3.12.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -15,6 +15,7 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
+// @grant        unsafeWindow
 // @connect      tornwar.com
 // @connect      localhost
 // @connect      *
@@ -2405,12 +2406,23 @@ body.wb-chain-active {
     /**
      * Dynamically load Socket.IO client when @require is not supported (e.g. Torn PDA).
      */
+    /** Access to the real page window (escaping userscript sandbox). */
+    const pageWindow = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
+    /** Check all possible locations where io() might live. */
+    function getIO() {
+        if (typeof io === 'function') return io;
+        if (typeof window.io === 'function') return window.io;
+        if (typeof pageWindow.io === 'function') return pageWindow.io;
+        return null;
+    }
+
     async function loadSocketIO() {
-        if (typeof io === 'function' || typeof window.io === 'function') return;
+        if (getIO()) return;
         const url = CONFIG.SERVER_URL + '/socket.io.min.js';
         log('Loading Socket.IO client from', url);
 
-        // Method 1: <script> tag (desktop Tampermonkey)
+        // Method 1: <script src> tag
         try {
             await new Promise((resolve, reject) => {
                 const s = document.createElement('script');
@@ -2419,39 +2431,54 @@ body.wb-chain-active {
                 s.onerror = reject;
                 document.head.appendChild(s);
             });
-            if (typeof io === 'function' || typeof window.io === 'function') {
-                log('Socket.IO loaded via script tag');
-                return;
+            await new Promise(r => setTimeout(r, 200));
+            if (getIO()) { log('Socket.IO loaded via script[src]'); return; }
+        } catch (_) { log('Script[src] failed'); }
+
+        // Method 2: fetch + inline <script>
+        try {
+            const resp = await fetch(url);
+            if (resp.ok) {
+                const code = await resp.text();
+                const s = document.createElement('script');
+                s.textContent = code;
+                document.head.appendChild(s);
+                await new Promise(r => setTimeout(r, 200));
+                if (getIO()) { log('Socket.IO loaded via fetch + inline script'); return; }
             }
-        } catch (_) { log('Script tag failed, trying alternatives'); }
+        } catch (_) { log('Fetch + inline failed'); }
 
-        // Method 2: GM_xmlhttpRequest (bypasses CORS, works in userscript sandbox)
-        const code = await new Promise((resolve, reject) => {
-            httpRequest({
-                method: 'GET',
-                url: url,
-                onload: (r) => {
-                    if (r.status === 200) resolve(r.responseText);
-                    else reject(new Error('HTTP ' + r.status));
-                },
-                onerror: (e) => reject(e),
+        // Method 3: httpRequest (GM_xmlhttpRequest / PDA bridge) + inline <script>
+        try {
+            const code = await new Promise((resolve, reject) => {
+                httpRequest({
+                    method: 'GET', url,
+                    onload: (r) => r.status === 200 ? resolve(r.responseText) : reject(new Error('HTTP ' + r.status)),
+                    onerror: reject,
+                });
             });
-        });
+            const s = document.createElement('script');
+            s.textContent = code;
+            document.head.appendChild(s);
+            await new Promise(r => setTimeout(r, 200));
+            if (getIO()) { log('Socket.IO loaded via httpRequest + inline script'); return; }
+        } catch (_) { log('httpRequest + inline failed'); }
 
-        // Eval into page context so `io` is globally available
-        const script = document.createElement('script');
-        script.textContent = code;
-        document.head.appendChild(script);
-        document.head.removeChild(script);
+        // Method 4: httpRequest + eval in userscript context (last resort)
+        try {
+            const code = await new Promise((resolve, reject) => {
+                httpRequest({
+                    method: 'GET', url,
+                    onload: (r) => r.status === 200 ? resolve(r.responseText) : reject(new Error('HTTP ' + r.status)),
+                    onerror: reject,
+                });
+            });
+            (0, eval)(code); // indirect eval — runs in global scope
+            await new Promise(r => setTimeout(r, 100));
+            if (getIO()) { log('Socket.IO loaded via httpRequest + eval'); return; }
+        } catch (e) { log('httpRequest + eval failed:', e.message); }
 
-        // Small delay for script execution
-        await new Promise(r => setTimeout(r, 100));
-
-        if (typeof window.io === 'function') {
-            log('Socket.IO loaded via GM_xmlhttpRequest + inline script');
-        } else {
-            throw new Error('io not defined after all loading methods');
-        }
+        throw new Error('All Socket.IO loading methods failed');
     }
 
     /**
@@ -2474,7 +2501,7 @@ body.wb-chain-active {
             }
         }
 
-        const ioFn = (typeof io === 'function') ? io : (typeof window.io === 'function') ? window.io : null;
+        const ioFn = getIO();
         if (!ioFn) {
             log('Socket.IO client not available — using polling only');
             updateRtBadge(false);
