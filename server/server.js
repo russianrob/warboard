@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 
-import routes from "./routes.js";
+import routes, { setIO } from "./routes.js";
 import { socketAuth } from "./auth.js";
 import { registerSocketHandlers } from "./socket-handlers.js";
 import { startChainMonitor, stopAll as stopAllChainMonitors } from "./chain-monitor.js";
@@ -172,6 +172,9 @@ const io = new SocketIOServer(httpServer, {
     credentials: true,
   },
 });
+
+// Share io instance with route handlers for real-time broadcasts
+setIO(io);
 
 // Authenticate every socket connection via JWT
 io.use(socketAuth);

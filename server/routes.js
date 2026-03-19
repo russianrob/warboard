@@ -16,6 +16,38 @@ const ALLOWED_FACTION_ID = "42055";
 const SOFT_UNCALL_MS = 30_000; // 30 seconds after hospital detection
 const REFRESH_COOLDOWN_MS = 30_000; // 30 seconds between refreshes per war
 
+/** Socket.IO server instance — set via setIO() from server.js. */
+let io = null;
+
+/** Called by server.js to share the Socket.IO instance with route handlers. */
+export function setIO(ioInstance) {
+  io = ioInstance;
+}
+
+/**
+ * Broadcast a full war state snapshot to all clients in a war room.
+ * Called after any state mutation so connected clients get instant updates.
+ */
+function broadcastWarUpdate(warId) {
+  if (!io) return;
+  const war = store.getWar(warId);
+  if (!war) return;
+  io.to(`war_${warId}`).emit("war_update", {
+    warId: war.warId,
+    factionId: war.factionId,
+    enemyFactionId: war.enemyFactionId,
+    enemyFactionName: war.enemyFactionName || null,
+    calls: war.calls,
+    priorities: war.priorities,
+    enemyStatuses: war.enemyStatuses,
+    chainData: war.chainData,
+    onlinePlayers: store.getOnlinePlayersForWar(warId),
+    viewers: store.getViewersForWar(warId),
+    ourFactionOnline: war.ourFactionOnline || null,
+    factionKeyStored: !!store.getFactionApiKey(war.factionId),
+  });
+}
+
 /** Track call expiry timers so they can be cancelled. */
 const callTimers = new Map(); // `${warId}:${targetId}` → timeoutId
 
@@ -56,6 +88,8 @@ function uncallTarget(warId, targetId) {
 
   const timerKey = `${warId}:${targetId}`;
   clearExistingTimer(timerKey);
+
+  broadcastWarUpdate(warId);
 }
 
 // ── GET /api/health ──────────────────────────────────────────────────────
@@ -362,7 +396,7 @@ router.post("/api/call", requireAuth, (req, res) => {
       return res.status(403).json({ error: "Only the caller can uncall this target" });
     }
 
-    uncallTarget(warId, targetId);
+    uncallTarget(warId, targetId); // broadcasts inside
     console.log(`[api] ${playerName} uncalled target ${targetId}`);
     return res.json({ ok: true });
   }
@@ -391,6 +425,7 @@ router.post("/api/call", requireAuth, (req, res) => {
     }, CALL_EXPIRE_MS),
   );
 
+  broadcastWarUpdate(warId);
   console.log(`[api] ${playerName} called target ${targetId} in war ${warId}`);
   return res.json({ ok: true, call: callData });
 });
@@ -440,6 +475,7 @@ router.post("/api/priority", requireAuth, (req, res) => {
   }
   store.saveState();
 
+  broadcastWarUpdate(warId);
   console.log(`[api] ${playerName} set priority '${priority}' on target ${targetId} in war ${warId}`);
   return res.json({ ok: true, priority: war.priorities[targetId] || null });
 });
@@ -539,6 +575,11 @@ router.post("/api/status", requireAuth, async (req, res) => {
     store.saveState();
   }
 
+  // Broadcast if anything changed
+  if ((statuses && typeof statuses === "object") || (chainData && typeof chainData === "object")) {
+    broadcastWarUpdate(warId);
+  }
+
   // Full refresh from Torn API
   if (refresh) {
     if (!war.enemyFactionId) {
@@ -562,6 +603,7 @@ router.post("/api/status", requireAuth, async (req, res) => {
       const freshStatuses = await fetchFactionMembers(war.enemyFactionId, apiKey);
       war.enemyStatuses = freshStatuses;
       store.saveState();
+      broadcastWarUpdate(warId);
       console.log(`[api] Statuses refreshed for war ${warId} (${Object.keys(freshStatuses).length} members)`);
     } catch (err) {
       console.error("[api] Status refresh failed:", err.message);
@@ -580,6 +622,11 @@ router.post("/api/viewing", requireAuth, (req, res) => {
   const { playerId } = req.user;
   const { targetId } = req.body ?? {};
   store.setViewingTarget(playerId, targetId || null);
+
+  // Broadcast viewer change — need warId from the player's current session
+  const player = store.getPlayer(playerId);
+  if (player?.warId) broadcastWarUpdate(player.warId);
+
   return res.json({ ok: true });
 });
 
