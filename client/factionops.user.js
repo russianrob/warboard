@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.12.1
+// @version      3.12.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1394,6 +1394,9 @@ body.wb-chain-active {
 .fo-online-dot.on { background: #00b894; box-shadow: 0 0 5px rgba(0,184,148,0.4); }
 .fo-online-dot.idle { background: #fdcb6e; box-shadow: 0 0 5px rgba(253,203,110,0.3); }
 .fo-online-dot.off { background: #636e72; }
+.fo-rt-badge { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; letter-spacing: 0.04em; line-height: 1.3; display: none; }
+.fo-rt-badge.rt { display: inline-block; background: rgba(0,184,148,0.18); color: #00b894; }
+.fo-rt-badge.poll { display: inline-block; background: rgba(253,203,110,0.18); color: #fdcb6e; }
 
 /* Call column */
 .fo-call-cell { display: flex; align-items: center; gap: 4px; padding: 0 4px; min-width: 0; overflow: hidden; }
@@ -2428,6 +2431,7 @@ body.wb-chain-active {
 
         realtimeSocket.on('connect', () => {
             log('Socket.IO connected:', realtimeSocket.id);
+            updateRtBadge(true);
 
             // Join the war room
             const warId = deriveWarId();
@@ -2452,6 +2456,7 @@ body.wb-chain-active {
 
         realtimeSocket.on('disconnect', (reason) => {
             log('Socket.IO disconnected:', reason);
+            updateRtBadge(false);
         });
 
         realtimeSocket.on('connect_error', (err) => {
@@ -2465,7 +2470,17 @@ body.wb-chain-active {
             realtimeSocket.disconnect();
             realtimeSocket = null;
             log('Socket.IO disconnected');
+            updateRtBadge(false);
         }
+    }
+
+    /** Update the realtime/polling badge (only visible to player 137558). */
+    function updateRtBadge(isRealtime) {
+        const badge = document.getElementById('fo-rt-badge');
+        if (!badge) return;
+        badge.className = 'fo-rt-badge ' + (isRealtime ? 'rt' : 'poll');
+        badge.textContent = isRealtime ? 'RT' : 'POLL';
+        badge.title = isRealtime ? 'Socket.IO realtime active' : 'Falling back to polling';
     }
 
     // =========================================================================
@@ -4281,6 +4296,7 @@ body.wb-chain-active {
                         <span class="fo-logo-text">FactionOps</span>
                     </div>
                     <div class="fo-status-dot${state.connected ? '' : ' disconnected'}" id="fo-conn-dot" title="${state.connected ? 'Connected' : 'Disconnected'}"></div>
+                    ${state.myPlayerId === '137558' ? '<span class="fo-rt-badge" id="fo-rt-badge"></span>' : ''}
                     <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                 </div>
