@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.12.5
+// @version      3.12.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2406,28 +2406,52 @@ body.wb-chain-active {
      * Dynamically load Socket.IO client when @require is not supported (e.g. Torn PDA).
      */
     async function loadSocketIO() {
-        if (typeof io === 'function') return;
+        if (typeof io === 'function' || typeof window.io === 'function') return;
         const url = CONFIG.SERVER_URL + '/socket.io.min.js';
-        log('Fetching Socket.IO client from', url);
+        log('Loading Socket.IO client from', url);
+
+        // Method 1: <script> tag (desktop Tampermonkey)
         try {
-            // Try <script> tag first (works on desktop Tampermonkey)
             await new Promise((resolve, reject) => {
-                const script = document.createElement('script');
-                script.src = url;
-                script.onload = resolve;
-                script.onerror = reject;
-                document.head.appendChild(script);
+                const s = document.createElement('script');
+                s.src = url;
+                s.onload = resolve;
+                s.onerror = reject;
+                document.head.appendChild(s);
             });
-            if (typeof io === 'function') { log('Socket.IO loaded via script tag'); return; }
-        } catch (_) { /* script tag blocked, try fetch+eval */ }
-        // Fallback: fetch + eval (for PDA / restricted webviews)
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const code = await resp.text();
-        const fn = new Function(code);
-        fn();
-        if (typeof io !== 'function') throw new Error('io not defined after eval');
-        log('Socket.IO loaded via fetch+eval');
+            if (typeof io === 'function' || typeof window.io === 'function') {
+                log('Socket.IO loaded via script tag');
+                return;
+            }
+        } catch (_) { log('Script tag failed, trying alternatives'); }
+
+        // Method 2: GM_xmlhttpRequest (bypasses CORS, works in userscript sandbox)
+        const code = await new Promise((resolve, reject) => {
+            httpRequest({
+                method: 'GET',
+                url: url,
+                onload: (r) => {
+                    if (r.status === 200) resolve(r.responseText);
+                    else reject(new Error('HTTP ' + r.status));
+                },
+                onerror: (e) => reject(e),
+            });
+        });
+
+        // Eval into page context so `io` is globally available
+        const script = document.createElement('script');
+        script.textContent = code;
+        document.head.appendChild(script);
+        document.head.removeChild(script);
+
+        // Small delay for script execution
+        await new Promise(r => setTimeout(r, 100));
+
+        if (typeof window.io === 'function') {
+            log('Socket.IO loaded via GM_xmlhttpRequest + inline script');
+        } else {
+            throw new Error('io not defined after all loading methods');
+        }
     }
 
     /**
@@ -2450,7 +2474,8 @@ body.wb-chain-active {
             }
         }
 
-        if (typeof io !== 'function') {
+        const ioFn = (typeof io === 'function') ? io : (typeof window.io === 'function') ? window.io : null;
+        if (!ioFn) {
             log('Socket.IO client not available — using polling only');
             updateRtBadge(false);
             return;
@@ -2459,7 +2484,7 @@ body.wb-chain-active {
         const serverUrl = CONFIG.SERVER_URL;
         log('Connecting Socket.IO to', serverUrl);
 
-        realtimeSocket = io(serverUrl, {
+        realtimeSocket = ioFn(serverUrl, {
             auth: { token: state.jwtToken },
             transports: ['websocket', 'polling'],
             reconnection: true,
