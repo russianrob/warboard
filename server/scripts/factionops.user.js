@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.13.5
+// @version      3.13.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2320,18 +2320,30 @@ body.wb-chain-active {
     // ── Socket.IO real-time push (primary) ─────────────────────────────────
 
     let realtimeSocket = null;
+    let hasReceivedInitialData = false;
 
     /**
      * Apply server data to local state and re-render.
      * Used by both pollOnce() and Socket.IO war_update handler.
      */
     function applyServerData(data) {
+        // ── Statuses FIRST (so target names are available for call toasts) ──
+        if (data.enemyStatuses) {
+            mergeStatusesMonotonic(data.enemyStatuses);
+        }
+
+        // ── Priorities ──
+        if (data.priorities) {
+            state.priorities = data.priorities;
+        }
+
         // ── Diff & notify: calls ──
         if (data.calls) {
             const oldCalls = state.calls;
             for (const [tid, callData] of Object.entries(data.calls)) {
                 if (!oldCalls[tid]) {
-                    if (String(callData.calledBy.id) !== state.myPlayerId) {
+                    // Only toast for NEW calls after initial load (skip on page refresh)
+                    if (hasReceivedInitialData && String(callData.calledBy.id) !== state.myPlayerId) {
                         const targetName = state.statuses[tid]?.name || `#${tid}`;
                         showToast(`${callData.calledBy.name} called target ${targetName}`, 'info');
                     }
@@ -2344,16 +2356,6 @@ body.wb-chain-active {
                 }
             }
             state.calls = data.calls;
-        }
-
-        // ── Priorities ──
-        if (data.priorities) {
-            state.priorities = data.priorities;
-        }
-
-        // ── Statuses ──
-        if (data.enemyStatuses) {
-            mergeStatusesMonotonic(data.enemyStatuses);
         }
 
         // ── Chain ──
@@ -2415,6 +2417,9 @@ body.wb-chain-active {
 
         // Trigger FF fetch if we have new targets without cached FF data
         fetchFairFightBatch();
+
+        // After first data load, enable call toasts for subsequent updates
+        hasReceivedInitialData = true;
     }
 
     /**
