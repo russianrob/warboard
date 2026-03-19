@@ -17,8 +17,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 
-import routes, { gateMiddleware } from "./routes.js";
-import { socketAuth } from "./auth.js";
+import routes from "./routes.js";
+import { socketAuth, verifyToken } from "./auth.js";
 import { registerSocketHandlers } from "./socket-handlers.js";
 import { startChainMonitor, stopAll as stopAllChainMonitors } from "./chain-monitor.js";
 import { startWarStatusMonitor, stopAll as stopAllWarStatusMonitors } from "./war-status-monitor.js";
@@ -53,8 +53,7 @@ app.use(
 );
 app.use(express.json());
 
-// ── Landing page gate (faction members only) ──────────────────────────────
-app.use(gateMiddleware);
+// ── Landing page is public — gate is applied only to /scripts/*.user.js below ──
 
 // ── Static files (landing page) ─────────────────────────────────────────
 app.use(express.static(join(__dirname, "public")));
@@ -84,13 +83,27 @@ const SCRIPTS_DIR = join(__dirname, "scripts");
 app.get("/scripts/", (_req, res) => res.status(403).json({ error: "Forbidden" }));
 app.get("/scripts", (_req, res) => res.status(403).json({ error: "Forbidden" }));
 
-// Serve individual .user.js files only
+// Serve individual script files — .meta.js is public, .user.js requires gate cookie
 app.get("/scripts/:filename", (req, res) => {
   const filename = req.params.filename;
 
   // Only allow .user.js and .meta.js files, no path traversal
   if (!/^[\w.-]+\.(?:user|meta)\.js$/.test(filename) || filename.includes("..")) {
     return res.status(404).json({ error: "Not found" });
+  }
+
+  // Gate .user.js downloads behind faction cookie
+  if (filename.endsWith(".user.js")) {
+    const cookie = req.headers.cookie;
+    const match = cookie && cookie.match(/(?:^|;\s*)fo_gate=([^;]*)/);
+    const token = match ? decodeURIComponent(match[1]) : null;
+    let valid = false;
+    if (token) {
+      try { verifyToken(token); valid = true; } catch (_) { /* expired/invalid */ }
+    }
+    if (!valid) {
+      return res.redirect("/gate.html");
+    }
   }
 
   const filePath = join(SCRIPTS_DIR, filename);
