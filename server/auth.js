@@ -5,7 +5,7 @@
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET || "change-this-to-a-random-string";
-const JWT_EXPIRY = "24h";
+const JWT_EXPIRY = "90d";
 
 // ── Torn API verification ───────────────────────────────────────────────
 
