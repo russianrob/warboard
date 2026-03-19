@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.12.2
+// @version      3.12.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -4355,6 +4355,9 @@ body.wb-chain-active {
         }
 
         renderOverlay();
+
+        // Set RT badge initial state (admin only)
+        updateRtBadge(realtimeSocket && realtimeSocket.connected);
 
         // Move Torn's native #barChain into our overlay header
         moveTornChainBar();
