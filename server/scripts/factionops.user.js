@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.11.6
+// @version      3.12.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -18,12 +18,14 @@
 // @connect      tornwar.com
 // @connect      localhost
 // @connect      *
+// @require      https://tornwar.com/socket.io.min.js
 // @run-at       document-idle
 // ==/UserScript==
 
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.12.0 - Real-time push: Socket.IO connection for instant call/priority/status updates; polling reduced to 5s fallback
 // v3.11.6 - Fix: auto-retry on network error for call/uncall/priority actions (1s delay, 10s timeout)
 // v3.11.5 - Jailed members moved to collapsed Unavailable section; hospital pill shows countdown timer
 // v3.11.4 - UI: Compact 2-row header (logo+stats row 1, war info centered row 2)
@@ -2088,7 +2090,8 @@ body.wb-chain-active {
 
     // ── Polling-based server communication (replaces Socket.IO) ──────────
 
-    const POLL_INTERVAL_MS = IS_PDA ? 2000 : 1000;
+    // Polling is now a fallback — Socket.IO push handles instant updates
+    const POLL_INTERVAL_MS = IS_PDA ? 8000 : 5000;
 
     let pollTimer = null;
     let pollErrorCount = 0;
@@ -2232,105 +2235,7 @@ body.wb-chain-active {
                 log('Polling connected');
             }
 
-            // ── Diff & notify: calls ──
-            if (data.calls) {
-                const oldCalls = state.calls;
-                // New calls
-                for (const [tid, callData] of Object.entries(data.calls)) {
-                    if (!oldCalls[tid]) {
-                        // Notification for new call by someone else
-                        if (String(callData.calledBy.id) !== state.myPlayerId) {
-                            showToast(`${callData.calledBy.name} called target #${tid}`, 'info');
-                        }
-                        broadcastStateChange({ type: 'call_update', targetId: tid });
-                    }
-                }
-                // Removed calls
-                for (const tid of Object.keys(oldCalls)) {
-                    if (!data.calls[tid]) {
-                        broadcastStateChange({ type: 'call_update', targetId: tid });
-                    }
-                }
-                state.calls = data.calls;
-            }
-
-            // ── Priorities ──
-            if (data.priorities) {
-                state.priorities = data.priorities;
-            }
-
-            // ── Statuses ──
-            if (data.enemyStatuses) {
-                mergeStatusesMonotonic(data.enemyStatuses);
-            }
-
-            // ── Chain ──
-            if (data.chainData) {
-                const oldCurrent = state.chain.current;
-                const chainChanged = data.chainData.current !== oldCurrent;
-                // Always update hit count and max
-                state.chain.current = data.chainData.current ?? state.chain.current;
-                state.chain.max = data.chainData.max ?? state.chain.max;
-                // Always accept server timeout — it's our primary source
-                // (along with intercepted API). Use 3s drift threshold to
-                // avoid minor jitter but always correct significant drift.
-                const serverTimeout = data.chainData.timeout ?? 0;
-                if (chainChanged || state.chain.timeout <= 0 || Math.abs(serverTimeout - state.chain.timeout) > 3) {
-                    setChainTimeout(serverTimeout);
-                }
-                // Cooldown always from server (not locally counted)
-                state.chain.cooldown = data.chainData.cooldown ?? 0;
-                chainCooldownSetAt = Date.now();
-                chainCooldownSetVal = data.chainData.cooldown ?? 0;
-                updateChainBar();
-
-                // Bonus hit notification
-                if (data.chainData.current && chainChanged) {
-                    const next = nextBonusMilestone(data.chainData.current + 1);
-                    const hitsToBonus = next ? next - data.chainData.current : null;
-                    if (hitsToBonus !== null && hitsToBonus <= 3 && hitsToBonus > 0) {
-                        showToast(`BONUS HIT in ${hitsToBonus}! Target: ${next}`, 'error');
-                    }
-                }
-            }
-
-            // ── Online players ──
-            if (data.onlinePlayers) {
-                state.onlinePlayers = data.onlinePlayers;
-
-            }
-
-            // ── Viewers (who is on which attack page) ──
-            if (data.viewers) {
-                state.viewers = data.viewers;
-            }
-
-            // ── Our faction online counts (from server-side Torn API poll) ──
-            if (data.ourFactionOnline) {
-                state.ourFactionOnline = data.ourFactionOnline;
-            }
-
-            // Store enemyFactionId from server if we didn't have it
-            if (data.enemyFactionId && !state.enemyFactionId) {
-                state.enemyFactionId = data.enemyFactionId;
-            }
-            if (data.enemyFactionName) {
-                state.enemyFactionName = data.enemyFactionName;
-                // Update the header UI
-                const enemyEl = document.getElementById('fo-enemy-name');
-                if (enemyEl) enemyEl.textContent = data.enemyFactionName;
-            }
-
-            // Faction key status from server
-            if (data.factionKeyStored !== undefined) {
-                state.factionKeyStored = !!data.factionKeyStored;
-            }
-
-            // Refresh UI rows
-            refreshAllRows();
-
-            // Trigger FF fetch if we have new targets without cached FF data
-            fetchFairFightBatch();
+            applyServerData(data);
 
         } catch (err) {
             pollErrorCount++;
@@ -2393,6 +2298,174 @@ body.wb-chain-active {
         pollErrorCount = 0;
         updateConnectionUI();
         log('Polling stopped');
+    }
+
+    // ── Socket.IO real-time push (primary) ─────────────────────────────────
+
+    let realtimeSocket = null;
+
+    /**
+     * Apply server data to local state and re-render.
+     * Used by both pollOnce() and Socket.IO war_update handler.
+     */
+    function applyServerData(data) {
+        // ── Diff & notify: calls ──
+        if (data.calls) {
+            const oldCalls = state.calls;
+            for (const [tid, callData] of Object.entries(data.calls)) {
+                if (!oldCalls[tid]) {
+                    if (String(callData.calledBy.id) !== state.myPlayerId) {
+                        showToast(`${callData.calledBy.name} called target #${tid}`, 'info');
+                    }
+                    broadcastStateChange({ type: 'call_update', targetId: tid });
+                }
+            }
+            for (const tid of Object.keys(oldCalls)) {
+                if (!data.calls[tid]) {
+                    broadcastStateChange({ type: 'call_update', targetId: tid });
+                }
+            }
+            state.calls = data.calls;
+        }
+
+        // ── Priorities ──
+        if (data.priorities) {
+            state.priorities = data.priorities;
+        }
+
+        // ── Statuses ──
+        if (data.enemyStatuses) {
+            mergeStatusesMonotonic(data.enemyStatuses);
+        }
+
+        // ── Chain ──
+        if (data.chainData) {
+            const oldCurrent = state.chain.current;
+            const chainChanged = data.chainData.current !== oldCurrent;
+            state.chain.current = data.chainData.current ?? state.chain.current;
+            state.chain.max = data.chainData.max ?? state.chain.max;
+            const serverTimeout = data.chainData.timeout ?? 0;
+            if (chainChanged || state.chain.timeout <= 0 || Math.abs(serverTimeout - state.chain.timeout) > 3) {
+                setChainTimeout(serverTimeout);
+            }
+            state.chain.cooldown = data.chainData.cooldown ?? 0;
+            chainCooldownSetAt = Date.now();
+            chainCooldownSetVal = data.chainData.cooldown ?? 0;
+            updateChainBar();
+
+            if (data.chainData.current && chainChanged) {
+                const next = nextBonusMilestone(data.chainData.current + 1);
+                const hitsToBonus = next ? next - data.chainData.current : null;
+                if (hitsToBonus !== null && hitsToBonus <= 3 && hitsToBonus > 0) {
+                    showToast(`BONUS HIT in ${hitsToBonus}! Target: ${next}`, 'error');
+                }
+            }
+        }
+
+        // ── Online players ──
+        if (data.onlinePlayers) {
+            state.onlinePlayers = data.onlinePlayers;
+        }
+
+        // ── Viewers ──
+        if (data.viewers) {
+            state.viewers = data.viewers;
+        }
+
+        // ── Our faction online counts ──
+        if (data.ourFactionOnline) {
+            state.ourFactionOnline = data.ourFactionOnline;
+        }
+
+        // Store enemyFactionId from server if we didn't have it
+        if (data.enemyFactionId && !state.enemyFactionId) {
+            state.enemyFactionId = data.enemyFactionId;
+        }
+        if (data.enemyFactionName) {
+            state.enemyFactionName = data.enemyFactionName;
+            const enemyEl = document.getElementById('fo-enemy-name');
+            if (enemyEl) enemyEl.textContent = data.enemyFactionName;
+        }
+
+        // Faction key status
+        if (data.factionKeyStored !== undefined) {
+            state.factionKeyStored = !!data.factionKeyStored;
+        }
+
+        // Refresh UI rows
+        refreshAllRows();
+
+        // Trigger FF fetch if we have new targets without cached FF data
+        fetchFairFightBatch();
+    }
+
+    /**
+     * Connect Socket.IO for real-time push updates.
+     * Falls back to polling if connection fails.
+     */
+    function connectRealtime() {
+        if (realtimeSocket) return; // already connected or connecting
+        if (!state.jwtToken) return;
+
+        // Socket.IO client loaded via @require
+        if (typeof io !== 'function') {
+            log('Socket.IO client not available — using polling only');
+            return;
+        }
+
+        const serverUrl = CONFIG.SERVER_URL;
+        log('Connecting Socket.IO to', serverUrl);
+
+        realtimeSocket = io(serverUrl, {
+            auth: { token: state.jwtToken },
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 2000,
+            reconnectionDelayMax: 30000,
+            timeout: 10000,
+        });
+
+        realtimeSocket.on('connect', () => {
+            log('Socket.IO connected:', realtimeSocket.id);
+
+            // Join the war room
+            const warId = deriveWarId();
+            if (warId && state.myFactionId) {
+                realtimeSocket.emit('join_war', {
+                    warId,
+                    factionId: state.myFactionId,
+                    enemyFactionId: state.enemyFactionId || null,
+                });
+            }
+        });
+
+        // Instant updates from server
+        realtimeSocket.on('war_update', (data) => {
+            applyServerData(data);
+        });
+
+        // Also handle the initial state sent on join
+        realtimeSocket.on('war_state', (data) => {
+            applyServerData(data);
+        });
+
+        realtimeSocket.on('disconnect', (reason) => {
+            log('Socket.IO disconnected:', reason);
+        });
+
+        realtimeSocket.on('connect_error', (err) => {
+            warn('Socket.IO connection error:', err.message);
+        });
+    }
+
+    /** Disconnect Socket.IO. */
+    function disconnectRealtime() {
+        if (realtimeSocket) {
+            realtimeSocket.disconnect();
+            realtimeSocket = null;
+            log('Socket.IO disconnected');
+        }
     }
 
     // =========================================================================
@@ -2516,6 +2589,7 @@ body.wb-chain-active {
             calledAt: Date.now(),
         };
         updateTargetRow(tid);
+        if (CONFIG.AUTO_SORT) debouncedSort();
         postAction('/api/call', { warId, targetId: tid })
             .catch(e => {
                 warn('Call failed:', e.message);
@@ -2534,6 +2608,7 @@ body.wb-chain-active {
         const prev = state.calls[tid];
         delete state.calls[tid];
         updateTargetRow(tid);
+        if (CONFIG.AUTO_SORT) debouncedSort();
         postAction('/api/call', { warId, targetId: tid, action: 'uncall' })
             .catch(e => {
                 warn('Uncall failed:', e.message);
@@ -2827,13 +2902,15 @@ body.wb-chain-active {
             setConfig('API_KEY', apiKey);
 
             stopPolling();
+            disconnectRealtime();
             if (apiKey) {
                 try {
                     await authenticate();
                     startPolling();
+                    connectRealtime();
                 } catch (e) {
                     warn('Auth failed on save:', e.message);
-                    if (state.jwtToken) startPolling();
+                    if (state.jwtToken) { startPolling(); connectRealtime(); }
                 }
             }
             closeSettings();
@@ -6055,15 +6132,17 @@ body.wb-chain-active {
         installFetchInterceptor();
         installXHRInterceptor();
 
-        // 7. Authenticate and start polling
+        // 7. Authenticate, start polling + Socket.IO
         if (CONFIG.API_KEY) {
             try {
                 await authenticate();
                 startPolling();
+                connectRealtime();
             } catch (e) {
                 warn('Initial auth failed:', e.message);
                 if (state.jwtToken) {
                     startPolling();
+                    connectRealtime();
                 } else {
                     showToast('Not configured — click the gear icon to set up', 'warning');
                 }
