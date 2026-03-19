@@ -2456,22 +2456,42 @@ img { max-width: 100%; display: block; }
     if (unsubscribeBtn) {
       unsubscribeBtn.addEventListener('click', function() {
         var headers = authHeaders();
+
+        function finish() {
+          clearAuth();
+          settingsLoaded = false; // reset so settings reload on next subscribe
+          // Reset auth form to clean state
+          if (apiKeyInput) apiKeyInput.value = '';
+          if (authBtn) { authBtn.disabled = false; authBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg> Enable Notifications'; }
+          if (authError) authError.style.display = 'none';
+          show(needAuthEl);
+        }
+
+        if (!swRegistration) { finish(); return; }
+
         swRegistration.pushManager.getSubscription().then(function(sub) {
-          if (!sub) return;
-          var endpoint = sub.endpoint;
-          return sub.unsubscribe().then(function() {
+          if (!sub) {
+            // No browser subscription — just tell the server and clean up
             if (headers) {
               return fetch('/api/push/unsubscribe', {
                 method: 'POST',
                 headers: headers,
-                body: JSON.stringify({ endpoint: endpoint }),
-              });
+                body: JSON.stringify({ endpoint: 'all' }),
+              }).catch(function() {});
             }
-          });
-        }).then(function() {
-          clearAuth();
-          show(needAuthEl);
-        });
+          } else {
+            var endpoint = sub.endpoint;
+            return sub.unsubscribe().then(function() {
+              if (headers) {
+                return fetch('/api/push/unsubscribe', {
+                  method: 'POST',
+                  headers: headers,
+                  body: JSON.stringify({ endpoint: endpoint }),
+                });
+              }
+            });
+          }
+        }).then(finish).catch(finish);
       });
     }
 

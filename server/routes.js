@@ -751,7 +751,11 @@ router.post("/api/push/unsubscribe", requireAuth, (req, res) => {
     return res.status(400).json({ error: "endpoint is required" });
   }
 
-  push.unsubscribe(playerId, endpoint);
+  if (endpoint === "all") {
+    push.unsubscribeAll(playerId);
+  } else {
+    push.unsubscribe(playerId, endpoint);
+  }
   return res.json({ ok: true });
 });
 
