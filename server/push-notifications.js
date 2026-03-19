@@ -210,6 +210,14 @@ export function isSubscribed(playerId) {
   return !!(subscriptions[playerId] && subscriptions[playerId].length > 0);
 }
 
+/**
+ * Get all player IDs that have active push subscriptions.
+ * @returns {string[]}
+ */
+export function getSubscribedPlayerIds() {
+  return Object.keys(subscriptions).filter((id) => subscriptions[id] && subscriptions[id].length > 0);
+}
+
 // ── Send Notifications ──────────────────────────────────────────────────
 
 /**
