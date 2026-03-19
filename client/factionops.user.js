@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.12.7
+// @version      3.12.8
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2422,7 +2422,7 @@ body.wb-chain-active {
         const url = CONFIG.SERVER_URL + '/socket.io.min.js';
         log('Loading Socket.IO client from', url);
 
-        // Method 1: <script src> tag
+        // Method 1: <script src> tag (works on desktop Tampermonkey)
         try {
             await new Promise((resolve, reject) => {
                 const s = document.createElement('script');
@@ -2433,50 +2433,36 @@ body.wb-chain-active {
             });
             await new Promise(r => setTimeout(r, 200));
             if (getIO()) { log('Socket.IO loaded via script[src]'); return; }
-        } catch (_) { log('Script[src] failed'); }
+        } catch (e) { log('Script[src] failed:', e.message || e); }
 
-        // Method 2: fetch + inline <script>
+        // Method 2: fetch + eval (works on PDA — fetches from tornwar.com)
         try {
+            log('Trying fetch from', url);
             const resp = await fetch(url);
-            if (resp.ok) {
-                const code = await resp.text();
-                const s = document.createElement('script');
-                s.textContent = code;
-                document.head.appendChild(s);
-                await new Promise(r => setTimeout(r, 200));
-                if (getIO()) { log('Socket.IO loaded via fetch + inline script'); return; }
-            }
-        } catch (_) { log('Fetch + inline failed'); }
-
-        // Method 3: httpRequest (GM_xmlhttpRequest / PDA bridge) + inline <script>
-        try {
-            const code = await new Promise((resolve, reject) => {
-                httpRequest({
-                    method: 'GET', url,
-                    onload: (r) => r.status === 200 ? resolve(r.responseText) : reject(new Error('HTTP ' + r.status)),
-                    onerror: reject,
-                });
-            });
-            const s = document.createElement('script');
-            s.textContent = code;
-            document.head.appendChild(s);
-            await new Promise(r => setTimeout(r, 200));
-            if (getIO()) { log('Socket.IO loaded via httpRequest + inline script'); return; }
-        } catch (_) { log('httpRequest + inline failed'); }
-
-        // Method 4: httpRequest + eval in userscript context (last resort)
-        try {
-            const code = await new Promise((resolve, reject) => {
-                httpRequest({
-                    method: 'GET', url,
-                    onload: (r) => r.status === 200 ? resolve(r.responseText) : reject(new Error('HTTP ' + r.status)),
-                    onerror: reject,
-                });
-            });
-            (0, eval)(code); // indirect eval — runs in global scope
+            const code = await resp.text();
+            log('Fetched Socket.IO client (' + code.length + ' bytes), evaluating...');
+            (0, eval)(code);
             await new Promise(r => setTimeout(r, 100));
-            if (getIO()) { log('Socket.IO loaded via httpRequest + eval'); return; }
-        } catch (e) { log('httpRequest + eval failed:', e.message); }
+            if (getIO()) { log('Socket.IO loaded via fetch + eval'); return; }
+            log('eval succeeded but io not found, checking pageWindow...');
+        } catch (e) { log('Fetch + eval failed:', e.message || e); }
+
+        // Method 3: PDA_httpGet direct + eval (if fetch had CORS issues)
+        if (IS_PDA && typeof PDA_httpGet === 'function') {
+            try {
+                log('Trying PDA_httpGet...');
+                const result = await PDA_httpGet(url, {});
+                const code = typeof result === 'string' ? result : (result.responseText || result.body || '');
+                if (code.length > 1000) {
+                    log('PDA_httpGet got Socket.IO client (' + code.length + ' bytes), evaluating...');
+                    (0, eval)(code);
+                    await new Promise(r => setTimeout(r, 100));
+                    if (getIO()) { log('Socket.IO loaded via PDA_httpGet + eval'); return; }
+                } else {
+                    log('PDA_httpGet response too short:', code.length);
+                }
+            } catch (e) { log('PDA_httpGet + eval failed:', e.message || e); }
+        }
 
         throw new Error('All Socket.IO loading methods failed');
     }
