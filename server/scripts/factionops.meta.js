@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.12.1
+// @version      3.11.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -18,6 +18,5 @@
 // @connect      tornwar.com
 // @connect      localhost
 // @connect      *
-// @require      https://tornwar.com/socket.io.min.js
 // @run-at       document-idle
 // ==/UserScript==
