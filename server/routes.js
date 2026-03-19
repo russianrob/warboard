@@ -114,16 +114,16 @@ router.post("/api/gate", async (req, res) => {
 });
 
 /**
- * Middleware: gate the landing page behind faction membership.
- * Exempt: /api/*, /scripts/*, gate page assets.
+ * Middleware: gate the entire site behind faction membership.
+ * Exempt: /api/*, gate.html, .meta.js (Tampermonkey update checks).
+ * Script downloads (.user.js) and the landing page require gate cookie.
  */
 export function gateMiddleware(req, res, next) {
-  // Always allow API routes, script routes, and the gate page itself
+  // Always allow API routes, gate page, and .meta.js files (for update checks)
   if (
     req.path.startsWith("/api/") ||
-    req.path.startsWith("/scripts/") ||
     req.path === "/gate.html" ||
-    req.path === "/download/factionops.user.js"
+    req.path.endsWith(".meta.js")
   ) {
     return next();
   }
