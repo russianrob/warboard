@@ -2424,17 +2424,25 @@ body.wb-chain-active {
         if (realtimeSocket) return; // already connected or connecting
         if (!state.jwtToken) return;
 
+        // Debug: log all possible io locations
+        log('RT debug: typeof io =', typeof io);
+        try { log('RT debug: typeof window.io =', typeof window.io); } catch(e) { log('RT debug: window.io error', e.message); }
+        try { log('RT debug: typeof globalThis.io =', typeof globalThis.io); } catch(e) { log('RT debug: globalThis.io error', e.message); }
+        try { log('RT debug: typeof self.io =', typeof self.io); } catch(e) { log('RT debug: self.io error', e.message); }
+        if (typeof io === 'object' && io) { log('RT debug: io keys =', Object.keys(io).join(',')); }
+
         const ioFn = (typeof io === 'function') ? io
+            : (typeof io === 'object' && io !== null && typeof io.io === 'function') ? io.io
             : (typeof window !== 'undefined' && typeof window.io === 'function') ? window.io
             : (typeof globalThis !== 'undefined' && typeof globalThis.io === 'function') ? globalThis.io
             : (typeof self !== 'undefined' && typeof self.io === 'function') ? self.io
             : null;
         if (!ioFn) {
-            warn('Socket.IO client not available — checked io, window.io, globalThis.io, self.io');
+            warn('Socket.IO not found anywhere');
             updateRtBadge(false);
             return;
         }
-        log('Socket.IO client found:', ioFn === io ? 'io' : ioFn === window.io ? 'window.io' : ioFn === globalThis.io ? 'globalThis.io' : 'self.io');
+        log('Socket.IO client located, connecting...');
 
         const serverUrl = CONFIG.SERVER_URL;
         log('Connecting Socket.IO to', serverUrl);
