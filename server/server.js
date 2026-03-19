@@ -164,13 +164,17 @@ const io = new SocketIOServer(httpServer, {
   cors: {
     origin: function (origin, callback) {
       if (!origin) return callback(null, true);
-      if (/\.torn\.com$/.test(origin) || /^https?:\/\/localhost/.test(origin)) {
+      if (/\.torn\.com$/.test(origin) || /tornwar\.com/.test(origin) || /^https?:\/\/localhost/.test(origin)) {
         return callback(null, true);
       }
+      // Log unexpected origins for debugging
+      console.log('[ws] CORS rejected origin:', origin);
       callback(null, false);
     },
     credentials: true,
+    methods: ['GET', 'POST'],
   },
+  allowEIO3: true,
 });
 
 // Share io instance with route handlers for real-time broadcasts
