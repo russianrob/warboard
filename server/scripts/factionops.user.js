@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.13.4
+// @version      3.13.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2332,7 +2332,8 @@ body.wb-chain-active {
             for (const [tid, callData] of Object.entries(data.calls)) {
                 if (!oldCalls[tid]) {
                     if (String(callData.calledBy.id) !== state.myPlayerId) {
-                        showToast(`${callData.calledBy.name} called target #${tid}`, 'info');
+                        const targetName = state.statuses[tid]?.name || `#${tid}`;
+                        showToast(`${callData.calledBy.name} called target ${targetName}`, 'info');
                     }
                     broadcastStateChange({ type: 'call_update', targetId: tid });
                 }
