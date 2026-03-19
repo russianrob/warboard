@@ -18,7 +18,7 @@ import {
 } from "./push-notifications.js";
 
 const PLAYER_ID = "137558";
-const POLL_INTERVAL_MS = 60_000; // 60 seconds
+const POLL_INTERVAL_MS = 300_000; // 5 minutes (matches energy/nerve tick rate)
 
 let pollTimeout = null;
 
