@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.4
+// @version      3.14.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.14.5 - Integrate ranked war timer into overlay header (estimated time to target-drop win)
 // v3.12.0 - Real-time push: Socket.IO connection for instant call/priority/status updates; polling reduced to 5s fallback
 // v3.11.6 - Fix: auto-retry on network error for call/uncall/priority actions (1s delay, 10s timeout)
 // v3.11.5 - Jailed members moved to collapsed Unavailable section; hospital pill shows countdown timer
@@ -1118,6 +1119,24 @@ body.wb-chain-active {
 .fo-chain-live-timer.danger { color: #e17055; animation: fo-pulse 0.6s infinite alternate; }
 .fo-chain-live-bonus { color: #e17055; font-weight: 700; font-size: 10px; margin-left: 2px; }
 @keyframes fo-pulse { from { opacity: 1; } to { opacity: 0.4; } }
+
+/* Ranked war timer (estimated time to target drop win) */
+.fo-war-timer {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 600;
+    padding: 3px 10px; border-radius: 20px;
+    background: rgba(108,92,231,0.15);
+    border: 1px solid rgba(108,92,231,0.3);
+    white-space: nowrap;
+    cursor: pointer;
+}
+.fo-war-timer-icon { font-size: 12px; }
+.fo-war-timer-label { opacity: 0.6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+.fo-war-timer-value { font-variant-numeric: tabular-nums; font-weight: 700; }
+.fo-war-timer.safe .fo-war-timer-value { color: #00b894; }
+.fo-war-timer.warning .fo-war-timer-value { color: #fdcb6e; }
+.fo-war-timer.danger .fo-war-timer-value { color: #e17055; animation: fo-pulse 0.6s infinite alternate; }
+.fo-war-timer.waiting .fo-war-timer-value { color: #e17055; font-size: 10px; }
 
 /* Fallback: custom chain info when Torn bar not found */
 .fo-chain-info {
@@ -4353,6 +4372,11 @@ body.wb-chain-active {
                         <span class="fo-chain-timeout" id="fo-chain-timeout">${state.chain.timeout > 0 ? formatTimer(state.chain.timeout) : '--:--'}</span>
                         <span class="fo-chain-bonus" id="fo-chain-bonus" style="display:none;"></span>
                     </div>
+                    <div class="fo-war-timer waiting" id="fo-war-timer" title="Ranked War Timer — click for wiki">
+                        <span class="fo-war-timer-icon">🕓</span>
+                        <span class="fo-war-timer-label">War</span>
+                        <span class="fo-war-timer-value" id="fo-war-timer-value">--:--</span>
+                    </div>
                     <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.ourFactionOnline ? state.ourFactionOnline.online : state.onlinePlayers.length} us</span> · <span id="fo-enemy-online-count">0 enemy</span></div>
                     <div class="fo-energy-display" id="fo-energy-display" title="Energy">
                         <span class="fo-energy-label">E</span>
@@ -4428,6 +4452,76 @@ body.wb-chain-active {
         if (fab) fab.style.display = 'none';
         const heatmapFab = document.getElementById('wb-heatmap-toggle');
         if (heatmapFab) heatmapFab.style.display = 'none';
+
+        // ── Ranked War Timer ───────────────────────────────────────────
+        const warTimerEl = document.getElementById('fo-war-timer');
+        const warTimerValue = document.getElementById('fo-war-timer-value');
+        if (warTimerEl) {
+            warTimerEl.addEventListener('click', () => {
+                window.open('https://wiki.torn.com/wiki/Ranked_War', '_blank');
+            });
+            function updateWarTimer() {
+                const timerSpans = document.querySelectorAll('.timer___fSGg8 span');
+                const targetBox = document.querySelector('.target___NBVXq');
+                if (!timerSpans || timerSpans.length < 8 || !targetBox) {
+                    warTimerEl.className = 'fo-war-timer waiting';
+                    warTimerValue.textContent = 'N/A';
+                    warTimerEl.title = 'Ranked War Timer — war data not found on page';
+                    return;
+                }
+                const timeParts = Array.from(timerSpans).map(s => s.textContent).join('').split(':');
+                if (timeParts.length < 3) {
+                    warTimerEl.className = 'fo-war-timer waiting';
+                    warTimerValue.textContent = 'N/A';
+                    return;
+                }
+                const days = parseInt(timeParts[0]) || 0;
+                const hours = parseInt(timeParts[1]) || 0;
+                const minutes = parseInt(timeParts[2]) || 0;
+                const totalElapsedHours = (days * 24) + hours + (minutes / 60);
+                if (totalElapsedHours <= 24) {
+                    warTimerEl.className = 'fo-war-timer waiting';
+                    warTimerValue.textContent = 'Pre-24h';
+                    warTimerEl.title = 'Ranked War Timer\nTarget drop starts after 24h elapsed';
+                    return;
+                }
+                const dropHours = Math.floor(totalElapsedHours - 24);
+                let match;
+                try { match = targetBox.innerText.match(/(\d[\d,]*)\s*\/\s*(\d[\d,]*)/); } catch(e) { match = null; }
+                if (!match) {
+                    warTimerEl.className = 'fo-war-timer waiting';
+                    warTimerValue.textContent = 'N/A';
+                    warTimerEl.title = 'Ranked War Timer — unable to parse target values';
+                    return;
+                }
+                const lead = parseInt(match[1].replace(/,/g, ''));
+                const currentTarget = parseInt(match[2].replace(/,/g, ''));
+                const originalTarget = currentTarget / (1 - (dropHours * 0.01));
+                const DROP_PER_HOUR = originalTarget * 0.01;
+                const gap = currentTarget - lead;
+                const hoursRemaining = gap / DROP_PER_HOUR;
+                if (hoursRemaining <= 0) {
+                    warTimerEl.className = 'fo-war-timer safe';
+                    warTimerValue.textContent = 'WON';
+                    warTimerEl.title = 'Ranked War Timer — target reached!';
+                    return;
+                }
+                const totalMin = Math.floor(hoursRemaining * 60);
+                const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
+                const mm = (totalMin % 60).toString().padStart(2, '0');
+                const urgency = hoursRemaining <= 2 ? 'danger' : hoursRemaining <= 6 ? 'warning' : 'safe';
+                warTimerEl.className = 'fo-war-timer ' + urgency;
+                warTimerValue.textContent = hh + ':' + mm;
+                warTimerEl.title = 'Ranked War Timer'
+                    + '\nEst. time remaining: ' + hh + ':' + mm
+                    + '\nOriginal target: ~' + Math.round(originalTarget).toLocaleString()
+                    + '\nDrop/hour: ~' + Math.round(DROP_PER_HOUR).toLocaleString()
+                    + '\nLead gap: ' + gap.toLocaleString()
+                    + '\nClick for wiki';
+            }
+            updateWarTimer();
+            setInterval(updateWarTimer, 30000); // refresh every 30s
+        }
 
         log('War overlay initialised');
     }
