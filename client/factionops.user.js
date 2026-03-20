@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.9
+// @version      3.14.10
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,7 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v3.14.9 - War timer click opens detail popup (mobile-friendly); no wiki link
+// v3.14.10 - War timer click opens detail popup (mobile-friendly); no wiki link
 // v3.14.6 - Move energy display to header-left (next to settings gear) to reduce header row wrapping on mobile
 // v3.14.5 - Integrate ranked war timer into overlay header (estimated time to target-drop win)
 // v3.12.0 - Real-time push: Socket.IO connection for instant call/priority/status updates; polling reduced to 5s fallback
@@ -2953,7 +2953,7 @@ body.wb-chain-active {
                 resultEl.textContent = 'Saving...';
                 resultEl.style.color = 'var(--wb-idle-yellow)';
                 try {
-                    const resp = await postAction('/api/war-target', { warId: state.warId, target: num });
+                    const resp = await postAction('/api/war-target', { warId: deriveWarId(), target: num });
                     if (resp && resp.ok) {
                         state.warTarget = resp.warTarget;
                         resultEl.textContent = 'Target set: ' + num.toLocaleString() + ' respect';
@@ -2975,7 +2975,7 @@ body.wb-chain-active {
                 resultEl.textContent = 'Clearing...';
                 resultEl.style.color = 'var(--wb-idle-yellow)';
                 try {
-                    const resp = await postAction('/api/war-target', { warId: state.warId, target: null });
+                    const resp = await postAction('/api/war-target', { warId: deriveWarId(), target: null });
                     if (resp && resp.ok) {
                         state.warTarget = null;
                         const input = document.getElementById('fo-input-war-target');
@@ -4638,19 +4638,27 @@ body.wb-chain-active {
                 }
 
                 // ── Ranked war drop-timer mode (no custom target) ──
-                if (!timerSpans || timerSpans.length < 8 || !targetBox || lead === null) {
+                if (totalElapsedHours === null) {
                     warTimerEl.className = 'fo-war-timer waiting';
                     warTimerValue.textContent = 'N/A';
-                    if (warTimerDetail) warTimerDetail.innerHTML = warTimerDetailRow('Status', 'War data not found on page');
+                    if (warTimerDetail) warTimerDetail.innerHTML = warTimerDetailRow('Status', 'War timer not found on page');
                     return;
                 }
-                if (totalElapsedHours === null || totalElapsedHours <= 24) {
+                if (totalElapsedHours <= 24) {
                     warTimerEl.className = 'fo-war-timer waiting';
                     warTimerValue.textContent = 'Pre-24h';
                     if (warTimerDetail) warTimerDetail.innerHTML =
                         warTimerDetailRow('Status', 'Waiting for 24h mark')
-                        + warTimerDetailRow('Elapsed', elapsedStr || '--')
+                        + warTimerDetailRow('Elapsed', elapsedStr)
                         + warTimerDetailRow('Drop starts', 'After 24h elapsed');
+                    return;
+                }
+                if (lead === null || currentTarget === null) {
+                    warTimerEl.className = 'fo-war-timer waiting';
+                    warTimerValue.textContent = elapsedStr;
+                    if (warTimerDetail) warTimerDetail.innerHTML =
+                        warTimerDetailRow('Elapsed', elapsedStr)
+                        + warTimerDetailRow('Status', 'Score data not available');
                     return;
                 }
                 const dropHours = Math.floor(totalElapsedHours - 24);
