@@ -258,9 +258,6 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
      *   400–409  bonus_imminent
      *   500–509  enemy_surge
      *   600–699  call_stolen
-     *   700      full_energy
-     *   701      full_nerve
-     *   702      drug_cooldown
      *   800      war_target
      */
     const pdaNotifCounters = {};
@@ -278,9 +275,6 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
             bonus_imminent: [400, 409],
             enemy_surge:    [500, 509],
             call_stolen:    [600, 699],
-            full_energy:    [700, 700],
-            full_nerve:     [701, 701],
-            drug_cooldown:  [702, 702],
             war_target:     [800, 800],
         };
 
@@ -2934,7 +2928,7 @@ body.wb-chain-active {
                 </label>
             </div>
             <div style="font-size:11px;opacity:0.6;margin-bottom:14px;">
-                Native push notifications for calls, chain alerts, bonus hits, energy/nerve full, and war targets.
+                Native push notifications for calls, chain alerts, bonus hits, and war targets.
             </div>
             ` : ''}
 
@@ -3560,8 +3554,7 @@ body.wb-chain-active {
     let energyState = { current: 0, max: 0, ticktime: 0, fulltime: 0 };
     let energyTickAnchorAt = 0; // wall-clock when we last set ticktime
     let energyTickAnchorVal = 0; // ticktime value at anchor
-    let pdaEnergyWasFull = false; // track transition for PDA notification
-    let pdaNerveWasFull = false;   // track transition for PDA notification
+
 
     function pollEnergy() {
         if (!CONFIG.API_KEY) return;
@@ -3574,34 +3567,13 @@ body.wb-chain-active {
                     const data = JSON.parse(res.responseText);
                     if (data.error) return;
                     if (data.energy) {
-                        const wasFull = pdaEnergyWasFull;
                         energyState.current = data.energy.current || 0;
                         energyState.max = data.energy.maximum || 0;
                         energyState.ticktime = data.energy.ticktime || 0;
                         energyState.fulltime = data.energy.fulltime || 0;
                         energyTickAnchorVal = energyState.ticktime;
                         energyTickAnchorAt = Date.now();
-                        const isFull = energyState.max > 0 && energyState.current >= energyState.max;
-                        pdaEnergyWasFull = isFull;
-                        if (isFull && !wasFull) {
-                            firePdaNotification('full_energy',
-                                '\u26A1 Energy Full',
-                                `Your energy is full (${energyState.current}/${energyState.max}) \u2014 time to train or attack!`,
-                                'https://www.torn.com/gym.php');
-                        }
                         updateEnergyDisplay();
-                    }
-                    if (data.nerve) {
-                        const nerveCur = data.nerve.current || 0;
-                        const nerveMax = data.nerve.maximum || 0;
-                        const nerveFull = nerveMax > 0 && nerveCur >= nerveMax;
-                        if (nerveFull && !pdaNerveWasFull) {
-                            firePdaNotification('full_nerve',
-                                '\uD83D\uDCA2 Nerve Full',
-                                `Your nerve is full (${nerveCur}/${nerveMax}) \u2014 go commit some crimes!`,
-                                'https://www.torn.com/crimes.php');
-                        }
-                        pdaNerveWasFull = nerveFull;
                     }
                 } catch (e) { /* silent */ }
             },

@@ -26,7 +26,6 @@ import { loadHeatmaps, stopFlush as stopHeatmapFlush } from "./activity-heatmap.
 import { startMembershipSchedule, stopMembershipSchedule } from "./membership-check.js";
 import * as store from "./store.js";
 import { loadSubscriptions } from "./push-notifications.js";
-import { startPersonalMonitor, stopPersonalMonitor } from "./personal-monitor.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -209,7 +208,6 @@ store.loadFactionKeys();
 store.loadPlayerKeys();
 loadHeatmaps();
 loadSubscriptions();
-startPersonalMonitor();
 
 // Resume war status monitors for any persisted wars
 // Chain data comes from clients via DOM reading — no server-side chain polling needed
