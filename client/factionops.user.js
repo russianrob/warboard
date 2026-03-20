@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.15.2
+// @version      3.15.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.15.3  - Adaptive PDA polling: 2s during active war, 5s when idle (saves battery + server load)
 // v3.15.2  - Fix pre-war countdown: detect via lead=0 from DOM instead of text matching
 // v3.15.1  - Pre-war countdown: show time until war starts instead of 0% when war hasn't begun
 // v3.15.0  - PDA: native push notifications via scheduleNotification handler (calls, chain, bonus, war target)
@@ -2217,11 +2218,18 @@ body.wb-chain-active {
     // ── Polling-based server communication (replaces Socket.IO) ──────────
 
     // Polling is now a fallback — Socket.IO push handles instant updates
-    const POLL_INTERVAL_MS = IS_PDA ? 3500 : 5000;
+    const POLL_FAST_MS  = IS_PDA ? 2000 : 5000;  // War active: 2s on PDA, 5s desktop
+    const POLL_IDLE_MS  = IS_PDA ? 5000 : 5000;  // No war: 5s everywhere
+    let currentPollInterval = POLL_IDLE_MS;
 
     let pollTimer = null;
     let pollErrorCount = 0;
     const MAX_POLL_BACKOFF = 30000;
+
+    /** Check if a war is actively running (enemy statuses present = war data flowing). */
+    function isWarActive() {
+        return Object.keys(state.statuses || {}).length > 0;
+    }
 
     /** Derive a stable warId from factionId (convention: "war_<factionId>"). */
     function deriveWarId() {
@@ -2396,27 +2404,38 @@ body.wb-chain-active {
 
         state.connecting = true;
         updateConnectionUI();
-        log('Starting poll loop (' + POLL_INTERVAL_MS + 'ms interval)');
+        log('Starting adaptive poll loop (fast=' + POLL_FAST_MS + 'ms, idle=' + POLL_IDLE_MS + 'ms)');
 
         // Immediate first poll
         pollOnce();
 
-        pollTimer = setInterval(() => {
+        function scheduleNextPoll() {
+            const desired = isWarActive() ? POLL_FAST_MS : POLL_IDLE_MS;
+            if (desired !== currentPollInterval) {
+                log('Poll interval changed: ' + currentPollInterval + 'ms → ' + desired + 'ms');
+                currentPollInterval = desired;
+            }
             const backoff = pollErrorCount > 0
-                ? Math.min(POLL_INTERVAL_MS * Math.pow(2, pollErrorCount), MAX_POLL_BACKOFF)
-                : POLL_INTERVAL_MS;
+                ? Math.min(currentPollInterval * Math.pow(2, pollErrorCount), MAX_POLL_BACKOFF)
+                : currentPollInterval;
 
-            // Skip this tick if in backoff (simple jitter)
-            if (pollErrorCount > 0 && Math.random() > (POLL_INTERVAL_MS / backoff)) return;
-
-            pollOnce();
-        }, POLL_INTERVAL_MS);
+            pollTimer = setTimeout(() => {
+                // Skip this tick if in backoff (simple jitter)
+                if (pollErrorCount > 0 && Math.random() > (currentPollInterval / backoff)) {
+                    scheduleNextPoll();
+                    return;
+                }
+                pollOnce();
+                scheduleNextPoll();
+            }, backoff);
+        }
+        scheduleNextPoll();
     }
 
     /** Stop the polling loop. */
     function stopPolling() {
         if (pollTimer) {
-            clearInterval(pollTimer);
+            clearTimeout(pollTimer);
             pollTimer = null;
         }
         state.connected = false;
