@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.15.3
+// @version      3.15.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.15.4  - Fix PDA notifications showing target ID instead of name; improved name lookup fallback
 // v3.15.3  - Adaptive PDA polling: 2s during active war, 5s when idle (saves battery + server load)
 // v3.15.2  - Fix pre-war countdown: detect via lead=0 from DOM instead of text matching
 // v3.15.1  - Pre-war countdown: show time until war starts instead of 0% when war hasn't begun
@@ -2472,8 +2473,10 @@ body.wb-chain-active {
                 if (!oldCalls[tid]) {
                     // Only toast for NEW calls after initial load (skip on page refresh)
                     if (hasReceivedInitialData && String(callData.calledBy.id) !== state.myPlayerId) {
-                        const targetName = state.statuses[tid]?.name || `#${tid}`;
-                        showCallToast(tid, `${callData.calledBy.name} called target ${targetName}`);
+                        const targetName = state.statuses[tid]?.name
+                            || (data.enemyStatuses && data.enemyStatuses[tid]?.name)
+                            || `Target #${tid}`;
+                        showCallToast(tid, `${callData.calledBy.name} called ${targetName}`);
                         firePdaNotification('target_called',
                             '\uD83C\uDFAF Target Called',
                             `${callData.calledBy.name} called ${targetName}`,
