@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.16
+// @version      3.15.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.15.0  - PDA: native push notifications via scheduleNotification handler (calls, chain, bonus, energy, nerve, war target)
 // v3.14.16 - PDA: revert Socket.IO attempt (all transports blocked by InAppWebView); reduce PDA poll to 3.5s
 // v3.14.15 - PDA: force polling transport (WebSocket confirmed blocked by InAppWebView)
 // v3.14.14 - PDA: show toast diagnostics for Socket.IO connection (visible on screen)
@@ -167,6 +168,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
         AUTO_SORT: GM_getValue('factionops_autosort', true),
         CHAIN_ALERT: GM_getValue('factionops_chain_alert', true),
         CHAIN_ALERT_THRESHOLD: GM_getValue('factionops_chain_alert_threshold', 30),
+        PDA_NOTIFICATIONS: GM_getValue('factionops_pda_notif', IS_PDA),
         CALL_TIMEOUT: 5 * 60 * 1000,       // 5 minute call expiry
         REFRESH_INTERVAL: 30 * 1000,        // 30 second status refresh
         IS_PDA: IS_PDA,
@@ -187,6 +189,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
             AUTO_SORT: 'factionops_autosort',
             CHAIN_ALERT: 'factionops_chain_alert',
             CHAIN_ALERT_THRESHOLD: 'factionops_chain_alert_threshold',
+            PDA_NOTIFICATIONS: 'factionops_pda_notif',
         };
         if (gmKeys[key]) {
             GM_setValue(gmKeys[key], value);
@@ -237,6 +240,79 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
             return;
         }
         GM_xmlhttpRequest(opts);
+    }
+
+    // =========================================================================
+    // SECTION 1C: PDA NATIVE NOTIFICATIONS
+    // =========================================================================
+
+    /**
+     * PDA native notification via flutter_inappwebview.callHandler('scheduleNotification').
+     * Uses unique notification IDs per event type (0–9999 range).
+     * On non-PDA or when PDA_NOTIFICATIONS is off, this is a no-op.
+     *
+     * ID ranges (to avoid collisions):
+     *   100–199  target_called
+     *   200–299  chain_alert
+     *   300–399  hospital_pop
+     *   400–409  bonus_imminent
+     *   500–509  enemy_surge
+     *   600–699  call_stolen
+     *   700      full_energy
+     *   701      full_nerve
+     *   702      drug_cooldown
+     *   800      war_target
+     */
+    const pdaNotifCounters = {};
+    const pdaNotifFired = new Set(); // dedupe keys like 'chain_alert' or 'call_123'
+
+    function firePdaNotification(type, title, body, urlCallback) {
+        if (!IS_PDA || !CONFIG.PDA_NOTIFICATIONS) return;
+        if (!window.flutter_inappwebview?.callHandler) return;
+
+        // ID ranges per type
+        const ranges = {
+            target_called:  [100, 199],
+            chain_alert:    [200, 299],
+            hospital_pop:   [300, 399],
+            bonus_imminent: [400, 409],
+            enemy_surge:    [500, 509],
+            call_stolen:    [600, 699],
+            full_energy:    [700, 700],
+            full_nerve:     [701, 701],
+            drug_cooldown:  [702, 702],
+            war_target:     [800, 800],
+        };
+
+        const range = ranges[type];
+        if (!range) return;
+
+        // Rotating ID within range
+        if (!pdaNotifCounters[type]) pdaNotifCounters[type] = range[0];
+        const id = pdaNotifCounters[type];
+        pdaNotifCounters[type] = id >= range[1] ? range[0] : id + 1;
+
+        // Schedule 1 second from now (minimum future timestamp required)
+        const timestamp = Date.now() + 1000;
+
+        window.flutter_inappwebview.callHandler('scheduleNotification', {
+            title: title,
+            subtitle: body,
+            id: id,
+            timestamp: timestamp,
+            overwriteID: true,
+            launchNativeToast: false,
+            urlCallback: urlCallback || '',
+        }).then(() => {
+            log(`[PDA-Notif] Scheduled: ${type} (id=${id})`);
+        }).catch(err => {
+            warn(`[PDA-Notif] Failed: ${type}`, err);
+        });
+    }
+
+    /** Clear PDA dedup set — called when data changes significantly (e.g. new war). */
+    function resetPdaNotifDedup() {
+        pdaNotifFired.clear();
     }
 
     // =========================================================================
@@ -2383,6 +2459,10 @@ body.wb-chain-active {
                     if (hasReceivedInitialData && String(callData.calledBy.id) !== state.myPlayerId) {
                         const targetName = state.statuses[tid]?.name || `#${tid}`;
                         showCallToast(tid, `${callData.calledBy.name} called target ${targetName}`);
+                        firePdaNotification('target_called',
+                            '\uD83C\uDFAF Target Called',
+                            `${callData.calledBy.name} called ${targetName}`,
+                            `https://www.torn.com/loader.php?sid=attack&user2ID=${tid}`);
                     }
                     broadcastStateChange({ type: 'call_update', targetId: tid });
                 }
@@ -2416,6 +2496,9 @@ body.wb-chain-active {
                 const hitsToBonus = next ? next - data.chainData.current : null;
                 if (hitsToBonus !== null && hitsToBonus <= 3 && hitsToBonus > 0) {
                     showToast(`BONUS HIT in ${hitsToBonus}! Target: ${next}`, 'error');
+                    firePdaNotification('bonus_imminent',
+                        '\uD83D\uDCA5 Bonus Hit Imminent',
+                        `Chain at ${data.chainData.current}/${next} \u2014 ${hitsToBonus} hit${hitsToBonus > 1 ? 's' : ''} to bonus!`);
                 }
             }
         }
@@ -2842,6 +2925,19 @@ body.wb-chain-active {
                 <span style="font-size:12px;opacity:0.8;">seconds</span>
             </div>
 
+            ${IS_PDA ? `
+            <div class="wb-settings-row">
+                <span>PDA Notifications</span>
+                <label class="wb-toggle">
+                    <input type="checkbox" id="wb-toggle-pda-notif" ${CONFIG.PDA_NOTIFICATIONS ? 'checked' : ''}>
+                    <span class="wb-toggle-slider"></span>
+                </label>
+            </div>
+            <div style="font-size:11px;opacity:0.6;margin-bottom:14px;">
+                Native push notifications for calls, chain alerts, bonus hits, energy/nerve full, and war targets.
+            </div>
+            ` : ''}
+
             <hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:14px 0;">
 
             ${isLeader() ? `
@@ -2937,6 +3033,13 @@ body.wb-chain-active {
                 e.target.value = CONFIG.CHAIN_ALERT_THRESHOLD;
             }
         });
+
+        const pdaNotifToggle = document.getElementById('wb-toggle-pda-notif');
+        if (pdaNotifToggle) {
+            pdaNotifToggle.addEventListener('change', (e) => {
+                setConfig('PDA_NOTIFICATIONS', e.target.checked);
+            });
+        }
 
         // War target — set/clear (leader only)
         const warTargetSetBtn = document.getElementById('fo-btn-set-war-target');
@@ -3359,6 +3462,9 @@ body.wb-chain-active {
             // Chain break sound alert
             if (CONFIG.CHAIN_ALERT && state.chain.timeout > 0 && state.chain.timeout <= CONFIG.CHAIN_ALERT_THRESHOLD && !state.chainAlertFired) {
                 playChainAlert();
+                firePdaNotification('chain_alert',
+                    '\uD83D\uDEA8 CHAIN BREAKING!',
+                    `Chain ${state.chain.current} \u2014 ${Math.round(state.chain.timeout)}s remaining! Attack now!`);
                 state.chainAlertFired = true;
             }
             if (state.chain.timeout > CONFIG.CHAIN_ALERT_THRESHOLD) {
@@ -3454,6 +3560,8 @@ body.wb-chain-active {
     let energyState = { current: 0, max: 0, ticktime: 0, fulltime: 0 };
     let energyTickAnchorAt = 0; // wall-clock when we last set ticktime
     let energyTickAnchorVal = 0; // ticktime value at anchor
+    let pdaEnergyWasFull = false; // track transition for PDA notification
+    let pdaNerveWasFull = false;   // track transition for PDA notification
 
     function pollEnergy() {
         if (!CONFIG.API_KEY) return;
@@ -3466,13 +3574,34 @@ body.wb-chain-active {
                     const data = JSON.parse(res.responseText);
                     if (data.error) return;
                     if (data.energy) {
+                        const wasFull = pdaEnergyWasFull;
                         energyState.current = data.energy.current || 0;
                         energyState.max = data.energy.maximum || 0;
                         energyState.ticktime = data.energy.ticktime || 0;
                         energyState.fulltime = data.energy.fulltime || 0;
                         energyTickAnchorVal = energyState.ticktime;
                         energyTickAnchorAt = Date.now();
+                        const isFull = energyState.max > 0 && energyState.current >= energyState.max;
+                        pdaEnergyWasFull = isFull;
+                        if (isFull && !wasFull) {
+                            firePdaNotification('full_energy',
+                                '\u26A1 Energy Full',
+                                `Your energy is full (${energyState.current}/${energyState.max}) \u2014 time to train or attack!`,
+                                'https://www.torn.com/gym.php');
+                        }
                         updateEnergyDisplay();
+                    }
+                    if (data.nerve) {
+                        const nerveCur = data.nerve.current || 0;
+                        const nerveMax = data.nerve.maximum || 0;
+                        const nerveFull = nerveMax > 0 && nerveCur >= nerveMax;
+                        if (nerveFull && !pdaNerveWasFull) {
+                            firePdaNotification('full_nerve',
+                                '\uD83D\uDCA2 Nerve Full',
+                                `Your nerve is full (${nerveCur}/${nerveMax}) \u2014 go commit some crimes!`,
+                                'https://www.torn.com/crimes.php');
+                        }
+                        pdaNerveWasFull = nerveFull;
                     }
                 } catch (e) { /* silent */ }
             },
@@ -4614,6 +4743,9 @@ body.wb-chain-active {
                             if (!warTargetNotifiedThisSession) {
                                 warTargetNotifiedThisSession = true;
                                 postAction('/api/war-target-reached', { warId: deriveWarId(), lead: lead }).catch(() => {});
+                                firePdaNotification('war_target',
+                                    '\uD83C\uDFAF War Target Reached!',
+                                    `Faction hit ${lead.toLocaleString()} / ${goal.toLocaleString()} respect \u2014 hold the line!`);
                             }
                             // Goal reached — switch to war-end countdown
                             if (totalElapsedHours !== null && totalElapsedHours > 24 && currentTarget !== null) {
