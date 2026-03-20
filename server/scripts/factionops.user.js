@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.6
+// @version      3.14.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.14.7 - War timer click opens detail popup (mobile-friendly); no wiki link
 // v3.14.6 - Move energy display to header-left (next to settings gear) to reduce header row wrapping on mobile
 // v3.14.5 - Integrate ranked war timer into overlay header (estimated time to target-drop win)
 // v3.12.0 - Real-time push: Socket.IO connection for instant call/priority/status updates; polling reduced to 5s fallback
@@ -1138,6 +1139,19 @@ body.wb-chain-active {
 .fo-war-timer.warning .fo-war-timer-value { color: #fdcb6e; }
 .fo-war-timer.danger .fo-war-timer-value { color: #e17055; animation: fo-pulse 0.6s infinite alternate; }
 .fo-war-timer.waiting .fo-war-timer-value { color: #e17055; font-size: 10px; }
+.fo-war-timer { position: relative; }
+.fo-war-timer-detail {
+    display: none; position: absolute; top: calc(100% + 6px); right: 0;
+    background: var(--wb-bg-secondary, #1e272e); border: 1px solid rgba(108,92,231,0.4);
+    border-radius: 8px; padding: 10px 14px; min-width: 200px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 9999;
+    font-size: 11px; font-weight: 400; white-space: normal;
+}
+.fo-war-timer-detail.open { display: block; }
+.fo-war-timer-detail-row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+.fo-war-timer-detail-label { color: rgba(255,255,255,0.5); }
+.fo-war-timer-detail-val { color: var(--wb-text, #dfe6e9); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+
 
 /* Fallback: custom chain info when Torn bar not found */
 .fo-chain-info {
@@ -4378,10 +4392,11 @@ body.wb-chain-active {
                         <span class="fo-chain-timeout" id="fo-chain-timeout">${state.chain.timeout > 0 ? formatTimer(state.chain.timeout) : '--:--'}</span>
                         <span class="fo-chain-bonus" id="fo-chain-bonus" style="display:none;"></span>
                     </div>
-                    <div class="fo-war-timer waiting" id="fo-war-timer" title="Ranked War Timer — click for wiki">
+                    <div class="fo-war-timer waiting" id="fo-war-timer" title="Ranked War Timer">
                         <span class="fo-war-timer-icon">🕓</span>
                         <span class="fo-war-timer-label">War</span>
                         <span class="fo-war-timer-value" id="fo-war-timer-value">--:--</span>
+                        <div class="fo-war-timer-detail" id="fo-war-timer-detail"></div>
                     </div>
                     <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.ourFactionOnline ? state.ourFactionOnline.online : state.onlinePlayers.length} us</span> · <span id="fo-enemy-online-count">0 enemy</span></div>
                 </div>
@@ -4457,33 +4472,53 @@ body.wb-chain-active {
         // ── Ranked War Timer ───────────────────────────────────────────
         const warTimerEl = document.getElementById('fo-war-timer');
         const warTimerValue = document.getElementById('fo-war-timer-value');
+        const warTimerDetail = document.getElementById('fo-war-timer-detail');
         if (warTimerEl) {
-            warTimerEl.addEventListener('click', () => {
-                window.open('https://wiki.torn.com/wiki/Ranked_War', '_blank');
+            // Click toggles the detail popup
+            warTimerEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (warTimerDetail) warTimerDetail.classList.toggle('open');
             });
+            // Close detail popup when clicking anywhere else
+            document.addEventListener('click', () => {
+                if (warTimerDetail) warTimerDetail.classList.remove('open');
+            });
+
+            function warTimerDetailRow(label, val) {
+                return '<div class="fo-war-timer-detail-row">'
+                    + '<span class="fo-war-timer-detail-label">' + label + '</span>'
+                    + '<span class="fo-war-timer-detail-val">' + val + '</span>'
+                    + '</div>';
+            }
+
             function updateWarTimer() {
                 const timerSpans = document.querySelectorAll('.timer___fSGg8 span');
                 const targetBox = document.querySelector('.target___NBVXq');
                 if (!timerSpans || timerSpans.length < 8 || !targetBox) {
                     warTimerEl.className = 'fo-war-timer waiting';
                     warTimerValue.textContent = 'N/A';
-                    warTimerEl.title = 'Ranked War Timer — war data not found on page';
+                    if (warTimerDetail) warTimerDetail.innerHTML = warTimerDetailRow('Status', 'War data not found on page');
                     return;
                 }
                 const timeParts = Array.from(timerSpans).map(s => s.textContent).join('').split(':');
                 if (timeParts.length < 3) {
                     warTimerEl.className = 'fo-war-timer waiting';
                     warTimerValue.textContent = 'N/A';
+                    if (warTimerDetail) warTimerDetail.innerHTML = warTimerDetailRow('Status', 'Cannot parse timer');
                     return;
                 }
                 const days = parseInt(timeParts[0]) || 0;
                 const hours = parseInt(timeParts[1]) || 0;
                 const minutes = parseInt(timeParts[2]) || 0;
                 const totalElapsedHours = (days * 24) + hours + (minutes / 60);
+                const elapsedStr = days + 'd ' + hours + 'h ' + minutes + 'm';
                 if (totalElapsedHours <= 24) {
                     warTimerEl.className = 'fo-war-timer waiting';
                     warTimerValue.textContent = 'Pre-24h';
-                    warTimerEl.title = 'Ranked War Timer\nTarget drop starts after 24h elapsed';
+                    if (warTimerDetail) warTimerDetail.innerHTML =
+                        warTimerDetailRow('Status', 'Waiting for 24h mark')
+                        + warTimerDetailRow('Elapsed', elapsedStr)
+                        + warTimerDetailRow('Drop starts', 'After 24h elapsed');
                     return;
                 }
                 const dropHours = Math.floor(totalElapsedHours - 24);
@@ -4492,7 +4527,7 @@ body.wb-chain-active {
                 if (!match) {
                     warTimerEl.className = 'fo-war-timer waiting';
                     warTimerValue.textContent = 'N/A';
-                    warTimerEl.title = 'Ranked War Timer — unable to parse target values';
+                    if (warTimerDetail) warTimerDetail.innerHTML = warTimerDetailRow('Status', 'Unable to parse target');
                     return;
                 }
                 const lead = parseInt(match[1].replace(/,/g, ''));
@@ -4504,7 +4539,11 @@ body.wb-chain-active {
                 if (hoursRemaining <= 0) {
                     warTimerEl.className = 'fo-war-timer safe';
                     warTimerValue.textContent = 'WON';
-                    warTimerEl.title = 'Ranked War Timer — target reached!';
+                    if (warTimerDetail) warTimerDetail.innerHTML =
+                        warTimerDetailRow('Status', 'Target reached!')
+                        + warTimerDetailRow('Lead', lead.toLocaleString())
+                        + warTimerDetailRow('Target', currentTarget.toLocaleString())
+                        + warTimerDetailRow('Elapsed', elapsedStr);
                     return;
                 }
                 const totalMin = Math.floor(hoursRemaining * 60);
@@ -4513,12 +4552,14 @@ body.wb-chain-active {
                 const urgency = hoursRemaining <= 2 ? 'danger' : hoursRemaining <= 6 ? 'warning' : 'safe';
                 warTimerEl.className = 'fo-war-timer ' + urgency;
                 warTimerValue.textContent = hh + ':' + mm;
-                warTimerEl.title = 'Ranked War Timer'
-                    + '\nEst. time remaining: ' + hh + ':' + mm
-                    + '\nOriginal target: ~' + Math.round(originalTarget).toLocaleString()
-                    + '\nDrop/hour: ~' + Math.round(DROP_PER_HOUR).toLocaleString()
-                    + '\nLead gap: ' + gap.toLocaleString()
-                    + '\nClick for wiki';
+                if (warTimerDetail) warTimerDetail.innerHTML =
+                    warTimerDetailRow('Time remaining', hh + ':' + mm)
+                    + warTimerDetailRow('Lead', lead.toLocaleString())
+                    + warTimerDetailRow('Current target', currentTarget.toLocaleString())
+                    + warTimerDetailRow('Original target', '~' + Math.round(originalTarget).toLocaleString())
+                    + warTimerDetailRow('Drop/hour', '~' + Math.round(DROP_PER_HOUR).toLocaleString())
+                    + warTimerDetailRow('Lead gap', gap.toLocaleString())
+                    + warTimerDetailRow('Elapsed', elapsedStr);
             }
             updateWarTimer();
             setInterval(updateWarTimer, 30000); // refresh every 30s
