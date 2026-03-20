@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.15.4
+// @version      3.15.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.15.5  - Add 'Test PDA Notification' button in settings (debug/verify scheduleNotification)
 // v3.15.4  - Fix PDA notifications showing target ID instead of name; improved name lookup fallback
 // v3.15.3  - Adaptive PDA polling: 2s during active war, 5s when idle (saves battery + server load)
 // v3.15.2  - Fix pre-war countdown: detect via lead=0 from DOM instead of text matching
@@ -2951,9 +2952,11 @@ body.wb-chain-active {
                     <span class="wb-toggle-slider"></span>
                 </label>
             </div>
-            <div style="font-size:11px;opacity:0.6;margin-bottom:14px;">
+            <div style="font-size:11px;opacity:0.6;margin-bottom:8px;">
                 Native push notifications for calls, chain alerts, bonus hits, and war targets.
             </div>
+            <button class="wb-btn wb-btn-sm" id="fo-btn-test-pda-notif" style="margin-bottom:14px;font-size:11px;">Test PDA Notification</button>
+            <div id="fo-pda-notif-result" style="font-size:11px;margin-bottom:10px;min-height:14px;"></div>
             ` : ''}
 
             <hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:14px 0;">
@@ -3056,6 +3059,38 @@ body.wb-chain-active {
         if (pdaNotifToggle) {
             pdaNotifToggle.addEventListener('change', (e) => {
                 setConfig('PDA_NOTIFICATIONS', e.target.checked);
+            });
+        }
+
+        const testPdaBtn = document.getElementById('fo-btn-test-pda-notif');
+        if (testPdaBtn) {
+            testPdaBtn.addEventListener('click', () => {
+                const resultEl = document.getElementById('fo-pda-notif-result');
+                if (!window.flutter_inappwebview?.callHandler) {
+                    if (resultEl) resultEl.innerHTML = '<span style="color:#e17055;">Not running in PDA — handler not available</span>';
+                    return;
+                }
+                const testId = 9999; // Use ID 9999 for test (won't collide with real notifications)
+                const timestamp = Date.now() + 3000; // 3 seconds from now
+                if (resultEl) resultEl.innerHTML = '<span style="color:#74b9ff;">Scheduling test notification (3s)...</span>';
+                window.flutter_inappwebview.callHandler('scheduleNotification', {
+                    title: '\uD83D\uDD14 FactionOps Test',
+                    subtitle: 'PDA notifications are working!',
+                    id: testId,
+                    timestamp: timestamp,
+                    overwriteID: true,
+                    launchNativeToast: true,
+                    toastMessage: 'Test notification scheduled — fires in 3 seconds',
+                    toastColor: 'green',
+                    toastDurationSeconds: 3,
+                    urlCallback: '',
+                }).then((resp) => {
+                    log('[PDA-Test] scheduleNotification response:', resp);
+                    if (resultEl) resultEl.innerHTML = '<span style="color:#00b894;">\u2713 Scheduled! Check for notification in ~3s. Response: ' + JSON.stringify(resp) + '</span>';
+                }).catch((err) => {
+                    warn('[PDA-Test] scheduleNotification error:', err);
+                    if (resultEl) resultEl.innerHTML = '<span style="color:#e17055;">\u2717 Error: ' + (err?.message || err) + '</span>';
+                });
             });
         }
 
