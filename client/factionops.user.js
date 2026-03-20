@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.15.0
+// @version      3.15.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,7 +39,8 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v3.15.0  - PDA: native push notifications via scheduleNotification handler (calls, chain, bonus, energy, nerve, war target)
+// v3.15.1  - Pre-war countdown: show time until war starts instead of 0% when war hasn't begun
+// v3.15.0  - PDA: native push notifications via scheduleNotification handler (calls, chain, bonus, war target)
 // v3.14.16 - PDA: revert Socket.IO attempt (all transports blocked by InAppWebView); reduce PDA poll to 3.5s
 // v3.14.15 - PDA: force polling transport (WebSocket confirmed blocked by InAppWebView)
 // v3.14.14 - PDA: show toast diagnostics for Socket.IO connection (visible on screen)
@@ -4680,7 +4681,58 @@ body.wb-chain-active {
             }
 
             function updateWarTimer() {
-                // Try to read DOM war data
+                // ── Pre-war countdown: detect war-not-started state ──
+                // Torn shows a countdown on the faction war page before the war begins.
+                // Use textContent (includes hidden elements) to find countdown text.
+                const hiddenMain = document.querySelector('[data-fo-hidden="true"]');
+                const searchText = (hiddenMain?.textContent || '') + ' ' + (document.body?.innerText || '');
+
+                // Match "Starts in Xh Ym", "Starts in X hours and Y minutes", etc.
+                const startsInMatch = searchText.match(/starts?\s+in\s+(\d+)\s*h(?:ours?)?(?:\s*(?:and\s*)?\s*(\d+)\s*m(?:in(?:ute)?s?)?)?/i)
+                    || searchText.match(/starts?\s+in\s+(\d+)\s*m(?:in(?:ute)?s?)?/i);
+                if (startsInMatch) {
+                    let h = 0, m = 0;
+                    if (/h/i.test(startsInMatch[0])) {
+                        h = parseInt(startsInMatch[1]) || 0;
+                        m = parseInt(startsInMatch[2]) || 0;
+                    } else {
+                        m = parseInt(startsInMatch[1]) || 0;
+                    }
+                    const display = h > 0 ? `${h}h ${m}m` : `${m}m`;
+                    warTimerEl.className = 'fo-war-timer waiting';
+                    warTimerValue.textContent = display;
+                    if (warTimerDetail) warTimerDetail.innerHTML =
+                        warTimerDetailRow('Status', 'War not started')
+                        + warTimerDetailRow('Starts in', display);
+                    return;
+                }
+
+                // Also check for DD:HH:MM:SS countdown timers in the DOM
+                // (Torn sometimes uses span-based timers for countdown)
+                if (!document.querySelector('.target___NBVXq')) {
+                    // No score target on page → war likely hasn't started
+                    const timerEls = document.querySelectorAll('[class*="countdown"], [class*="timer___"], [class*="Timer"]');
+                    for (const el of timerEls) {
+                        const cdMatch = (el.textContent || '').match(/(\d+):(\d{2}):(\d{2}):(\d{2})/);
+                        if (cdMatch) {
+                            const d = parseInt(cdMatch[1]) || 0;
+                            const h = parseInt(cdMatch[2]) || 0;
+                            const m = parseInt(cdMatch[3]) || 0;
+                            const totalMin = d * 24 * 60 + h * 60 + m;
+                            if (totalMin > 0) {
+                                const display = d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+                                warTimerEl.className = 'fo-war-timer waiting';
+                                warTimerValue.textContent = display;
+                                if (warTimerDetail) warTimerDetail.innerHTML =
+                                    warTimerDetailRow('Status', 'War not started')
+                                    + warTimerDetailRow('Starts in', display);
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                // ── Active war: read elapsed time + score from DOM ──
                 const timerSpans = document.querySelectorAll('.timer___fSGg8 span');
                 const targetBox = document.querySelector('.target___NBVXq');
                 let lead = null, currentTarget = null, elapsedStr = null, totalElapsedHours = null;
