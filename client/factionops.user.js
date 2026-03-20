@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.13
+// @version      3.14.14
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.14.14 - PDA: show toast diagnostics for Socket.IO connection (visible on screen)
 // v3.14.13 - PDA: enable Socket.IO WebSocket connection (was blocked), add transport diagnostics
 // v3.14.12 - War timer click opens detail popup (mobile-friendly); no wiki link
 // v3.14.6 - Move energy display to header-left (next to settings gear) to reduce header row wrapping on mobile
@@ -2510,8 +2511,9 @@ body.wb-chain-active {
         });
 
         realtimeSocket.on('connect', () => {
-            log('Socket.IO connected:', realtimeSocket.id, 'transport:', realtimeSocket.io?.engine?.transport?.name);
-            if (IS_PDA) log('[PDA-RT] Connected via', realtimeSocket.io?.engine?.transport?.name);
+            const transport = realtimeSocket.io?.engine?.transport?.name || 'unknown';
+            log('Socket.IO connected:', realtimeSocket.id, 'transport:', transport);
+            if (IS_PDA) showToast(`[PDA-RT] Connected via ${transport}`, 'success');
             updateRtBadge(true);
 
             // Join the war room
@@ -2541,8 +2543,9 @@ body.wb-chain-active {
         });
 
         realtimeSocket.on('connect_error', (err) => {
+            const transport = realtimeSocket.io?.engine?.transport?.name || 'unknown';
             warn('Socket.IO connection error:', err.message);
-            if (IS_PDA) warn('[PDA-RT] Connect error:', err.message, '| transport:', realtimeSocket.io?.engine?.transport?.name);
+            if (IS_PDA) showToast(`[PDA-RT] Error: ${err.message} (${transport})`, 'error');
         });
 
         // Log transport upgrade (polling → websocket)
