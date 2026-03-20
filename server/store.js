@@ -59,6 +59,7 @@ export function loadState() {
       if (!war.calls) war.calls = {};
       if (!war.enemyStatuses) war.enemyStatuses = {};
       if (!war.chainData) war.chainData = { current: 0, max: 0, timeout: 0, cooldown: 0 };
+      if (!war.warTarget) war.warTarget = null;
       wars.set(id, war);
     }
     console.log(`[store] Loaded ${wars.size} war(s) from disk`);
@@ -95,6 +96,7 @@ export function getOrCreateWar(warId, factionId, enemyFactionId = null) {
     priorities: {},
     enemyStatuses: {},
     chainData: { current: 0, max: 0, timeout: 0, cooldown: 0 },
+    warTarget: null,
   };
   wars.set(warId, war);
   saveState();

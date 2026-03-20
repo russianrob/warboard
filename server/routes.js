@@ -46,6 +46,7 @@ function broadcastWarUpdate(warId) {
     viewers: store.getViewersForWar(warId),
     ourFactionOnline: war.ourFactionOnline || null,
     factionKeyStored: !!store.getFactionApiKey(war.factionId),
+    warTarget: war.warTarget || null,
   });
 }
 
@@ -367,6 +368,7 @@ router.get("/api/poll", (req, res, next) => {
     viewers: store.getViewersForWar(warId),
     ourFactionOnline: war.ourFactionOnline || null,
     factionKeyStored: !!store.getFactionApiKey(factionId),
+    warTarget: war.warTarget || null,
   });
 });
 
@@ -486,6 +488,71 @@ router.post("/api/priority", requireAuth, (req, res) => {
   return res.json({ ok: true, priority: war.priorities[targetId] || null });
 });
 
+
+// ── GET /api/war-target ──────────────────────────────────────────────────
+// Get the custom war target for a specific war.
+
+router.get("/api/war-target", requireAuth, (req, res) => {
+  const { warId } = req.query;
+  if (!warId) {
+    return res.status(400).json({ error: "warId query parameter is required" });
+  }
+  const war = requireWarMember(req, res, warId);
+  if (!war) {
+    return war === null && !res.headersSent
+      ? res.status(404).json({ error: "War not found" })
+      : undefined;
+  }
+  return res.json({ warTarget: war.warTarget || null });
+});
+
+// ── POST /api/war-target ─────────────────────────────────────────────────
+// Set or clear the custom war target. Leader/co-leader only.
+
+router.post("/api/war-target", requireAuth, (req, res) => {
+  const { playerId, playerName, factionPosition } = req.user;
+  const { warId, target } = req.body ?? {};
+
+  // Enforce leader/co-leader
+  const pos = (factionPosition || "").toLowerCase();
+  if (!LEADER_POSITIONS.includes(pos)) {
+    return res.status(403).json({ error: "Only leaders and co-leaders can set the war target" });
+  }
+
+  if (!warId) {
+    return res.status(400).json({ error: "warId is required" });
+  }
+
+  const war = requireWarMember(req, res, warId);
+  if (!war) {
+    return war === null && !res.headersSent
+      ? res.status(404).json({ error: "War not found" })
+      : undefined;
+  }
+
+  if (target === null || target === undefined || target === 0) {
+    war.warTarget = null;
+    store.saveState();
+    broadcastWarUpdate(warId);
+    console.log(`[api] ${playerName} cleared war target for war ${warId}`);
+    return res.json({ ok: true, warTarget: null });
+  }
+
+  const numTarget = parseInt(target, 10);
+  if (isNaN(numTarget) || numTarget <= 0) {
+    return res.status(400).json({ error: "target must be a positive number" });
+  }
+
+  war.warTarget = {
+    value: numTarget,
+    setBy: { id: playerId, name: playerName },
+    timestamp: Date.now(),
+  };
+  store.saveState();
+  broadcastWarUpdate(warId);
+  console.log(`[api] ${playerName} set war target to ${numTarget.toLocaleString()} for war ${warId}`);
+  return res.json({ ok: true, warTarget: war.warTarget });
+});
 
 // ── POST /api/faction-key ─────────────────────────────────────────────────
 // Save a faction-dedicated API key for server-side polling.

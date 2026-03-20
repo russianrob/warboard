@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.8
+// @version      3.14.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,7 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v3.14.8 - War timer click opens detail popup (mobile-friendly); no wiki link
+// v3.14.9 - War timer click opens detail popup (mobile-friendly); no wiki link
 // v3.14.6 - Move energy display to header-left (next to settings gear) to reduce header row wrapping on mobile
 // v3.14.5 - Integrate ranked war timer into overlay header (estimated time to target-drop win)
 // v3.12.0 - Real-time push: Socket.IO connection for instant call/priority/status updates; polling reduced to 5s fallback
@@ -1735,6 +1735,9 @@ body.wb-chain-active {
         // Whether a faction API key has been saved on the server
         factionKeyStored: false,
 
+        // Custom war target (server-synced, set by leader)
+        warTarget: null,
+
         // UI references
         ui: {
             chainBar: null,
@@ -2443,6 +2446,11 @@ body.wb-chain-active {
             state.factionKeyStored = !!data.factionKeyStored;
         }
 
+        // War target (server-synced)
+        if (data.warTarget !== undefined) {
+            state.warTarget = data.warTarget;
+        }
+
         // Refresh UI rows
         refreshAllRows();
 
@@ -2834,6 +2842,24 @@ body.wb-chain-active {
 
             <hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:14px 0;">
 
+            ${isLeader() ? `
+            <label>War Target (Respect)</label>
+            <div style="font-size:11px;opacity:0.7;margin-bottom:8px;">
+                Set a custom respect target for terms/ranked wars. All faction members will see progress toward this goal.
+            </div>
+            <div style="display:flex;gap:6px;margin-bottom:14px;">
+                <input type="text" id="fo-input-war-target" value="${state.warTarget ? state.warTarget.value : ''}" placeholder="e.g. 10000" style="margin-bottom:0;flex:1;" inputmode="numeric">
+                <button class="wb-btn wb-btn-sm" id="fo-btn-set-war-target">Set</button>
+                <button class="wb-btn wb-btn-sm wb-btn-danger" id="fo-btn-clear-war-target" ${state.warTarget ? '' : 'disabled'}>Clear</button>
+            </div>
+            <div id="fo-war-target-result" style="font-size:11px;margin-bottom:10px;min-height:14px;"></div>
+            ` : (state.warTarget ? `
+            <div style="font-size:11px;margin-bottom:14px;">
+                <span style="opacity:0.6;">War Target:</span> <strong style="color:#74b9ff;">${parseInt(state.warTarget.value).toLocaleString()}</strong>
+                <span style="opacity:0.5;"> (set by ${escapeHtml(state.warTarget.setBy.name)})</span>
+            </div>
+            ` : '')}
+
             <label>Faction API Key</label>
             <div style="font-size:11px;opacity:0.7;margin-bottom:8px;">
                 Provide a Limited API key for server-side war status updates. This lets the server poll Torn directly instead of relying on page data.
@@ -2909,6 +2935,64 @@ body.wb-chain-active {
                 e.target.value = CONFIG.CHAIN_ALERT_THRESHOLD;
             }
         });
+
+        // War target — set/clear (leader only)
+        const warTargetSetBtn = document.getElementById('fo-btn-set-war-target');
+        const warTargetClearBtn = document.getElementById('fo-btn-clear-war-target');
+        if (warTargetSetBtn) {
+            warTargetSetBtn.addEventListener('click', async () => {
+                const resultEl = document.getElementById('fo-war-target-result');
+                const input = document.getElementById('fo-input-war-target');
+                const val = input.value.trim().replace(/,/g, '');
+                const num = parseInt(val, 10);
+                if (!val || isNaN(num) || num <= 0) {
+                    resultEl.textContent = 'Enter a valid positive number.';
+                    resultEl.style.color = 'var(--wb-call-red)';
+                    return;
+                }
+                resultEl.textContent = 'Saving...';
+                resultEl.style.color = 'var(--wb-idle-yellow)';
+                try {
+                    const resp = await postAction('/api/war-target', { warId: state.warId, target: num });
+                    if (resp && resp.ok) {
+                        state.warTarget = resp.warTarget;
+                        resultEl.textContent = 'Target set: ' + num.toLocaleString() + ' respect';
+                        resultEl.style.color = 'var(--wb-call-green)';
+                        if (warTargetClearBtn) warTargetClearBtn.disabled = false;
+                    } else {
+                        resultEl.textContent = (resp && resp.error) || 'Failed to set target';
+                        resultEl.style.color = 'var(--wb-call-red)';
+                    }
+                } catch (e) {
+                    resultEl.textContent = 'Error: ' + e.message;
+                    resultEl.style.color = 'var(--wb-call-red)';
+                }
+            });
+        }
+        if (warTargetClearBtn) {
+            warTargetClearBtn.addEventListener('click', async () => {
+                const resultEl = document.getElementById('fo-war-target-result');
+                resultEl.textContent = 'Clearing...';
+                resultEl.style.color = 'var(--wb-idle-yellow)';
+                try {
+                    const resp = await postAction('/api/war-target', { warId: state.warId, target: null });
+                    if (resp && resp.ok) {
+                        state.warTarget = null;
+                        const input = document.getElementById('fo-input-war-target');
+                        if (input) input.value = '';
+                        resultEl.textContent = 'Target cleared.';
+                        resultEl.style.color = 'var(--wb-call-green)';
+                        warTargetClearBtn.disabled = true;
+                    } else {
+                        resultEl.textContent = (resp && resp.error) || 'Failed to clear target';
+                        resultEl.style.color = 'var(--wb-call-red)';
+                    }
+                } catch (e) {
+                    resultEl.textContent = 'Error: ' + e.message;
+                    resultEl.style.color = 'var(--wb-call-red)';
+                }
+            });
+        }
 
         // Faction API key — check if one already exists
         (async () => {
@@ -4492,46 +4576,84 @@ body.wb-chain-active {
             }
 
             function updateWarTimer() {
+                // Try to read DOM war data
                 const timerSpans = document.querySelectorAll('.timer___fSGg8 span');
                 const targetBox = document.querySelector('.target___NBVXq');
-                if (!timerSpans || timerSpans.length < 8 || !targetBox) {
+                let lead = null, currentTarget = null, elapsedStr = null, totalElapsedHours = null;
+
+                if (timerSpans && timerSpans.length >= 8) {
+                    const timeParts = Array.from(timerSpans).map(s => s.textContent).join('').split(':');
+                    if (timeParts.length >= 3) {
+                        const days = parseInt(timeParts[0]) || 0;
+                        const hours = parseInt(timeParts[1]) || 0;
+                        const minutes = parseInt(timeParts[2]) || 0;
+                        totalElapsedHours = (days * 24) + hours + (minutes / 60);
+                        elapsedStr = days + 'd ' + hours + 'h ' + minutes + 'm';
+                    }
+                }
+                if (targetBox) {
+                    let match;
+                    try { match = targetBox.innerText.match(/(\d[\d,]*)\s*\/\s*(\d[\d,]*)/); } catch(e) { match = null; }
+                    if (match) {
+                        lead = parseInt(match[1].replace(/,/g, ''));
+                        currentTarget = parseInt(match[2].replace(/,/g, ''));
+                    }
+                }
+
+                // ── Custom war target mode ──
+                if (state.warTarget && state.warTarget.value) {
+                    const goal = state.warTarget.value;
+                    if (lead !== null) {
+                        const remaining = goal - lead;
+                        const pct = Math.min(100, Math.round((lead / goal) * 100));
+                        if (remaining <= 0) {
+                            warTimerEl.className = 'fo-war-timer safe';
+                            warTimerValue.textContent = '\u2713 ' + pct + '%';
+                            if (warTimerDetail) warTimerDetail.innerHTML =
+                                warTimerDetailRow('Status', 'Target reached!')
+                                + warTimerDetailRow('Goal', goal.toLocaleString())
+                                + warTimerDetailRow('Current', lead.toLocaleString())
+                                + warTimerDetailRow('Progress', pct + '%')
+                                + (elapsedStr ? warTimerDetailRow('Elapsed', elapsedStr) : '');
+                        } else {
+                            const urgency = pct >= 80 ? 'safe' : pct >= 50 ? 'warning' : 'danger';
+                            warTimerEl.className = 'fo-war-timer ' + urgency;
+                            warTimerValue.textContent = pct + '%';
+                            if (warTimerDetail) warTimerDetail.innerHTML =
+                                warTimerDetailRow('Goal', goal.toLocaleString())
+                                + warTimerDetailRow('Current', lead.toLocaleString())
+                                + warTimerDetailRow('Remaining', remaining.toLocaleString())
+                                + warTimerDetailRow('Progress', pct + '%')
+                                + (elapsedStr ? warTimerDetailRow('Elapsed', elapsedStr) : '')
+                                + (currentTarget !== null ? warTimerDetailRow('War target (DOM)', currentTarget.toLocaleString()) : '');
+                        }
+                    } else {
+                        warTimerEl.className = 'fo-war-timer waiting';
+                        warTimerValue.textContent = 'Goal: ' + goal.toLocaleString();
+                        if (warTimerDetail) warTimerDetail.innerHTML =
+                            warTimerDetailRow('Goal', goal.toLocaleString())
+                            + warTimerDetailRow('Status', 'Waiting for war data');
+                    }
+                    return;
+                }
+
+                // ── Ranked war drop-timer mode (no custom target) ──
+                if (!timerSpans || timerSpans.length < 8 || !targetBox || lead === null) {
                     warTimerEl.className = 'fo-war-timer waiting';
                     warTimerValue.textContent = 'N/A';
                     if (warTimerDetail) warTimerDetail.innerHTML = warTimerDetailRow('Status', 'War data not found on page');
                     return;
                 }
-                const timeParts = Array.from(timerSpans).map(s => s.textContent).join('').split(':');
-                if (timeParts.length < 3) {
-                    warTimerEl.className = 'fo-war-timer waiting';
-                    warTimerValue.textContent = 'N/A';
-                    if (warTimerDetail) warTimerDetail.innerHTML = warTimerDetailRow('Status', 'Cannot parse timer');
-                    return;
-                }
-                const days = parseInt(timeParts[0]) || 0;
-                const hours = parseInt(timeParts[1]) || 0;
-                const minutes = parseInt(timeParts[2]) || 0;
-                const totalElapsedHours = (days * 24) + hours + (minutes / 60);
-                const elapsedStr = days + 'd ' + hours + 'h ' + minutes + 'm';
-                if (totalElapsedHours <= 24) {
+                if (totalElapsedHours === null || totalElapsedHours <= 24) {
                     warTimerEl.className = 'fo-war-timer waiting';
                     warTimerValue.textContent = 'Pre-24h';
                     if (warTimerDetail) warTimerDetail.innerHTML =
                         warTimerDetailRow('Status', 'Waiting for 24h mark')
-                        + warTimerDetailRow('Elapsed', elapsedStr)
+                        + warTimerDetailRow('Elapsed', elapsedStr || '--')
                         + warTimerDetailRow('Drop starts', 'After 24h elapsed');
                     return;
                 }
                 const dropHours = Math.floor(totalElapsedHours - 24);
-                let match;
-                try { match = targetBox.innerText.match(/(\d[\d,]*)\s*\/\s*(\d[\d,]*)/); } catch(e) { match = null; }
-                if (!match) {
-                    warTimerEl.className = 'fo-war-timer waiting';
-                    warTimerValue.textContent = 'N/A';
-                    if (warTimerDetail) warTimerDetail.innerHTML = warTimerDetailRow('Status', 'Unable to parse target');
-                    return;
-                }
-                const lead = parseInt(match[1].replace(/,/g, ''));
-                const currentTarget = parseInt(match[2].replace(/,/g, ''));
                 const originalTarget = currentTarget / (1 - (dropHours * 0.01));
                 const DROP_PER_HOUR = originalTarget * 0.01;
                 const gap = currentTarget - lead;
