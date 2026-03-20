@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.15.7
+// @version      3.16.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.16.0  - Multi-hit deal calls: long-press/right-click Call button for 15-min reserved deal call
 // v3.15.7  - Fix race condition: own-faction members no longer leak into overlay before enemy data loads
 // v3.15.6  - Fix web push notifications showing target ID: send targetName in call API request
 // v3.15.5  - Add 'Test PDA Notification' button in settings (debug/verify scheduleNotification)
@@ -168,7 +169,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.15.7',
+        VERSION: '3.16.0',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -177,6 +178,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
         CHAIN_ALERT_THRESHOLD: GM_getValue('factionops_chain_alert_threshold', 30),
         PDA_NOTIFICATIONS: GM_getValue('factionops_pda_notif', IS_PDA),
         CALL_TIMEOUT: 5 * 60 * 1000,       // 5 minute call expiry
+        DEAL_TIMEOUT: 15 * 60 * 1000,      // 15 minute deal call expiry
         REFRESH_INTERVAL: 30 * 1000,        // 30 second status refresh
         IS_PDA: IS_PDA,
     };
@@ -1574,6 +1576,29 @@ body.wb-chain-active {
     border-color: rgba(225,112,85,0.5);
 }
 
+/* Deal call styling */
+.fo-called-tag.fo-called-deal {
+    border-color: rgba(253,203,110,0.4);
+    background: rgba(253,203,110,0.1);
+}
+.fo-called-tag.fo-called-deal.fo-called-mine {
+    border-color: rgba(253,203,110,0.4);
+    background: rgba(253,203,110,0.1);
+    color: #fdcb6e;
+}
+.fo-called-tag.fo-called-deal.fo-called-other {
+    border-color: rgba(253,203,110,0.4);
+    background: rgba(253,203,110,0.1);
+    color: #fdcb6e;
+}
+.fo-deal-badge {
+    font-size: 9px; font-weight: 700;
+    padding: 1px 5px; border-radius: 8px;
+    background: rgba(253,203,110,0.2);
+    color: #fdcb6e;
+    white-space: nowrap; flex-shrink: 0;
+}
+
 /* Attack button */
 .fo-attack-btn {
     font-family: 'JetBrains Mono', monospace;
@@ -2479,10 +2504,11 @@ body.wb-chain-active {
                         const targetName = state.statuses[tid]?.name
                             || (data.enemyStatuses && data.enemyStatuses[tid]?.name)
                             || `Target #${tid}`;
-                        showCallToast(tid, `${callData.calledBy.name} called ${targetName}`);
+                        const dealLabel = callData.isDeal ? ' \uD83D\uDD12 Deal' : '';
+                        showCallToast(tid, `${callData.calledBy.name} called ${targetName}${dealLabel}`);
                         firePdaNotification('target_called',
-                            '\uD83C\uDFAF Target Called',
-                            `${callData.calledBy.name} called ${targetName}`,
+                            callData.isDeal ? '\uD83D\uDD12 Deal Call' : '\uD83C\uDFAF Target Called',
+                            `${callData.calledBy.name} called ${targetName}${dealLabel}`,
                             `https://www.torn.com/loader.php?sid=attack&user2ID=${tid}`);
                     }
                     broadcastStateChange({ type: 'call_update', targetId: tid });
@@ -2780,7 +2806,7 @@ body.wb-chain-active {
     // SECTION 8: ACTION HELPERS (HTTP POST)
     // =========================================================================
 
-    function emitCallTarget(targetId) {
+    function emitCallTarget(targetId, isDeal) {
         if (!state.connected) return;
         const warId = deriveWarId();
         if (!warId) return;
@@ -2789,11 +2815,14 @@ body.wb-chain-active {
         state.calls[tid] = {
             calledBy: { id: state.myPlayerId, name: state.myPlayerName || 'You' },
             calledAt: Date.now(),
+            isDeal: !!isDeal,
         };
         updateTargetRow(tid);
         if (CONFIG.AUTO_SORT) debouncedSort();
         const targetName = state.statuses[tid]?.name || null;
-        postAction('/api/call', { warId, targetId: tid, targetName })
+        const payload = { warId, targetId: tid, targetName };
+        if (isDeal) payload.isDeal = true;
+        postAction('/api/call', payload)
             .catch(e => {
                 warn('Call failed:', e.message);
                 delete state.calls[tid];
@@ -4156,7 +4185,7 @@ body.wb-chain-active {
             // Called by us
             const btn = document.createElement('span');
             btn.className = 'wb-call-btn wb-called-self';
-            btn.textContent = 'CALLED';
+            btn.textContent = callData.isDeal ? '\uD83D\uDD12 DEAL' : 'CALLED';
             container.appendChild(btn);
 
             const uncallBtn = document.createElement('button');
@@ -4173,8 +4202,9 @@ body.wb-chain-active {
             // Called by someone else
             const badge = document.createElement('span');
             badge.className = 'wb-call-btn wb-called-other';
-            badge.textContent = callData.calledBy ? callData.calledBy.name : 'Called';
-            badge.title = `Called by ${callData.calledBy ? callData.calledBy.name : 'unknown'}`;
+            const nameText = callData.calledBy ? callData.calledBy.name : 'Called';
+            badge.textContent = callData.isDeal ? `\uD83D\uDD12 ${nameText}` : nameText;
+            badge.title = `${callData.isDeal ? 'Deal call' : 'Called'} by ${callData.calledBy ? callData.calledBy.name : 'unknown'}`;
             container.appendChild(badge);
         }
     }
@@ -5447,11 +5477,25 @@ body.wb-chain-active {
         if (callData) {
             const tag = document.createElement('span');
             const isMine = callData.calledBy && String(callData.calledBy.id) === state.myPlayerId;
-            tag.className = 'fo-called-tag ' + (isMine ? 'fo-called-mine' : 'fo-called-other');
+            tag.className = 'fo-called-tag ' + (isMine ? 'fo-called-mine' : 'fo-called-other')
+                + (callData.isDeal ? ' fo-called-deal' : '');
             const callerName = document.createElement('span');
             callerName.className = 'fo-caller-name';
-            callerName.textContent = isMine ? 'Mine' : (callData.calledBy ? callData.calledBy.name : 'Someone');
+            if (callData.isDeal) {
+                callerName.textContent = (isMine ? 'Mine' : (callData.calledBy ? callData.calledBy.name : 'Someone'));
+            } else {
+                callerName.textContent = isMine ? 'Mine' : (callData.calledBy ? callData.calledBy.name : 'Someone');
+            }
             tag.appendChild(callerName);
+
+            // Deal badge
+            if (callData.isDeal) {
+                const dealBadge = document.createElement('span');
+                dealBadge.className = 'fo-deal-badge';
+                dealBadge.textContent = '\uD83D\uDD12 Deal';
+                dealBadge.title = 'Multi-hit deal \u2014 15 min timeout';
+                tag.appendChild(dealBadge);
+            }
             cell.appendChild(tag);
 
             // Only the caller can uncall their own target
@@ -5470,10 +5514,59 @@ body.wb-chain-active {
             const btn = document.createElement('button');
             btn.className = 'fo-call-btn';
             btn.textContent = 'Call';
+
+            // Long-press / right-click = deal call
+            let longPressTimer = null;
+            let longPressTriggered = false;
+
+            btn.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return; // only left button
+                longPressTriggered = false;
+                longPressTimer = setTimeout(() => {
+                    longPressTriggered = true;
+                    emitCallTarget(targetId, true);
+                    showToast('\uD83D\uDD12 Deal call placed (15 min)', 'info');
+                }, 600);
+            });
+            btn.addEventListener('mouseup', () => {
+                if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+            });
+            btn.addEventListener('mouseleave', () => {
+                if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+            });
+
+            // Touch support for PDA
+            btn.addEventListener('touchstart', (e) => {
+                longPressTriggered = false;
+                longPressTimer = setTimeout(() => {
+                    longPressTriggered = true;
+                    emitCallTarget(targetId, true);
+                    showToast('\uD83D\uDD12 Deal call placed (15 min)', 'info');
+                }, 600);
+            }, { passive: true });
+            btn.addEventListener('touchend', (e) => {
+                if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+                if (longPressTriggered) { e.preventDefault(); return; }
+            });
+            btn.addEventListener('touchmove', () => {
+                if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+            }, { passive: true });
+
+            // Normal click = regular call
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                emitCallTarget(targetId);
+                if (longPressTriggered) return; // already handled by long-press
+                emitCallTarget(targetId, false);
             });
+
+            // Right-click = deal call (desktop)
+            btn.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                emitCallTarget(targetId, true);
+                showToast('\uD83D\uDD12 Deal call placed (15 min)', 'info');
+            });
+
             cell.appendChild(btn);
         }
     }
@@ -6159,7 +6252,8 @@ body.wb-chain-active {
             const now = Date.now();
             let pruned = 0;
             for (const [targetId, callData] of Object.entries(state.calls)) {
-                if (callData.calledAt && (now - callData.calledAt) > CONFIG.CALL_TIMEOUT) {
+                const timeout = callData.isDeal ? CONFIG.DEAL_TIMEOUT : CONFIG.CALL_TIMEOUT;
+                if (callData.calledAt && (now - callData.calledAt) > timeout) {
                     delete state.calls[targetId];
                     updateTargetRow(targetId);
                     pruned++;
@@ -6269,7 +6363,8 @@ body.wb-chain-active {
         for (const [targetId, callData] of Object.entries(state.calls)) {
             if (!callData.calledAt) continue;
             const age = now - callData.calledAt;
-            const ratio = Math.min(age / CONFIG.CALL_TIMEOUT, 1);
+            const timeout = callData.isDeal ? CONFIG.DEAL_TIMEOUT : CONFIG.CALL_TIMEOUT;
+            const ratio = Math.min(age / timeout, 1);
 
             const el = document.getElementById(`wb-call-${targetId}`);
             if (el) {

@@ -13,6 +13,7 @@ import * as push from "./push-notifications.js";
 const router = Router();
 
 const CALL_EXPIRE_MS = parseInt(process.env.CALL_EXPIRE_MS, 10) || 5 * 60 * 1000; // 5 minutes
+const DEAL_EXPIRE_MS = parseInt(process.env.DEAL_EXPIRE_MS, 10) || 15 * 60 * 1000; // 15 minutes (multi-hit deal)
 const ALLOWED_FACTION_ID = "42055";
 const SOFT_UNCALL_MS = 30_000; // 30 seconds after hospital detection
 const REFRESH_COOLDOWN_MS = 30_000; // 30 seconds between refreshes per war
@@ -377,7 +378,7 @@ router.get("/api/poll", (req, res, next) => {
 
 router.post("/api/call", requireAuth, (req, res) => {
   const { playerId, playerName } = req.user;
-  const { action, targetId, targetName, warId } = req.body ?? {};
+  const { action, targetId, targetName, warId, isDeal } = req.body ?? {};
 
   if (!targetId || !warId) {
     return res.status(400).json({ error: "targetId and warId are required" });
@@ -414,22 +415,24 @@ router.post("/api/call", requireAuth, (req, res) => {
   const callData = {
     calledBy: { id: playerId, name: playerName },
     timestamp: Date.now(),
+    isDeal: !!isDeal,
   };
   war.calls[targetId] = callData;
   store.saveState();
 
-  // Set auto-expire timer
+  // Set auto-expire timer (deal calls get a longer timeout)
   const timerKey = `${warId}:${targetId}`;
+  const expireMs = isDeal ? DEAL_EXPIRE_MS : CALL_EXPIRE_MS;
   clearExistingTimer(timerKey);
   callTimers.set(
     timerKey,
     setTimeout(() => {
       uncallTarget(warId, targetId);
-    }, CALL_EXPIRE_MS),
+    }, expireMs),
   );
 
   broadcastWarUpdate(warId);
-  console.log(`[api] ${playerName} called target ${targetId} in war ${warId}`);
+  console.log(`[api] ${playerName} ${isDeal ? 'deal-called' : 'called'} target ${targetId} in war ${warId}`);
 
   // Push notification to war room (except the caller)
   const warPlayers = store.getOnlinePlayersForWar(warId);
@@ -666,8 +669,9 @@ router.post("/api/status", requireAuth, async (req, res) => {
       const st = statusData.status || "";
       const isHospital = st.toLowerCase().includes("hospital");
 
-      // If hospital, soft-uncall after delay
-      if (isHospital && war.calls[targetId]) {
+      // If hospital, soft-uncall after delay — but NOT for deal calls
+      // (deal calls reserve the target for multiple hits, so hospitalization is expected)
+      if (isHospital && war.calls[targetId] && !war.calls[targetId].isDeal) {
         const timerKey = `${warId}:${targetId}`;
         clearExistingTimer(timerKey);
         callTimers.set(
