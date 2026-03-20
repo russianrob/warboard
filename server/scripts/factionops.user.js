@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.15.6
+// @version      3.15.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.15.7  - Fix race condition: own-faction members no longer leak into overlay before enemy data loads
 // v3.15.6  - Fix web push notifications showing target ID: send targetName in call API request
 // v3.15.5  - Add 'Test PDA Notification' button in settings (debug/verify scheduleNotification)
 // v3.15.4  - Fix PDA notifications showing target ID instead of name; improved name lookup fallback
@@ -167,7 +168,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.11.0',
+        VERSION: '3.15.7',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -5832,21 +5833,28 @@ body.wb-chain-active {
         if (!data || data.error) return;
 
         // Faction member data (may contain member statuses)
+        // GUARD: Only update members the server already told us are enemy targets.
+        // Without this, Torn's own-faction member list (loaded on factions.php?step=your)
+        // leaks into state.statuses before the server has sent enemyStatuses,
+        // causing the overlay to briefly show our own faction members.
         if (data.members) {
             const statusBatch = {};
             for (const [memberId, member] of Object.entries(data.members)) {
+                const mid = String(memberId);
+                // Skip members not already known as enemy targets
+                if (!state.statuses[mid]) continue;
                 const statusInfo = parseInterceptedMemberStatus(member);
                 if (statusInfo) {
                     // Preserve existing name/level if this payload doesn't provide them
-                    const existing = state.statuses[String(memberId)] || {};
+                    const existing = state.statuses[mid] || {};
                     if (!statusInfo.name && existing.name) statusInfo.name = existing.name;
                     if (statusInfo.level == null && existing.level != null) statusInfo.level = existing.level;
-                    statusBatch[String(memberId)] = statusInfo;
+                    statusBatch[mid] = statusInfo;
                 }
             }
 
             // Use monotonic merge so intercepted API can't bump timers up
-            mergeStatusesMonotonic(statusBatch);
+            if (Object.keys(statusBatch).length > 0) mergeStatusesMonotonic(statusBatch);
 
             // Update DOM for each affected target
             for (const targetId of Object.keys(statusBatch)) {
