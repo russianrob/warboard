@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.10
+// @version      3.14.11
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,7 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v3.14.10 - War timer click opens detail popup (mobile-friendly); no wiki link
+// v3.14.11 - War timer click opens detail popup (mobile-friendly); no wiki link
 // v3.14.6 - Move energy display to header-left (next to settings gear) to reduce header row wrapping on mobile
 // v3.14.5 - Integrate ranked war timer into overlay header (estimated time to target-drop win)
 // v3.12.0 - Real-time push: Socket.IO connection for instant call/priority/status updates; polling reduced to 5s fallback
@@ -4607,14 +4607,46 @@ body.wb-chain-active {
                         const remaining = goal - lead;
                         const pct = Math.min(100, Math.round((lead / goal) * 100));
                         if (remaining <= 0) {
-                            warTimerEl.className = 'fo-war-timer safe';
-                            warTimerValue.textContent = '\u2713 ' + pct + '%';
-                            if (warTimerDetail) warTimerDetail.innerHTML =
-                                warTimerDetailRow('Status', 'Target reached!')
-                                + warTimerDetailRow('Goal', goal.toLocaleString())
-                                + warTimerDetailRow('Current', lead.toLocaleString())
-                                + warTimerDetailRow('Progress', pct + '%')
-                                + (elapsedStr ? warTimerDetailRow('Elapsed', elapsedStr) : '');
+                            // Goal reached — switch to war-end countdown
+                            if (totalElapsedHours !== null && totalElapsedHours > 24 && currentTarget !== null) {
+                                const dropHrs = Math.floor(totalElapsedHours - 24);
+                                const origTarget = currentTarget / (1 - (dropHrs * 0.01));
+                                const dropPerHr = origTarget * 0.01;
+                                const gap = currentTarget - lead;
+                                const hrsLeft = gap / dropPerHr;
+                                if (hrsLeft <= 0) {
+                                    warTimerEl.className = 'fo-war-timer safe';
+                                    warTimerValue.textContent = '\u2713 WON';
+                                    if (warTimerDetail) warTimerDetail.innerHTML =
+                                        warTimerDetailRow('Status', 'War won!')
+                                        + warTimerDetailRow('Goal', goal.toLocaleString() + ' \u2713')
+                                        + warTimerDetailRow('Lead', lead.toLocaleString())
+                                        + warTimerDetailRow('War target', currentTarget.toLocaleString())
+                                        + warTimerDetailRow('Elapsed', elapsedStr);
+                                } else {
+                                    const tMin = Math.floor(hrsLeft * 60);
+                                    const h = Math.floor(tMin / 60).toString().padStart(2, '0');
+                                    const m = (tMin % 60).toString().padStart(2, '0');
+                                    const urg = hrsLeft <= 2 ? 'danger' : hrsLeft <= 6 ? 'warning' : 'safe';
+                                    warTimerEl.className = 'fo-war-timer ' + urg;
+                                    warTimerValue.textContent = h + ':' + m;
+                                    if (warTimerDetail) warTimerDetail.innerHTML =
+                                        warTimerDetailRow('Goal', goal.toLocaleString() + ' \u2713')
+                                        + warTimerDetailRow('War ends in', h + ':' + m)
+                                        + warTimerDetailRow('Lead', lead.toLocaleString())
+                                        + warTimerDetailRow('War target', currentTarget.toLocaleString())
+                                        + warTimerDetailRow('Drop/hour', '~' + Math.round(dropPerHr).toLocaleString())
+                                        + warTimerDetailRow('Elapsed', elapsedStr);
+                                }
+                            } else {
+                                warTimerEl.className = 'fo-war-timer safe';
+                                warTimerValue.textContent = '\u2713 ' + pct + '%';
+                                if (warTimerDetail) warTimerDetail.innerHTML =
+                                    warTimerDetailRow('Status', 'Goal reached!')
+                                    + warTimerDetailRow('Goal', goal.toLocaleString())
+                                    + warTimerDetailRow('Current', lead.toLocaleString())
+                                    + (elapsedStr ? warTimerDetailRow('Elapsed', elapsedStr) : '');
+                            }
                         } else {
                             const urgency = pct >= 80 ? 'safe' : pct >= 50 ? 'warning' : 'danger';
                             warTimerEl.className = 'fo-war-timer ' + urgency;
