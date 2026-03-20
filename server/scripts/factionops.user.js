@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.12
+// @version      3.14.13
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.14.13 - PDA: enable Socket.IO WebSocket connection (was blocked), add transport diagnostics
 // v3.14.12 - War timer click opens detail popup (mobile-friendly); no wiki link
 // v3.14.6 - Move energy display to header-left (next to settings gear) to reduce header row wrapping on mobile
 // v3.14.5 - Integrate ranked war timer into overlay header (estimated time to target-drop win)
@@ -2469,11 +2470,9 @@ body.wb-chain-active {
         if (realtimeSocket) return; // already connected or connecting
         if (!state.jwtToken) return;
 
-        // PDA webview blocks cross-origin XHR/WebSocket — Socket.IO cannot connect
+        // PDA: attempt WebSocket connection instead of blocking entirely
         if (IS_PDA) {
-            log('PDA detected — realtime not supported, using polling');
-            updateRtBadge(false);
-            return;
+            log('PDA detected — attempting WebSocket connection to tornwar.com');
         }
 
         // Debug: log all possible io locations
@@ -2501,17 +2500,18 @@ body.wb-chain-active {
 
         realtimeSocket = ioFn(serverUrl, {
             auth: { token: state.jwtToken },
-            transports: IS_PDA ? ['polling'] : ['websocket', 'polling'],
+            transports: ['websocket', 'polling'],
             withCredentials: false,
             reconnection: true,
-            reconnectionAttempts: IS_PDA ? 5 : Infinity,
+            reconnectionAttempts: Infinity,
             reconnectionDelay: 2000,
             reconnectionDelayMax: 30000,
-            timeout: IS_PDA ? 20000 : 10000,
+            timeout: 10000,
         });
 
         realtimeSocket.on('connect', () => {
-            log('Socket.IO connected:', realtimeSocket.id);
+            log('Socket.IO connected:', realtimeSocket.id, 'transport:', realtimeSocket.io?.engine?.transport?.name);
+            if (IS_PDA) log('[PDA-RT] Connected via', realtimeSocket.io?.engine?.transport?.name);
             updateRtBadge(true);
 
             // Join the war room
@@ -2542,6 +2542,12 @@ body.wb-chain-active {
 
         realtimeSocket.on('connect_error', (err) => {
             warn('Socket.IO connection error:', err.message);
+            if (IS_PDA) warn('[PDA-RT] Connect error:', err.message, '| transport:', realtimeSocket.io?.engine?.transport?.name);
+        });
+
+        // Log transport upgrade (polling → websocket)
+        realtimeSocket.io?.on('reconnect_attempt', () => {
+            log('Socket.IO reconnect attempt, transport:', realtimeSocket.io?.engine?.transport?.name);
         });
     }
 
