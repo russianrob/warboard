@@ -45,6 +45,7 @@ export const NOTIFICATION_TYPES = {
   full_energy:     { label: "Full Energy",           description: "When your energy bar is full",                      default: true  },
   full_nerve:      { label: "Full Nerve",            description: "When your nerve bar is full",                       default: true  },
   drug_cooldown:   { label: "Drug Cooldown Done",    description: "When your drug cooldown expires",                   default: true  },
+  war_target:      { label: "War Target Reached",    description: "When faction hits the custom war target",           default: true  },
 };
 
 // ── Subscription Storage ────────────────────────────────────────────────
@@ -435,4 +436,23 @@ export async function notifyDrugCooldown(playerId) {
     icon: "/icon-192.png",
     data: { type: "drug-cooldown" },
   }, "drug_cooldown");
+}
+
+/**
+ * Notify all war members that the custom war target has been reached.
+ */
+export async function notifyWarTargetReached(warPlayers, warId, targetValue, currentLead) {
+  const playerIds = warPlayers.map((p) => p.playerId || p.id);
+  await sendToPlayers(
+    playerIds.filter((id) => isSubscribed(id)),
+    {
+      title: "🎯 War Target Reached!",
+      body: `Faction hit ${currentLead.toLocaleString()} / ${targetValue.toLocaleString()} respect — hold the line!`,
+      tag: "war-target-reached",
+      icon: "/icon-192.png",
+      data: { type: "war-target", warId },
+    },
+    "war_target",
+    { urgency: "high", TTL: 300 },
+  );
 }

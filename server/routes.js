@@ -554,6 +554,42 @@ router.post("/api/war-target", requireAuth, (req, res) => {
   return res.json({ ok: true, warTarget: war.warTarget });
 });
 
+// ── POST /api/war-target-reached ──────────────────────────────────────────
+// Trigger push notification when custom war target is reached. Fires once.
+
+router.post("/api/war-target-reached", requireAuth, (req, res) => {
+  const { warId, lead } = req.body ?? {};
+
+  if (!warId) {
+    return res.status(400).json({ error: "warId is required" });
+  }
+
+  const war = requireWarMember(req, res, warId);
+  if (!war) {
+    return war === null && !res.headersSent
+      ? res.status(404).json({ error: "War not found" })
+      : undefined;
+  }
+
+  if (!war.warTarget) {
+    return res.status(400).json({ error: "No war target set" });
+  }
+
+  // Only fire once per target value
+  if (war.warTarget.notifiedAt) {
+    return res.json({ ok: true, alreadyNotified: true });
+  }
+
+  war.warTarget.notifiedAt = Date.now();
+  store.saveState();
+
+  const warPlayers = store.getOnlinePlayersForWar(warId);
+  push.notifyWarTargetReached(warPlayers, warId, war.warTarget.value, lead || war.warTarget.value);
+
+  console.log(`[api] War target reached notification sent for war ${warId} (target: ${war.warTarget.value})`);
+  return res.json({ ok: true });
+});
+
 // ── POST /api/faction-key ─────────────────────────────────────────────────
 // Save a faction-dedicated API key for server-side polling.
 

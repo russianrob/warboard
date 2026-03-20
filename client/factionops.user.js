@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.11
+// @version      3.14.12
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,7 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v3.14.11 - War timer click opens detail popup (mobile-friendly); no wiki link
+// v3.14.12 - War timer click opens detail popup (mobile-friendly); no wiki link
 // v3.14.6 - Move energy display to header-left (next to settings gear) to reduce header row wrapping on mobile
 // v3.14.5 - Integrate ranked war timer into overlay header (estimated time to target-drop win)
 // v3.12.0 - Real-time push: Socket.IO connection for instant call/priority/status updates; polling reduced to 5s fallback
@@ -4554,6 +4554,7 @@ body.wb-chain-active {
         if (heatmapFab) heatmapFab.style.display = 'none';
 
         // ── Ranked War Timer ───────────────────────────────────────────
+        let warTargetNotifiedThisSession = false; // prevent duplicate calls within a session
         const warTimerEl = document.getElementById('fo-war-timer');
         const warTimerValue = document.getElementById('fo-war-timer-value');
         const warTimerDetail = document.getElementById('fo-war-timer-detail');
@@ -4607,6 +4608,11 @@ body.wb-chain-active {
                         const remaining = goal - lead;
                         const pct = Math.min(100, Math.round((lead / goal) * 100));
                         if (remaining <= 0) {
+                            // Fire push notification once
+                            if (!warTargetNotifiedThisSession) {
+                                warTargetNotifiedThisSession = true;
+                                postAction('/api/war-target-reached', { warId: deriveWarId(), lead: lead }).catch(() => {});
+                            }
                             // Goal reached — switch to war-end countdown
                             if (totalElapsedHours !== null && totalElapsedHours > 24 && currentTarget !== null) {
                                 const dropHrs = Math.floor(totalElapsedHours - 24);
