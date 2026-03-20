@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.15
+// @version      3.14.16
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.14.16 - PDA: revert Socket.IO attempt (all transports blocked by InAppWebView); reduce PDA poll to 3.5s
 // v3.14.15 - PDA: force polling transport (WebSocket confirmed blocked by InAppWebView)
 // v3.14.14 - PDA: show toast diagnostics for Socket.IO connection (visible on screen)
 // v3.14.13 - PDA: enable Socket.IO WebSocket connection (was blocked), add transport diagnostics
@@ -2144,7 +2145,7 @@ body.wb-chain-active {
     // ── Polling-based server communication (replaces Socket.IO) ──────────
 
     // Polling is now a fallback — Socket.IO push handles instant updates
-    const POLL_INTERVAL_MS = IS_PDA ? 8000 : 5000;
+    const POLL_INTERVAL_MS = IS_PDA ? 3500 : 5000;
 
     let pollTimer = null;
     let pollErrorCount = 0;
@@ -2472,18 +2473,15 @@ body.wb-chain-active {
         if (realtimeSocket) return; // already connected or connecting
         if (!state.jwtToken) return;
 
-        // PDA: WebSocket is blocked by Flutter InAppWebView (times out).
-        // Use Socket.IO polling transport instead — still real-time via long-polling.
+        // PDA: Socket.IO cannot work — both WebSocket and XHR polling are
+        // blocked by Flutter InAppWebView's security sandbox. PDA users
+        // get near-real-time updates via HTTP polling (3.5s) through the
+        // PDA_httpGet/PDA_httpPost bridge instead.
         if (IS_PDA) {
-            log('PDA detected — using Socket.IO polling transport (WebSocket blocked by WebView)');
+            log('PDA detected — skipping Socket.IO (blocked by WebView). Using HTTP polling.');
+            updateRtBadge(false);
+            return;
         }
-
-        // Debug: log all possible io locations
-        log('RT debug: typeof io =', typeof io);
-        try { log('RT debug: typeof window.io =', typeof window.io); } catch(e) { log('RT debug: window.io error', e.message); }
-        try { log('RT debug: typeof globalThis.io =', typeof globalThis.io); } catch(e) { log('RT debug: globalThis.io error', e.message); }
-        try { log('RT debug: typeof self.io =', typeof self.io); } catch(e) { log('RT debug: self.io error', e.message); }
-        if (typeof io === 'object' && io) { log('RT debug: io keys =', Object.keys(io).join(',')); }
 
         const ioFn = (typeof io === 'function') ? io
             : (typeof io === 'object' && io !== null && typeof io.io === 'function') ? io.io
@@ -2492,30 +2490,26 @@ body.wb-chain-active {
             : (typeof self !== 'undefined' && typeof self.io === 'function') ? self.io
             : null;
         if (!ioFn) {
-            warn('Socket.IO not found anywhere');
+            warn('Socket.IO client not found');
             updateRtBadge(false);
             return;
         }
-        log('Socket.IO client located, connecting...');
+        log('Connecting Socket.IO to', CONFIG.SERVER_URL);
 
-        const serverUrl = CONFIG.SERVER_URL;
-        log('Connecting Socket.IO to', serverUrl);
-
-        realtimeSocket = ioFn(serverUrl, {
+        realtimeSocket = ioFn(CONFIG.SERVER_URL, {
             auth: { token: state.jwtToken },
-            transports: IS_PDA ? ['polling'] : ['websocket', 'polling'],
+            transports: ['websocket', 'polling'],
             withCredentials: false,
             reconnection: true,
             reconnectionAttempts: Infinity,
-            reconnectionDelay: IS_PDA ? 3000 : 2000,
+            reconnectionDelay: 2000,
             reconnectionDelayMax: 30000,
-            timeout: IS_PDA ? 15000 : 10000,
+            timeout: 10000,
         });
 
         realtimeSocket.on('connect', () => {
             const transport = realtimeSocket.io?.engine?.transport?.name || 'unknown';
             log('Socket.IO connected:', realtimeSocket.id, 'transport:', transport);
-            if (IS_PDA) showToast(`RT connected via ${transport}`, 'success');
             updateRtBadge(true);
 
             // Join the war room
@@ -2545,14 +2539,11 @@ body.wb-chain-active {
         });
 
         realtimeSocket.on('connect_error', (err) => {
-            const transport = realtimeSocket.io?.engine?.transport?.name || 'unknown';
             warn('Socket.IO connection error:', err.message);
-            if (IS_PDA) showToast(`RT error: ${err.message} (${transport})`, 'error');
         });
 
-        // Log transport upgrade (polling → websocket)
         realtimeSocket.io?.on('reconnect_attempt', () => {
-            log('Socket.IO reconnect attempt, transport:', realtimeSocket.io?.engine?.transport?.name);
+            log('Socket.IO reconnect attempt');
         });
     }
 
