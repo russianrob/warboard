@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.5
+// @version      3.14.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.14.6 - Move energy display to header-left (next to settings gear) to reduce header row wrapping on mobile
 // v3.14.5 - Integrate ranked war timer into overlay header (estimated time to target-drop win)
 // v3.12.0 - Real-time push: Socket.IO connection for instant call/priority/status updates; polling reduced to 5s fallback
 // v3.11.6 - Fix: auto-retry on network error for call/uncall/priority actions (1s delay, 10s timeout)
@@ -4356,6 +4357,11 @@ body.wb-chain-active {
                     ${state.myPlayerId === '137558' ? '<span class="fo-rt-badge" id="fo-rt-badge"></span>' : ''}
                     <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
+                    <div class="fo-energy-display" id="fo-energy-display" title="Energy">
+                        <span class="fo-energy-label">E</span>
+                        <span class="fo-energy-value" id="fo-energy-value">--/--</span>
+                        <span class="fo-energy-timer" id="fo-energy-timer"></span>
+                    </div>
                 </div>
                 <div class="fo-header-center">
                     <span class="fo-war-badge" id="fo-war-type">War</span>
@@ -4378,11 +4384,6 @@ body.wb-chain-active {
                         <span class="fo-war-timer-value" id="fo-war-timer-value">--:--</span>
                     </div>
                     <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.ourFactionOnline ? state.ourFactionOnline.online : state.onlinePlayers.length} us</span> · <span id="fo-enemy-online-count">0 enemy</span></div>
-                    <div class="fo-energy-display" id="fo-energy-display" title="Energy">
-                        <span class="fo-energy-label">E</span>
-                        <span class="fo-energy-value" id="fo-energy-value">--/--</span>
-                        <span class="fo-energy-timer" id="fo-energy-timer"></span>
-                    </div>
                 </div>
             </div>
             <div class="fo-next-up-bar" id="fo-next-up"></div>
