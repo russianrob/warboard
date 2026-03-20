@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.14.7
+// @version      3.14.8
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,7 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v3.14.7 - War timer click opens detail popup (mobile-friendly); no wiki link
+// v3.14.8 - War timer click opens detail popup (mobile-friendly); no wiki link
 // v3.14.6 - Move energy display to header-left (next to settings gear) to reduce header row wrapping on mobile
 // v3.14.5 - Integrate ranked war timer into overlay header (estimated time to target-drop win)
 // v3.12.0 - Real-time push: Socket.IO connection for instant call/priority/status updates; polling reduced to 5s fallback
@@ -1141,7 +1141,7 @@ body.wb-chain-active {
 .fo-war-timer.waiting .fo-war-timer-value { color: #e17055; font-size: 10px; }
 .fo-war-timer { position: relative; }
 .fo-war-timer-detail {
-    display: none; position: absolute; top: calc(100% + 6px); right: 0;
+    display: none; position: absolute; top: calc(100% + 6px); left: 0;
     background: var(--wb-bg-secondary, #1e272e); border: 1px solid rgba(108,92,231,0.4);
     border-radius: 8px; padding: 10px 14px; min-width: 200px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 9999;
