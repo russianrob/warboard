@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.15.5
+// @version      3.15.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.15.6  - Fix web push notifications showing target ID: send targetName in call API request
 // v3.15.5  - Add 'Test PDA Notification' button in settings (debug/verify scheduleNotification)
 // v3.15.4  - Fix PDA notifications showing target ID instead of name; improved name lookup fallback
 // v3.15.3  - Adaptive PDA polling: 2s during active war, 5s when idle (saves battery + server load)
@@ -2790,7 +2791,8 @@ body.wb-chain-active {
         };
         updateTargetRow(tid);
         if (CONFIG.AUTO_SORT) debouncedSort();
-        postAction('/api/call', { warId, targetId: tid })
+        const targetName = state.statuses[tid]?.name || null;
+        postAction('/api/call', { warId, targetId: tid, targetName })
             .catch(e => {
                 warn('Call failed:', e.message);
                 delete state.calls[tid];
