@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.16.2
+// @version      3.16.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2991,7 +2991,7 @@ body.wb-chain-active {
             </div>
             <button class="wb-btn wb-btn-sm" id="fo-btn-test-pda-notif" style="margin-bottom:14px;font-size:11px;">Test PDA Notification</button>
             <div id="fo-pda-notif-result" style="font-size:11px;margin-bottom:10px;min-height:14px;"></div>
-            <button class="wb-btn wb-btn-sm" id="fo-btn-test-sse" style="margin-bottom:14px;font-size:11px;">Test SSE (EventSource)</button>
+            <button class="wb-btn wb-btn-sm" id="fo-btn-test-sse" style="margin-bottom:14px;font-size:11px;">Test SSE (Fetch Stream)</button>
             <div id="fo-sse-result" style="font-size:11px;margin-bottom:10px;min-height:14px;white-space:pre-wrap;max-height:120px;overflow-y:auto;"></div>
             ` : ''}
 
@@ -3130,61 +3130,94 @@ body.wb-chain-active {
             });
         }
 
-        // SSE test button
+        // SSE test button — uses fetch + ReadableStream (works cross-origin in PDA)
         const testSseBtn = document.getElementById('fo-btn-test-sse');
         if (testSseBtn) {
-            testSseBtn.addEventListener('click', () => {
+            testSseBtn.addEventListener('click', async () => {
                 const resultEl = document.getElementById('fo-sse-result');
                 if (!resultEl) return;
 
-                // Check if EventSource exists at all
-                if (typeof EventSource === 'undefined') {
-                    resultEl.innerHTML = '<span style="color:#e17055;">\u2717 EventSource not supported in this environment</span>';
-                    return;
-                }
-
-                resultEl.innerHTML = '<span style="color:#74b9ff;">Connecting to SSE test endpoint...</span>';
+                resultEl.innerHTML = '<span style="color:#74b9ff;">Connecting via fetch stream...</span>';
                 let received = 0;
+                let aborted = false;
+                const controller = new AbortController();
+
+                // Safety timeout — abort after 35s
+                const timer = setTimeout(() => {
+                    aborted = true;
+                    controller.abort();
+                    resultEl.innerHTML += '<span style="color:#fdcb6e;">Timed out after 35s (' + received + ' events received)</span>\n';
+                }, 35000);
 
                 try {
-                    const es = new EventSource(CONFIG.SERVER_URL + '/api/sse-test');
+                    const resp = await fetch(CONFIG.SERVER_URL + '/api/sse-test', {
+                        signal: controller.signal,
+                        headers: { 'Accept': 'text/event-stream' }
+                    });
 
-                    es.onopen = () => {
-                        resultEl.innerHTML = '<span style="color:#00b894;">\u2713 Connection opened! Waiting for events...</span>\n';
-                    };
+                    if (!resp.ok) {
+                        clearTimeout(timer);
+                        resultEl.innerHTML = '<span style="color:#e17055;">\u2717 HTTP ' + resp.status + '</span>';
+                        return;
+                    }
 
-                    es.onmessage = (evt) => {
-                        received++;
-                        const data = JSON.parse(evt.data);
-                        const line = `#${received}: ${data.event} (${new Date(data.ts).toLocaleTimeString()})`;
-                        resultEl.innerHTML += '<span style="color:#dfe6e9;">' + line + '</span>\n';
-                        resultEl.scrollTop = resultEl.scrollHeight;
+                    // Try streaming via ReadableStream
+                    if (resp.body && typeof resp.body.getReader === 'function') {
+                        resultEl.innerHTML = '<span style="color:#00b894;">\u2713 ReadableStream available — reading chunks...</span>\n';
+                        const reader = resp.body.getReader();
+                        const decoder = new TextDecoder();
+                        let buffer = '';
 
-                        if (data.event === 'done') {
-                            es.close();
-                            resultEl.innerHTML += '<span style="color:#00b894;">\u2713 SSE WORKS! Received ' + received + ' events. PDA supports EventSource.</span>\n';
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            buffer += decoder.decode(value, { stream: true });
+
+                            // Parse SSE lines out of the buffer
+                            const parts = buffer.split('\n\n');
+                            buffer = parts.pop(); // keep incomplete tail
+                            for (const part of parts) {
+                                const match = part.match(/^data:\s*(.+)$/m);
+                                if (!match) continue;
+                                received++;
+                                try {
+                                    const data = JSON.parse(match[1]);
+                                    const line = '#' + received + ': ' + data.event + ' (' + new Date(data.ts).toLocaleTimeString() + ')';
+                                    resultEl.innerHTML += '<span style="color:#dfe6e9;">' + line + '</span>\n';
+                                    resultEl.scrollTop = resultEl.scrollHeight;
+                                    if (data.event === 'done') {
+                                        reader.cancel();
+                                        clearTimeout(timer);
+                                        resultEl.innerHTML += '<span style="color:#00b894;">\u2713 STREAMING WORKS! Received ' + received + ' events in real-time.</span>\n';
+                                        return;
+                                    }
+                                } catch (_) {}
+                            }
                         }
-                    };
-
-                    es.onerror = (err) => {
-                        es.close();
-                        if (received > 0) {
-                            resultEl.innerHTML += '<span style="color:#fdcb6e;">Connection closed after ' + received + ' events (partial success)</span>\n';
-                        } else {
-                            resultEl.innerHTML = '<span style="color:#e17055;">\u2717 SSE connection failed — EventSource not working in PDA</span>';
+                        clearTimeout(timer);
+                        if (!aborted) {
+                            resultEl.innerHTML += '<span style="color:#00b894;">\u2713 Stream ended. Received ' + received + ' events.</span>\n';
                         }
-                    };
-
-                    // Safety timeout — close after 30s if still running
-                    setTimeout(() => {
-                        if (es.readyState !== 2) { // not CLOSED
-                            es.close();
-                            resultEl.innerHTML += '<span style="color:#fdcb6e;">Timed out after 30s (' + received + ' events received)</span>\n';
+                    } else {
+                        // Fallback — no ReadableStream, read entire response at once
+                        resultEl.innerHTML = '<span style="color:#fdcb6e;">No ReadableStream — falling back to full-body read...</span>\n';
+                        const text = await resp.text();
+                        clearTimeout(timer);
+                        const lines = text.split('\n').filter(l => l.startsWith('data:'));
+                        received = lines.length;
+                        for (const line of lines) {
+                            try {
+                                const data = JSON.parse(line.replace(/^data:\s*/, ''));
+                                resultEl.innerHTML += '<span style="color:#dfe6e9;">#' + lines.indexOf(line) + ': ' + data.event + '</span>\n';
+                            } catch (_) {}
                         }
-                    }, 30000);
-
+                        resultEl.innerHTML += '<span style="color:#fdcb6e;">Got ' + received + ' events (non-streaming, all at once after connection closed)</span>\n';
+                    }
                 } catch (e) {
-                    resultEl.innerHTML = '<span style="color:#e17055;">\u2717 Error: ' + (e.message || e) + '</span>';
+                    clearTimeout(timer);
+                    if (!aborted) {
+                        resultEl.innerHTML = '<span style="color:#e17055;">\u2717 Error: ' + (e.message || e) + '</span>';
+                    }
                 }
             });
         }
