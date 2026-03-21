@@ -821,6 +821,9 @@ router.post("/api/status", requireAuth, async (req, res) => {
     // Push chain-break alerts
     const timeout = chainData.timeout ?? war.chainData.timeout;
     const current = chainData.current ?? war.chainData.current;
+    if (timeout <= 60 && current > 0) {
+      console.log(`[chain-client] ${playerName} reported chain ${current}, timeout ${Math.round(timeout)}s`);
+    }
     if (timeout > 0 && current > 0) {
       // Panic at 30s
       if (timeout <= 30) {
