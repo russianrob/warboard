@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.18.4
+// @version      3.18.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1846,6 +1846,7 @@ body.wb-chain-active {
 
         // Custom war target (server-synced, set by leader)
         warTarget: null,
+        warScores: null,  // { myScore, enemyScore } from server-side ranked war polling
 
         // UI references
         ui: {
@@ -2589,6 +2590,9 @@ body.wb-chain-active {
         // War target (server-synced)
         if (data.warTarget !== undefined) {
             state.warTarget = data.warTarget;
+        }
+        if (data.warScores !== undefined) {
+            state.warScores = data.warScores;
         }
 
         // Refresh UI rows
@@ -4983,41 +4987,12 @@ body.wb-chain-active {
                     }
                 }
 
-                // Read own faction's total score (for termed wars)
-                // Find both scores and both faction names in the war bar, match by faction name.
-                const scoreBlock = document.querySelector('[class*="scoreBlock___"]');
-                if (scoreBlock && state.myFactionName) {
-                    // Read all score values
-                    const scoreEls = scoreBlock.querySelectorAll('[class*="scoreText___"]');
-                    const scores = [];
-                    for (const el of scoreEls) {
-                        const num = parseInt(el.textContent.replace(/[^\d]/g, ''));
-                        if (!isNaN(num)) scores.push(num);
-                    }
-                    // Read all faction name links in the war bar area
-                    // Torn shows "FactionA vs FactionB" above the score block
-                    const warBarParent = scoreBlock.closest('[class*="war___"], [class*="warBar___"]') || scoreBlock.parentElement;
-                    if (warBarParent && scores.length >= 2) {
-                        const links = warBarParent.querySelectorAll('a');
-                        const myName = state.myFactionName.toLowerCase();
-                        let myIndex = -1;
-                        for (let i = 0; i < links.length; i++) {
-                            if (links[i].textContent.trim().toLowerCase() === myName) {
-                                myIndex = i;
-                                break;
-                            }
-                        }
-                        // First faction name = left score (scores[0]), second = right score (scores[1])
-                        if (myIndex === 0) {
-                            myFactionScore = scores[0];
-                        } else if (myIndex >= 1) {
-                            myFactionScore = scores[1];
-                        }
-                    }
-                    // Compute signed lead
-                    if (myFactionScore !== null && scores.length >= 2) {
-                        const enemyScore = scores[0] === myFactionScore ? scores[1] : scores[0];
-                        signedLead = myFactionScore - enemyScore;
+                // Read own faction's total score from server-reported war data
+                // (comes from Torn API via fetchRankedWar, no DOM scraping needed)
+                if (state.warScores) {
+                    myFactionScore = state.warScores.myScore || null;
+                    if (state.warScores.myScore != null && state.warScores.enemyScore != null) {
+                        signedLead = state.warScores.myScore - state.warScores.enemyScore;
                     }
                 }
 

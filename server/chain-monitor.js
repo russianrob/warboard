@@ -130,22 +130,30 @@ export function startChainMonitor(io, warId) {
         }
       }
 
-      // ── War score check (for custom war target notifications) ──
+      // ── War score check (every 60s) ──
       const lastCheck = lastScoreCheck.get(warId) || 0;
-      if (war.warTarget && war.warTarget.value && !war.warTarget.notifiedAt && !warTargetNotified.get(warId) && Date.now() - lastCheck > WAR_SCORE_CHECK_INTERVAL) {
+      if (Date.now() - lastCheck > WAR_SCORE_CHECK_INTERVAL) {
         lastScoreCheck.set(warId, Date.now());
         try {
           const rw = await fetchRankedWar(war.factionId, apiKey);
-          if (rw && rw.myScore >= war.warTarget.value) {
-            warTargetNotified.set(warId, true);
-            war.warTarget.notifiedAt = Date.now();
+          if (rw) {
+            // Store scores on war object so clients can display them
+            war.warScores = { myScore: rw.myScore, enemyScore: rw.enemyScore };
             store.saveState();
-            const warPlayers = store.getOnlinePlayersForWar(warId);
-            push.notifyWarTargetReached(warPlayers, warId, war.warTarget.value, rw.myScore);
-            console.log(`[chain] War target ${war.warTarget.value} reached! Score: ${rw.myScore} (server poll)`);
+
+            // Check if custom war target reached
+            if (war.warTarget && war.warTarget.value && !war.warTarget.notifiedAt && !warTargetNotified.get(warId)) {
+              if (rw.myScore >= war.warTarget.value) {
+                warTargetNotified.set(warId, true);
+                war.warTarget.notifiedAt = Date.now();
+                store.saveState();
+                const warPlayers = store.getOnlinePlayersForWar(warId);
+                push.notifyWarTargetReached(warPlayers, warId, war.warTarget.value, rw.myScore);
+                console.log(`[chain] War target ${war.warTarget.value} reached! Score: ${rw.myScore} (server poll)`);
+              }
+            }
           }
         } catch (scoreErr) {
-          // Non-fatal — score check is secondary
           console.error(`[chain] War score check failed: ${scoreErr.message}`);
         }
       }

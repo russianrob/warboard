@@ -74,6 +74,7 @@ function broadcastWarUpdate(warId) {
     ourFactionOnline: war.ourFactionOnline || null,
     factionKeyStored: !!store.getFactionApiKey(war.factionId),
     warTarget: war.warTarget || null,
+    warScores: war.warScores || null,
   };
   // Push to Socket.IO clients
   if (io) io.to(`war_${warId}`).emit("war_update", payload);
@@ -377,6 +378,7 @@ router.get("/api/stream", (req, res, next) => {
     ourFactionOnline: war.ourFactionOnline || null,
     factionKeyStored: !!store.getFactionApiKey(factionId),
     warTarget: war.warTarget || null,
+    warScores: war.warScores || null,
   };
   res.write(`data: ${JSON.stringify(initial)}\n\n`);
 
@@ -484,6 +486,7 @@ router.get("/api/poll", (req, res, next) => {
     ourFactionOnline: war.ourFactionOnline || null,
     factionKeyStored: !!store.getFactionApiKey(factionId),
     warTarget: war.warTarget || null,
+    warScores: war.warScores || null,
   });
 });
 
