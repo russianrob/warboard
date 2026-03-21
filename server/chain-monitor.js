@@ -1,15 +1,24 @@
 /**
  * Chain monitoring service.
  *
- * Periodically polls the Torn API for enemy faction chain data and broadcasts
- * updates (including bonus-hit alerts) to the appropriate war room.
+ * Server-side fallback: polls Torn API for chain data when no client is
+ * reporting chain info (i.e. nobody has FactionOps open). Fires push
+ * notifications for chain-break alerts and bonus-imminent hits.
+ *
+ * Only polls when:
+ * - A war is active
+ * - No client has reported chain data in the last CLIENT_STALE_MS
  */
 
 import * as store from "./store.js";
 import { fetchFactionChain } from "./torn-api.js";
+import * as push from "./push-notifications.js";
 
-const POLL_INTERVAL_MS = 10_000; // 10 seconds
+const POLL_INTERVAL_MS = 15_000; // 15 seconds
 const MAX_BACKOFF_MS = 120_000;   // max 2 minutes between retries on failure
+const CLIENT_STALE_MS = 15_000;   // if no client report in 15s, server takes over
+const CHAIN_ALERT_THRESHOLD = 60; // seconds — fire alert when chain timer <= this
+const CHAIN_ALERT_COOLDOWN_MS = 30_000; // max one alert push per 30s per war
 
 /** Bonus hit thresholds in Torn chain mechanics. */
 const BONUS_HITS = [
@@ -20,13 +29,29 @@ const BONUS_HITS = [
 const timeouts = new Map();
 /** Current backoff delay per warId (resets on success). */
 const backoffs = new Map();
+/** Last time a client reported chain data per warId. */
+const lastClientReport = new Map();
+/** Last time we sent a chain alert push per warId. */
+const lastAlertSent = new Map();
 
-// Legacy — keep for stopAll compat
-const intervals = new Map();
+/**
+ * Record that a client just reported chain data (called from /api/status route).
+ * This prevents server-side polling from duplicating the client's work.
+ */
+export function recordClientChainReport(warId) {
+  lastClientReport.set(warId, Date.now());
+}
+
+/**
+ * Check if a client has recently reported chain data.
+ */
+function isClientReporting(warId) {
+  const last = lastClientReport.get(warId) || 0;
+  return (Date.now() - last) < CLIENT_STALE_MS;
+}
 
 /**
  * Start chain monitoring for a war room.
- * @param {import("socket.io").Server|null} io  Socket.IO server (optional, may be null for HTTP-only)
  * @param {string} warId
  */
 export function startChainMonitor(io, warId) {
@@ -41,6 +66,12 @@ export function startChainMonitor(io, warId) {
     const war = store.getWar(warId);
     if (!war || !war.factionId) { scheduleNext(POLL_INTERVAL_MS); return; }
 
+    // Skip if a client is actively reporting chain data
+    if (isClientReporting(warId)) {
+      scheduleNext(POLL_INTERVAL_MS);
+      return;
+    }
+
     const apiKey = store.getFactionApiKey(war.factionId) || store.getApiKeyForFaction(war.factionId);
     if (!apiKey) { scheduleNext(POLL_INTERVAL_MS); return; }
 
@@ -49,70 +80,57 @@ export function startChainMonitor(io, warId) {
 
       // Compensate for API cache age
       if (chain.timestamp && chain.timeout > 0) {
-          const cacheAge = Math.floor(Date.now() / 1000) - chain.timestamp;
-          if (cacheAge > 0 && cacheAge < 300) {
-              chain.timeout = Math.max(0, chain.timeout - cacheAge);
-          }
+        const cacheAge = Math.floor(Date.now() / 1000) - chain.timestamp;
+        if (cacheAge > 0 && cacheAge < 300) {
+          chain.timeout = Math.max(0, chain.timeout - cacheAge);
+        }
       }
+
+      const prevChain = { ...war.chainData };
       war.chainData = chain;
       store.saveState();
 
-      // Success — reset backoff
+      // Reset backoff on success
       backoffs.set(warId, POLL_INTERVAL_MS);
 
-      // Determine next bonus hit
-      const nextBonus = BONUS_HITS.find((b) => b > chain.current) ?? null;
-
-      // Broadcast via Socket.IO if available (HTTP polling clients get it from /api/poll)
-      if (io) {
-        const payload = {
-          factionId: war.factionId,
-          current: chain.current,
-          max: chain.max,
-          timeout: chain.timeout,
-          cooldown: chain.cooldown,
-          bonusHits: BONUS_HITS,
-          nextBonus,
-        };
-
-        io.to(`war_${warId}`).emit("chain_update", payload);
-
-        if (nextBonus && chain.current >= nextBonus - 3 && chain.current < nextBonus) {
-          io.to(`war_${warId}`).emit("chain_bonus_alert", {
-            current: chain.current,
-            nextBonus,
-            hitsAway: nextBonus - chain.current,
-          });
+      // ── Chain-break push alert ──
+      if (chain.timeout > 0 && chain.timeout <= CHAIN_ALERT_THRESHOLD && chain.current > 0) {
+        const lastAlert = lastAlertSent.get(warId) || 0;
+        if (Date.now() - lastAlert > CHAIN_ALERT_COOLDOWN_MS) {
+          lastAlertSent.set(warId, Date.now());
+          const warPlayers = store.getOnlinePlayersForWar(warId);
+          push.notifyChainAlert(warPlayers, warId, chain.current, chain.timeout, Math.round(chain.timeout));
+          console.log(`[chain] Push alert: chain ${chain.current}, ${Math.round(chain.timeout)}s remaining (server poll)`);
         }
+      }
 
-        if (chain.current > 0 && chain.timeout > 0 && chain.timeout < 60) {
-          io.to(`war_${warId}`).emit("chain_timeout_warning", {
-            current: chain.current,
-            timeout: chain.timeout,
-          });
+      // ── Bonus-imminent push alert ──
+      if (chain.current > 0) {
+        const nextBonus = BONUS_HITS.find((b) => b > chain.current);
+        if (nextBonus && nextBonus - chain.current <= 2 && (prevChain.current || 0) < chain.current) {
+          const warPlayers = store.getOnlinePlayersForWar(warId);
+          push.notifyBonusImminent(warPlayers, warId, chain.current, nextBonus);
         }
       }
 
       scheduleNext(POLL_INTERVAL_MS);
     } catch (err) {
-      // Exponential backoff on failure — double the delay, cap at MAX_BACKOFF_MS
+      // Exponential backoff on failure
       const current = backoffs.get(warId) || POLL_INTERVAL_MS;
       const next = Math.min(current * 2, MAX_BACKOFF_MS);
       backoffs.set(warId, next);
-      console.error(`[chain] Poll failed for war ${warId}: ${err.message} (retry in ${Math.round(next/1000)}s)`);
+      console.error(`[chain] Poll failed for war ${warId}: ${err.message} (retry in ${Math.round(next / 1000)}s)`);
       scheduleNext(next);
     }
   };
 
-  // Run immediately, schedule via setTimeout chain (not setInterval)
   backoffs.set(warId, POLL_INTERVAL_MS);
   poll();
-  console.log(`[chain] Started monitoring for war ${warId}`);
+  console.log(`[chain] Started monitoring for war ${warId} (server fallback, polls every ${POLL_INTERVAL_MS / 1000}s when no client active)`);
 }
 
 /**
  * Stop chain monitoring for a war room.
- * @param {string} warId
  */
 export function stopChainMonitor(warId) {
   const tid = timeouts.get(warId);
@@ -121,10 +139,8 @@ export function stopChainMonitor(warId) {
     timeouts.delete(warId);
   }
   backoffs.delete(warId);
-  // Legacy cleanup
-  const id = intervals.get(warId);
-  if (id) clearInterval(id);
-  intervals.delete(warId);
+  lastClientReport.delete(warId);
+  lastAlertSent.delete(warId);
   console.log(`[chain] Stopped monitoring for war ${warId}`);
 }
 
@@ -138,7 +154,6 @@ export function stopAll() {
   }
   timeouts.clear();
   backoffs.clear();
-  // Legacy cleanup
-  for (const [, id] of intervals) clearInterval(id);
-  intervals.clear();
+  lastClientReport.clear();
+  lastAlertSent.clear();
 }

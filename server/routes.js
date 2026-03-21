@@ -7,7 +7,7 @@ import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.j
 import * as store from "./store.js";
 import { fetchFactionMembers, fetchFactionChain, fetchRankedWar } from "./torn-api.js";
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
-import { startChainMonitor } from "./chain-monitor.js";
+import { startChainMonitor, recordClientChainReport } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
 
 const router = Router();
@@ -456,8 +456,9 @@ router.get("/api/poll", (req, res, next) => {
     }
   }
 
-  // Chain data now comes from clients via DOM reading — no server-side chain polling
-  // startChainMonitor(null, warId);
+  // Server-side chain polling as fallback when no client is reporting chain data.
+  // Only actually polls when no client has reported in the last 15 seconds.
+  startChainMonitor(null, warId);
 
   // Track player as online (use playerId as pseudo-socketId for polling clients)
   store.setPlayer(playerId, {
@@ -808,6 +809,9 @@ router.post("/api/status", requireAuth, async (req, res) => {
 
   // Chain data update from intercepted data
   if (chainData && typeof chainData === "object") {
+    // Record that a client is actively reporting — suppresses server-side polling
+    recordClientChainReport(warId);
+
     const prevChain = { ...war.chainData };
     war.chainData = { ...war.chainData, ...chainData };
     store.saveState();
