@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.18.2
+// @version      3.18.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3706,8 +3706,8 @@ body.wb-chain-active {
                 const elapsed = (Date.now() - chainTimeoutAnchorAt) / 1000;
                 state.chain.timeout = Math.max(0, chainTimeoutAnchor - elapsed);
             }
-            // Chain break sound + notification alerts
-            if (CONFIG.CHAIN_ALERT && state.chain.timeout > 0 && state.chain.current > 0) {
+            // Chain break sound + notification alerts (only during active wars)
+            if (CONFIG.CHAIN_ALERT && isWarActive() && state.chain.timeout > 0 && state.chain.current > 0) {
                 // Panic at 30s
                 if (state.chain.timeout <= 30 && !state.chainPanicFired) {
                     playChainAlert();
