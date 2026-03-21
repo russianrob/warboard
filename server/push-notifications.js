@@ -347,7 +347,7 @@ export async function notifyChainPanic(warPlayers, warId, current, timeLeft) {
       data: { type: "chain-panic", warId },
     },
     "chain_alert",
-    { urgency: "very-high", TTL: 15 },
+    { urgency: "high", TTL: 15 },
   );
 }
 
