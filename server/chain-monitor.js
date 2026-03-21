@@ -17,8 +17,10 @@ import * as push from "./push-notifications.js";
 const POLL_INTERVAL_MS = 15_000; // 15 seconds
 const MAX_BACKOFF_MS = 120_000;   // max 2 minutes between retries on failure
 const CLIENT_STALE_MS = 15_000;   // if no client report in 15s, server takes over
-const CHAIN_ALERT_THRESHOLD = 60; // seconds — fire alert when chain timer <= this
+const CHAIN_ALERT_THRESHOLD = 60; // seconds — fire warning when chain timer <= this
+const CHAIN_PANIC_THRESHOLD = 30; // seconds — fire panic when chain timer <= this
 const CHAIN_ALERT_COOLDOWN_MS = 30_000; // max one alert push per 30s per war
+const CHAIN_PANIC_COOLDOWN_MS = 20_000; // max one panic push per 20s per war
 const WAR_SCORE_CHECK_INTERVAL = 60_000; // check war score every 60s
 
 /** Bonus hit thresholds in Torn chain mechanics. */
@@ -34,6 +36,8 @@ const backoffs = new Map();
 const lastClientReport = new Map();
 /** Last time we sent a chain alert push per warId. */
 const lastAlertSent = new Map();
+/** Last time we sent a chain panic push per warId. */
+const lastPanicSent = new Map();
 /** Last time we checked war score per warId. */
 const lastScoreCheck = new Map();
 /** Track if we already notified war target reached per warId. */
@@ -98,14 +102,26 @@ export function startChainMonitor(io, warId) {
       // Reset backoff on success
       backoffs.set(warId, POLL_INTERVAL_MS);
 
-      // ── Chain-break push alert ──
-      if (chain.timeout > 0 && chain.timeout <= CHAIN_ALERT_THRESHOLD && chain.current > 0) {
-        const lastAlert = lastAlertSent.get(warId) || 0;
-        if (Date.now() - lastAlert > CHAIN_ALERT_COOLDOWN_MS) {
-          lastAlertSent.set(warId, Date.now());
-          const warPlayers = store.getOnlinePlayersForWar(warId);
-          push.notifyChainAlert(warPlayers, warId, chain.current, chain.timeout, Math.round(chain.timeout));
-          console.log(`[chain] Push alert: chain ${chain.current}, ${Math.round(chain.timeout)}s remaining (server poll)`);
+      // ── Chain-break push alerts ──
+      if (chain.timeout > 0 && chain.current > 0) {
+        // Panic alert at 30s
+        if (chain.timeout <= CHAIN_PANIC_THRESHOLD) {
+          const lastPanic = lastPanicSent.get(warId) || 0;
+          if (Date.now() - lastPanic > CHAIN_PANIC_COOLDOWN_MS) {
+            lastPanicSent.set(warId, Date.now());
+            const warPlayers = store.getOnlinePlayersForWar(warId);
+            push.notifyChainPanic(warPlayers, warId, chain.current, Math.round(chain.timeout));
+            console.log(`[chain] PANIC alert: chain ${chain.current}, ${Math.round(chain.timeout)}s remaining (server poll)`);
+          }
+        // Warning alert at 60s
+        } else if (chain.timeout <= CHAIN_ALERT_THRESHOLD) {
+          const lastAlert = lastAlertSent.get(warId) || 0;
+          if (Date.now() - lastAlert > CHAIN_ALERT_COOLDOWN_MS) {
+            lastAlertSent.set(warId, Date.now());
+            const warPlayers = store.getOnlinePlayersForWar(warId);
+            push.notifyChainAlert(warPlayers, warId, chain.current, chain.timeout, Math.round(chain.timeout));
+            console.log(`[chain] Warning alert: chain ${chain.current}, ${Math.round(chain.timeout)}s remaining (server poll)`);
+          }
         }
       }
 

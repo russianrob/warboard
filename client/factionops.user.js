@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.18.0
+// @version      3.18.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1839,6 +1839,7 @@ body.wb-chain-active {
 
         // Chain alert fired flag (resets when timeout goes back above threshold)
         chainAlertFired: false,
+        chainPanicFired: false,
 
         // Whether a faction API key has been saved on the server
         factionKeyStored: false,
@@ -3705,16 +3706,27 @@ body.wb-chain-active {
                 const elapsed = (Date.now() - chainTimeoutAnchorAt) / 1000;
                 state.chain.timeout = Math.max(0, chainTimeoutAnchor - elapsed);
             }
-            // Chain break sound alert
-            if (CONFIG.CHAIN_ALERT && state.chain.timeout > 0 && state.chain.timeout <= CONFIG.CHAIN_ALERT_THRESHOLD && !state.chainAlertFired) {
-                playChainAlert();
-                firePdaNotification('chain_alert',
-                    '\uD83D\uDEA8 CHAIN BREAKING!',
-                    `Chain ${state.chain.current} \u2014 ${Math.round(state.chain.timeout)}s remaining! Attack now!`);
-                state.chainAlertFired = true;
+            // Chain break sound + notification alerts
+            if (CONFIG.CHAIN_ALERT && state.chain.timeout > 0 && state.chain.current > 0) {
+                // Panic at 30s
+                if (state.chain.timeout <= 30 && !state.chainPanicFired) {
+                    playChainAlert();
+                    firePdaNotification('chain_alert',
+                        '\uD83D\uDD34 CHAIN DYING! ' + Math.round(state.chain.timeout) + 's!',
+                        `Chain ${state.chain.current} is about to break! ${Math.round(state.chain.timeout)}s left \u2014 HIT NOW!`);
+                    state.chainPanicFired = true;
+                // Warning at 60s
+                } else if (state.chain.timeout <= CONFIG.CHAIN_ALERT_THRESHOLD && !state.chainAlertFired) {
+                    playChainAlert();
+                    firePdaNotification('chain_alert',
+                        '\uD83D\uDEA8 CHAIN BREAKING!',
+                        `Chain ${state.chain.current} \u2014 ${Math.round(state.chain.timeout)}s remaining! Attack now!`);
+                    state.chainAlertFired = true;
+                }
             }
             if (state.chain.timeout > CONFIG.CHAIN_ALERT_THRESHOLD) {
                 state.chainAlertFired = false;
+                state.chainPanicFired = false;
             }
             if (chainCooldownSetAt > 0 && chainCooldownSetVal > 0) {
                 const elapsed = (Date.now() - chainCooldownSetAt) / 1000;

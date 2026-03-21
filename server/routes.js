@@ -94,6 +94,8 @@ const RANKED_WAR_DETECT_COOLDOWN_MS = 60000; // only check once per minute
 /** Track last chain alert push per warId to avoid spamming. */
 const chainAlertCooldowns = new Map(); // warId → timestamp
 const CHAIN_ALERT_COOLDOWN_MS = 30000; // max one chain alert push per 30s
+const chainPanicCooldowns = new Map(); // warId → timestamp
+const CHAIN_PANIC_COOLDOWN_MS = 20000; // max one panic push per 20s
 
 function clearExistingTimer(timerKey) {
   if (callTimers.has(timerKey)) {
@@ -816,14 +818,27 @@ router.post("/api/status", requireAuth, async (req, res) => {
     war.chainData = { ...war.chainData, ...chainData };
     store.saveState();
 
-    // Push chain-break alert if timeout is dangerously low (< 60s)
+    // Push chain-break alerts
     const timeout = chainData.timeout ?? war.chainData.timeout;
     const current = chainData.current ?? war.chainData.current;
-    const lastChainAlert = chainAlertCooldowns.get(warId) || 0;
-    if (timeout > 0 && timeout <= 60 && current > 0 && Date.now() - lastChainAlert > CHAIN_ALERT_COOLDOWN_MS) {
-      chainAlertCooldowns.set(warId, Date.now());
-      const warPlayers = store.getOnlinePlayersForWar(warId);
-      push.notifyChainAlert(warPlayers, warId, current, timeout, Math.round(timeout));
+    if (timeout > 0 && current > 0) {
+      // Panic at 30s
+      if (timeout <= 30) {
+        const lastPanic = chainPanicCooldowns.get(warId) || 0;
+        if (Date.now() - lastPanic > CHAIN_PANIC_COOLDOWN_MS) {
+          chainPanicCooldowns.set(warId, Date.now());
+          const warPlayers = store.getOnlinePlayersForWar(warId);
+          push.notifyChainPanic(warPlayers, warId, current, Math.round(timeout));
+        }
+      // Warning at 60s
+      } else if (timeout <= 60) {
+        const lastChainAlert = chainAlertCooldowns.get(warId) || 0;
+        if (Date.now() - lastChainAlert > CHAIN_ALERT_COOLDOWN_MS) {
+          chainAlertCooldowns.set(warId, Date.now());
+          const warPlayers = store.getOnlinePlayersForWar(warId);
+          push.notifyChainAlert(warPlayers, warId, current, timeout, Math.round(timeout));
+        }
+      }
     }
 
     // Push bonus-imminent alert (within 2 hits of a milestone)

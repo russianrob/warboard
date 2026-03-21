@@ -333,6 +333,25 @@ export async function notifyChainAlert(warPlayers, warId, current, timeout, time
 }
 
 /**
+ * PANIC alert — chain is about to die (< 30s).
+ */
+export async function notifyChainPanic(warPlayers, warId, current, timeLeft) {
+  const playerIds = warPlayers.map((p) => p.playerId || p.id);
+  await sendToPlayers(
+    playerIds.filter((id) => isSubscribed(id)),
+    {
+      title: `🔴 CHAIN DYING! ${timeLeft}s!`,
+      body: `Chain ${current} is about to break! ${timeLeft}s left — HIT NOW!`,
+      tag: "chain-panic",
+      icon: "/icon-192.png",
+      data: { type: "chain-panic", warId },
+    },
+    "chain_alert",
+    { urgency: "very-high", TTL: 15 },
+  );
+}
+
+/**
  * Notify a specific player that a target left hospital.
  */
 export async function notifyHospitalPop(playerId, targetName, targetId) {
