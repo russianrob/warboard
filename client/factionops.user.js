@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.17.3
+// @version      3.17.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -4937,7 +4937,7 @@ body.wb-chain-active {
                 const timerSpans = document.querySelectorAll('.timer___fSGg8 span');
                 const targetBox = document.querySelector('.target___NBVXq');
                 let lead = null, currentTarget = null, elapsedStr = null, totalElapsedHours = null;
-                let myFactionScore = null;
+                let myFactionScore = null, signedLead = null;
                 let timerDays = 0, timerHours = 0, timerMinutes = 0;
 
                 if (timerSpans && timerSpans.length >= 8) {
@@ -4967,6 +4967,17 @@ body.wb-chain-active {
                     if (myScoreEl) {
                         const num = parseInt(myScoreEl.textContent.replace(/[^\d]/g, ''));
                         if (!isNaN(num)) myFactionScore = num;
+                    }
+                    // Read all scores to compute signed lead (positive = winning, negative = losing)
+                    if (myFactionScore !== null) {
+                        const allScoreEls = scoreBlock.querySelectorAll('[class*="scoreText___"]');
+                        for (const el of allScoreEls) {
+                            const num = parseInt(el.textContent.replace(/[^\d]/g, ''));
+                            if (!isNaN(num) && num !== myFactionScore) {
+                                signedLead = myFactionScore - num;
+                                break;
+                            }
+                        }
                     }
                 }
 
@@ -5017,7 +5028,7 @@ body.wb-chain-active {
                                         warTimerDetailRow('Status', 'War won!')
                                         + warTimerDetailRow('Goal', goal.toLocaleString() + ' \u2713')
                                         + warTimerDetailRow('Our score', score.toLocaleString())
-                                        + warTimerDetailRow('Lead', lead !== null ? lead.toLocaleString() : '—')
+                                        + warTimerDetailRow('Lead', signedLead !== null ? (signedLead >= 0 ? '+' : '') + signedLead.toLocaleString() : (lead !== null ? lead.toLocaleString() : '—'))
                                         + warTimerDetailRow('War target', currentTarget.toLocaleString())
                                         + warTimerDetailRow('Elapsed', elapsedStr);
                                 } else {
@@ -5031,7 +5042,7 @@ body.wb-chain-active {
                                         warTimerDetailRow('Goal', goal.toLocaleString() + ' \u2713')
                                         + warTimerDetailRow('War ends in', h + ':' + m)
                                         + warTimerDetailRow('Our score', score.toLocaleString())
-                                        + warTimerDetailRow('Lead', lead !== null ? lead.toLocaleString() : '—')
+                                        + warTimerDetailRow('Lead', signedLead !== null ? (signedLead >= 0 ? '+' : '') + signedLead.toLocaleString() : (lead !== null ? lead.toLocaleString() : '—'))
                                         + warTimerDetailRow('War target', currentTarget.toLocaleString())
                                         + warTimerDetailRow('Drop/hour', '~' + Math.round(dropPerHr).toLocaleString())
                                         + warTimerDetailRow('Elapsed', elapsedStr);
@@ -5055,7 +5066,7 @@ body.wb-chain-active {
                                 + warTimerDetailRow('Remaining', remaining.toLocaleString())
                                 + warTimerDetailRow('Progress', pct + '%')
                                 + (elapsedStr ? warTimerDetailRow('Elapsed', elapsedStr) : '')
-                                + (lead !== null ? warTimerDetailRow('Lead', lead.toLocaleString()) : '')
+                                + (signedLead !== null ? warTimerDetailRow('Lead', (signedLead >= 0 ? '+' : '') + signedLead.toLocaleString()) : lead !== null ? warTimerDetailRow('Lead', lead.toLocaleString()) : '')
                                 + (currentTarget !== null ? warTimerDetailRow('War target', currentTarget.toLocaleString()) : '');
                         }
                     } else {
@@ -5102,7 +5113,7 @@ body.wb-chain-active {
                     warTimerValue.textContent = 'WON';
                     if (warTimerDetail) warTimerDetail.innerHTML =
                         warTimerDetailRow('Status', 'Target reached!')
-                        + warTimerDetailRow('Lead', lead.toLocaleString())
+                        + warTimerDetailRow('Lead', signedLead !== null ? (signedLead >= 0 ? '+' : '') + signedLead.toLocaleString() : lead.toLocaleString())
                         + warTimerDetailRow('Target', currentTarget.toLocaleString())
                         + warTimerDetailRow('Elapsed', elapsedStr);
                     return;
@@ -5115,7 +5126,7 @@ body.wb-chain-active {
                 warTimerValue.textContent = hh + ':' + mm;
                 if (warTimerDetail) warTimerDetail.innerHTML =
                     warTimerDetailRow('Time remaining', hh + ':' + mm)
-                    + warTimerDetailRow('Lead', lead.toLocaleString())
+                    + warTimerDetailRow('Lead', signedLead !== null ? (signedLead >= 0 ? '+' : '') + signedLead.toLocaleString() : lead.toLocaleString())
                     + warTimerDetailRow('Current target', currentTarget.toLocaleString())
                     + warTimerDetailRow('Original target', '~' + Math.round(originalTarget).toLocaleString())
                     + warTimerDetailRow('Drop/hour', '~' + Math.round(DROP_PER_HOUR).toLocaleString())
