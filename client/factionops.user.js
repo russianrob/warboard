@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.16.6
+// @version      3.16.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -4795,6 +4795,7 @@ body.wb-chain-active {
                 const timerSpans = document.querySelectorAll('.timer___fSGg8 span');
                 const targetBox = document.querySelector('.target___NBVXq');
                 let lead = null, currentTarget = null, elapsedStr = null, totalElapsedHours = null;
+                let myFactionScore = null;
                 let timerDays = 0, timerHours = 0, timerMinutes = 0;
 
                 if (timerSpans && timerSpans.length >= 8) {
@@ -4813,6 +4814,17 @@ body.wb-chain-active {
                     if (match) {
                         lead = parseInt(match[1].replace(/,/g, ''));
                         currentTarget = parseInt(match[2].replace(/,/g, ''));
+                    }
+                }
+
+                // Read own faction's total score (for termed wars)
+                // Torn uses scoreText___HASH + currentFaction___HASH on our faction's score
+                const scoreBlock = document.querySelector('[class*="scoreBlock___"]');
+                if (scoreBlock) {
+                    const myScoreEl = scoreBlock.querySelector('[class*="currentFaction___"]');
+                    if (myScoreEl) {
+                        const num = parseInt(myScoreEl.textContent.replace(/[^\d]/g, ''));
+                        if (!isNaN(num)) myFactionScore = num;
                     }
                 }
 
@@ -4835,24 +4847,26 @@ body.wb-chain-active {
                 // ── Custom war target mode ──
                 if (state.warTarget && state.warTarget.value) {
                     const goal = state.warTarget.value;
-                    if (lead !== null) {
-                        const remaining = goal - lead;
-                        const pct = Math.min(100, Math.round((lead / goal) * 100));
+                    // Use own faction's total score for termed wars; fall back to lead if unavailable
+                    const score = myFactionScore !== null ? myFactionScore : lead;
+                    if (score !== null) {
+                        const remaining = goal - score;
+                        const pct = Math.min(100, Math.round((score / goal) * 100));
                         if (remaining <= 0) {
                             // Fire push notification once
                             if (!warTargetNotifiedThisSession) {
                                 warTargetNotifiedThisSession = true;
-                                postAction('/api/war-target-reached', { warId: deriveWarId(), lead: lead }).catch(() => {});
+                                postAction('/api/war-target-reached', { warId: deriveWarId(), lead: score }).catch(() => {});
                                 firePdaNotification('war_target',
                                     '\uD83C\uDFAF War Target Reached!',
-                                    `Faction hit ${lead.toLocaleString()} / ${goal.toLocaleString()} respect \u2014 hold the line!`);
+                                    `Faction hit ${score.toLocaleString()} / ${goal.toLocaleString()} respect \u2014 hold the line!`);
                             }
                             // Goal reached — switch to war-end countdown
                             if (totalElapsedHours !== null && totalElapsedHours > 24 && currentTarget !== null) {
                                 const dropHrs = Math.floor(totalElapsedHours - 24);
                                 const origTarget = currentTarget / (1 - (dropHrs * 0.01));
                                 const dropPerHr = origTarget * 0.01;
-                                const gap = currentTarget - lead;
+                                const gap = currentTarget - score;
                                 const hrsLeft = gap / dropPerHr;
                                 if (hrsLeft <= 0) {
                                     warTimerEl.className = 'fo-war-timer safe';
@@ -4860,8 +4874,9 @@ body.wb-chain-active {
                                     if (warTimerDetail) warTimerDetail.innerHTML =
                                         warTimerDetailRow('Status', 'War won!')
                                         + warTimerDetailRow('Goal', goal.toLocaleString() + ' \u2713')
-                                        + warTimerDetailRow('Lead', lead.toLocaleString())
-                                        + warTimerDetailRow('War target', currentTarget.toLocaleString())
+                                        + warTimerDetailRow('Our score', score.toLocaleString())
+                                        + warTimerDetailRow('Lead', lead !== null ? lead.toLocaleString() : '—')
+                                        + warTimerDetailRow('War target (DOM)', currentTarget.toLocaleString())
                                         + warTimerDetailRow('Elapsed', elapsedStr);
                                 } else {
                                     const tMin = Math.floor(hrsLeft * 60);
@@ -4873,8 +4888,9 @@ body.wb-chain-active {
                                     if (warTimerDetail) warTimerDetail.innerHTML =
                                         warTimerDetailRow('Goal', goal.toLocaleString() + ' \u2713')
                                         + warTimerDetailRow('War ends in', h + ':' + m)
-                                        + warTimerDetailRow('Lead', lead.toLocaleString())
-                                        + warTimerDetailRow('War target', currentTarget.toLocaleString())
+                                        + warTimerDetailRow('Our score', score.toLocaleString())
+                                        + warTimerDetailRow('Lead', lead !== null ? lead.toLocaleString() : '—')
+                                        + warTimerDetailRow('War target (DOM)', currentTarget.toLocaleString())
                                         + warTimerDetailRow('Drop/hour', '~' + Math.round(dropPerHr).toLocaleString())
                                         + warTimerDetailRow('Elapsed', elapsedStr);
                                 }
@@ -4884,7 +4900,7 @@ body.wb-chain-active {
                                 if (warTimerDetail) warTimerDetail.innerHTML =
                                     warTimerDetailRow('Status', 'Goal reached!')
                                     + warTimerDetailRow('Goal', goal.toLocaleString())
-                                    + warTimerDetailRow('Current', lead.toLocaleString())
+                                    + warTimerDetailRow('Our score', score.toLocaleString())
                                     + (elapsedStr ? warTimerDetailRow('Elapsed', elapsedStr) : '');
                             }
                         } else {
@@ -4893,10 +4909,11 @@ body.wb-chain-active {
                             warTimerValue.textContent = pct + '%';
                             if (warTimerDetail) warTimerDetail.innerHTML =
                                 warTimerDetailRow('Goal', goal.toLocaleString())
-                                + warTimerDetailRow('Current', lead.toLocaleString())
+                                + warTimerDetailRow('Current', score.toLocaleString())
                                 + warTimerDetailRow('Remaining', remaining.toLocaleString())
                                 + warTimerDetailRow('Progress', pct + '%')
                                 + (elapsedStr ? warTimerDetailRow('Elapsed', elapsedStr) : '')
+                                + (lead !== null ? warTimerDetailRow('Lead', lead.toLocaleString()) : '')
                                 + (currentTarget !== null ? warTimerDetailRow('War target (DOM)', currentTarget.toLocaleString()) : '');
                         }
                     } else {
