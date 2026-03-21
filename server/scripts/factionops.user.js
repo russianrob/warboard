@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.17.6
+// @version      3.17.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3553,7 +3553,7 @@ body.wb-chain-active {
         const now = Date.now();
         if (now - _lastForwardedChain < 3000) return;
         _lastForwardedChain = now;
-        postAction('/api/update', {
+        postAction('/api/status', {
             warId,
             chainData: {
                 current: chain.current || 0,
