@@ -11,7 +11,7 @@
  */
 
 import * as store from "./store.js";
-import { fetchFactionChain } from "./torn-api.js";
+import { fetchFactionChain, fetchRankedWar } from "./torn-api.js";
 import * as push from "./push-notifications.js";
 
 const POLL_INTERVAL_MS = 15_000; // 15 seconds
@@ -19,6 +19,7 @@ const MAX_BACKOFF_MS = 120_000;   // max 2 minutes between retries on failure
 const CLIENT_STALE_MS = 15_000;   // if no client report in 15s, server takes over
 const CHAIN_ALERT_THRESHOLD = 60; // seconds — fire alert when chain timer <= this
 const CHAIN_ALERT_COOLDOWN_MS = 30_000; // max one alert push per 30s per war
+const WAR_SCORE_CHECK_INTERVAL = 60_000; // check war score every 60s
 
 /** Bonus hit thresholds in Torn chain mechanics. */
 const BONUS_HITS = [
@@ -33,6 +34,10 @@ const backoffs = new Map();
 const lastClientReport = new Map();
 /** Last time we sent a chain alert push per warId. */
 const lastAlertSent = new Map();
+/** Last time we checked war score per warId. */
+const lastScoreCheck = new Map();
+/** Track if we already notified war target reached per warId. */
+const warTargetNotified = new Map();
 
 /**
  * Record that a client just reported chain data (called from /api/status route).
@@ -113,6 +118,26 @@ export function startChainMonitor(io, warId) {
         }
       }
 
+      // ── War score check (for custom war target notifications) ──
+      const lastCheck = lastScoreCheck.get(warId) || 0;
+      if (war.warTarget && war.warTarget.value && !war.warTarget.notifiedAt && !warTargetNotified.get(warId) && Date.now() - lastCheck > WAR_SCORE_CHECK_INTERVAL) {
+        lastScoreCheck.set(warId, Date.now());
+        try {
+          const rw = await fetchRankedWar(war.factionId, apiKey);
+          if (rw && rw.myScore >= war.warTarget.value) {
+            warTargetNotified.set(warId, true);
+            war.warTarget.notifiedAt = Date.now();
+            store.saveState();
+            const warPlayers = store.getOnlinePlayersForWar(warId);
+            push.notifyWarTargetReached(warPlayers, warId, war.warTarget.value, rw.myScore);
+            console.log(`[chain] War target ${war.warTarget.value} reached! Score: ${rw.myScore} (server poll)`);
+          }
+        } catch (scoreErr) {
+          // Non-fatal — score check is secondary
+          console.error(`[chain] War score check failed: ${scoreErr.message}`);
+        }
+      }
+
       scheduleNext(POLL_INTERVAL_MS);
     } catch (err) {
       // Exponential backoff on failure
@@ -141,6 +166,8 @@ export function stopChainMonitor(warId) {
   backoffs.delete(warId);
   lastClientReport.delete(warId);
   lastAlertSent.delete(warId);
+  lastScoreCheck.delete(warId);
+  warTargetNotified.delete(warId);
   console.log(`[chain] Stopped monitoring for war ${warId}`);
 }
 
@@ -156,4 +183,6 @@ export function stopAll() {
   backoffs.clear();
   lastClientReport.clear();
   lastAlertSent.clear();
+  lastScoreCheck.clear();
+  warTargetNotified.clear();
 }
