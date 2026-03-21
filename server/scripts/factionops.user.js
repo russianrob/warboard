@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.18.3
+// @version      3.18.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -4984,24 +4984,40 @@ body.wb-chain-active {
                 }
 
                 // Read own faction's total score (for termed wars)
-                // Torn marks our faction's score element with currentFaction___HASH class.
+                // Find both scores and both faction names in the war bar, match by faction name.
                 const scoreBlock = document.querySelector('[class*="scoreBlock___"]');
-                if (scoreBlock) {
-                    const myScoreEl = scoreBlock.querySelector('[class*="currentFaction___"]');
-                    if (myScoreEl) {
-                        const num = parseInt(myScoreEl.textContent.replace(/[^\d]/g, ''));
-                        if (!isNaN(num)) myFactionScore = num;
+                if (scoreBlock && state.myFactionName) {
+                    // Read all score values
+                    const scoreEls = scoreBlock.querySelectorAll('[class*="scoreText___"]');
+                    const scores = [];
+                    for (const el of scoreEls) {
+                        const num = parseInt(el.textContent.replace(/[^\d]/g, ''));
+                        if (!isNaN(num)) scores.push(num);
                     }
-                    // Read all scores to compute signed lead (positive = winning, negative = losing)
-                    if (myFactionScore !== null) {
-                        const allScoreEls = scoreBlock.querySelectorAll('[class*="scoreText___"]');
-                        for (const el of allScoreEls) {
-                            const num = parseInt(el.textContent.replace(/[^\d]/g, ''));
-                            if (!isNaN(num) && num !== myFactionScore) {
-                                signedLead = myFactionScore - num;
+                    // Read all faction name links in the war bar area
+                    // Torn shows "FactionA vs FactionB" above the score block
+                    const warBarParent = scoreBlock.closest('[class*="war___"], [class*="warBar___"]') || scoreBlock.parentElement;
+                    if (warBarParent && scores.length >= 2) {
+                        const links = warBarParent.querySelectorAll('a');
+                        const myName = state.myFactionName.toLowerCase();
+                        let myIndex = -1;
+                        for (let i = 0; i < links.length; i++) {
+                            if (links[i].textContent.trim().toLowerCase() === myName) {
+                                myIndex = i;
                                 break;
                             }
                         }
+                        // First faction name = left score (scores[0]), second = right score (scores[1])
+                        if (myIndex === 0) {
+                            myFactionScore = scores[0];
+                        } else if (myIndex >= 1) {
+                            myFactionScore = scores[1];
+                        }
+                    }
+                    // Compute signed lead
+                    if (myFactionScore !== null && scores.length >= 2) {
+                        const enemyScore = scores[0] === myFactionScore ? scores[1] : scores[0];
+                        signedLead = myFactionScore - enemyScore;
                     }
                 }
 
