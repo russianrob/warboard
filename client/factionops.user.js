@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.17.0
+// @version      3.17.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -1227,15 +1227,15 @@ body.wb-chain-active {
 .fo-war-timer { position: relative; }
 .fo-war-timer-detail {
     display: none; position: absolute; top: calc(100% + 6px); left: 0;
-    background: var(--wb-bg-secondary, #1e272e); border: 1px solid rgba(108,92,231,0.4);
+    background: #1e272e !important; border: 1px solid rgba(108,92,231,0.4);
     border-radius: 8px; padding: 10px 14px; min-width: 200px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 9999;
-    font-size: 11px; font-weight: 400; white-space: normal;
+    font-size: 11px; font-weight: 400; white-space: normal; color: #dfe6e9 !important;
 }
 .fo-war-timer-detail.open { display: block; }
 .fo-war-timer-detail-row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
-.fo-war-timer-detail-label { color: rgba(255,255,255,0.5); }
-.fo-war-timer-detail-val { color: var(--wb-text, #dfe6e9); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.fo-war-timer-detail-label { color: rgba(255,255,255,0.5) !important; }
+.fo-war-timer-detail-val { color: #dfe6e9 !important; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
 
 
 /* Fallback: custom chain info when Torn bar not found */
