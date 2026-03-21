@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.18.1
+// @version      3.18.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3715,6 +3715,9 @@ body.wb-chain-active {
                         '\uD83D\uDD34 CHAIN DYING! ' + Math.round(state.chain.timeout) + 's!',
                         `Chain ${state.chain.current} is about to break! ${Math.round(state.chain.timeout)}s left \u2014 HIT NOW!`);
                     state.chainPanicFired = true;
+                    // Forward live countdown to server so it can send web push
+                    _lastForwardedChain = 0; // bypass throttle
+                    forwardChainToServer(state.chain);
                 // Warning at 60s
                 } else if (state.chain.timeout <= CONFIG.CHAIN_ALERT_THRESHOLD && !state.chainAlertFired) {
                     playChainAlert();
@@ -3722,6 +3725,9 @@ body.wb-chain-active {
                         '\uD83D\uDEA8 CHAIN BREAKING!',
                         `Chain ${state.chain.current} \u2014 ${Math.round(state.chain.timeout)}s remaining! Attack now!`);
                     state.chainAlertFired = true;
+                    // Forward live countdown to server so it can send web push
+                    _lastForwardedChain = 0; // bypass throttle
+                    forwardChainToServer(state.chain);
                 }
             }
             if (state.chain.timeout > CONFIG.CHAIN_ALERT_THRESHOLD) {
