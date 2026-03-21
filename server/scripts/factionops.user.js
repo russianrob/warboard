@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.17.1
+// @version      3.17.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -4960,13 +4960,23 @@ body.wb-chain-active {
                 }
 
                 // Read own faction's total score (for termed wars)
-                // Torn uses scoreText___HASH + currentFaction___HASH on our faction's score
+                // Read both scores from the score block, then use the lead to identify ours.
+                // Our score - enemy score = lead. So: our score = the one where (score - other) == lead.
                 const scoreBlock = document.querySelector('[class*="scoreBlock___"]');
-                if (scoreBlock) {
-                    const myScoreEl = scoreBlock.querySelector('[class*="currentFaction___"]');
-                    if (myScoreEl) {
-                        const num = parseInt(myScoreEl.textContent.replace(/[^\d]/g, ''));
-                        if (!isNaN(num)) myFactionScore = num;
+                if (scoreBlock && lead !== null) {
+                    const scoreEls = scoreBlock.querySelectorAll('[class*="scoreText___"]');
+                    const scores = [];
+                    for (const el of scoreEls) {
+                        const num = parseInt(el.textContent.replace(/[^\d]/g, ''));
+                        if (!isNaN(num)) scores.push(num);
+                    }
+                    if (scores.length >= 2) {
+                        const [a, b] = scores;
+                        if (a - b === lead) {
+                            myFactionScore = a;
+                        } else if (b - a === lead) {
+                            myFactionScore = b;
+                        }
                     }
                 }
 
@@ -5018,7 +5028,7 @@ body.wb-chain-active {
                                         + warTimerDetailRow('Goal', goal.toLocaleString() + ' \u2713')
                                         + warTimerDetailRow('Our score', score.toLocaleString())
                                         + warTimerDetailRow('Lead', lead !== null ? lead.toLocaleString() : '—')
-                                        + warTimerDetailRow('War target (DOM)', currentTarget.toLocaleString())
+                                        + warTimerDetailRow('War target', currentTarget.toLocaleString())
                                         + warTimerDetailRow('Elapsed', elapsedStr);
                                 } else {
                                     const tMin = Math.floor(hrsLeft * 60);
@@ -5032,7 +5042,7 @@ body.wb-chain-active {
                                         + warTimerDetailRow('War ends in', h + ':' + m)
                                         + warTimerDetailRow('Our score', score.toLocaleString())
                                         + warTimerDetailRow('Lead', lead !== null ? lead.toLocaleString() : '—')
-                                        + warTimerDetailRow('War target (DOM)', currentTarget.toLocaleString())
+                                        + warTimerDetailRow('War target', currentTarget.toLocaleString())
                                         + warTimerDetailRow('Drop/hour', '~' + Math.round(dropPerHr).toLocaleString())
                                         + warTimerDetailRow('Elapsed', elapsedStr);
                                 }
@@ -5056,7 +5066,7 @@ body.wb-chain-active {
                                 + warTimerDetailRow('Progress', pct + '%')
                                 + (elapsedStr ? warTimerDetailRow('Elapsed', elapsedStr) : '')
                                 + (lead !== null ? warTimerDetailRow('Lead', lead.toLocaleString()) : '')
-                                + (currentTarget !== null ? warTimerDetailRow('War target (DOM)', currentTarget.toLocaleString()) : '');
+                                + (currentTarget !== null ? warTimerDetailRow('War target', currentTarget.toLocaleString()) : '');
                         }
                     } else {
                         warTimerEl.className = 'fo-war-timer waiting';
