@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.16.4
+// @version      3.16.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2991,8 +2991,7 @@ body.wb-chain-active {
             </div>
             <button class="wb-btn wb-btn-sm" id="fo-btn-test-pda-notif" style="margin-bottom:14px;font-size:11px;">Test PDA Notification</button>
             <div id="fo-pda-notif-result" style="font-size:11px;margin-bottom:10px;min-height:14px;"></div>
-            <button class="wb-btn wb-btn-sm" id="fo-btn-test-sse" style="margin-bottom:14px;font-size:11px;">Test SSE</button>
-            <div id="fo-sse-result" style="font-size:11px;margin-bottom:10px;min-height:14px;white-space:pre-wrap;max-height:120px;overflow-y:auto;"></div>
+
             ` : ''}
 
             <hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:14px 0;">
@@ -3130,66 +3129,7 @@ body.wb-chain-active {
             });
         }
 
-        // SSE test button — uses httpRequest wrapper (PDA_httpGet on PDA, GM_xmlhttpRequest on desktop)
-        const testSseBtn = document.getElementById('fo-btn-test-sse');
-        if (testSseBtn) {
-            testSseBtn.addEventListener('click', () => {
-                const resultEl = document.getElementById('fo-sse-result');
-                if (!resultEl) return;
 
-                const url = CONFIG.SERVER_URL + '/api/sse-test';
-                resultEl.innerHTML = '<span style="color:#74b9ff;">Connecting to ' + url + '...</span>\n';
-                resultEl.innerHTML += '<span style="color:#74b9ff;">Environment: ' + (IS_PDA ? 'PDA' : 'Desktop') + '</span>\n';
-
-                // Safety timeout
-                const timer = setTimeout(() => {
-                    resultEl.innerHTML += '<span style="color:#fdcb6e;">Timed out after 35s</span>\n';
-                }, 35000);
-
-                function parseSSEBody(text) {
-                    const lines = text.split('\n').filter(l => l.startsWith('data:'));
-                    let count = 0;
-                    for (const line of lines) {
-                        try {
-                            const data = JSON.parse(line.replace(/^data:\s*/, ''));
-                            count++;
-                            resultEl.innerHTML += '<span style="color:#dfe6e9;">#' + count + ': ' + data.event + ' (' + new Date(data.ts).toLocaleTimeString() + ')</span>\n';
-                        } catch (_) {}
-                    }
-                    return count;
-                }
-
-                httpRequest({
-                    method: 'GET',
-                    url: url,
-                    headers: { 'Accept': 'text/event-stream' },
-                    onload: (resp) => {
-                        clearTimeout(timer);
-                        const status = resp.status || 200;
-                        const body = resp.responseText || '';
-                        resultEl.innerHTML += '<span style="color:#74b9ff;">Response status: ' + status + ', body length: ' + body.length + '</span>\n';
-                        if (status >= 200 && status < 300 && body.length > 0) {
-                            const count = parseSSEBody(body);
-                            if (count > 0) {
-                                resultEl.innerHTML += '<span style="color:#00b894;">\u2713 Received ' + count + ' events (buffered, not real-time streaming)</span>\n';
-                            } else {
-                                resultEl.innerHTML += '<span style="color:#e17055;">\u2717 Got response but no SSE events parsed</span>\n';
-                                resultEl.innerHTML += '<span style="color:#636e72;">Raw: ' + body.substring(0, 200) + '</span>\n';
-                            }
-                        } else {
-                            resultEl.innerHTML += '<span style="color:#e17055;">\u2717 HTTP ' + status + (body ? ': ' + body.substring(0, 100) : '') + '</span>\n';
-                        }
-                        resultEl.scrollTop = resultEl.scrollHeight;
-                    },
-                    onerror: (err) => {
-                        clearTimeout(timer);
-                        const msg = err && (err.message || err.error || (typeof err === 'string' ? err : JSON.stringify(err)));
-                        resultEl.innerHTML += '<span style="color:#e17055;">\u2717 Error: ' + (msg || 'unknown') + '</span>\n';
-                        resultEl.scrollTop = resultEl.scrollHeight;
-                    }
-                });
-            });
-        }
 
         // War target — set/clear (leader only)
         const warTargetSetBtn = document.getElementById('fo-btn-set-war-target');
