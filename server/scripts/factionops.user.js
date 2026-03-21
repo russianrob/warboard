@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.16.7
+// @version      3.16.8
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2464,17 +2464,19 @@ body.wb-chain-active {
         scheduleNextPoll();
     }
 
-    /** Stop the polling loop. */
-    function stopPolling() {
+    /** Stop the polling loop. keepState=true preserves connection state (used when Socket.IO takes over). */
+    function stopPolling(keepState) {
         if (pollTimer) {
             clearTimeout(pollTimer);
             pollTimer = null;
         }
-        state.connected = false;
-        state.connecting = false;
+        if (!keepState) {
+            state.connected = false;
+            state.connecting = false;
+            updateConnectionUI();
+        }
         pollErrorCount = 0;
-        updateConnectionUI();
-        log('Polling stopped');
+        log('Polling stopped' + (keepState ? ' (Socket.IO active)' : ''));
     }
 
     // ── Socket.IO real-time push (primary) ─────────────────────────────────
@@ -2648,8 +2650,11 @@ body.wb-chain-active {
             // Socket is live — stop redundant polling on desktop
             if (pollTimer) {
                 log('Socket.IO connected — stopping polling fallback');
-                stopPolling();
+                stopPolling(true);
             }
+            state.connected = true;
+            state.connecting = false;
+            updateConnectionUI();
 
             // Join the war room
             const warId = deriveWarId();
