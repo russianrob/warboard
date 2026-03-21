@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.17.4
+// @version      3.17.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -177,7 +177,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
         THEME: GM_getValue('factionops_theme', 'dark'),
         AUTO_SORT: GM_getValue('factionops_autosort', true),
         CHAIN_ALERT: GM_getValue('factionops_chain_alert', true),
-        CHAIN_ALERT_THRESHOLD: GM_getValue('factionops_chain_alert_threshold', 30),
+        CHAIN_ALERT_THRESHOLD: GM_getValue('factionops_chain_alert_threshold', 60),
         PDA_NOTIFICATIONS: GM_getValue('factionops_pda_notif', IS_PDA),
         CALL_TIMEOUT: 5 * 60 * 1000,       // 5 minute call expiry
         DEAL_TIMEOUT: 15 * 60 * 1000,      // 15 minute deal call expiry
