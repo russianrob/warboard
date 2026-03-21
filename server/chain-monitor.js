@@ -14,9 +14,9 @@ import * as store from "./store.js";
 import { fetchFactionChain, fetchRankedWar } from "./torn-api.js";
 import * as push from "./push-notifications.js";
 
-const POLL_INTERVAL_MS = 15_000; // 15 seconds
+const POLL_INTERVAL_MS = 10_000; // 10 seconds
 const MAX_BACKOFF_MS = 120_000;   // max 2 minutes between retries on failure
-const CLIENT_STALE_MS = 15_000;   // if no client report in 15s, server takes over
+const CLIENT_STALE_MS = 12_000;   // if no client report in 12s, server takes over
 const CHAIN_ALERT_THRESHOLD = 60; // seconds — fire warning when chain timer <= this
 const CHAIN_PANIC_THRESHOLD = 30; // seconds — fire panic when chain timer <= this
 const CHAIN_ALERT_COOLDOWN_MS = 30_000; // max one alert push per 30s per war
