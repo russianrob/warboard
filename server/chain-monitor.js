@@ -87,13 +87,9 @@ export function startChainMonitor(io, warId) {
     try {
       const chain = await fetchFactionChain(war.factionId, apiKey);
 
-      // Compensate for API cache age
-      if (chain.timestamp && chain.timeout > 0) {
-        const cacheAge = Math.floor(Date.now() / 1000) - chain.timestamp;
-        if (cacheAge > 0 && cacheAge < 300) {
-          chain.timeout = Math.max(0, chain.timeout - cacheAge);
-        }
-      }
+      // Note: removed cache age compensation — it was over-correcting and
+      // causing false chain alerts (e.g. 128s timeout reported as 58s).
+      // Torn's chain.timeout is already the value at time of API response.
 
       const prevChain = { ...war.chainData };
       war.chainData = chain;
