@@ -91,6 +91,10 @@ const refreshCooldowns = new Map(); // warId → timestamp
 const rankedWarDetectCooldowns = new Map(); // warId → timestamp
 const RANKED_WAR_DETECT_COOLDOWN_MS = 60000; // only check once per minute
 
+/** Track last chain alert push per warId to avoid spamming. */
+const chainAlertCooldowns = new Map(); // warId → timestamp
+const CHAIN_ALERT_COOLDOWN_MS = 30000; // max one chain alert push per 30s
+
 function clearExistingTimer(timerKey) {
   if (callTimers.has(timerKey)) {
     clearTimeout(callTimers.get(timerKey));
@@ -808,12 +812,14 @@ router.post("/api/status", requireAuth, async (req, res) => {
     war.chainData = { ...war.chainData, ...chainData };
     store.saveState();
 
-    // Push chain-break alert if timeout is dangerously low (< 30s)
+    // Push chain-break alert if timeout is dangerously low (< 60s)
     const timeout = chainData.timeout ?? war.chainData.timeout;
     const current = chainData.current ?? war.chainData.current;
-    if (timeout > 0 && timeout <= 30 && current > 0) {
+    const lastChainAlert = chainAlertCooldowns.get(warId) || 0;
+    if (timeout > 0 && timeout <= 60 && current > 0 && Date.now() - lastChainAlert > CHAIN_ALERT_COOLDOWN_MS) {
+      chainAlertCooldowns.set(warId, Date.now());
       const warPlayers = store.getOnlinePlayersForWar(warId);
-      push.notifyChainAlert(warPlayers, warId, current, timeout, timeout);
+      push.notifyChainAlert(warPlayers, warId, current, timeout, Math.round(timeout));
     }
 
     // Push bonus-imminent alert (within 2 hits of a milestone)
