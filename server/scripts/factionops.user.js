@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.16.8
+// @version      3.17.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2688,8 +2688,16 @@ body.wb-chain-active {
             }
         });
 
+        let socketErrorCount = 0;
         realtimeSocket.on('connect_error', (err) => {
-            warn('Socket.IO connection error:', err.message);
+            socketErrorCount++;
+            warn('Socket.IO connection error (' + socketErrorCount + '):', err.message);
+            // After 3 failures, give up on Socket.IO and try SSE stream
+            if (socketErrorCount >= 3 && canUseSSEStream()) {
+                log('Socket.IO failed 3 times — switching to SSE stream');
+                disconnectRealtime();
+                connectSSEStream();
+            }
         });
 
         realtimeSocket.io?.on('reconnect_attempt', () => {
@@ -2707,13 +2715,140 @@ body.wb-chain-active {
         }
     }
 
-    /** Update the realtime/polling badge (only visible to player 137558). */
-    function updateRtBadge(isRealtime) {
+    // ── SSE stream via GM_xmlhttpRequest (Tampermonkey on Chrome) ─────────
+
+    let sseAbort = null;       // abort handle from GM_xmlhttpRequest
+    let sseLastLength = 0;     // track how much of responseText we've parsed
+    let sseConnected = false;
+    let sseRetryTimer = null;
+    const SSE_RETRY_MS = 5000; // retry after 5s on disconnect
+
+    /**
+     * Can we use GM_xmlhttpRequest streaming?
+     * Must be on Tampermonkey (not PDA), and Socket.IO must not already be connected.
+     */
+    function canUseSSEStream() {
+        if (IS_PDA) return false;
+        if (realtimeSocket && realtimeSocket.connected) return false;
+        if (typeof GM_xmlhttpRequest !== 'function') return false;
+        return true;
+    }
+
+    /** Connect SSE stream via GM_xmlhttpRequest onprogress. */
+    function connectSSEStream() {
+        if (!canUseSSEStream()) return;
+        if (sseAbort) return; // already connected
+        if (!state.jwtToken) return;
+
+        const warId = deriveWarId();
+        if (!warId || !state.myFactionId) return;
+
+        const url = CONFIG.SERVER_URL + '/api/stream?warId=' + encodeURIComponent(warId)
+            + '&token=' + encodeURIComponent(state.jwtToken)
+            + (state.enemyFactionId ? '&enemyFactionId=' + encodeURIComponent(state.enemyFactionId) : '');
+
+        log('Connecting SSE stream to', CONFIG.SERVER_URL + '/api/stream');
+        sseLastLength = 0;
+        sseConnected = false;
+
+        sseAbort = GM_xmlhttpRequest({
+            method: 'GET',
+            url: url,
+            responseType: 'text',
+            onprogress: (resp) => {
+                if (!sseConnected) {
+                    sseConnected = true;
+                    log('SSE stream connected');
+                    updateRtBadge('sse');
+                    // Stop polling — SSE is now handling updates
+                    if (pollTimer) {
+                        stopPolling(true);
+                    }
+                }
+
+                // Parse new SSE data since last check
+                const newText = resp.responseText.substring(sseLastLength);
+                sseLastLength = resp.responseText.length;
+
+                // Split into SSE events (separated by double newline)
+                const parts = newText.split('\n\n');
+                for (const part of parts) {
+                    const match = part.match(/^data:\s*(.+)$/m);
+                    if (!match) continue; // skip heartbeats and empty lines
+                    try {
+                        const data = JSON.parse(match[1]);
+                        applyServerData(data);
+                    } catch (_) {}
+                }
+            },
+            onload: () => {
+                // Stream ended (server closed)
+                log('SSE stream ended by server');
+                cleanupSSE();
+                scheduleSSERetry();
+            },
+            onerror: (err) => {
+                warn('SSE stream error:', err?.error || err?.statusText || 'unknown');
+                cleanupSSE();
+                scheduleSSERetry();
+            },
+            ontimeout: () => {
+                warn('SSE stream timeout');
+                cleanupSSE();
+                scheduleSSERetry();
+            }
+        });
+    }
+
+    function cleanupSSE() {
+        sseConnected = false;
+        sseAbort = null;
+        sseLastLength = 0;
+        updateRtBadge(false);
+        // Restart polling as fallback
+        if (!pollTimer && state.jwtToken) {
+            startPolling();
+        }
+    }
+
+    function disconnectSSEStream() {
+        if (sseRetryTimer) { clearTimeout(sseRetryTimer); sseRetryTimer = null; }
+        if (sseAbort && typeof sseAbort.abort === 'function') {
+            sseAbort.abort();
+        }
+        sseConnected = false;
+        sseAbort = null;
+        sseLastLength = 0;
+        updateRtBadge(false);
+    }
+
+    function scheduleSSERetry() {
+        if (sseRetryTimer) return;
+        sseRetryTimer = setTimeout(() => {
+            sseRetryTimer = null;
+            if (canUseSSEStream() && state.jwtToken) {
+                connectSSEStream();
+            }
+        }, SSE_RETRY_MS);
+    }
+
+    /** Update the realtime/polling badge. */
+    function updateRtBadge(mode) {
         const badge = document.getElementById('fo-rt-badge');
         if (!badge) return;
-        badge.className = 'fo-rt-badge ' + (isRealtime ? 'rt' : 'poll');
-        badge.textContent = isRealtime ? 'RT' : 'POLL';
-        badge.title = isRealtime ? 'Socket.IO realtime active' : 'Falling back to polling';
+        if (mode === true || mode === 'rt') {
+            badge.className = 'fo-rt-badge rt';
+            badge.textContent = 'RT';
+            badge.title = 'Socket.IO realtime active';
+        } else if (mode === 'sse') {
+            badge.className = 'fo-rt-badge rt';
+            badge.textContent = 'RT';
+            badge.title = 'SSE stream active';
+        } else {
+            badge.className = 'fo-rt-badge poll';
+            badge.textContent = 'POLL';
+            badge.title = 'Falling back to polling';
+        }
     }
 
     // =========================================================================
@@ -3277,6 +3412,7 @@ body.wb-chain-active {
         document.getElementById('wb-btn-disconnect').addEventListener('click', () => {
             stopPolling();
             disconnectRealtime();
+            disconnectSSEStream();
             closeSettings();
         });
 
@@ -3289,6 +3425,7 @@ body.wb-chain-active {
 
             stopPolling();
             disconnectRealtime();
+            disconnectSSEStream();
             if (apiKey) {
                 try {
                     await authenticate();

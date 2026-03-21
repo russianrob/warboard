@@ -26,15 +26,41 @@ export function setIO(ioInstance) {
   io = ioInstance;
 }
 
+// ── SSE stream clients (for Tampermonkey GM_xmlhttpRequest onprogress) ───────
+// Map<warId, Set<{ res, playerId }>>
+const sseClients = new Map();
+
+function addSSEClient(warId, client) {
+  if (!sseClients.has(warId)) sseClients.set(warId, new Set());
+  sseClients.get(warId).add(client);
+}
+
+function removeSSEClient(warId, client) {
+  const set = sseClients.get(warId);
+  if (set) {
+    set.delete(client);
+    if (set.size === 0) sseClients.delete(warId);
+  }
+}
+
+/** Push SSE event to all stream clients in a war room. */
+function broadcastSSE(warId, data) {
+  const set = sseClients.get(warId);
+  if (!set || set.size === 0) return;
+  const payload = `data: ${JSON.stringify(data)}\n\n`;
+  for (const client of set) {
+    try { client.res.write(payload); } catch (_) { /* client gone */ }
+  }
+}
+
 /**
  * Broadcast a full war state snapshot to all clients in a war room.
  * Called after any state mutation so connected clients get instant updates.
  */
 function broadcastWarUpdate(warId) {
-  if (!io) return;
   const war = store.getWar(warId);
   if (!war) return;
-  io.to(`war_${warId}`).emit("war_update", {
+  const payload = {
     warId: war.warId,
     factionId: war.factionId,
     enemyFactionId: war.enemyFactionId,
@@ -48,7 +74,11 @@ function broadcastWarUpdate(warId) {
     ourFactionOnline: war.ourFactionOnline || null,
     factionKeyStored: !!store.getFactionApiKey(war.factionId),
     warTarget: war.warTarget || null,
-  });
+  };
+  // Push to Socket.IO clients
+  if (io) io.to(`war_${warId}`).emit("war_update", payload);
+  // Push to SSE stream clients
+  broadcastSSE(warId, payload);
 }
 
 /** Track call expiry timers so they can be cancelled. */
@@ -286,6 +316,82 @@ router.get("/api/faction/:factionId/chain", requireAuth, async (req, res) => {
     return res.status(502).json({ error: "Failed to fetch chain data from Torn API" });
   }
 });
+
+// ── GET /api/stream ──────────────────────────────────────────────────────
+// SSE stream for Tampermonkey clients (GM_xmlhttpRequest onprogress).
+// Holds the connection open and pushes war updates as SSE events.
+// Auth via ?token= query param. Heartbeat every 25s to keep alive.
+
+router.get("/api/stream", (req, res, next) => {
+  if (!req.headers.authorization && req.query.token) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
+  next();
+}, requireAuth, (req, res) => {
+  const { playerId, playerName, factionId } = req.user;
+  const { warId, enemyFactionId } = req.query;
+
+  if (!warId) {
+    return res.status(400).json({ error: "warId query parameter is required" });
+  }
+
+  const war = store.getOrCreateWar(warId, factionId, enemyFactionId || null);
+  if (war.factionId !== factionId) {
+    return res.status(403).json({ error: "Not a member of this war's faction" });
+  }
+
+  // Track player as online
+  store.setPlayer(playerId, {
+    socketId: `sse_${playerId}`,
+    factionId,
+    warId,
+    name: playerName,
+  });
+
+  // Set up SSE headers
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+
+  // Send initial war state immediately
+  const initial = {
+    warId: war.warId,
+    factionId: war.factionId,
+    enemyFactionId: war.enemyFactionId,
+    enemyFactionName: war.enemyFactionName || null,
+    calls: war.calls,
+    priorities: war.priorities,
+    enemyStatuses: war.enemyStatuses,
+    chainData: war.chainData,
+    onlinePlayers: store.getOnlinePlayersForWar(warId),
+    viewers: store.getViewersForWar(warId),
+    ourFactionOnline: war.ourFactionOnline || null,
+    factionKeyStored: !!store.getFactionApiKey(factionId),
+    warTarget: war.warTarget || null,
+  };
+  res.write(`data: ${JSON.stringify(initial)}\n\n`);
+
+  // Register this client for broadcasts
+  const client = { res, playerId };
+  addSSEClient(warId, client);
+  console.log(`[sse] ${playerName} connected to stream for war ${warId}`);
+
+  // Heartbeat every 25s to keep connection alive
+  const heartbeat = setInterval(() => {
+    try { res.write(`: heartbeat\n\n`); } catch (_) {}
+  }, 25000);
+
+  // Cleanup on disconnect
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    removeSSEClient(warId, client);
+    console.log(`[sse] ${playerName} disconnected from stream`);
+  });
+});
+
 
 // ── GET /api/poll ────────────────────────────────────────────────────────
 // Returns full war state for the authenticated player's faction.
