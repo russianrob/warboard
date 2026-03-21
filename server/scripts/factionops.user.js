@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.16.0
+// @version      3.16.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.16.1  - Show RT/Poll connection badge for all users (was admin-only)
 // v3.16.0  - Multi-hit deal calls: long-press/right-click Call button for 15-min reserved deal call
 // v3.15.7  - Fix race condition: own-faction members no longer leak into overlay before enemy data loads
 // v3.15.6  - Fix web push notifications showing target ID: send targetName in call API request
@@ -169,7 +170,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.16.0',
+        VERSION: '3.16.1',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -4647,7 +4648,7 @@ body.wb-chain-active {
                         <span class="fo-logo-text">FactionOps</span>
                     </div>
                     <div class="fo-status-dot${state.connected ? '' : ' disconnected'}" id="fo-conn-dot" title="${state.connected ? 'Connected' : 'Disconnected'}"></div>
-                    ${state.myPlayerId === '137558' ? '<span class="fo-rt-badge" id="fo-rt-badge"></span>' : ''}
+                    <span class="fo-rt-badge" id="fo-rt-badge"></span>
                     <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                     <div class="fo-energy-display" id="fo-energy-display" title="Energy">
@@ -4713,7 +4714,7 @@ body.wb-chain-active {
 
         renderOverlay();
 
-        // Set RT badge initial state (admin only)
+        // Set RT badge initial state
         updateRtBadge(realtimeSocket && realtimeSocket.connected);
 
         // Move Torn's native #barChain into our overlay header
