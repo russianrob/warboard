@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.16.5
+// @version      3.16.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2246,11 +2246,12 @@ body.wb-chain-active {
     // SECTION 6: HTTP POLLING CLIENT
     // =========================================================================
 
-    // ── Polling-based server communication (replaces Socket.IO) ──────────
+    // ── Polling-based server communication ──────────────────────────────
 
-    // Polling is now a fallback — Socket.IO push handles instant updates
-    const POLL_FAST_MS  = IS_PDA ? 2000 : 5000;  // War active: 2s on PDA, 5s desktop
-    const POLL_IDLE_MS  = IS_PDA ? 5000 : 5000;  // No war: 5s everywhere
+    // PDA: polling is the primary transport (Socket.IO blocked by WebView)
+    // Desktop: polling is a fallback — Socket.IO handles real-time push
+    const POLL_FAST_MS  = 2000;  // War active: 2s
+    const POLL_IDLE_MS  = 5000;  // No war: 5s
     let currentPollInterval = POLL_IDLE_MS;
 
     let pollTimer = null;
@@ -2644,6 +2645,12 @@ body.wb-chain-active {
             log('Socket.IO connected:', realtimeSocket.id, 'transport:', transport);
             updateRtBadge(true);
 
+            // Socket is live — stop redundant polling on desktop
+            if (pollTimer) {
+                log('Socket.IO connected — stopping polling fallback');
+                stopPolling();
+            }
+
             // Join the war room
             const warId = deriveWarId();
             if (warId && state.myFactionId) {
@@ -2668,6 +2675,12 @@ body.wb-chain-active {
         realtimeSocket.on('disconnect', (reason) => {
             log('Socket.IO disconnected:', reason);
             updateRtBadge(false);
+
+            // Socket lost — start polling as fallback until reconnect
+            if (!pollTimer && state.jwtToken) {
+                log('Socket.IO lost — starting polling fallback');
+                startPolling();
+            }
         });
 
         realtimeSocket.on('connect_error', (err) => {
@@ -3258,6 +3271,7 @@ body.wb-chain-active {
 
         document.getElementById('wb-btn-disconnect').addEventListener('click', () => {
             stopPolling();
+            disconnectRealtime();
             closeSettings();
         });
 
