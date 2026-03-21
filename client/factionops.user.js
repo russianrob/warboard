@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.18.5
+// @version      3.18.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3711,7 +3711,10 @@ body.wb-chain-active {
                 state.chain.timeout = Math.max(0, chainTimeoutAnchor - elapsed);
             }
             // Chain break sound + notification alerts (only during active wars)
-            if (CONFIG.CHAIN_ALERT && isWarActive() && state.chain.timeout > 0 && state.chain.current > 0) {
+            // Only alert if chain data is fresh (anchor set within last 60s — avoids stale countdown alerts)
+            const anchorAge = chainTimeoutAnchorAt > 0 ? (Date.now() - chainTimeoutAnchorAt) / 1000 : Infinity;
+            const chainDataFresh = anchorAge < 120; // anchor less than 2 min old
+            if (CONFIG.CHAIN_ALERT && isWarActive() && chainDataFresh && state.chain.timeout > 0 && state.chain.current > 0) {
                 // Panic at 30s
                 if (state.chain.timeout <= 30 && !state.chainPanicFired) {
                     playChainAlert();
@@ -3719,8 +3722,7 @@ body.wb-chain-active {
                         '\uD83D\uDD34 CHAIN DYING! ' + Math.round(state.chain.timeout) + 's!',
                         `Chain ${state.chain.current} is about to break! ${Math.round(state.chain.timeout)}s left \u2014 HIT NOW!`);
                     state.chainPanicFired = true;
-                    // Forward live countdown to server so it can send web push
-                    _lastForwardedChain = 0; // bypass throttle
+                    _lastForwardedChain = 0;
                     forwardChainToServer(state.chain);
                 // Warning at 60s
                 } else if (state.chain.timeout <= CONFIG.CHAIN_ALERT_THRESHOLD && !state.chainAlertFired) {
@@ -3729,8 +3731,7 @@ body.wb-chain-active {
                         '\uD83D\uDEA8 CHAIN BREAKING!',
                         `Chain ${state.chain.current} \u2014 ${Math.round(state.chain.timeout)}s remaining! Attack now!`);
                     state.chainAlertFired = true;
-                    // Forward live countdown to server so it can send web push
-                    _lastForwardedChain = 0; // bypass throttle
+                    _lastForwardedChain = 0;
                     forwardChainToServer(state.chain);
                 }
             }
