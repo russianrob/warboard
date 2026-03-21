@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.17.2
+// @version      3.17.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -4960,23 +4960,13 @@ body.wb-chain-active {
                 }
 
                 // Read own faction's total score (for termed wars)
-                // Read both scores from the score block, then use the lead to identify ours.
-                // Our score - enemy score = lead. So: our score = the one where (score - other) == lead.
+                // Torn marks our faction's score element with currentFaction___HASH class.
                 const scoreBlock = document.querySelector('[class*="scoreBlock___"]');
-                if (scoreBlock && lead !== null) {
-                    const scoreEls = scoreBlock.querySelectorAll('[class*="scoreText___"]');
-                    const scores = [];
-                    for (const el of scoreEls) {
-                        const num = parseInt(el.textContent.replace(/[^\d]/g, ''));
-                        if (!isNaN(num)) scores.push(num);
-                    }
-                    if (scores.length >= 2) {
-                        const [a, b] = scores;
-                        if (a - b === lead) {
-                            myFactionScore = a;
-                        } else if (b - a === lead) {
-                            myFactionScore = b;
-                        }
+                if (scoreBlock) {
+                    const myScoreEl = scoreBlock.querySelector('[class*="currentFaction___"]');
+                    if (myScoreEl) {
+                        const num = parseInt(myScoreEl.textContent.replace(/[^\d]/g, ''));
+                        if (!isNaN(num)) myFactionScore = num;
                     }
                 }
 
