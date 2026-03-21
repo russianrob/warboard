@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.18.6
+// @version      3.18.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3550,24 +3550,8 @@ body.wb-chain-active {
      * Forward intercepted chain data to the server so all faction members
      * see the update instantly (instead of waiting for the 30s poll).
      */
-    let _lastForwardedChain = 0;
-    function forwardChainToServer(chain) {
-        const warId = deriveWarId();
-        if (!warId || !state.jwtToken) return;
-        // Throttle: don't send more than once every 3 seconds
-        const now = Date.now();
-        if (now - _lastForwardedChain < 3000) return;
-        _lastForwardedChain = now;
-        postAction('/api/status', {
-            warId,
-            chainData: {
-                current: chain.current || 0,
-                max: chain.max || 0,
-                timeout: chain.timeout || 0,
-                cooldown: chain.cooldown || 0,
-            },
-        }).catch(() => { /* silent — server poll is the fallback */ });
-    }
+    // Chain data forwarding removed — server polls Torn API directly for chain alerts.
+    // Client only handles local audio beep + PDA notification.
 
     /** Update chain bar contents and styling. */
     function updateChainBar() {
@@ -3722,8 +3706,6 @@ body.wb-chain-active {
                         '\uD83D\uDD34 CHAIN DYING! ' + Math.round(state.chain.timeout) + 's!',
                         `Chain ${state.chain.current} is about to break! ${Math.round(state.chain.timeout)}s left \u2014 HIT NOW!`);
                     state.chainPanicFired = true;
-                    _lastForwardedChain = 0;
-                    forwardChainToServer(state.chain);
                 // Warning at 60s
                 } else if (state.chain.timeout <= CONFIG.CHAIN_ALERT_THRESHOLD && !state.chainAlertFired) {
                     playChainAlert();
@@ -3731,8 +3713,6 @@ body.wb-chain-active {
                         '\uD83D\uDEA8 CHAIN BREAKING!',
                         `Chain ${state.chain.current} \u2014 ${Math.round(state.chain.timeout)}s remaining! Attack now!`);
                     state.chainAlertFired = true;
-                    _lastForwardedChain = 0;
-                    forwardChainToServer(state.chain);
                 }
             }
             if (state.chain.timeout > CONFIG.CHAIN_ALERT_THRESHOLD) {
@@ -3797,7 +3777,6 @@ body.wb-chain-active {
                             updateChainBar();
 
                             if (chain.current !== oldCurrent) {
-                                forwardChainToServer(state.chain);
                             }
                         }
                     } catch (e) {
@@ -3954,7 +3933,6 @@ body.wb-chain-active {
         }
 
         if (changed) {
-            forwardChainToServer(state.chain);
         }
 
         return true;
@@ -6182,7 +6160,6 @@ body.wb-chain-active {
             chainCooldownSetVal = state.chain.cooldown;
             updateChainBar();
             // Forward chain data to server so all faction members see it instantly
-            forwardChainToServer(state.chain);
         }
 
         // Ranked war data — extract enemy faction

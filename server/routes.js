@@ -7,7 +7,7 @@ import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.j
 import * as store from "./store.js";
 import { fetchFactionMembers, fetchFactionChain, fetchRankedWar } from "./torn-api.js";
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
-import { startChainMonitor, recordClientChainReport } from "./chain-monitor.js";
+import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
 
 const router = Router();
@@ -92,11 +92,7 @@ const refreshCooldowns = new Map(); // warId → timestamp
 const rankedWarDetectCooldowns = new Map(); // warId → timestamp
 const RANKED_WAR_DETECT_COOLDOWN_MS = 60000; // only check once per minute
 
-/** Track last chain alert push per warId to avoid spamming. */
-const chainAlertCooldowns = new Map(); // warId → timestamp
-const CHAIN_ALERT_COOLDOWN_MS = 30000; // max one chain alert push per 30s
-const chainPanicCooldowns = new Map(); // warId → timestamp
-const CHAIN_PANIC_COOLDOWN_MS = 20000; // max one panic push per 20s
+// Chain alert push cooldowns moved to chain-monitor.js (server polls directly)
 
 function clearExistingTimer(timerKey) {
   if (callTimers.has(timerKey)) {
@@ -812,50 +808,10 @@ router.post("/api/status", requireAuth, async (req, res) => {
     store.saveState();
   }
 
-  // Chain data update from intercepted data
+  // Chain data update from client (for display sync only — push alerts handled by server chain monitor)
   if (chainData && typeof chainData === "object") {
-    // Record that a client is actively reporting — suppresses server-side polling
-    recordClientChainReport(warId);
-
-    const prevChain = { ...war.chainData };
     war.chainData = { ...war.chainData, ...chainData };
     store.saveState();
-
-    // Push chain-break alerts
-    const timeout = chainData.timeout ?? war.chainData.timeout;
-    const current = chainData.current ?? war.chainData.current;
-    if (timeout <= 60 && current > 0) {
-      console.log(`[chain-client] ${playerName} reported chain ${current}, timeout ${Math.round(timeout)}s`);
-    }
-    if (timeout > 0 && current > 0) {
-      // Panic at 30s
-      if (timeout <= 30) {
-        const lastPanic = chainPanicCooldowns.get(warId) || 0;
-        if (Date.now() - lastPanic > CHAIN_PANIC_COOLDOWN_MS) {
-          chainPanicCooldowns.set(warId, Date.now());
-          const warPlayers = store.getOnlinePlayersForWar(warId);
-          push.notifyChainPanic(warPlayers, warId, current, Math.round(timeout));
-        }
-      // Warning at 60s
-      } else if (timeout <= 60) {
-        const lastChainAlert = chainAlertCooldowns.get(warId) || 0;
-        if (Date.now() - lastChainAlert > CHAIN_ALERT_COOLDOWN_MS) {
-          chainAlertCooldowns.set(warId, Date.now());
-          const warPlayers = store.getOnlinePlayersForWar(warId);
-          push.notifyChainAlert(warPlayers, warId, current, timeout, Math.round(timeout));
-        }
-      }
-    }
-
-    // Push bonus-imminent alert (within 2 hits of a milestone)
-    const BONUSES = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000];
-    if (current > 0) {
-      const nextBonus = BONUSES.find((b) => b > current);
-      if (nextBonus && nextBonus - current <= 2 && (prevChain.current || 0) < current) {
-        const warPlayers = store.getOnlinePlayersForWar(warId);
-        push.notifyBonusImminent(warPlayers, warId, current, nextBonus);
-      }
-    }
   }
 
   // Broadcast if anything changed

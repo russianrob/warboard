@@ -16,7 +16,7 @@ import * as push from "./push-notifications.js";
 
 const POLL_INTERVAL_MS = 10_000; // 10 seconds
 const MAX_BACKOFF_MS = 120_000;   // max 2 minutes between retries on failure
-const CLIENT_STALE_MS = 12_000;   // if no client report in 12s, server takes over
+// Client chain forwarding removed — server always polls directly.
 const CHAIN_ALERT_THRESHOLD = 60; // seconds — fire warning when chain timer <= this
 const CHAIN_PANIC_THRESHOLD = 30; // seconds — fire panic when chain timer <= this
 const CHAIN_ALERT_COOLDOWN_MS = 30_000; // max one alert push per 30s per war
@@ -32,8 +32,7 @@ const BONUS_HITS = [
 const timeouts = new Map();
 /** Current backoff delay per warId (resets on success). */
 const backoffs = new Map();
-/** Last time a client reported chain data per warId. */
-const lastClientReport = new Map();
+
 /** Last time we sent a chain alert push per warId. */
 const lastAlertSent = new Map();
 /** Last time we sent a chain panic push per warId. */
@@ -43,21 +42,7 @@ const lastScoreCheck = new Map();
 /** Track if we already notified war target reached per warId. */
 const warTargetNotified = new Map();
 
-/**
- * Record that a client just reported chain data (called from /api/status route).
- * This prevents server-side polling from duplicating the client's work.
- */
-export function recordClientChainReport(warId) {
-  lastClientReport.set(warId, Date.now());
-}
-
-/**
- * Check if a client has recently reported chain data.
- */
-function isClientReporting(warId) {
-  const last = lastClientReport.get(warId) || 0;
-  return (Date.now() - last) < CLIENT_STALE_MS;
-}
+// recordClientChainReport removed — server always polls directly.
 
 /**
  * Start chain monitoring for a war room.
@@ -74,12 +59,6 @@ export function startChainMonitor(io, warId) {
   const poll = async () => {
     const war = store.getWar(warId);
     if (!war || !war.factionId) { scheduleNext(POLL_INTERVAL_MS); return; }
-
-    // Skip if a client is actively reporting chain data
-    if (isClientReporting(warId)) {
-      scheduleNext(POLL_INTERVAL_MS);
-      return;
-    }
 
     const apiKey = store.getFactionApiKey(war.factionId) || store.getApiKeyForFaction(war.factionId);
     if (!apiKey) { scheduleNext(POLL_INTERVAL_MS); return; }
@@ -184,7 +163,6 @@ export function stopChainMonitor(warId) {
     timeouts.delete(warId);
   }
   backoffs.delete(warId);
-  lastClientReport.delete(warId);
   lastAlertSent.delete(warId);
   lastScoreCheck.delete(warId);
   warTargetNotified.delete(warId);
@@ -201,7 +179,6 @@ export function stopAll() {
   }
   timeouts.clear();
   backoffs.clear();
-  lastClientReport.clear();
   lastAlertSent.clear();
   lastScoreCheck.clear();
   warTargetNotified.clear();
