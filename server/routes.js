@@ -102,6 +102,42 @@ router.get("/api/health", (req, res) => {
   res.json({ status: "ok", uptime: Math.floor(process.uptime()) });
 });
 
+// ── GET /api/sse-test ────────────────────────────────────────────────────
+// Lightweight SSE probe — sends 10 heartbeat events (one every 2s) then closes.
+// Used to test whether PDA's InAppWebView supports EventSource.
+
+router.get("/api/sse-test", (req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no", // disable nginx buffering if proxied
+  });
+
+  let count = 0;
+  const maxEvents = 10;
+
+  // Send initial event immediately
+  res.write(`data: ${JSON.stringify({ event: "hello", count: 0, ts: Date.now() })}\n\n`);
+  count++;
+
+  const interval = setInterval(() => {
+    if (count >= maxEvents) {
+      res.write(`data: ${JSON.stringify({ event: "done", count, ts: Date.now() })}\n\n`);
+      clearInterval(interval);
+      res.end();
+      return;
+    }
+    res.write(`data: ${JSON.stringify({ event: "heartbeat", count, ts: Date.now() })}\n\n`);
+    count++;
+  }, 2000);
+
+  // Clean up if client disconnects early
+  req.on("close", () => {
+    clearInterval(interval);
+  });
+});
+
 // ── POST /api/gate ──────────────────────────────────────────────────────
 // Verify Torn API key for landing page access. Sets a cookie on success.
 

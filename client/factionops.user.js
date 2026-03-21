@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.16.1
+// @version      3.16.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.16.2  - Add SSE (EventSource) test button in PDA settings to probe real-time support
 // v3.16.1  - Show RT/Poll connection badge for all users (was admin-only)
 // v3.16.0  - Multi-hit deal calls: long-press/right-click Call button for 15-min reserved deal call
 // v3.15.7  - Fix race condition: own-faction members no longer leak into overlay before enemy data loads
@@ -170,7 +171,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.16.1',
+        VERSION: '3.16.2',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2990,6 +2991,8 @@ body.wb-chain-active {
             </div>
             <button class="wb-btn wb-btn-sm" id="fo-btn-test-pda-notif" style="margin-bottom:14px;font-size:11px;">Test PDA Notification</button>
             <div id="fo-pda-notif-result" style="font-size:11px;margin-bottom:10px;min-height:14px;"></div>
+            <button class="wb-btn wb-btn-sm" id="fo-btn-test-sse" style="margin-bottom:14px;font-size:11px;">Test SSE (EventSource)</button>
+            <div id="fo-sse-result" style="font-size:11px;margin-bottom:10px;min-height:14px;white-space:pre-wrap;max-height:120px;overflow-y:auto;"></div>
             ` : ''}
 
             <hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:14px 0;">
@@ -3124,6 +3127,65 @@ body.wb-chain-active {
                     warn('[PDA-Test] scheduleNotification error:', err);
                     if (resultEl) resultEl.innerHTML = '<span style="color:#e17055;">\u2717 Error: ' + (err?.message || err) + '</span>';
                 });
+            });
+        }
+
+        // SSE test button
+        const testSseBtn = document.getElementById('fo-btn-test-sse');
+        if (testSseBtn) {
+            testSseBtn.addEventListener('click', () => {
+                const resultEl = document.getElementById('fo-sse-result');
+                if (!resultEl) return;
+
+                // Check if EventSource exists at all
+                if (typeof EventSource === 'undefined') {
+                    resultEl.innerHTML = '<span style="color:#e17055;">\u2717 EventSource not supported in this environment</span>';
+                    return;
+                }
+
+                resultEl.innerHTML = '<span style="color:#74b9ff;">Connecting to SSE test endpoint...</span>';
+                let received = 0;
+
+                try {
+                    const es = new EventSource(CONFIG.SERVER_URL + '/api/sse-test');
+
+                    es.onopen = () => {
+                        resultEl.innerHTML = '<span style="color:#00b894;">\u2713 Connection opened! Waiting for events...</span>\n';
+                    };
+
+                    es.onmessage = (evt) => {
+                        received++;
+                        const data = JSON.parse(evt.data);
+                        const line = `#${received}: ${data.event} (${new Date(data.ts).toLocaleTimeString()})`;
+                        resultEl.innerHTML += '<span style="color:#dfe6e9;">' + line + '</span>\n';
+                        resultEl.scrollTop = resultEl.scrollHeight;
+
+                        if (data.event === 'done') {
+                            es.close();
+                            resultEl.innerHTML += '<span style="color:#00b894;">\u2713 SSE WORKS! Received ' + received + ' events. PDA supports EventSource.</span>\n';
+                        }
+                    };
+
+                    es.onerror = (err) => {
+                        es.close();
+                        if (received > 0) {
+                            resultEl.innerHTML += '<span style="color:#fdcb6e;">Connection closed after ' + received + ' events (partial success)</span>\n';
+                        } else {
+                            resultEl.innerHTML = '<span style="color:#e17055;">\u2717 SSE connection failed — EventSource not working in PDA</span>';
+                        }
+                    };
+
+                    // Safety timeout — close after 30s if still running
+                    setTimeout(() => {
+                        if (es.readyState !== 2) { // not CLOSED
+                            es.close();
+                            resultEl.innerHTML += '<span style="color:#fdcb6e;">Timed out after 30s (' + received + ' events received)</span>\n';
+                        }
+                    }, 30000);
+
+                } catch (e) {
+                    resultEl.innerHTML = '<span style="color:#e17055;">\u2717 Error: ' + (e.message || e) + '</span>';
+                }
             });
         }
 
