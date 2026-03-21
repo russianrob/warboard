@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.17.8
+// @version      3.17.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -4785,7 +4785,13 @@ body.wb-chain-active {
             || document.querySelector('.content-wrapper');
         if (mainContent) {
             mainContent.dataset.foHidden = 'true';
-            mainContent.style.display = 'none';
+            // Use visual hiding instead of display:none so Torn's scripts still render
+            // the war bar DOM (needed to read scores/timer for war target tracking).
+            mainContent.style.position = 'absolute';
+            mainContent.style.opacity = '0';
+            mainContent.style.pointerEvents = 'none';
+            mainContent.style.height = '0';
+            mainContent.style.overflow = 'hidden';
         }
 
         // Create the overlay if it doesn't already exist
