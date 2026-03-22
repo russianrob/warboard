@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn OC Loan Manager (PDA)
 // @namespace    https://torn.com
-// @version      2.0.2-pda
+// @version      2.0.3-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary), tracks unpaid OC payouts (PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.0.3-pda - Fix: prevent double-loan — better success detection, disable button permanently after loan attempt
 // v2.0.2-pda - Fix: loan button now always refreshes armory cache (fixes needing to press twice)
 // v2.0.1-pda - Unused tab: exclude temporary items (members can freely loan temps)
 // v2.0.0-pda - Multi-category armory: loan/retrieve drugs, medical, temporary items (not just tools)
@@ -385,7 +386,12 @@
     });
     if (!res.ok) throw new Error('Loan request failed');
     const text = await res.text();
-    if (!text.includes('success')) throw new Error('Loan failed');
+    // Torn returns various responses — treat as success unless it clearly contains an error
+    const lower = text.toLowerCase();
+    if (lower.includes('error') || lower.includes('cannot') || lower.includes('not enough') || lower.includes('fail')) {
+      throw new Error('Loan rejected by server');
+    }
+    // If we got an OK response without error keywords, treat as success
   };
 
   const loanPreparedItem = async ({ userID, userName }) => {
@@ -747,29 +753,41 @@
         // Loan buttons
         content.querySelectorAll('.loan-btn').forEach(btn => {
           btn.onclick = async () => {
+            if (btn.dataset.loaning === 'true') return; // prevent double-click
+            btn.dataset.loaning = 'true';
             const itemID = parseInt(btn.dataset.itemid, 10);
             const userID = parseInt(btn.dataset.userid, 10);
             const userName = btn.dataset.username;
             btn.disabled = true;
             btn.textContent = '…';
+            btn.style.opacity = '0.6';
             try {
               const armoryID = await prepareArmouryForItem(itemID);
               if (!armoryID) {
                 btn.textContent = 'No stock';
                 btn.style.background = '#555';
+                btn.style.opacity = '1';
+                // Allow retry for no stock — item might be restocked
+                setTimeout(() => {
+                  btn.dataset.loaning = 'false';
+                  btn.disabled = false;
+                  btn.textContent = 'Loan';
+                  btn.style.background = '#2a3cff';
+                }, 3000);
                 return;
               }
               await loanPreparedItem({ userID, userName });
               btn.textContent = '✓ Loaned';
               btn.style.background = '#1a7a1a';
+              btn.style.opacity = '1';
+              // Stay disabled permanently — item is loaned
             } catch (e) {
-              btn.textContent = 'Error';
-              btn.style.background = '#a00';
-              btn.disabled = false;
-              setTimeout(() => {
-                btn.textContent = 'Loan';
-                btn.style.background = '#2a3cff';
-              }, 2000);
+              // Loan may have gone through even if response was unexpected
+              // Keep disabled to prevent accidental double-loan
+              btn.textContent = '? Check';
+              btn.style.background = '#b8860b';
+              btn.style.opacity = '1';
+              // Don't re-enable — user should refresh the tab to see current state
               console.error('[OCLM] Loan error:', e);
             }
           };
