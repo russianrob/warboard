@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.18.9
+// @version      3.19.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2652,11 +2652,6 @@ body.wb-chain-active {
             log('Socket.IO connected:', realtimeSocket.id, 'transport:', transport);
             updateRtBadge(true);
 
-            // Socket is live — stop redundant polling on desktop
-            if (pollTimer) {
-                log('Socket.IO connected — stopping polling fallback');
-                stopPolling(true);
-            }
             state.connected = true;
             state.connecting = false;
             updateConnectionUI();
@@ -2671,13 +2666,9 @@ body.wb-chain-active {
                 });
             }
 
-            // Safety net: if no data arrives within 3s, do a single poll fetch
-            setTimeout(() => {
-                if (!hasReceivedInitialData && state.jwtToken) {
-                    log('Socket.IO connected but no initial data — fetching via poll');
-                    pollOnce();
-                }
-            }, 3000);
+            // Keep polling running as a safety net — Socket.IO provides instant updates
+            // but polling ensures data is never stale/missing. Polling is infrequent (5s)
+            // so the overhead is minimal.
         });
 
         // Instant updates from server
@@ -2693,12 +2684,7 @@ body.wb-chain-active {
         realtimeSocket.on('disconnect', (reason) => {
             log('Socket.IO disconnected:', reason);
             updateRtBadge(false);
-
-            // Socket lost — start polling as fallback until reconnect
-            if (!pollTimer && state.jwtToken) {
-                log('Socket.IO lost — starting polling fallback');
-                startPolling();
-            }
+            // Polling is always running as safety net, no action needed
         });
 
         let socketErrorCount = 0;
