@@ -19,6 +19,7 @@ const MAX_BACKOFF_MS = 120_000;   // max 2 minutes between retries on failure
 // Client chain forwarding removed — server always polls directly.
 const CHAIN_ALERT_THRESHOLD = 60; // seconds — fire warning when chain timer <= this
 const CHAIN_PANIC_THRESHOLD = 30; // seconds — fire panic when chain timer <= this
+const CHAIN_MIN_HITS = 10;        // only alert when chain >= 10 (real chain)
 const CHAIN_ALERT_COOLDOWN_MS = 30_000; // max one alert push per 30s per war
 const CHAIN_PANIC_COOLDOWN_MS = 20_000; // max one panic push per 20s per war
 const WAR_SCORE_CHECK_INTERVAL = 60_000; // check war score every 60s
@@ -78,7 +79,7 @@ export function startChainMonitor(io, warId) {
       backoffs.set(warId, POLL_INTERVAL_MS);
 
       // ── Chain-break push alerts ──
-      if (chain.timeout > 0 && chain.current > 0) {
+      if (chain.timeout > 0 && chain.current >= CHAIN_MIN_HITS) {
         // Panic alert at 30s
         if (chain.timeout <= CHAIN_PANIC_THRESHOLD) {
           const lastPanic = lastPanicSent.get(warId) || 0;
@@ -101,7 +102,7 @@ export function startChainMonitor(io, warId) {
       }
 
       // ── Bonus-imminent push alert ──
-      if (chain.current > 0) {
+      if (chain.current >= CHAIN_MIN_HITS) {
         const nextBonus = BONUS_HITS.find((b) => b > chain.current);
         if (nextBonus && nextBonus - chain.current <= 2 && (prevChain.current || 0) < chain.current) {
           const warPlayers = store.getOnlinePlayersForWar(warId);

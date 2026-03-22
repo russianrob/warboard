@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.19.1
+// @version      3.19.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3692,7 +3692,7 @@ body.wb-chain-active {
             // Only alert if chain data is fresh (anchor set within last 60s — avoids stale countdown alerts)
             const anchorAge = chainTimeoutAnchorAt > 0 ? (Date.now() - chainTimeoutAnchorAt) / 1000 : Infinity;
             const chainDataFresh = anchorAge < 120; // anchor less than 2 min old
-            if (CONFIG.CHAIN_ALERT && isWarActive() && chainDataFresh && state.chain.timeout > 0 && state.chain.current > 0) {
+            if (CONFIG.CHAIN_ALERT && isWarActive() && chainDataFresh && state.chain.timeout > 0 && state.chain.current >= 10) {
                 // Panic at 30s
                 if (state.chain.timeout <= 30 && !state.chainPanicFired) {
                     playChainAlert();
