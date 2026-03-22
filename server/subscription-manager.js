@@ -21,6 +21,8 @@ const OWNER_API_KEY = process.env.OWNER_API_KEY || "";
 const OWNER_FACTION_ID = process.env.OWNER_FACTION_ID || "42055";
 const SUBSCRIPTION_PRICE = parseInt(process.env.SUBSCRIPTION_PRICE, 10) || 50_000_000;
 const SUBSCRIPTION_DAYS = parseInt(process.env.SUBSCRIPTION_DAYS, 10) || 30;
+const TRIAL_PRICE = parseInt(process.env.TRIAL_PRICE, 10) || 1_000_000;
+const TRIAL_DAYS = parseInt(process.env.TRIAL_DAYS, 10) || 7;
 const POLL_INTERVAL_MS = 4 * 60 * 1000; // 4 minutes
 
 const DATA_DIR = process.env.DATA_DIR || join(__dirname, "data");
@@ -29,8 +31,9 @@ const SUBS_FILE = join(DATA_DIR, "subscriptions.json");
 // ── State ───────────────────────────────────────────────────────────────
 
 let state = {
-  factions: {},            // { factionId: { factionName, paidBy: { playerId, playerName }, paidAt, expiresAt, transactionId } }
+  factions: {},            // { factionId: { factionName, paidBy: { playerId, playerName }, paidAt, expiresAt, transactionId, tier } }
   processedTransactions: [], // transaction IDs already handled
+  trialsUsed: [],          // factionIds that have used their one-time trial
 };
 
 let pollTimer = null;
@@ -44,6 +47,7 @@ function loadState() {
       const loaded = JSON.parse(raw);
       state.factions = loaded.factions || {};
       state.processedTransactions = loaded.processedTransactions || [];
+      state.trialsUsed = loaded.trialsUsed || [];
       console.log(
         `[subscriptions] Loaded ${Object.keys(state.factions).length} faction(s), ` +
         `${state.processedTransactions.length} processed transaction(s)`
@@ -99,11 +103,16 @@ async function pollPayments() {
       const amount = entry.data?.money || entry.data?.amount || 0;
       const senderId = entry.data?.sender || entry.data?.user || null;
 
-      if (amount < SUBSCRIPTION_PRICE || !senderId) {
+      if (!senderId || amount < TRIAL_PRICE) {
         // Mark as processed even if under threshold to avoid re-checking
         state.processedTransactions.push(txId);
         continue;
       }
+
+      // Determine tier: full sub or trial
+      const isFull = amount >= SUBSCRIPTION_PRICE;
+      const tier = isFull ? "full" : "trial";
+      const grantDays = isFull ? SUBSCRIPTION_DAYS : TRIAL_DAYS;
 
       // Look up the sender's faction
       try {
@@ -129,6 +138,17 @@ async function pollPayments() {
           continue;
         }
 
+        // Trial: one-time per faction
+        if (tier === "trial" && state.trialsUsed.includes(factionId)) {
+          console.log(
+            `[subscriptions] Trial payment from ${playerName} [${senderId}] (faction ${factionId}) — ` +
+            `trial already used, ignoring`
+          );
+          state.processedTransactions.push(txId);
+          saveState();
+          continue;
+        }
+
         const now = new Date().toISOString();
         const existing = state.factions[factionId];
         let baseDate = new Date();
@@ -138,7 +158,7 @@ async function pollPayments() {
           baseDate = new Date(existing.expiresAt);
         }
 
-        const expiresAt = new Date(baseDate.getTime() + SUBSCRIPTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+        const expiresAt = new Date(baseDate.getTime() + grantDays * 24 * 60 * 60 * 1000).toISOString();
 
         state.factions[factionId] = {
           factionName,
@@ -146,7 +166,13 @@ async function pollPayments() {
           paidAt: now,
           expiresAt,
           transactionId: txId,
+          tier,
         };
+
+        // Mark trial as used for this faction
+        if (tier === "trial" && !state.trialsUsed.includes(factionId)) {
+          state.trialsUsed.push(factionId);
+        }
 
         state.processedTransactions.push(txId);
         saveState();
@@ -155,15 +181,16 @@ async function pollPayments() {
           year: "numeric", month: "short", day: "numeric",
         });
 
+        const tierLabel = tier === "trial" ? `${TRIAL_DAYS}-day trial` : `${SUBSCRIPTION_DAYS}-day sub`;
         if (existing) {
           console.log(
             `[subscriptions] Faction renewed: ${factionName} (${factionId}) paid by ${playerName} — ` +
-            `extended to ${expiryDate}`
+            `${tierLabel}, extended to ${expiryDate}`
           );
         } else {
           console.log(
             `[subscriptions] New faction subscribed: ${factionName} (${factionId}) paid by ${playerName} — ` +
-            `expires ${expiryDate}`
+            `${tierLabel}, expires ${expiryDate}`
           );
         }
       } catch (lookupErr) {
@@ -228,7 +255,8 @@ export function getOwnerFactionId() {
  */
 export function getSubscriptionRejectionMessage() {
   const priceFormatted = SUBSCRIPTION_PRICE.toLocaleString();
-  return `Faction not subscribed. Send $${priceFormatted} to RussianRob [137558] to activate ${SUBSCRIPTION_DAYS}-day access.`;
+  const trialFormatted = TRIAL_PRICE.toLocaleString();
+  return `Faction not subscribed. Send $${trialFormatted} to RussianRob [137558] for a ${TRIAL_DAYS}-day trial, or $${priceFormatted} for ${SUBSCRIPTION_DAYS}-day access.`;
 }
 
 /**
