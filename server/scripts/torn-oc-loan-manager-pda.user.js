@@ -1,880 +1,997 @@
 // ==UserScript==
 // @name         Torn OC Loan Manager (PDA)
 // @namespace    https://torn.com
-// @version      1.5.2-pda
-// @description  Highlights over-loaned items and helps loan missing OC tools + split calculator (PDA compatible, no armory tab needed)
+// @version      2.0.2-pda
+// @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary), tracks unpaid OC payouts (PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
 // @downloadURL  https://tornwar.com/scripts/torn-oc-loan-manager-pda.user.js
 // @updateURL    https://tornwar.com/scripts/torn-oc-loan-manager-pda.meta.js
 // ==/UserScript==
-
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.0.2-pda - Fix: loan button now always refreshes armory cache (fixes needing to press twice)
+// v2.0.1-pda - Unused tab: exclude temporary items (members can freely loan temps)
+// v2.0.0-pda - Multi-category armory: loan/retrieve drugs, medical, temporary items (not just tools)
+// v1.9.1-pda - Payouts tab: replace broken Pay All with Open Payouts link to Torn's completed crimes page
+// v1.9.0-pda - Payouts tab: Pay All button with configurable payout %, pays to faction balance
+// v1.8.3-pda - Fix: Unused tab now checks all OC item needs, not just missing ones
+// v1.8.2-pda - Fix: resolve item names from Torn API when not in local cache
+// v1.8.1-pda - Fix: filter out chain link crimes ($0 reward) from Payouts tab
+// v1.8.0-pda - Replace Split tab with Payouts: shows completed OCs awaiting payout
+// v1.7.2-pda - Fix: Settings tab now shows PDA key status, allows override/clear
+// v1.7.1-pda - Fix: draggable button click detection
+// v1.7.0-pda - Draggable OC button with position memory
+// v1.6.0-pda - Add API Settings panel, shrink floating button
 // v1.5.2-pda - Update URLs to tornwar.com hosting
 // v1.5.1-pda - Fix: retrieve role parameter (use "retrieve" not "return")
 // v1.5.0-pda - Unused tab card UI with Retrieve Item button
 // v1.4.1-pda - Initial PDA-compatible release: highlights over-loaned items,
 //              helps loan missing OC tools, split calculator
 // =============================================================================
-
 (function () {
-    'use strict';
+  'use strict';
 
-    // ------------------- PDA / API detection -------------------
-    let inPDA = false;
-    let apiKey = '';
-
-    try {
-        const PDAKey = "###PDA-APIKEY###";
-        if (PDAKey && PDAKey.charAt(0) !== "#") {
-            inPDA = true;
-            apiKey = PDAKey; // Use PDA API key
-        }
-    } catch (e) {
-        // Not in PDA, ignore
+  // ------------------- PDA / API detection -------------------
+  let inPDA = false;
+  let apiKey = '';
+  try {
+    const PDAKey = "###PDA-APIKEY###";
+    if (PDAKey && PDAKey.charAt(0) !== "#") {
+      inPDA = true;
+      apiKey = PDAKey; // Use PDA API key
     }
+  } catch (e) {
+    // Not in PDA, ignore
+  }
 
-    // ------------------- Storage shim (no GM_* APIs) -------------------
-    const storage = {
-        get(key, def = '') {
-            try {
-                const v = localStorage.getItem(key);
-                return v === null ? def : v;
-            } catch {
-                return def;
-            }
-        },
-        set(key, value) {
-            try {
-                localStorage.setItem(key, value);
-            } catch {
-                // ignore
-            }
+  // ------------------- Storage shim (no GM_* APIs) -------------------
+  const storage = {
+    get(key, def = '') {
+      try { const v = localStorage.getItem(key); return v === null ? def : v; }
+      catch { return def; }
+    },
+    set(key, value) {
+      try { localStorage.setItem(key, value); }
+      catch { /* ignore */ }
+    }
+  };
+
+  const getApiKey = () => {
+    const override = storage.get('OCLM_API_KEY', '');
+    if (override) return override;
+    if (inPDA) return apiKey;
+    return '';
+  };
+
+  const requireApiKeyOrThrow = () => {
+    const key = getApiKey();
+    if (!key) {
+      const err = new Error('MISSING_API_KEY');
+      err.isApiKeyError = true;
+      throw err;
+    }
+    return key;
+  };
+
+  const BLACKLISTED_ITEM_IDS = new Set([1012, 226]);
+
+  const overAllocated = new Map();
+  const memberNameMap = new Map();
+  let membersLoaded = false;
+
+  // itemID -> { armoryID, qty, armoryType }
+  const armoryCache = new Map();
+  let preparedArmoryID = null;
+  let pendingArmoryItemID = null;
+
+  // Torn item type -> armory tab type mapping
+  // The armory POST `type` param needs the armory tab name, not the Torn item type
+  const ITEM_TYPE_TO_ARMORY_TAB = {
+    'Tool': 'utilities',
+    'Drug': 'drugs',
+    'Medical': 'medical',
+    'Booster': 'boosters',
+    'Temporary': 'temporary'
+  };
+
+  // Armory tab type -> POST `type` param for loan/retrieve actions
+  const ARMORY_TAB_TO_POST_TYPE = {
+    'utilities': 'Tool',
+    'drugs': 'Drug',
+    'medical': 'Medical',
+    'boosters': 'Booster',
+    'temporary': 'Temporary'
+  };
+
+  // All armory categories that can hold OC items
+  const ARMORY_CATEGORIES = ['utilities', 'drugs', 'medical', 'boosters', 'temporary'];
+
+  // Cache: itemID -> Torn item type (e.g. 'Tool', 'Drug', 'Medical')
+  const itemTypeCache = new Map();
+
+  // ------------------- Utilities -------------------
+  const getRfcvToken = () => {
+    const match = document.cookie.match(/rfc_v=([^;]+)/);
+    return match ? match[1] : null;
+  };
+
+  const isOnArmoryUtilities = () => {
+    return location.hash.includes('#/tab=armoury') && location.hash.includes('sub=utilities');
+  };
+
+  const formatNumber = (num) => {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  };
+
+  // ------------------- API Helpers -------------------
+  const loadMembers = async () => {
+    if (membersLoaded) return;
+    const key = requireApiKeyOrThrow();
+    const res = await fetch(`https://api.torn.com/v2/faction/members?key=${key}`);
+    if (!res.ok) throw new Error('Failed to load members');
+    const data = await res.json();
+    Object.values(data.members || {}).forEach(m => memberNameMap.set(m.id, m.name));
+    membersLoaded = true;
+  };
+
+  const getMissingOCItems = async () => {
+    const key = requireApiKeyOrThrow();
+    const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}`);
+    if (!res.ok) throw new Error('Failed to load OC data');
+    const data = await res.json();
+    const missing = [];
+    data.crimes.forEach(crime => {
+      crime.slots?.forEach(slot => {
+        if (slot.item_requirement && !slot.item_requirement.is_available &&
+            slot.user?.id &&
+            !BLACKLISTED_ITEM_IDS.has(slot.item_requirement.id)
+        ) {
+          missing.push({
+            crimeName: crime.name,
+            position: slot.position,
+            itemID: slot.item_requirement.id,
+            userID: slot.user.id,
+            userName: memberNameMap.get(slot.user.id) || `Unknown [${slot.user.id}]`
+          });
         }
-    };
+      });
+    });
+    return missing;
+  };
 
-    const getApiKey = () => {
-        if (inPDA) return apiKey;
-        return storage.get('OCLM_API_KEY', '');
-    };
-
-    const requireApiKeyOrThrow = () => {
-        const key = getApiKey();
-        if (!key) {
-            const err = new Error('MISSING_API_KEY');
-            err.isApiKeyError = true;
-            throw err;
+  // Returns ALL item requirements for active OCs (both available and missing)
+  const getAllOCItemRequirements = async () => {
+    const key = requireApiKeyOrThrow();
+    const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}`);
+    if (!res.ok) throw new Error('Failed to load OC data');
+    const data = await res.json();
+    // userID -> Set of itemIDs they need for any OC
+    const neededByUser = new Map();
+    data.crimes.forEach(crime => {
+      crime.slots?.forEach(slot => {
+        if (slot.item_requirement && slot.user?.id) {
+          const uid = slot.user.id;
+          const iid = slot.item_requirement.id;
+          if (!neededByUser.has(uid)) neededByUser.set(uid, new Set());
+          neededByUser.get(uid).add(iid);
         }
-        return key;
-    };
+      });
+    });
+    return neededByUser;
+  };
 
-    const BLACKLISTED_ITEM_IDS = new Set([1012, 226]);
+  const getUnpaidCompletedCrimes = async () => {
+    const key = requireApiKeyOrThrow();
+    // Fetch completed crimes from the last 30 days
+    const now = Math.floor(Date.now() / 1000);
+    const thirtyDaysAgo = now - (30 * 24 * 60 * 60);
+    const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=completed&filter=executed_at&from=${thirtyDaysAgo}&to=${now}&sort=DESC&key=${key}`);
+    if (!res.ok) throw new Error('Failed to load completed crimes');
+    const data = await res.json();
+    const crimes = Array.isArray(data?.crimes) ? data.crimes : (data?.crimes && typeof data.crimes === 'object' ? Object.values(data.crimes) : []);
+    const unpaid = [];
+    for (const c of crimes) {
+      const status = String(c?.status || '').toLowerCase();
+      if (status !== 'successful') continue;
+      const paidAt = c?.rewards?.payout?.paid_at;
+      if (paidAt) continue; // already paid
+      const money = Number(c?.rewards?.money || 0);
+      if (money <= 0) continue; // chain link 1 — waiting on link 2, can't be paid yet
+      unpaid.push({
+        id: c.id,
+        name: c.name || 'Unknown OC',
+        difficulty: c.difficulty || null,
+        executedAt: c.executed_at,
+        money,
+        respect: Number(c?.rewards?.respect || 0),
+        payoutPct: c?.rewards?.payout?.percentage ?? null
+      });
+    }
+    return unpaid;
+  };
 
-    const overAllocated = new Map();
-    const memberNameMap = new Map();
-    let membersLoaded = false;
+  const ITEM_NAME_CACHE_KEY = 'UTILITY_ITEM_ID_NAME_MAP';
 
-    // itemID -> { armoryID, qty }
-    const armoryCache = new Map();
-    let preparedArmoryID = null;
-    let pendingArmoryItemID = null;
+  const getItemNameMap = () => {
+    try {
+      const raw = storage.get(ITEM_NAME_CACHE_KEY, '{}');
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch { return {}; }
+  };
 
-    // Split calculator
-    const SCENARIOS = {
-        "Ace in the Hole": {
-            "Stacking the Deck": 6.8,
-            "Ace in the Hole": 12.56
-        },
-        "Crane Reaction": {
-            "Manifest Cruelty": 3.125,
-            "Gone Fission": 5.7,
-            "Crane Reaction": 8.167
+  const setItemName = (itemID, name) => {
+    const map = getItemNameMap();
+    if (!map[itemID]) {
+      map[itemID] = name;
+      storage.set(ITEM_NAME_CACHE_KEY, JSON.stringify(map));
+    }
+  };
+
+  const getItemName = (itemID) => {
+    const map = getItemNameMap();
+    return map[itemID] || null;
+  };
+
+  // Resolve unknown item names via Torn API
+  const resolveItemNames = async (itemIDs) => {
+    const unknown = itemIDs.filter(id => !getItemName(id));
+    if (!unknown.length) return;
+    const key = requireApiKeyOrThrow();
+    const unique = [...new Set(unknown)];
+    // Torn API v2 items endpoint
+    try {
+      const res = await fetch(`https://api.torn.com/v2/torn/items?ids=${unique.join(',')}&key=${key}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const items = Array.isArray(data?.items) ? data.items : Object.values(data?.items || {});
+      for (const item of items) {
+        if (item?.id && item?.name) {
+          setItemName(item.id, item.name);
         }
-    };
+      }
+    } catch { /* non-critical, fall back to ID */ }
+  };
 
-    // ------------------- Utilities -------------------
-    const getRfcvToken = () => {
-        const match = document.cookie.match(/rfc_v=([^;]+)/);
-        return match ? match[1] : null;
-    };
-
-    const isOnArmoryUtilities = () => {
-        return location.hash.includes('#/tab=armoury') && location.hash.includes('sub=utilities');
-    };
-
-    const formatNumber = (num) => {
-        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    };
-
-    // ------------------- API Helpers -------------------
-    const loadMembers = async () => {
-        if (membersLoaded) return;
-        const key = requireApiKeyOrThrow();
-        const res = await fetch(`https://api.torn.com/v2/faction/members?key=${key}`);
-        if (!res.ok) throw new Error('Failed to load members');
-        const data = await res.json();
-        Object.values(data.members || {}).forEach(m => memberNameMap.set(m.id, m.name));
-        membersLoaded = true;
-    };
-
-    const getMissingOCItems = async () => {
-        const key = requireApiKeyOrThrow();
-        const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}`);
-        if (!res.ok) throw new Error('Failed to load OC data');
-        const data = await res.json();
-
-        const missing = [];
-        data.crimes.forEach(crime => {
-            crime.slots?.forEach(slot => {
-                if (slot.item_requirement &&
-                    !slot.item_requirement.is_available &&
-                    slot.user?.id &&
-                    !BLACKLISTED_ITEM_IDS.has(slot.item_requirement.id)
-                ) {
-                    missing.push({
-                        crimeName: crime.name,
-                        position: slot.position,
-                        itemID: slot.item_requirement.id,
-                        userID: slot.user.id,
-                        userName: memberNameMap.get(slot.user.id) || `Unknown [${slot.user.id}]`
-                    });
-                }
-            });
-        });
-        return missing;
-    };
-
-    const ITEM_NAME_CACHE_KEY = 'UTILITY_ITEM_ID_NAME_MAP';
-
-    const getItemNameMap = () => {
-        try {
-            const raw = storage.get(ITEM_NAME_CACHE_KEY, '{}');
-            const parsed = JSON.parse(raw);
-            return parsed && typeof parsed === 'object' ? parsed : {};
-        } catch {
-            return {};
+  // ------------------- Armory Cache (multi-category) -------------------
+  const fetchArmoryCategoryJSON = async (category) => {
+    const rfcv = getRfcvToken();
+    if (!rfcv) throw new Error('Missing RFCV token');
+    const body = new URLSearchParams({
+      step: 'armouryTabContent',
+      type: category,
+      start: '0',
+      ajax: 'true'
+    });
+    const res = await fetch(`https://www.torn.com/factions.php?rfcv=${rfcv}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body,
+      credentials: 'same-origin'
+    });
+    if (!res.ok) return []; // Category may not be unlocked
+    try {
+      const data = await res.json();
+      if (!data?.items) return [];
+      for (const entry of data.items) {
+        if (entry.itemID && entry.name) {
+          setItemName(entry.itemID, entry.name);
         }
-    };
+      }
+      // Tag each item with its armory category
+      return data.items.map(item => ({ ...item, armoryCategory: category }));
+    } catch { return []; }
+  };
 
-    const setItemName = (itemID, name) => {
-        const map = getItemNameMap();
-        if (!map[itemID]) {
-            map[itemID] = name;
-            storage.set(ITEM_NAME_CACHE_KEY, JSON.stringify(map));
-        }
-    };
+  // Fetch all armory categories and return combined items
+  const fetchAllArmoryItems = async () => {
+    const results = await Promise.all(
+      ARMORY_CATEGORIES.map(cat => fetchArmoryCategoryJSON(cat))
+    );
+    return results.flat();
+  };
 
-    const getItemName = (itemID) => {
-        const map = getItemNameMap();
-        return map[itemID] || null;
-    };
-
-    // ------------------- Armory Cache (JSON, no tab needed) -------------------
-    const fetchArmoryUtilitiesJSON = async () => {
-        const rfcv = getRfcvToken();
-        if (!rfcv) throw new Error('Missing RFCV token');
-
-        const body = new URLSearchParams({
-            step: 'armouryTabContent',
-            type: 'utilities',
-            start: '0',
-            ajax: 'true'
+  const refreshArmoryCache = async () => {
+    armoryCache.clear();
+    const items = await fetchAllArmoryItems();
+    for (const entry of items) {
+      if (entry.user === false && entry.qty > 0) {
+        armoryCache.set(entry.itemID, {
+          armoryID: entry.armoryID,
+          qty: entry.qty,
+          armoryCategory: entry.armoryCategory
         });
-
-        const res = await fetch(`https://www.torn.com/factions.php?rfcv=${rfcv}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'X-Requested-With': 'XMLHttpRequest'
-            },
-            body,
-            credentials: 'same-origin'
-        });
-
-        if (!res.ok) throw new Error('Failed to fetch armoury');
-        const data = await res.json();
-        if (!data?.items) throw new Error('Malformed response');
-
-        for (const entry of data.items) {
-            if (entry.itemID && entry.name) {
-                setItemName(entry.itemID, entry.name);
-            }
-        }
-
-        return data.items;
-    };
-
-    const refreshArmoryCache = async () => {
-        armoryCache.clear();
-        const items = await fetchArmoryUtilitiesJSON();
-        for (const entry of items) {
-            if (entry.user === false && entry.qty > 0) {
-                armoryCache.set(entry.itemID, {
-                    armoryID: entry.armoryID,
-                    qty: entry.qty
-                });
-            }
-        }
-    };
-
-    const prepareArmouryForItem = async (itemID) => {
-        if (!armoryCache.has(itemID)) await refreshArmoryCache();
-        const entry = armoryCache.get(itemID);
-        if (!entry || entry.qty <= 0) return null;
-        preparedArmoryID = entry.armoryID;
-        pendingArmoryItemID = itemID;
-        return entry.armoryID;
-    };
-
-    // ------------------- Retrieve (return loaned item) -------------------
-    const retrieveItem = async ({ armoryID, itemID, userID, userName }) => {
-        const rfcv = getRfcvToken();
-        if (!rfcv) throw new Error('Missing RFCV token');
-
-        const body = new URLSearchParams({
-            ajax: 'true',
-            step: 'armouryActionItem',
-            role: 'retrieve',
-            item: armoryID,
-            itemID: itemID,
-            type: 'Tool',
-            user: `${userName} [${userID}]`,
-            quantity: '1'
-        });
-
-        const res = await fetch(`https://www.torn.com/factions.php?rfcv=${rfcv}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'X-Requested-With': 'XMLHttpRequest'
-            },
-            body,
-            credentials: 'same-origin'
-        });
-
-        if (!res.ok) throw new Error('Retrieve request failed');
-        const text = await res.text();
-        if (!text.includes('success')) throw new Error('Retrieve failed');
-    };
-
-    // ------------------- Loaning (correct armoryID + itemID) -------------------
-    const loanItem = async ({ armoryID, itemID, userID, userName }) => {
-        const rfcv = getRfcvToken();
-        if (!rfcv) throw new Error('Missing RFCV token');
-
-        const body = new URLSearchParams({
-            ajax: 'true',
-            step: 'armouryActionItem',
-            role: 'loan',
-            item: armoryID,
-            itemID: itemID,
-            type: 'Tool',
-            user: `${userName} [${userID}]`,
-            quantity: '1'
-        });
-
-        const res = await fetch(`https://www.torn.com/factions.php?rfcv=${rfcv}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'X-Requested-With': 'XMLHttpRequest'
-            },
-            body,
-            credentials: 'same-origin'
-        });
-
-        if (!res.ok) throw new Error('Loan request failed');
-        const text = await res.text();
-        if (!text.includes('success')) throw new Error('Loan failed');
-    };
-
-    const loanPreparedItem = async ({ userID, userName }) => {
-        if (!preparedArmoryID || pendingArmoryItemID === null) throw new Error('Armoury not prepared');
-        await loanItem({
-            armoryID: preparedArmoryID,
-            itemID: pendingArmoryItemID,
-            userID,
-            userName
-        });
-        const entry = armoryCache.get(pendingArmoryItemID);
-        if (entry) {
-            entry.qty -= 1;
-            if (entry.qty <= 0) armoryCache.delete(pendingArmoryItemID);
-        }
-        preparedArmoryID = null;
-        pendingArmoryItemID = null;
-    };
-
-    // ------------------- Highlighting -------------------
-    let highlightedRows = new Set();
-
-    const clearHighlights = () => {
-        highlightedRows.forEach(el => {
-            if (el?.style) {
-                el.style.outline = '';
-                el.style.boxShadow = '';
-                el.style.background = '';
-            }
-        });
-        highlightedRows.clear();
-    };
-
-    const highlightOverAllocated = () => {
-        clearHighlights();
-        const container = document.querySelector('#tab\\=armoury\\&sub\\=utilities');
-        if (!container) return;
-
-        container.querySelectorAll('li').forEach(li => {
-            const loanedDiv = li.querySelector('.loaned');
-            if (!loanedDiv) return;
-            const link = loanedDiv.querySelector('a[href^="/profiles.php?XID="]');
-            if (!link) return;
-            const playerId = parseInt(link.href.match(/XID=(\d+)/)?.[1], 10);
-            if (!playerId) return;
-            const itemImg = li.querySelector('.img-wrap');
-            const itemId = parseInt(itemImg?.getAttribute('data-itemid'), 10);
-            if (!itemId) return;
-
-            if (overAllocated.get(playerId)?.has(itemId)) {
-                li.style.outline = '2px solid var(--default-yellow-color)';
-                li.style.outlineOffset = '-2px';
-                li.style.background =
-                    'linear-gradient(90deg, rgba(240,200,90,0.22), transparent)';
-                li.style.transition = 'background 0.25s ease, outline 0.25s ease';
-                highlightedRows.add(li);
-            }
-        });
-    };
-
-    // ------------------- UI -------------------
-    const createUI = async () => {
-        document.querySelectorAll('#oc-loan-btn, #oc-loan-panel').forEach(el => el.remove());
-
-        const button = document.createElement('button');
-        button.id = 'oc-loan-btn';
-        button.textContent = 'OC Loans';
-        button.style.cssText = `
-            position: fixed;
-            top: 14px;
-            right: 14px;
-            z-index: 99999;
-            padding: 12px 20px;
-            min-height: 40px;
-            background: #2a3cff;
-            color: #fff;
-            border: none;
-            border-radius: 10px;
-            font-size: 14px;
-            font-weight: 700;
-            letter-spacing: 0.3px;
-            cursor: pointer;
-            box-shadow:
-                0 6px 18px rgba(42, 60, 255, 0.35),
-                inset 0 0 0 1px rgba(255,255,255,0.15);
-            transition:
-                transform 0.15s ease,
-                box-shadow 0.15s ease,
-                filter 0.15s ease;
-        `;
-        button.onmouseover = () => { button.style.opacity = '0.85'; };
-        button.onmouseout = () => { button.style.opacity = '1'; };
-
-        const panel = document.createElement('div');
-        panel.id = 'oc-loan-panel';
-        panel.style.cssText = `
-            position:fixed;
-            top:60px;
-            right:8px;
-            width:320px;
-            max-width:90vw;
-            max-height:80vh;
-            background: var(--default-bg-panel-color);
-            border: 1px solid var(--default-panel-divider-outer-side-color);
-            border-radius: 8px;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.4);
-            z-index:99998;
-            opacity:0; visibility:hidden; transform:translateY(-8px);
-            transition: opacity 0.25s ease, transform 0.25s ease;
-            display:flex;
-            flex-direction:column;
-            overflow:hidden;
-        `;
-
-        const style = document.createElement('style');
-        style.textContent = `
-            #oc-loan-panel {
-                color: #e6e6e6;
-                font-size: 13.5px;
-            }
-            #oc-loan-panel * {
-                box-sizing: border-box;
-            }
-            #oc-loan-panel .oc-header {
-                padding: 8px 10px 4px 10px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                background: #121212;
-                border-bottom: 1px solid #222;
-                gap: 4px;
-                flex-wrap: wrap;
-            }
-            #oc-loan-panel .oc-title {
-                font-size: 15px;
-                font-weight: 700;
-                letter-spacing: 0.3px;
-            }
-            #oc-loan-panel .oc-status {
-                font-size: 11px;
-                color: #888;
-            }
-            #oc-loan-panel .oc-tabs {
-                display: flex;
-                gap: 6px;
-            }
-            #oc-loan-panel .oc-tab {
-                padding: 6px 12px;
-                background: #1b1b1b;
-                border-radius: 999px;
-                border: none;
-                color: #aaa;
-                cursor: pointer;
-                font-weight: 600;
-            }
-            #oc-loan-panel .oc-tab.active {
-                background: #2a3cff;
-                color: #fff;
-            }
-            #oc-loan-panel .oc-tab:hover:not(.active) {
-                background: #222;
-                color: #ddd;
-            }
-            #oc-content {
-                padding: 12px 14px 14px 14px;
-                overflow-y: auto;
-                overflow-x: hidden;
-                max-height: calc(80vh - 52px);
-            }
-            #action-btn {
-                width: 100%;
-                padding: 14px;
-                margin-top: 14px;
-                border-radius: 10px;
-                border: none;
-                font-weight: 700;
-                font-size: 14px;
-                background: #2a2a2a;
-                color: #aaa;
-                cursor: pointer;
-            }
-            #action-btn.ready {
-                background: #2a3cff;
-                color: #fff;
-            }
-            #action-btn.ready:hover {
-                filter: brightness(1.1);
-            }
-            #oc-loan-panel table {
-                width: 100%;
-                border-collapse: collapse;
-            }
-            #oc-loan-panel th {
-                text-align: left;
-                color: #888;
-                font-weight: 600;
-                padding-bottom: 6px;
-            }
-            #oc-loan-panel td {
-                padding: 6px 0;
-            }
-            #oc-close {
-                cursor: pointer;
-                font-size: 22px;
-                opacity: 0.6;
-            }
-            #oc-close:hover { opacity: 1; }
-        `;
-        document.head.appendChild(style);
-
-        const apiStatus = inPDA
-            ? 'API: PDA key'
-            : (getApiKey() ? 'API: Local key' : 'API: missing');
-
-        panel.innerHTML = `
-            <div class="oc-header">
-                <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
-                    <div class="oc-title">OC Loan Manager</div>
-                    <div class="oc-status">${apiStatus}</div>
-                </div>
-                <div class="oc-tabs">
-                    <button id="tab-unused" class="oc-tab active">Unused</button>
-                    <button id="tab-missing" class="oc-tab">Missing</button>
-                    <button id="tab-split" class="oc-tab">Split</button>
-                </div>
-                <div id="oc-close">×</div>
-            </div>
-            <div id="oc-content"></div>
-        `;
-        document.body.appendChild(button);
-        document.body.appendChild(panel);
-
-        const content = panel.querySelector('#oc-content');
-        const tabUnused = panel.querySelector('#tab-unused');
-        const tabMissing = panel.querySelector('#tab-missing');
-        const tabSplit = panel.querySelector('#tab-split');
-        let isOpen = false;
-
-        const openPanel = () => {
-            isOpen = true;
-            panel.style.opacity = '1';
-            panel.style.visibility = 'visible';
-            panel.style.transform = 'translateY(0)';
-        };
-
-        const closePanel = () => {
-            isOpen = false;
-            panel.style.opacity = '0';
-            panel.style.visibility = 'hidden';
-            panel.style.transform = 'translateY(-10px)';
-            clearHighlights();
-        };
-
-        button.onclick = () => isOpen ? closePanel() : openPanel();
-        panel.querySelector('#oc-close').onclick = closePanel;
-
-        // Unused tab
-        tabUnused.onclick = async () => {
-            [tabUnused, tabMissing, tabSplit].forEach(t => t.classList.remove('active'));
-            tabUnused.classList.add('active');
-            content.innerHTML = '<div style="text-align:center;padding:40px;">Loading unused loans...</div>';
-
-            try {
-                const key = requireApiKeyOrThrow();
-
-                await loadMembers();
-                overAllocated.clear();
-
-                const [crimesRes, utilsRes, armoryItems] = await Promise.all([
-                    fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}`),
-                    fetch(`https://api.torn.com/faction/?selections=utilities&key=${key}`),
-                    fetchArmoryUtilitiesJSON()
-                ]);
-
-                const crimesData = await crimesRes.json();
-                const utilsData = await utilsRes.json();
-
-                // Build a lookup: itemID -> [{ armoryID, userID }] for loaned items from internal endpoint
-                const loanedArmoryLookup = new Map();
-                for (const entry of armoryItems) {
-                    if (entry.user && entry.user !== false && entry.itemID) {
-                        const uid = typeof entry.user === 'object' ? entry.user.userID : entry.user;
-                        if (!loanedArmoryLookup.has(entry.itemID)) loanedArmoryLookup.set(entry.itemID, []);
-                        loanedArmoryLookup.get(entry.itemID).push({
-                            armoryID: entry.armoryID,
-                            userID: uid
-                        });
-                    }
-                }
-
-                const usedItems = new Map();
-                crimesData.crimes.forEach(c => c.slots?.forEach(s => {
-                    if (!s.user?.id || !s.item_requirement?.id) return;
-                    const pid = s.user.id;
-                    if (!usedItems.has(pid)) usedItems.set(pid, new Set());
-                    usedItems.get(pid).add(s.item_requirement.id);
-                }));
-
-                const overList = [];
-                (utilsData.utilities || []).forEach(u => {
-                    if (!u.loaned || BLACKLISTED_ITEM_IDS.has(u.ID)) return;
-
-                    const loanedTo = typeof u.loaned_to === 'number' ? [u.loaned_to] :
-                        typeof u.loaned_to === 'string' ? u.loaned_to.split(',').map(x => parseInt(x.trim(), 10)).filter(Boolean) :
-                            [];
-
-                    loanedTo.forEach(pid => {
-                        if (!usedItems.get(pid)?.has(Number(u.ID))) {
-                            if (!overAllocated.has(pid)) overAllocated.set(pid, new Set());
-                            overAllocated.get(pid).add(Number(u.ID));
-
-                            // Find the matching armoryID from the internal endpoint
-                            const candidates = loanedArmoryLookup.get(Number(u.ID)) || [];
-                            const match = candidates.find(c => c.userID === pid);
-
-                            overList.push({
-                                name: memberNameMap.get(pid) || `Unknown [${pid}]`,
-                                pid,
-                                item: u.name,
-                                iid: u.ID,
-                                armoryID: match ? match.armoryID : null
-                            });
-                        }
-                    });
-                });
-
-                overList.sort((a, b) => a.name.localeCompare(b.name));
-
-                if (overList.length === 0) {
-                    content.innerHTML = '<div style="text-align:center;padding:50px;font-size:18px;">All loaned items in use!</div>';
-                } else {
-                    let unusedIndex = 0;
-                    const renderUnusedCurrent = () => {
-                        const e = overList[unusedIndex];
-                        const itemName = e.item || getItemName(e.iid);
-                        const canRetrieve = !!e.armoryID;
-
-                        content.innerHTML = `
-                            <div style="line-height:1.7; margin-bottom:16px;">
-                                <strong style="font-size:17px;">Unused Loan</strong><br>
-                                Item: ${itemName ? `${itemName} (${e.iid})` : `(${e.iid})`}<br>
-                                User: <span style="color:var(--default-color);">${e.name}</span><br>
-                                <span style="font-size:11px;color:#aaa;">Loaned but not needed for any OC</span>
-                            </div>
-                            <button id="action-btn" class="${canRetrieve ? 'ready' : ''}">
-                                ${canRetrieve ? `Retrieve Item (${unusedIndex + 1}/${overList.length})` : `Skip (${unusedIndex + 1}/${overList.length})`}
-                            </button>
-                        `;
-
-                        const actionBtn = content.querySelector('#action-btn');
-                        actionBtn.onclick = async () => {
-                            if (!canRetrieve) {
-                                unusedIndex++;
-                                if (unusedIndex >= overList.length) {
-                                    content.innerHTML =
-                                        '<div style="text-align:center;padding:50px;font-size:18px;">All items processed!</div>';
-                                } else {
-                                    renderUnusedCurrent();
-                                }
-                                return;
-                            }
-
-                            actionBtn.disabled = true;
-                            actionBtn.textContent = 'Retrieving...';
-
-                            try {
-                                await retrieveItem({
-                                    armoryID: e.armoryID,
-                                    itemID: e.iid,
-                                    userID: e.pid,
-                                    userName: e.name
-                                });
-
-                                unusedIndex++;
-                                if (unusedIndex >= overList.length) {
-                                    content.innerHTML =
-                                        '<div style="text-align:center;padding:50px;font-size:18px;">All items retrieved!</div>';
-                                } else {
-                                    renderUnusedCurrent();
-                                }
-                            } catch (err) {
-                                actionBtn.textContent = `Retrieve Item (${unusedIndex + 1}/${overList.length})`;
-                                actionBtn.disabled = false;
-                            }
-                        };
-                    };
-                    renderUnusedCurrent();
-                }
-
-                if (isOnArmoryUtilities()) highlightOverAllocated();
-            } catch (err) {
-                if (err.isApiKeyError || err.message === 'INVALID_API_RESPONSE') {
-                    content.innerHTML = `
-                        <div style="text-align:center;padding:50px;">
-                            <div style="font-size:18px;margin-bottom:12px;">API Key Required</div>
-                            <div style="color:#aaa;">
-                                No API key detected. If you are using Torn PDA, make sure a PDA API key is set in app settings.
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    content.innerHTML = `<div style="color:#f66;padding:20px;">Error: ${err.message}</div>`;
-                }
-            }
-        };
-
-        tabMissing.onclick = async () => {
-            [tabUnused, tabMissing, tabSplit].forEach(t => t.classList.remove('active'));
-            tabMissing.classList.add('active');
-            renderMissingTab();
-        };
-
-        const renderMissingTab = async () => {
-            try {
-                requireApiKeyOrThrow();
-            } catch {
-                content.innerHTML = `
-                    <div style="text-align:center;padding:50px;">
-                        <div style="font-size:18px;margin-bottom:12px;">API Key Required</div>
-                        <div style="color:#aaa;">
-                            No API key detected. If you are using Torn PDA, make sure a PDA API key is set in app settings.
-                        </div>
-                    </div>
-                `;
-                return;
-            }
-
-            let missingQueue = [];
-            try {
-                await loadMembers();
-                await refreshArmoryCache();
-                missingQueue = await getMissingOCItems();
-            } catch (err) {
-                content.innerHTML = `<div style="color:#f66;padding:20px;">Error loading: ${err.message}</div>`;
-                return;
-            }
-
-            if (missingQueue.length === 0) {
-                content.innerHTML = '<div style="text-align:center;padding:50px;font-size:18px;">No missing OC items!</div>';
-                return;
-            }
-
-            let index = 0;
-            const renderCurrent = () => {
-                const item = missingQueue[index];
-                const cached = armoryCache.get(item.itemID);
-                const isAvailable = cached && cached.qty > 0;
-                const itemName = getItemName(item.itemID);
-
-                content.innerHTML = `
-                    <div style="line-height:1.7; margin-bottom:16px;">
-                        <strong style="font-size:17px;">${item.crimeName}</strong><br>
-                        Position: ${item.position}<br>
-                        Item: ${itemName ? `${itemName} (${item.itemID})` : `(${item.itemID})`}<br>
-                        User: <span style="color:var(--default-color);">${item.userName}</span><br>
-                        <span style="font-size:11px;color:#aaa;">Available in armory: ${isAvailable ? cached.qty : 0}</span>
-                    </div>
-                    <button id="action-btn" class="${isAvailable ? 'ready' : ''}">
-                        ${isAvailable ? `Loan Item (${index + 1}/${missingQueue.length})` : 'Reload Armory Availability'}
-                    </button>
-                `;
-
-                const actionBtn = content.querySelector('#action-btn');
-
-                actionBtn.onclick = async () => {
-                    actionBtn.disabled = true;
-                    actionBtn.textContent = 'Processing...';
-
-                    try {
-                        if (!isAvailable) {
-                            await refreshArmoryCache();
-                            renderCurrent();
-                        } else {
-                            if (
-                                preparedArmoryID === null ||
-                                pendingArmoryItemID !== item.itemID
-                            ) {
-                                const armoryID = await prepareArmouryForItem(item.itemID);
-                                if (!armoryID) {
-                                    throw new Error('Item not available in armoury');
-                                }
-                            }
-
-                            await loanPreparedItem({
-                                userID: item.userID,
-                                userName: item.userName
-                            });
-
-                            index++;
-                            if (index >= missingQueue.length) {
-                                content.innerHTML =
-                                    '<div style="text-align:center;padding:50px;font-size:18px;">All items loaned!</div>';
-                            } else {
-                                renderCurrent();
-                            }
-                        }
-                    } catch (err) {
-                        actionBtn.textContent = isAvailable ? `Loan Item (${index + 1}/${missingQueue.length})` : 'Reload Armory Availability';
-                        actionBtn.disabled = false;
-                    }
-                };
-            };
-
-            renderCurrent();
-        };
-
-        tabSplit.onclick = () => {
-            [tabUnused, tabMissing, tabSplit].forEach(t => t.classList.remove('active'));
-            tabSplit.classList.add('active');
-
-            content.innerHTML = `
-                <select id="split-scenario" style="width:100%; padding:10px; margin-bottom:12px; background: var(--default-bg-panel-active-color); color: var(--default-color); border: 1px solid var(--default-panel-divider-outer-side-color); border-radius:6px;">
-                    ${Object.keys(SCENARIOS).map(s => `<option>${s}</option>`).join('')}
-                </select>
-                <input id="split-total" type="text" placeholder="e.g. 1,000,000,000" style="width:-webkit-fill-available; border:none; padding:12px; border-radius:10px;">
-                <div id="split-results" style="line-height:1.6;"></div>
-            `;
-
-            const select = content.querySelector('#split-scenario');
-            const input = content.querySelector('#split-total');
-            const results = content.querySelector('#split-results');
-
-            const calculate = () => {
-                const scenario = SCENARIOS[select.value];
-                const raw = input.value.replace(/,/g, '');
-                const total = parseFloat(raw);
-
-                if (isNaN(total) || total <= 0) {
-                    results.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">Enter valid total</div>';
-                    return;
-                }
-
-                results.innerHTML = `
-                    <table style="width:100%; border-collapse:collapse; line-height:1.6;">
-                    <thead>
-                        <tr style="border-bottom:1px solid var(--default-color);">
-                            <th style="text-align:left; padding:6px;">Scenario</th>
-                            <th style="text-align:right; padding:6px;">%</th>
-                            <th style="text-align:right; padding:6px;">Amount</th>
-                            <th style="width:32px;"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    ${Object.entries(scenario).map(([role, percent]) => {
-                    const amount = Math.floor(total * (percent / 100));
-                    const formatted = formatNumber(amount);
-
-                    return `
-                        <tr style="border-bottom:1px solid #444;">
-                            <td style="padding:6px; color:var(--default-color);">${role}</td>
-                            <td style="padding:6px;  color:var(--default-color); text-align:right;">${percent}%</td>
-                            <td style="padding:6px;  color:var(--default-color); text-align:right; font-weight:bold;">
-                                $${formatted}
-                            </td>
-                            <td style="text-align:center;">
-                                <span class="copy-btn" data-val="${amount}" style="cursor:pointer;">📋</span>
-                            </td>
-                        </tr>
-                    `;
-                }).join('')}
-            </tbody>
-        </table>
+      }
+    }
+  };
+
+  const prepareArmouryForItem = async (itemID) => {
+    // Always refresh to get the latest stock — avoids stale cache issues
+    // that required pressing the Loan button twice
+    await refreshArmoryCache();
+    const entry = armoryCache.get(itemID);
+    if (!entry || entry.qty <= 0) return null;
+    preparedArmoryID = entry.armoryID;
+    pendingArmoryItemID = itemID;
+    return entry.armoryID;
+  };
+
+  // Get the correct POST type for an item based on its armory category
+  const getPostTypeForItem = (itemID) => {
+    const cached = armoryCache.get(itemID);
+    if (cached?.armoryCategory) {
+      return ARMORY_TAB_TO_POST_TYPE[cached.armoryCategory] || 'Tool';
+    }
+    return 'Tool'; // fallback
+  };
+
+  // ------------------- Retrieve (return loaned item) -------------------
+  const retrieveItem = async ({ armoryID, itemID, userID, userName, postType }) => {
+    const rfcv = getRfcvToken();
+    if (!rfcv) throw new Error('Missing RFCV token');
+    const itemPostType = postType || getPostTypeForItem(itemID);
+    const body = new URLSearchParams({
+      ajax: 'true',
+      step: 'armouryActionItem',
+      role: 'retrieve',
+      item: armoryID,
+      itemID: itemID,
+      type: itemPostType,
+      user: `${userName} [${userID}]`,
+      quantity: '1'
+    });
+    const res = await fetch(`https://www.torn.com/factions.php?rfcv=${rfcv}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body,
+      credentials: 'same-origin'
+    });
+    if (!res.ok) throw new Error('Retrieve request failed');
+    const text = await res.text();
+    if (!text.includes('success')) throw new Error('Retrieve failed');
+  };
+
+  // ------------------- Loaning (correct armoryID + itemID) -------------------
+  const loanItem = async ({ armoryID, itemID, userID, userName }) => {
+    const rfcv = getRfcvToken();
+    if (!rfcv) throw new Error('Missing RFCV token');
+    const itemPostType = getPostTypeForItem(itemID);
+    const body = new URLSearchParams({
+      ajax: 'true',
+      step: 'armouryActionItem',
+      role: 'loan',
+      item: armoryID,
+      itemID: itemID,
+      type: itemPostType,
+      user: `${userName} [${userID}]`,
+      quantity: '1'
+    });
+    const res = await fetch(`https://www.torn.com/factions.php?rfcv=${rfcv}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body,
+      credentials: 'same-origin'
+    });
+    if (!res.ok) throw new Error('Loan request failed');
+    const text = await res.text();
+    if (!text.includes('success')) throw new Error('Loan failed');
+  };
+
+  const loanPreparedItem = async ({ userID, userName }) => {
+    if (!preparedArmoryID || pendingArmoryItemID === null)
+      throw new Error('Armoury not prepared');
+    await loanItem({
+      armoryID: preparedArmoryID,
+      itemID: pendingArmoryItemID,
+      userID,
+      userName
+    });
+    const entry = armoryCache.get(pendingArmoryItemID);
+    if (entry) {
+      entry.qty -= 1;
+      if (entry.qty <= 0) armoryCache.delete(pendingArmoryItemID);
+    }
+    preparedArmoryID = null;
+    pendingArmoryItemID = null;
+  };
+
+  // ------------------- Highlighting -------------------
+  let highlightedRows = new Set();
+
+  const clearHighlights = () => {
+    highlightedRows.forEach(el => {
+      if (el?.style) {
+        el.style.outline = '';
+        el.style.boxShadow = '';
+        el.style.background = '';
+      }
+    });
+    highlightedRows.clear();
+  };
+
+  const highlightOverAllocated = () => {
+    clearHighlights();
+    const container = document.querySelector('#tab\\=armoury\\&sub\\=utilities');
+    if (!container) return;
+    container.querySelectorAll('li').forEach(li => {
+      const loanedDiv = li.querySelector('.loaned');
+      if (!loanedDiv) return;
+      const link = loanedDiv.querySelector('a[href^="/profiles.php?XID="]');
+      if (!link) return;
+      const playerId = parseInt(link.href.match(/XID=(\d+)/)?.[1], 10);
+      if (!playerId) return;
+      const itemImg = li.querySelector('.img-wrap');
+      const itemId = parseInt(itemImg?.getAttribute('data-itemid'), 10);
+      if (!itemId) return;
+      if (overAllocated.get(playerId)?.has(itemId)) {
+        li.style.outline = '2px solid var(--default-yellow-color)';
+        li.style.outlineOffset = '-2px';
+        li.style.background = 'linear-gradient(90deg, rgba(240,200,90,0.22), transparent)';
+        li.style.transition = 'background 0.25s ease, outline 0.25s ease';
+        highlightedRows.add(li);
+      }
+    });
+  };
+
+  // ------------------- UI -------------------
+  const createUI = async () => {
+    document.querySelectorAll('#oc-loan-btn, #oc-loan-panel').forEach(el => el.remove());
+
+    const button = document.createElement('button');
+    button.id = 'oc-loan-btn';
+    button.textContent = 'OC';
+
+    // Restore saved position or use default
+    const savedPos = (() => {
+      try {
+        const raw = storage.get('OCLM_BTN_POS', '');
+        if (!raw) return null;
+        const p = JSON.parse(raw);
+        if (typeof p.x === 'number' && typeof p.y === 'number') return p;
+      } catch { /* ignore */ }
+      return null;
+    })();
+
+    button.style.cssText = `
+      position: fixed;
+      z-index: 99999;
+      padding: 5px 10px;
+      min-height: 26px;
+      background: #2a3cff;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      cursor: grab;
+      box-shadow: 0 3px 10px rgba(42, 60, 255, 0.3), inset 0 0 0 1px rgba(255,255,255,0.15);
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
     `;
 
-                results.querySelectorAll('.copy-btn').forEach(btn => {
-                    btn.onclick = async () => {
-                        try {
-                            await navigator.clipboard.writeText(btn.dataset.val);
-                            btn.textContent = '✅';
-                            setTimeout(() => btn.textContent = '📋', 1500);
-                        } catch {
-                            btn.textContent = '✖';
-                            setTimeout(() => btn.textContent = '📋', 1500);
-                        }
-                    };
-                });
-            };
+    if (savedPos) {
+      button.style.left = Math.min(savedPos.x, window.innerWidth - 40) + 'px';
+      button.style.top = Math.min(savedPos.y, window.innerHeight - 26) + 'px';
+    } else {
+      button.style.top = '10px';
+      button.style.right = '10px';
+    }
 
-            select.onchange = calculate;
-            input.oninput = () => {
-                let v = input.value.replace(/,/g, '');
-                if (/^\d*$/.test(v)) input.value = formatNumber(v);
-                calculate();
-            };
-            calculate();
-        };
+    // ---- Drag logic (mouse + touch, with click detection) ----
+    let isDragging = false;
+    let wasDragged = false;
+    let dragStartX = 0, dragStartY = 0;
+    let btnStartX = 0, btnStartY = 0;
+    const DRAG_THRESHOLD = 5; // px movement before it counts as a drag
+
+    const getClientPos = (e) => {
+      if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      return { x: e.clientX, y: e.clientY };
     };
 
-    createUI();
+    const onDragStart = (e) => {
+      // Only left mouse button or touch
+      if (e.type === 'mousedown' && e.button !== 0) return;
+      // Only preventDefault for touch (prevents scroll); mouse needs click to fire
+      if (e.type === 'touchstart') e.preventDefault();
+
+      const pos = getClientPos(e);
+      dragStartX = pos.x;
+      dragStartY = pos.y;
+      const rect = button.getBoundingClientRect();
+      btnStartX = rect.left;
+      btnStartY = rect.top;
+      isDragging = true;
+      wasDragged = false;
+      button.style.cursor = 'grabbing';
+
+      document.addEventListener('mousemove', onDragMove, { passive: false });
+      document.addEventListener('mouseup', onDragEnd);
+      document.addEventListener('touchmove', onDragMove, { passive: false });
+      document.addEventListener('touchend', onDragEnd);
+    };
+
+    const onDragMove = (e) => {
+      if (!isDragging) return;
+      const pos = getClientPos(e);
+      const dx = pos.x - dragStartX;
+      const dy = pos.y - dragStartY;
+      if (!wasDragged && Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+      wasDragged = true;
+      e.preventDefault();
+      // Clamp to viewport
+      const bw = button.offsetWidth;
+      const bh = button.offsetHeight;
+      const newX = Math.max(0, Math.min(window.innerWidth - bw, btnStartX + dx));
+      const newY = Math.max(0, Math.min(window.innerHeight - bh, btnStartY + dy));
+      button.style.left = newX + 'px';
+      button.style.top = newY + 'px';
+      button.style.right = 'auto';
+    };
+
+    const onDragEnd = (e) => {
+      if (!isDragging) return;
+      isDragging = false;
+      button.style.cursor = 'grab';
+      document.removeEventListener('mousemove', onDragMove);
+      document.removeEventListener('mouseup', onDragEnd);
+      document.removeEventListener('touchmove', onDragMove);
+      document.removeEventListener('touchend', onDragEnd);
+
+      if (wasDragged) {
+        // Persist position
+        const rect = button.getBoundingClientRect();
+        storage.set('OCLM_BTN_POS', JSON.stringify({ x: Math.round(rect.left), y: Math.round(rect.top) }));
+      } else if (e.type === 'touchend') {
+        // Touch didn't drag — treat as a tap (click won't fire after touchstart preventDefault)
+        isOpen ? closePanel() : openPanel();
+      }
+    };
+
+    button.addEventListener('mousedown', onDragStart);
+    button.addEventListener('touchstart', onDragStart, { passive: false });
+    button.onmouseover = () => { if (!isDragging) button.style.opacity = '0.85'; };
+    button.onmouseout = () => { button.style.opacity = '1'; };
+
+    const panel = document.createElement('div');
+    panel.id = 'oc-loan-panel';
+    panel.style.cssText = `
+      position:fixed;
+      width:320px;
+      max-width:90vw;
+      max-height:80vh;
+      background: var(--default-bg-panel-color);
+      border: 1px solid var(--default-panel-divider-outer-side-color);
+      border-radius: 8px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+      z-index:99998;
+      opacity:0;
+      visibility:hidden;
+      transform:translateY(-8px);
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+    `;
+
+    const style = document.createElement('style');
+    style.textContent = `
+      #oc-loan-panel { color: #e6e6e6; font-size: 13.5px; }
+      #oc-loan-panel * { box-sizing: border-box; }
+      #oc-loan-panel .oc-header {
+        padding: 8px 10px 4px 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #121212;
+        border-bottom: 1px solid #222;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      #oc-loan-panel .oc-title { font-size: 15px; font-weight: 700; letter-spacing: 0.3px; }
+      #oc-loan-panel .oc-status { font-size: 11px; color: #888; }
+      #oc-loan-panel .oc-tabs { display: flex; gap: 6px; }
+      #oc-loan-panel .oc-tab {
+        padding: 6px 12px;
+        background: #1b1b1b;
+        border-radius: 999px;
+        border: none;
+        color: #aaa;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      #oc-loan-panel .oc-tab.active { background: #2a3cff; color: #fff; }
+      #oc-loan-panel .oc-tab:hover:not(.active) { background: #222; color: #ddd; }
+      #oc-content {
+        padding: 12px 14px 14px 14px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        max-height: calc(80vh - 52px);
+      }
+      #action-btn {
+        width: 100%;
+        padding: 14px;
+        margin-top: 14px;
+        border-radius: 10px;
+        border: none;
+        font-weight: 700;
+        font-size: 14px;
+        background: #2a2a2a;
+        color: #aaa;
+        cursor: pointer;
+      }
+      #action-btn.ready { background: #2a3cff; color: #fff; }
+      #action-btn.ready:hover { filter: brightness(1.1); }
+      #oc-loan-panel table { width: 100%; border-collapse: collapse; }
+      #oc-loan-panel th { text-align: left; color: #888; font-weight: 600; padding-bottom: 6px; }
+      #oc-loan-panel td { padding: 6px 0; }
+      #oc-close { cursor: pointer; font-size: 22px; opacity: 0.6; }
+      #oc-close:hover { opacity: 1; }
+    `;
+    document.head.appendChild(style);
+
+    const apiStatus = inPDA ? 'API: PDA key' : (getApiKey() ? 'API: Local key' : 'API: missing — set key in ⚙');
+
+    panel.innerHTML = `
+      <div class="oc-header">
+        <span class="oc-title">OC Loan Manager</span>
+        <span id="oc-close">&times;</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 10px 2px 10px;flex-wrap:wrap;">
+        <div class="oc-tabs">
+          <button class="oc-tab active" data-tab="missing">Missing</button>
+          <button class="oc-tab" data-tab="unused">Unused</button>
+          <button class="oc-tab" data-tab="payouts">Payouts</button>
+          <button class="oc-tab" data-tab="settings">⚙</button>
+        </div>
+        <span class="oc-status">${apiStatus}</span>
+      </div>
+      <div id="oc-content"></div>
+    `;
+
+    document.body.appendChild(button);
+    document.body.appendChild(panel);
+
+    let isOpen = false;
+
+    const positionPanel = () => {
+      const btnRect = button.getBoundingClientRect();
+      const panelW = 320;
+      const panelH = panel.offsetHeight || 300;
+      let left = btnRect.right + 8;
+      let top = btnRect.top;
+      if (left + panelW > window.innerWidth) left = btnRect.left - panelW - 8;
+      if (left < 4) left = 4;
+      if (top + panelH > window.innerHeight) top = window.innerHeight - panelH - 8;
+      if (top < 4) top = 4;
+      panel.style.left = left + 'px';
+      panel.style.top = top + 'px';
+    };
+
+    const openPanel = () => {
+      positionPanel();
+      panel.style.opacity = '1';
+      panel.style.visibility = 'visible';
+      panel.style.transform = 'translateY(0)';
+      isOpen = true;
+      loadTab('missing');
+    };
+    const closePanel = () => {
+      panel.style.opacity = '0';
+      panel.style.visibility = 'hidden';
+      panel.style.transform = 'translateY(-8px)';
+      isOpen = false;
+    };
+
+    // Click (mouse only — touch tap handled in onDragEnd)
+    button.addEventListener('click', (e) => {
+      if (wasDragged) return; // ignore click after drag
+      isOpen ? closePanel() : openPanel();
+    });
+
+    panel.querySelector('#oc-close').onclick = closePanel;
+
+    // ----------- Tabs -----------
+    let activeTab = 'missing';
+    panel.querySelectorAll('.oc-tab').forEach(tab => {
+      tab.onclick = () => {
+        panel.querySelectorAll('.oc-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        activeTab = tab.dataset.tab;
+        loadTab(activeTab);
+      };
+    });
+
+    const content = panel.querySelector('#oc-content');
+
+    // ----------- Missing Tab -----------
+    const loadMissingTab = async () => {
+      content.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Loading OC data…</div>';
+      try {
+        await loadMembers();
+        const missing = await getMissingOCItems();
+        if (!missing.length) {
+          content.innerHTML = '<div style="text-align:center;color:#6c6;padding:20px;">All OC items allocated ✓</div>';
+          return;
+        }
+        // Resolve any unknown item names from the API
+        await resolveItemNames(missing.map(m => m.itemID));
+        let html = '<table><tr><th>Crime</th><th>Item</th><th>Player</th><th></th></tr>';
+        for (const m of missing) {
+          const itemName = getItemName(m.itemID) || `Item #${m.itemID}`;
+          html += `<tr>
+            <td style="font-size:12px;">${m.crimeName}</td>
+            <td style="font-size:12px;">${itemName}</td>
+            <td style="font-size:12px;"><a href="/profiles.php?XID=${m.userID}" style="color:#7af;">${m.userName}</a></td>
+            <td><button class="loan-btn" data-itemid="${m.itemID}" data-userid="${m.userID}" data-username="${m.userName}"
+              style="padding:4px 10px;border-radius:6px;border:none;background:#2a3cff;color:#fff;font-size:11px;cursor:pointer;white-space:nowrap;">
+              Loan</button></td>
+          </tr>`;
+        }
+        html += '</table>';
+        content.innerHTML = html;
+
+        // Loan buttons
+        content.querySelectorAll('.loan-btn').forEach(btn => {
+          btn.onclick = async () => {
+            const itemID = parseInt(btn.dataset.itemid, 10);
+            const userID = parseInt(btn.dataset.userid, 10);
+            const userName = btn.dataset.username;
+            btn.disabled = true;
+            btn.textContent = '…';
+            try {
+              const armoryID = await prepareArmouryForItem(itemID);
+              if (!armoryID) {
+                btn.textContent = 'No stock';
+                btn.style.background = '#555';
+                return;
+              }
+              await loanPreparedItem({ userID, userName });
+              btn.textContent = '✓ Loaned';
+              btn.style.background = '#1a7a1a';
+            } catch (e) {
+              btn.textContent = 'Error';
+              btn.style.background = '#a00';
+              btn.disabled = false;
+              setTimeout(() => {
+                btn.textContent = 'Loan';
+                btn.style.background = '#2a3cff';
+              }, 2000);
+              console.error('[OCLM] Loan error:', e);
+            }
+          };
+        });
+      } catch (e) {
+        if (e.isApiKeyError) {
+          content.innerHTML = '<div style="text-align:center;color:#f88;padding:20px;">API key required.<br>Set it in the ⚙ tab.</div>';
+        } else {
+          content.innerHTML = `<div style="text-align:center;color:#f88;padding:20px;">Error: ${e.message}</div>`;
+        }
+      }
+    };
+
+    // ----------- Unused Tab -----------
+    const loadUnusedTab = async () => {
+      content.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Loading armory & OC data…</div>';
+      try {
+        await loadMembers();
+        const [armoryItems, neededByUser] = await Promise.all([
+          fetchAllArmoryItems(),
+          getAllOCItemRequirements()
+        ]);
+
+        // Find items loaned to members who do NOT need them for any OC
+        // Skip temporary items — members can freely loan those for personal use
+        const unused = [];
+        for (const entry of armoryItems) {
+          if (entry.armoryCategory === 'temporary') continue;
+          if (entry.user && entry.user !== false && entry.user.userID) {
+            const uid = entry.user.userID;
+            const iid = entry.itemID;
+            // Loaned to someone — check if they need this item for an OC (available or not)
+            const needed = neededByUser.get(uid);
+            if (!needed || !needed.has(iid)) {
+              unused.push({
+                itemID: iid,
+                itemName: entry.name || getItemName(iid) || `Item #${iid}`,
+                armoryID: entry.armoryID,
+                armoryCategory: entry.armoryCategory || 'utilities',
+                userID: uid,
+                userName: entry.user.userName || memberNameMap.get(uid) || `Unknown [${uid}]`
+              });
+            }
+          }
+        }
+
+        if (!unused.length) {
+          content.innerHTML = '<div style="text-align:center;color:#6c6;padding:20px;">No unused loaned items ✓</div>';
+          return;
+        }
+
+        let html = '<div style="margin-bottom:8px;font-size:12px;color:#aaa;">Items loaned but not needed for any current OC:</div>';
+        html += '<table><tr><th>Item</th><th>Loaned To</th><th></th></tr>';
+        for (const u of unused) {
+          html += `<tr>
+            <td style="font-size:12px;">${u.itemName}</td>
+            <td style="font-size:12px;"><a href="/profiles.php?XID=${u.userID}" style="color:#7af;">${u.userName}</a></td>
+            <td><button class="retrieve-btn" data-armoryid="${u.armoryID}" data-itemid="${u.itemID}" data-userid="${u.userID}" data-username="${u.userName}" data-category="${u.armoryCategory || 'utilities'}"
+              style="padding:4px 10px;border-radius:6px;border:none;background:#c44;color:#fff;font-size:11px;cursor:pointer;white-space:nowrap;">
+              Retrieve</button></td>
+          </tr>`;
+        }
+        html += '</table>';
+        content.innerHTML = html;
+
+        // Retrieve buttons
+        content.querySelectorAll('.retrieve-btn').forEach(btn => {
+          btn.onclick = async () => {
+            const armoryID = parseInt(btn.dataset.armoryid, 10);
+            const itemID = parseInt(btn.dataset.itemid, 10);
+            const userID = parseInt(btn.dataset.userid, 10);
+            const userName = btn.dataset.username;
+            btn.disabled = true;
+            btn.textContent = '…';
+            try {
+              const postType = ARMORY_TAB_TO_POST_TYPE[btn.dataset.category] || 'Tool';
+              await retrieveItem({ armoryID, itemID, userID, userName, postType });
+              btn.textContent = '✓ Retrieved';
+              btn.style.background = '#1a7a1a';
+            } catch (e) {
+              btn.textContent = 'Error';
+              btn.style.background = '#a00';
+              console.error('[OCLM] Retrieve error:', e);
+            }
+          };
+        });
+      } catch (e) {
+        if (e.isApiKeyError) {
+          content.innerHTML = '<div style="text-align:center;color:#f88;padding:20px;">API key required.<br>Set it in the ⚙ tab.</div>';
+        } else {
+          content.innerHTML = `<div style="text-align:center;color:#f88;padding:20px;">Error: ${e.message}</div>`;
+        }
+      }
+    };
+
+    // ----------- Payouts Tab -----------
+    const loadPayoutsTab = async () => {
+      content.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Loading completed crimes…</div>';
+      try {
+        const unpaid = await getUnpaidCompletedCrimes();
+        if (!unpaid.length) {
+          content.innerHTML = '<div style="text-align:center;color:#6c6;padding:20px;">All completed OCs have been paid out ✓</div>';
+          return;
+        }
+
+        let totalMoney = 0;
+        unpaid.forEach(c => { totalMoney += c.money; });
+
+        let html = `<div style="margin-bottom:10px;font-size:12px;color:#aaa;">Completed OCs awaiting payout: <strong style="color:#f8d866;">${unpaid.length}</strong></div>`;
+        html += `<div style="margin-bottom:12px;padding:8px 10px;border-radius:6px;background:#1a1a2e;border:1px solid #333;">`;
+        html += `<span style="font-size:12px;color:#888;">Total unpaid:</span> <strong style="color:#6c6;font-size:14px;">$${formatNumber(totalMoney)}</strong>`;
+        html += `</div>`;
+
+        // Open Payouts button — navigates to Torn's completed crimes page
+        html += `<div style="margin-bottom:12px;">`;
+        html += `<a id="open-payouts-btn" href="https://www.torn.com/factions.php?step=your#/tab=crimes&crimeSubTab=completed" target="_blank" style="display:block;text-align:center;padding:10px 12px;border-radius:6px;background:#2a3cff;color:#fff;font-weight:700;font-size:13px;text-decoration:none;cursor:pointer;">Open Payouts Page (${unpaid.length} unpaid)</a>`;
+        html += `</div>`;
+
+        html += '<table><tr><th>Crime</th><th style="text-align:right;">Reward</th><th style="text-align:right;">Age</th></tr>';
+        for (const c of unpaid) {
+          const ageSec = Math.floor(Date.now() / 1000) - c.executedAt;
+          const ageDays = Math.floor(ageSec / 86400);
+          const ageHrs = Math.floor((ageSec % 86400) / 3600);
+          const ageStr = ageDays > 0 ? `${ageDays}d ${ageHrs}h` : `${ageHrs}h`;
+          const diffLabel = c.difficulty ? ` <span style="color:#666;">(Lv${c.difficulty})</span>` : '';
+          const pctLabel = c.payoutPct !== null ? ` <span style="color:#666;font-size:10px;">${c.payoutPct}%</span>` : '';
+          const ageColor = ageDays >= 7 ? '#f88' : (ageDays >= 3 ? '#f8d866' : '#aaa');
+          html += `<tr>
+            <td style="font-size:12px;">${c.name}${diffLabel}</td>
+            <td style="font-size:12px;text-align:right;">$${formatNumber(c.money)}${pctLabel}</td>
+            <td style="font-size:12px;text-align:right;color:${ageColor};">${ageStr}</td>
+          </tr>`;
+        }
+        html += '</table>';
+        content.innerHTML = html;
+
+        // Open payouts button hover effect
+        const openBtn = document.getElementById('open-payouts-btn');
+        openBtn.onmouseover = () => { openBtn.style.filter = 'brightness(1.15)'; };
+        openBtn.onmouseout = () => { openBtn.style.filter = ''; };
+      } catch (e) {
+        if (e.isApiKeyError) {
+          content.innerHTML = '<div style="text-align:center;color:#f88;padding:20px;">API key required.<br>Set it in the ⚙ tab.</div>';
+        } else {
+          content.innerHTML = `<div style="text-align:center;color:#f88;padding:20px;">Error: ${e.message}</div>`;
+        }
+      }
+    };
+
+    // ----------- Settings Tab -----------
+    const loadSettingsTab = () => {
+      const overrideKey = storage.get('OCLM_API_KEY', '');
+      const activeKey = overrideKey || (inPDA ? apiKey : '');
+      const masked = activeKey ? activeKey.slice(0, 4) + '…' + activeKey.slice(-4) : 'No key saved';
+      const sourceLabel = overrideKey ? 'Local override' : (inPDA ? 'PDA key' : 'Not set');
+
+      let html = `<div style="font-size:15px;font-weight:700;color:#ccc;margin-bottom:10px;">API Settings</div>`;
+
+      if (inPDA) {
+        html += `<div style="font-size:12.5px;color:#aaa;margin-bottom:14px;">Running in PDA — API key is provided automatically. You can still override it below.</div>`;
+      }
+
+      html += `<div style="font-size:12px;color:#888;margin-bottom:4px;">Current Key <span style="color:#666;">(${sourceLabel})</span></div>`;
+      html += `<div style="padding:10px;border-radius:6px;background:#1b1b1b;color:#999;border:1px solid #333;margin-bottom:14px;font-family:monospace;font-size:13px;">${masked}</div>`;
+
+      html += `<div style="font-size:12px;color:#888;margin-bottom:4px;">New API Key</div>`;
+      html += `<input id="settings-key" type="text" placeholder="Paste your Torn API key" style="width:100%;padding:10px;border-radius:6px;background:#1b1b1b;color:#eee;border:1px solid #333;margin-bottom:10px;font-family:monospace;font-size:13px;">`;
+
+      html += `<div style="display:flex;gap:8px;">`;
+      html += `<button id="settings-save" style="flex:1;padding:12px;border-radius:8px;border:none;background:#2a3cff;color:#fff;font-weight:700;font-size:14px;cursor:pointer;">Save Key</button>`;
+      html += `<button id="settings-clear" style="flex:1;padding:12px;border-radius:8px;border:1px solid #444;background:#1b1b1b;color:#ccc;font-weight:700;font-size:14px;cursor:pointer;">Clear Key</button>`;
+      html += `</div>`;
+
+      html += `<div style="margin-top:14px;font-size:11px;color:#555;">Your key is stored in localStorage and never leaves your browser. Use a <strong style="color:#888;">Limited Access</strong> key with only the permissions this script needs.</div>`;
+
+      content.innerHTML = html;
+
+      document.getElementById('settings-save').onclick = () => {
+        const val = document.getElementById('settings-key').value.trim();
+        if (val) {
+          storage.set('OCLM_API_KEY', val);
+          const saveBtn = document.getElementById('settings-save');
+          saveBtn.textContent = '✓ Saved';
+          saveBtn.style.background = '#1a7a1a';
+          panel.querySelector('.oc-status').textContent = 'API: Local override';
+          // Refresh display after short delay
+          setTimeout(() => loadSettingsTab(), 800);
+        }
+      };
+
+      document.getElementById('settings-clear').onclick = () => {
+        storage.set('OCLM_API_KEY', '');
+        const clearBtn = document.getElementById('settings-clear');
+        clearBtn.textContent = '✓ Cleared';
+        clearBtn.style.background = '#1a7a1a';
+        clearBtn.style.color = '#fff';
+        clearBtn.style.borderColor = '#1a7a1a';
+        panel.querySelector('.oc-status').textContent = inPDA ? 'API: PDA key' : 'API: missing — set key in ⚙';
+        setTimeout(() => loadSettingsTab(), 800);
+      };
+    };
+
+    // ----------- Tab Router -----------
+    const loadTab = (tab) => {
+      if (tab === 'missing') loadMissingTab();
+      else if (tab === 'unused') loadUnusedTab();
+      else if (tab === 'payouts') loadPayoutsTab();
+      else if (tab === 'settings') loadSettingsTab();
+    };
+  };
+
+  // ------------------- Init -------------------
+  const init = () => {
+    if (window.location.href.includes('factions.php?step=your')) {
+      createUI();
+    }
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
 })();

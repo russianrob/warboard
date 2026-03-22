@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn OC Loan Manager (PDA)
 // @namespace    https://torn.com
-// @version      1.5.2-pda
-// @description  Highlights over-loaned items and helps loan missing OC tools + split calculator (PDA compatible, no armory tab needed)
+// @version      2.0.2-pda
+// @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary), tracks unpaid OC payouts (PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
 // @downloadURL  https://tornwar.com/scripts/torn-oc-loan-manager-pda.user.js
