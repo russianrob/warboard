@@ -48,6 +48,28 @@ export async function fetchFactionMembers(factionId, apiKey) {
 }
 
 /**
+ * Fetch full faction basic data from the Torn API.
+ * Returns the complete basic response including faction-level fields
+ * (name, age, best_chain, respect, members) and per-member data.
+ */
+export async function fetchFactionBasic(factionId, apiKey) {
+  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=basic&key=${encodeURIComponent(apiKey)}`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Torn API returned HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+
+  if (data.error) {
+    throw new Error(`Torn API error: ${data.error.error} (code ${data.error.code})`);
+  }
+
+  return data;
+}
+
+/**
  * Fetch faction chain data from the Torn API.
  * Returns { current, max, timeout, cooldown }.
  */

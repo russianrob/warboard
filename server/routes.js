@@ -5,7 +5,7 @@
 import { Router } from "express";
 import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.js";
 import * as store from "./store.js";
-import { fetchFactionMembers, fetchFactionChain, fetchRankedWar } from "./torn-api.js";
+import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBasic } from "./torn-api.js";
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
@@ -1051,6 +1051,223 @@ router.get("/api/admin/subscriptions", requireAuth, (req, res) => {
     ownerFactionId: getOwnerFactionId(),
     subscriptions,
   });
+});
+
+// ── GET /api/war/:warId/scout-report ──────────────────────────────────
+// Generate a pre-war intelligence report about the enemy faction.
+
+/** Analyze faction basic data and produce a structured scout report. */
+function analyzeScoutReport(data) {
+  const members = data.members || {};
+  const memberList = Object.entries(members).map(([id, m]) => ({ id, ...m }));
+  const memberCount = memberList.length;
+  const now = Math.floor(Date.now() / 1000);
+
+  // ── Faction Overview ──
+  const overview = {
+    name: data.name || "Unknown",
+    age: data.age || 0,
+    respect: data.respect || 0,
+    bestChain: data.best_chain || 0,
+    memberCount,
+  };
+
+  // ── Strength Assessment ──
+  const levelRanges = [
+    { label: "1-15", min: 1, max: 15, count: 0 },
+    { label: "16-30", min: 16, max: 30, count: 0 },
+    { label: "31-50", min: 31, max: 50, count: 0 },
+    { label: "51-75", min: 51, max: 75, count: 0 },
+    { label: "76-100", min: 76, max: 100, count: 0 },
+  ];
+  let totalLevel = 0;
+  for (const m of memberList) {
+    const lvl = m.level || 0;
+    totalLevel += lvl;
+    for (const r of levelRanges) {
+      if (lvl >= r.min && lvl <= r.max) { r.count++; break; }
+    }
+  }
+  const avgLevel = memberCount > 0 ? Math.round((totalLevel / memberCount) * 10) / 10 : 0;
+
+  // Threat tier based on avg level, respect, best chain, age
+  let threatTier = "Low";
+  if (avgLevel >= 70 || overview.respect >= 50000000) threatTier = "Critical";
+  else if (avgLevel >= 50 || overview.respect >= 10000000) threatTier = "High";
+  else if (avgLevel >= 30 || overview.respect >= 1000000) threatTier = "Medium";
+
+  const strength = { levelDistribution: levelRanges, avgLevel, threatTier };
+
+  // ── Activity Patterns ──
+  let onlineCount = 0, idleCount = 0, offlineCount = 0;
+  const actionBuckets = { "5min": 0, "30min": 0, "1hr": 0, "1day": 0, "1week+": 0 };
+  let activeCombatRoster = 0;
+
+  for (const m of memberList) {
+    const activity = (m.last_action?.status || "Offline").toLowerCase();
+    if (activity === "online") onlineCount++;
+    else if (activity === "idle") idleCount++;
+    else offlineCount++;
+
+    // Parse last_action.relative for bucketing
+    const rel = m.last_action?.relative || "";
+    const ts = m.last_action?.timestamp || 0;
+    let secsAgo = ts > 0 ? Math.max(0, now - ts) : Infinity;
+
+    if (secsAgo <= 300) actionBuckets["5min"]++;
+    else if (secsAgo <= 1800) actionBuckets["30min"]++;
+    else if (secsAgo <= 3600) actionBuckets["1hr"]++;
+    else if (secsAgo <= 86400) actionBuckets["1day"]++;
+    else actionBuckets["1week+"]++;
+
+    // Active combat roster: online/idle within 30min, not hospitalized/jailed/traveling
+    const statusState = (m.status?.state || "Okay").toLowerCase();
+    const isUnavailable = ["hospital", "jail", "traveling", "abroad"].includes(statusState);
+    if (!isUnavailable && secsAgo <= 1800) {
+      activeCombatRoster++;
+    }
+  }
+
+  const activityPatterns = {
+    online: onlineCount,
+    idle: idleCount,
+    offline: offlineCount,
+    lastAction: actionBuckets,
+    activeCombatRoster,
+  };
+
+  // ── Vulnerability Windows ──
+  const hospitalized = [];
+  const jailed = [];
+  const traveling = [];
+  const inactive = [];
+
+  for (const m of memberList) {
+    const statusState = (m.status?.state || "Okay").toLowerCase();
+    const untilTs = m.status?.until || 0;
+    const remaining = untilTs > 0 ? Math.max(0, untilTs - now) : 0;
+    const ts = m.last_action?.timestamp || 0;
+    const secsAgo = ts > 0 ? Math.max(0, now - ts) : Infinity;
+
+    const info = { id: m.id, name: m.name, level: m.level };
+
+    if (statusState === "hospital") {
+      hospitalized.push({ ...info, remaining, description: m.status?.description || "" });
+    } else if (statusState === "jail") {
+      jailed.push({ ...info, remaining, description: m.status?.description || "" });
+    } else if (statusState === "traveling" || statusState === "abroad") {
+      traveling.push({ ...info, description: m.status?.description || "" });
+    }
+
+    if (secsAgo > 86400) {
+      inactive.push({ ...info, lastActionAgo: secsAgo });
+    }
+  }
+
+  // Sort hospitalized by remaining time descending
+  hospitalized.sort((a, b) => b.remaining - a.remaining);
+  inactive.sort((a, b) => b.lastActionAgo - a.lastActionAgo);
+
+  const vulnerabilities = { hospitalized, jailed, traveling, inactive };
+
+  // ── Faction Composition ──
+  let newMembers = 0, veterans = 0, totalDays = 0;
+  for (const m of memberList) {
+    const dif = m.days_in_faction || 0;
+    totalDays += dif;
+    if (dif < 30) newMembers++;
+    if (dif > 365) veterans++;
+  }
+  const avgDaysInFaction = memberCount > 0 ? Math.round(totalDays / memberCount) : 0;
+
+  // Likely leadership: top 5 by level
+  const likelyLeadership = [...memberList]
+    .sort((a, b) => (b.level || 0) - (a.level || 0))
+    .slice(0, 5)
+    .map(m => ({ id: m.id, name: m.name, level: m.level, daysInFaction: m.days_in_faction || 0 }));
+
+  const composition = { newMembers, veterans, avgDaysInFaction, likelyLeadership };
+
+  // ── Tactical Summary ──
+  const strengths = [];
+  const weaknesses = [];
+
+  if (avgLevel >= 50) strengths.push("High average level (" + avgLevel + ")");
+  if (overview.bestChain >= 1000) strengths.push("Strong chain capability (best: " + overview.bestChain.toLocaleString() + ")");
+  if (veterans > memberCount * 0.5) strengths.push("Experienced roster (" + veterans + " veterans)");
+  if (activeCombatRoster >= 10) strengths.push("Large active combat roster (" + activeCombatRoster + " ready)");
+
+  if (avgLevel < 30) weaknesses.push("Low average level (" + avgLevel + ")");
+  if (newMembers > memberCount * 0.3) weaknesses.push("Many new members (" + newMembers + " under 30 days)");
+  if (inactive.length > memberCount * 0.3) weaknesses.push("High inactivity (" + inactive.length + " inactive 24h+)");
+  if (hospitalized.length > 5) weaknesses.push(hospitalized.length + " members currently hospitalized");
+  if (activeCombatRoster < 5) weaknesses.push("Small active combat roster (only " + activeCombatRoster + " ready)");
+
+  let approach = "Standard engagement.";
+  if (activeCombatRoster < 5) approach = "Enemy has few active fighters — blitz attack recommended.";
+  else if (hospitalized.length > memberCount * 0.3) approach = "Many enemies hospitalized — press the advantage now.";
+  else if (avgLevel >= 60 && activeCombatRoster >= 10) approach = "Strong enemy — coordinate attacks, chain carefully.";
+
+  const tacticalSummary = {
+    estimatedActiveFighters: activeCombatRoster,
+    strengths,
+    weaknesses,
+    approach,
+  };
+
+  return {
+    overview,
+    strength,
+    activityPatterns,
+    vulnerabilities,
+    composition,
+    tacticalSummary,
+    generatedAt: Date.now(),
+  };
+}
+
+/** Track scout report cooldowns per war to prevent API spam. */
+const scoutReportCooldowns = new Map();
+const SCOUT_REPORT_COOLDOWN_MS = 60000; // 1 minute between requests per war
+
+router.get("/api/war/:warId/scout-report", requireAuth, async (req, res) => {
+  const { factionId } = req.user;
+  const { warId } = req.params;
+
+  const war = requireWarMember(req, res, warId);
+  if (!war) {
+    return war === null && !res.headersSent
+      ? res.status(404).json({ error: "War not found" })
+      : undefined;
+  }
+
+  if (!war.enemyFactionId) {
+    return res.status(400).json({ error: "No enemy faction configured for this war" });
+  }
+
+  // Cooldown check
+  const lastReport = scoutReportCooldowns.get(warId) || 0;
+  const elapsed = Date.now() - lastReport;
+  if (elapsed < SCOUT_REPORT_COOLDOWN_MS) {
+    const waitSec = Math.ceil((SCOUT_REPORT_COOLDOWN_MS - elapsed) / 1000);
+    return res.status(429).json({ error: `Please wait ${waitSec}s before requesting another scout report` });
+  }
+
+  const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
+  if (!apiKey) {
+    return res.status(503).json({ error: "No API key available — set a faction API key in settings" });
+  }
+
+  try {
+    scoutReportCooldowns.set(warId, Date.now());
+    const data = await fetchFactionBasic(war.enemyFactionId, apiKey);
+    const report = analyzeScoutReport(data);
+    console.log(`[scout] Generated scout report for war ${warId} (enemy: ${war.enemyFactionId})`);
+    return res.json({ report });
+  } catch (err) {
+    console.error("[scout] Scout report failed:", err.message);
+    return res.status(502).json({ error: `Failed to generate scout report: ${err.message}` });
+  }
 });
 
 export default router;

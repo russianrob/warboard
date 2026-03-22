@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.20.0
+// @version      3.21.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -171,7 +171,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.16.2',
+        VERSION: '3.21.0',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1775,6 +1775,158 @@ body.wb-chain-active {
     justify-content: space-between;
     border-top: 1px solid var(--wb-border);
 }
+/* ----- Scout Report modal ----- */
+.wb-scout-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 1000001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: Arial, sans-serif;
+}
+.wb-scout-modal {
+    background: var(--wb-bg);
+    border: 1px solid var(--wb-border);
+    border-radius: 8px;
+    width: 600px;
+    max-width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
+    color: var(--wb-text);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+.wb-scout-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--wb-border);
+}
+.wb-scout-header h2 {
+    margin: 0;
+    font-size: 16px;
+    color: var(--wb-call-green);
+}
+.wb-scout-close {
+    background: none;
+    border: none;
+    color: var(--wb-text);
+    font-size: 22px;
+    cursor: pointer;
+    opacity: 0.6;
+    padding: 0 4px;
+}
+.wb-scout-close:hover { opacity: 1; }
+.wb-scout-body {
+    padding: 16px 20px;
+}
+.wb-scout-section {
+    margin-bottom: 16px;
+}
+.wb-scout-section h3 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    color: var(--wb-call-green);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--wb-border);
+    padding-bottom: 4px;
+}
+.wb-scout-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 16px;
+    font-size: 12px;
+}
+.wb-scout-grid .wb-scout-label {
+    color: var(--wb-text-muted);
+}
+.wb-scout-grid .wb-scout-value {
+    font-weight: 600;
+    text-align: right;
+}
+.wb-scout-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-top: 4px;
+}
+.wb-scout-table th {
+    text-align: left;
+    font-size: 10px;
+    color: var(--wb-text-muted);
+    padding: 3px 6px;
+    border-bottom: 1px solid var(--wb-border);
+    text-transform: uppercase;
+}
+.wb-scout-table td {
+    padding: 3px 6px;
+    border-bottom: 1px solid rgba(45,52,54,0.3);
+}
+.wb-scout-table tr:last-child td { border-bottom: none; }
+.wb-scout-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--wb-accent);
+    overflow: hidden;
+    margin-top: 2px;
+}
+.wb-scout-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+.wb-scout-threat {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+.wb-scout-threat.critical { background: #d63031; color: #fff; }
+.wb-scout-threat.high { background: #e17055; color: #fff; }
+.wb-scout-threat.medium { background: #fdcb6e; color: #2d3436; }
+.wb-scout-threat.low { background: #636e72; color: #fff; }
+.wb-scout-summary-box {
+    background: var(--wb-bg-secondary);
+    border: 1px solid var(--wb-border);
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+.wb-scout-summary-box .wb-scout-pill {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    margin: 1px 2px;
+}
+.wb-scout-pill.strength { background: rgba(0,184,148,0.2); color: #00b894; }
+.wb-scout-pill.weakness { background: rgba(214,48,49,0.2); color: #ff7675; }
+.wb-scout-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    gap: 12px;
+    color: var(--wb-text-muted);
+    font-size: 13px;
+}
+.wb-scout-spinner {
+    width: 32px; height: 32px;
+    border: 3px solid var(--wb-border);
+    border-top-color: var(--wb-call-green);
+    border-radius: 50%;
+    animation: wb-spin 0.8s linear infinite;
+}
+@keyframes wb-spin { to { transform: rotate(360deg); } }
+
 .fo-unavailable-section {
     border-top: 1px solid var(--wb-border);
     margin-top: 2px;
@@ -4829,6 +4981,7 @@ body.wb-chain-active {
                     <div class="fo-status-dot${state.connected ? '' : ' disconnected'}" id="fo-conn-dot" title="${state.connected ? 'Connected' : 'Disconnected'}"></div>
                     <span class="fo-rt-badge" id="fo-rt-badge"></span>
                     <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
+                    <button class="fo-settings-btn" id="fo-scout-btn" title="Scout Report">&#x1F50D;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                     <div class="fo-energy-display" id="fo-energy-display" title="Energy">
                         <span class="fo-energy-label">E</span>
@@ -4910,6 +5063,15 @@ body.wb-chain-active {
             heatmapHeaderBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 toggleHeatmapPanel();
+            });
+        }
+
+        // Wire up scout report button in overlay header
+        const scoutBtn = document.getElementById('fo-scout-btn');
+        if (scoutBtn) {
+            scoutBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openScoutReport();
             });
         }
 
@@ -6782,6 +6944,226 @@ body.wb-chain-active {
             setTimeout(() => toast.remove(), 300);
             activeCallToasts.delete(targetId);
         }
+    }
+
+    // =========================================================================
+    // SCOUT REPORT
+    // =========================================================================
+
+    function openScoutReport() {
+        // Don't open if already open
+        if (document.getElementById('wb-scout-overlay')) return;
+
+        const warId = deriveWarId();
+        if (!warId) {
+            showToast('Not connected to a war', 'error');
+            return;
+        }
+        if (!state.enemyFactionId) {
+            showToast('No enemy faction detected yet', 'error');
+            return;
+        }
+
+        // Create overlay
+        const overlay = document.createElement('div');
+        overlay.className = 'wb-scout-overlay';
+        overlay.id = 'wb-scout-overlay';
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closeScoutReport();
+        });
+
+        const modal = document.createElement('div');
+        modal.className = 'wb-scout-modal';
+        modal.innerHTML = `
+            <div class="wb-scout-header">
+                <h2>\uD83D\uDD0D Scout Report</h2>
+                <button class="wb-scout-close" id="wb-scout-close">\u00D7</button>
+            </div>
+            <div class="wb-scout-body" id="wb-scout-body">
+                <div class="wb-scout-loading">
+                    <div class="wb-scout-spinner"></div>
+                    <span>Gathering intelligence...</span>
+                </div>
+            </div>
+        `;
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        document.getElementById('wb-scout-close').addEventListener('click', closeScoutReport);
+
+        // Fetch report
+        fetchScoutReport(warId);
+    }
+
+    function closeScoutReport() {
+        const overlay = document.getElementById('wb-scout-overlay');
+        if (overlay) overlay.remove();
+    }
+
+    async function fetchScoutReport(warId) {
+        try {
+            const url = `${CONFIG.SERVER_URL}/api/war/${encodeURIComponent(warId)}/scout-report`;
+            const data = await new Promise((resolve, reject) => {
+                httpRequest({
+                    method: 'GET',
+                    url,
+                    headers: { 'Authorization': `Bearer ${state.jwtToken}` },
+                    timeout: 15000,
+                    onload(r) {
+                        const d = safeParse(r.responseText);
+                        if (r.status >= 200 && r.status < 300) resolve(d);
+                        else reject(new Error((d && d.error) || `HTTP ${r.status}`));
+                    },
+                    onerror() { reject(new Error('Network error')); },
+                    ontimeout() { reject(new Error('Request timed out')); },
+                });
+            });
+
+            if (data && data.report) {
+                renderScoutReport(data.report);
+            } else {
+                throw new Error('Invalid response');
+            }
+        } catch (e) {
+            warn('Scout report failed:', e.message);
+            const body = document.getElementById('wb-scout-body');
+            if (body) {
+                body.innerHTML = `<div style="padding:20px;text-align:center;color:var(--wb-call-red);">
+                    <div style="font-size:24px;margin-bottom:8px;">\u26A0</div>
+                    <div>${escapeHtml(e.message)}</div>
+                </div>`;
+            }
+        }
+    }
+
+    function formatDuration(seconds) {
+        if (seconds < 60) return seconds + 's';
+        if (seconds < 3600) return Math.floor(seconds / 60) + 'm';
+        if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ' + Math.floor((seconds % 3600) / 60) + 'm';
+        return Math.floor(seconds / 86400) + 'd';
+    }
+
+    function renderScoutReport(report) {
+        const body = document.getElementById('wb-scout-body');
+        if (!body) return;
+
+        const o = report.overview;
+        const s = report.strength;
+        const a = report.activityPatterns;
+        const v = report.vulnerabilities;
+        const c = report.composition;
+        const t = report.tacticalSummary;
+        const maxLevelCount = Math.max(...s.levelDistribution.map(r => r.count), 1);
+
+        const threatClass = s.threatTier.toLowerCase();
+
+        let html = '';
+
+        // ── Faction Overview ──
+        html += `<div class="wb-scout-section">
+            <h3>Faction Overview</h3>
+            <div class="wb-scout-grid">
+                <span class="wb-scout-label">Faction</span><span class="wb-scout-value">${escapeHtml(o.name)}</span>
+                <span class="wb-scout-label">Age</span><span class="wb-scout-value">${o.age.toLocaleString()} days</span>
+                <span class="wb-scout-label">Respect</span><span class="wb-scout-value">${o.respect.toLocaleString()}</span>
+                <span class="wb-scout-label">Best Chain</span><span class="wb-scout-value">${o.bestChain.toLocaleString()}</span>
+                <span class="wb-scout-label">Members</span><span class="wb-scout-value">${o.memberCount}</span>
+            </div>
+        </div>`;
+
+        // ── Strength Assessment ──
+        html += `<div class="wb-scout-section">
+            <h3>Strength Assessment</h3>
+            <div class="wb-scout-grid" style="margin-bottom:8px;">
+                <span class="wb-scout-label">Avg Level</span><span class="wb-scout-value">${s.avgLevel}</span>
+                <span class="wb-scout-label">Threat Tier</span><span class="wb-scout-value"><span class="wb-scout-threat ${threatClass}">${s.threatTier}</span></span>
+            </div>
+            <table class="wb-scout-table">
+                <tr><th>Level Range</th><th>Count</th><th style="width:50%">Distribution</th></tr>
+                ${s.levelDistribution.map(r => {
+                    const pct = Math.round((r.count / maxLevelCount) * 100);
+                    const color = r.min >= 76 ? '#d63031' : r.min >= 51 ? '#e17055' : r.min >= 31 ? '#fdcb6e' : r.min >= 16 ? '#00b894' : '#636e72';
+                    return `<tr>
+                        <td>${r.label}</td>
+                        <td style="text-align:center">${r.count}</td>
+                        <td><div class="wb-scout-bar"><div class="wb-scout-bar-fill" style="width:${pct}%;background:${color}"></div></div></td>
+                    </tr>`;
+                }).join('')}
+            </table>
+        </div>`;
+
+        // ── Activity Patterns ──
+        html += `<div class="wb-scout-section">
+            <h3>Activity Patterns</h3>
+            <div class="wb-scout-grid">
+                <span class="wb-scout-label">Online</span><span class="wb-scout-value" style="color:#00b894">${a.online}</span>
+                <span class="wb-scout-label">Idle</span><span class="wb-scout-value" style="color:#fdcb6e">${a.idle}</span>
+                <span class="wb-scout-label">Offline</span><span class="wb-scout-value" style="color:#636e72">${a.offline}</span>
+                <span class="wb-scout-label">Active Combat Roster</span><span class="wb-scout-value" style="color:#e17055;font-size:14px;">${a.activeCombatRoster}</span>
+            </div>
+            <table class="wb-scout-table" style="margin-top:8px;">
+                <tr><th>Last Active</th><th style="text-align:center">Count</th></tr>
+                <tr><td>\u2264 5 min</td><td style="text-align:center">${a.lastAction['5min']}</td></tr>
+                <tr><td>\u2264 30 min</td><td style="text-align:center">${a.lastAction['30min']}</td></tr>
+                <tr><td>\u2264 1 hour</td><td style="text-align:center">${a.lastAction['1hr']}</td></tr>
+                <tr><td>\u2264 1 day</td><td style="text-align:center">${a.lastAction['1day']}</td></tr>
+                <tr><td>&gt; 1 week</td><td style="text-align:center">${a.lastAction['1week+']}</td></tr>
+            </table>
+        </div>`;
+
+        // ── Vulnerability Windows ──
+        html += `<div class="wb-scout-section">
+            <h3>Vulnerability Windows</h3>
+            <div class="wb-scout-grid" style="margin-bottom:8px;">
+                <span class="wb-scout-label">Hospitalized</span><span class="wb-scout-value" style="color:#d63031">${v.hospitalized.length}</span>
+                <span class="wb-scout-label">Jailed</span><span class="wb-scout-value" style="color:#636e72">${v.jailed.length}</span>
+                <span class="wb-scout-label">Traveling</span><span class="wb-scout-value" style="color:#0984e3">${v.traveling.length}</span>
+                <span class="wb-scout-label">Inactive (24h+)</span><span class="wb-scout-value" style="color:#636e72">${v.inactive.length}</span>
+            </div>`;
+
+        if (v.hospitalized.length > 0) {
+            html += `<table class="wb-scout-table">
+                <tr><th>Hospitalized</th><th style="text-align:center">Lvl</th><th style="text-align:right">Time Left</th></tr>
+                ${v.hospitalized.slice(0, 10).map(m => `<tr>
+                    <td style="color:#d63031">${escapeHtml(m.name)}</td>
+                    <td style="text-align:center">${m.level}</td>
+                    <td style="text-align:right">${formatDuration(m.remaining)}</td>
+                </tr>`).join('')}
+                ${v.hospitalized.length > 10 ? `<tr><td colspan="3" style="opacity:0.5;font-size:10px">... and ${v.hospitalized.length - 10} more</td></tr>` : ''}
+            </table>`;
+        }
+        html += `</div>`;
+
+        // ── Faction Composition ──
+        html += `<div class="wb-scout-section">
+            <h3>Faction Composition</h3>
+            <div class="wb-scout-grid" style="margin-bottom:8px;">
+                <span class="wb-scout-label">New Members (&lt;30d)</span><span class="wb-scout-value">${c.newMembers}</span>
+                <span class="wb-scout-label">Veterans (&gt;365d)</span><span class="wb-scout-value">${c.veterans}</span>
+                <span class="wb-scout-label">Avg Days in Faction</span><span class="wb-scout-value">${c.avgDaysInFaction.toLocaleString()}</span>
+            </div>
+            <table class="wb-scout-table">
+                <tr><th>Likely Leadership</th><th style="text-align:center">Lvl</th><th style="text-align:right">Days</th></tr>
+                ${c.likelyLeadership.map(m => `<tr>
+                    <td>${escapeHtml(m.name)}</td>
+                    <td style="text-align:center">${m.level}</td>
+                    <td style="text-align:right">${m.daysInFaction.toLocaleString()}</td>
+                </tr>`).join('')}
+            </table>
+        </div>`;
+
+        // ── Tactical Summary ──
+        html += `<div class="wb-scout-section">
+            <h3>Tactical Summary</h3>
+            <div class="wb-scout-summary-box">
+                <div style="margin-bottom:8px;"><strong>Est. Active Fighters:</strong> ${t.estimatedActiveFighters}</div>
+                ${t.strengths.length > 0 ? `<div style="margin-bottom:6px;"><strong>Strengths:</strong> ${t.strengths.map(s => `<span class="wb-scout-pill strength">${escapeHtml(s)}</span>`).join(' ')}</div>` : ''}
+                ${t.weaknesses.length > 0 ? `<div style="margin-bottom:6px;"><strong>Weaknesses:</strong> ${t.weaknesses.map(w => `<span class="wb-scout-pill weakness">${escapeHtml(w)}</span>`).join(' ')}</div>` : ''}
+                <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--wb-border);"><strong>Approach:</strong> ${escapeHtml(t.approach)}</div>
+            </div>
+        </div>`;
+
+        body.innerHTML = html;
     }
 
     function showToast(message, type = 'info') {
