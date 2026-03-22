@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.19.3
+// @version      3.19.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -179,6 +179,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
         CHAIN_ALERT: GM_getValue('factionops_chain_alert', true),
         CHAIN_ALERT_THRESHOLD: GM_getValue('factionops_chain_alert_threshold', 60),
         PDA_NOTIFICATIONS: GM_getValue('factionops_pda_notif', IS_PDA),
+        KEEP_ALIVE: GM_getValue('factionops_keep_alive', true),
         CALL_TIMEOUT: 5 * 60 * 1000,       // 5 minute call expiry
         DEAL_TIMEOUT: 15 * 60 * 1000,      // 15 minute deal call expiry
         REFRESH_INTERVAL: 30 * 1000,        // 30 second status refresh
@@ -201,6 +202,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
             CHAIN_ALERT: 'factionops_chain_alert',
             CHAIN_ALERT_THRESHOLD: 'factionops_chain_alert_threshold',
             PDA_NOTIFICATIONS: 'factionops_pda_notif',
+            KEEP_ALIVE: 'factionops_keep_alive',
         };
         if (gmKeys[key]) {
             GM_setValue(gmKeys[key], value);
@@ -3130,6 +3132,17 @@ body.wb-chain-active {
                 <span style="font-size:12px;opacity:0.8;">seconds</span>
             </div>
 
+            <div class="wb-settings-row">
+                <span>Stay Active</span>
+                <label class="wb-toggle">
+                    <input type="checkbox" id="wb-toggle-keep-alive" ${CONFIG.KEEP_ALIVE ? 'checked' : ''}>
+                    <span class="wb-toggle-slider"></span>
+                </label>
+            </div>
+            <div style="font-size:11px;opacity:0.6;margin-bottom:14px;">
+                Keeps your Torn activity fresh while the warboard is open, so enemies can't tell you're idle.
+            </div>
+
             ${IS_PDA ? `
             <div class="wb-settings-row">
                 <span>PDA Notifications</span>
@@ -3239,6 +3252,15 @@ body.wb-chain-active {
                 setConfig('CHAIN_ALERT_THRESHOLD', val);
             } else {
                 e.target.value = CONFIG.CHAIN_ALERT_THRESHOLD;
+            }
+        });
+
+        document.getElementById('wb-toggle-keep-alive').addEventListener('change', (e) => {
+            setConfig('KEEP_ALIVE', e.target.checked);
+            if (e.target.checked) {
+                startKeepAlive();
+            } else {
+                stopKeepAlive();
             }
         });
 
@@ -3412,6 +3434,7 @@ body.wb-chain-active {
             stopPolling();
             disconnectRealtime();
             disconnectSSEStream();
+            stopKeepAlive();
             closeSettings();
         });
 
@@ -4773,6 +4796,7 @@ body.wb-chain-active {
         // (we need #barChain to be in the DOM first)
         startStatusTimers();
         startCallPruner();
+        startKeepAlive();
         updateChainBar();
 
         // Hide Torn's main content so the overlay takes over
@@ -6436,6 +6460,67 @@ body.wb-chain-active {
     }
 
     // =========================================================================
+    // SECTION 17B: TORN KEEP-ALIVE (ANTI-IDLE)
+    // =========================================================================
+
+    /**
+     * Periodically pings the Torn API to keep the user's last_action timestamp
+     * fresh while the warboard is open, preventing enemies from seeing them as
+     * idle on their profile. Uses a lightweight /user/?selections=timestamp call.
+     */
+    let keepAliveTimer = null;
+    const KEEP_ALIVE_INTERVAL = 75 * 1000; // 75 seconds
+
+    function startKeepAlive() {
+        if (keepAliveTimer) return; // already running
+        if (!CONFIG.KEEP_ALIVE || !CONFIG.API_KEY) return;
+
+        // Only run when overlay is active and war is ongoing
+        if (!document.getElementById('fo-overlay') || !isWarActive()) return;
+
+        log('Keep-alive started (interval: ' + (KEEP_ALIVE_INTERVAL / 1000) + 's)');
+        keepAliveTimer = setInterval(() => {
+            // Stop if overlay was removed or war ended or setting toggled off
+            if (!document.getElementById('fo-overlay') || !isWarActive() || !CONFIG.KEEP_ALIVE) {
+                stopKeepAlive();
+                return;
+            }
+            keepAlivePing();
+        }, KEEP_ALIVE_INTERVAL);
+
+        // Fire one immediately so the user is marked active right away
+        keepAlivePing();
+    }
+
+    function stopKeepAlive() {
+        if (keepAliveTimer) {
+            clearInterval(keepAliveTimer);
+            keepAliveTimer = null;
+            log('Keep-alive stopped');
+        }
+    }
+
+    function keepAlivePing() {
+        const apiKey = CONFIG.API_KEY;
+        if (!apiKey) return;
+
+        httpRequest({
+            method: 'GET',
+            url: 'https://api.torn.com/user/?selections=timestamp&key=' + apiKey,
+            onload(res) {
+                if (res.status === 200) {
+                    log('Keep-alive ping OK');
+                } else {
+                    warn('Keep-alive ping failed: HTTP ' + res.status);
+                }
+            },
+            onerror() {
+                warn('Keep-alive ping network error');
+            },
+        });
+    }
+
+    // =========================================================================
     // SECTION 18: PAGE DETECTION & ROUTER
     // =========================================================================
 
@@ -7123,6 +7208,7 @@ body.wb-chain-active {
         stopDirectChainPoll();
         stopChainDOMObserver();
         stopEnergyPoll();
+        stopKeepAlive();
         if (lateChainWatcher) {
             lateChainWatcher.disconnect();
             lateChainWatcher = null;
