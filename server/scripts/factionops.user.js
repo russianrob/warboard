@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.18.8
+// @version      3.18.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2670,6 +2670,14 @@ body.wb-chain-active {
                     enemyFactionId: state.enemyFactionId || null,
                 });
             }
+
+            // Safety net: if no data arrives within 3s, do a single poll fetch
+            setTimeout(() => {
+                if (!hasReceivedInitialData && state.jwtToken) {
+                    log('Socket.IO connected but no initial data — fetching via poll');
+                    pollOnce();
+                }
+            }, 3000);
         });
 
         // Instant updates from server
