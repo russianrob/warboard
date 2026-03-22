@@ -24,6 +24,7 @@ import { startChainMonitor, stopAll as stopAllChainMonitors } from "./chain-moni
 import { startWarStatusMonitor, stopAll as stopAllWarStatusMonitors } from "./war-status-monitor.js";
 import { loadHeatmaps, stopFlush as stopHeatmapFlush } from "./activity-heatmap.js";
 import { startMembershipSchedule, stopMembershipSchedule } from "./membership-check.js";
+import { startSubscriptionManager, stopSubscriptionManager } from "./subscription-manager.js";
 import * as store from "./store.js";
 import { loadSubscriptions } from "./push-notifications.js";
 
@@ -220,6 +221,9 @@ for (const [warId, war] of store.getAllWars()) {
 // Schedule weekly membership verification (every Tuesday)
 startMembershipSchedule();
 
+// Start faction subscription manager (polls for 50M payments)
+startSubscriptionManager();
+
 httpServer.listen(PORT, () => {
   console.log(`[server] FactionOps server listening on port ${PORT}`);
   console.log(`[server] Landing page: http://localhost:${PORT}`);
@@ -237,6 +241,7 @@ function shutdown(signal) {
   stopPersonalMonitor();
   stopHeatmapFlush();
   stopMembershipSchedule();
+  stopSubscriptionManager();
   store.saveState();
   httpServer.close(() => {
     console.log("[server] Server closed");

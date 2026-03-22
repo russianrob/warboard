@@ -8,8 +8,7 @@
 
 import * as store from "./store.js";
 import { verifyTornApiKey } from "./auth.js";
-
-const ALLOWED_FACTION_ID = "42055";
+import { isFactionAllowed } from "./subscription-manager.js";
 
 /** Run the membership check immediately. */
 export async function runMembershipCheck() {
@@ -25,7 +24,7 @@ export async function runMembershipCheck() {
   for (const [playerId, apiKey] of keys) {
     try {
       const info = await verifyTornApiKey(apiKey);
-      if (info.factionId !== ALLOWED_FACTION_ID) {
+      if (!isFactionAllowed(info.factionId)) {
         store.removeApiKey(playerId);
         removed++;
         console.log(

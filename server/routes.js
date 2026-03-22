@@ -9,12 +9,13 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar } from "./torn-a
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
+import { isFactionAllowed, getAllSubscriptions, getOwnerFactionId, getSubscriptionRejectionMessage } from "./subscription-manager.js";
 
 const router = Router();
 
 const CALL_EXPIRE_MS = parseInt(process.env.CALL_EXPIRE_MS, 10) || 5 * 60 * 1000; // 5 minutes
 const DEAL_EXPIRE_MS = parseInt(process.env.DEAL_EXPIRE_MS, 10) || 15 * 60 * 1000; // 15 minutes (multi-hit deal)
-const ALLOWED_FACTION_ID = "42055";
+
 const SOFT_UNCALL_MS = 30_000; // 30 seconds after hospital detection
 const REFRESH_COOLDOWN_MS = 30_000; // 30 seconds between refreshes per war
 
@@ -168,8 +169,8 @@ router.post("/api/gate", async (req, res) => {
     return res.status(401).json({ error: msg });
   }
 
-  if (info.factionId !== ALLOWED_FACTION_ID) {
-    return res.status(403).json({ error: "Access restricted to faction members only" });
+  if (!isFactionAllowed(info.factionId)) {
+    return res.status(403).json({ error: getSubscriptionRejectionMessage() });
   }
 
   // Issue a gate-specific JWT (24h) stored as a cookie
@@ -237,10 +238,10 @@ router.post("/api/auth", async (req, res) => {
   try {
     const info = await verifyTornApiKey(apiKey);
 
-    // Faction lock — only members of the allowed faction can use the system
-    if (info.factionId !== ALLOWED_FACTION_ID) {
-      console.log(`[auth] Rejected ${info.playerName} (${info.playerId}) — faction ${info.factionId} not allowed`);
-      return res.status(403).json({ error: "This system is restricted to authorized factions only" });
+    // Faction lock — only the owner faction or subscribed factions can use the system
+    if (!isFactionAllowed(info.factionId)) {
+      console.log(`[auth] Rejected ${info.playerName} (${info.playerId}) — faction ${info.factionId} not subscribed`);
+      return res.status(403).json({ error: getSubscriptionRejectionMessage() });
     }
 
     // Store the API key server-side for later Torn API calls
@@ -1035,6 +1036,21 @@ router.post("/api/push/test", requireAuth, async (req, res) => {
     console.error("[push] Test notification failed:", err.message);
     return res.status(500).json({ error: "Failed to send test notification" });
   }
+});
+
+// ── GET /api/admin/subscriptions ─────────────────────────────────────
+
+router.get("/api/admin/subscriptions", requireAuth, (req, res) => {
+  // Only allow members of the owner faction
+  if (req.user.factionId !== getOwnerFactionId()) {
+    return res.status(403).json({ error: "Admin access restricted to owner faction" });
+  }
+
+  const subscriptions = getAllSubscriptions();
+  return res.json({
+    ownerFactionId: getOwnerFactionId(),
+    subscriptions,
+  });
 });
 
 export default router;
