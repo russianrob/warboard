@@ -2303,11 +2303,12 @@ body.wb-chain-active {
 
     /** Render an inline FF badge element. */
     function renderInlineFf(el, targetId) {
-        el.textContent = '';
-        el.className = 'fo-ff-inline';
         const cached = ffCache[targetId];
         if (!cached || cached.value == null) {
+            if (el.dataset.foCache === 'empty') return; // already empty
+            el.dataset.foCache = 'empty';
             el.textContent = '';
+            el.className = 'fo-ff-inline';
             el.style.color = '';
             el.style.background = '';
             return;
@@ -2316,7 +2317,11 @@ body.wb-chain-active {
         const now = Date.now() / 1000;
         const age = now - cached.lastUpdated;
         const stale = age > 14 * 24 * 60 * 60; // >14 days
+        const key = `ff_${ff.toFixed(2)}_${stale}`;
+        if (el.dataset.foCache === key) return; // no change
+        el.dataset.foCache = key;
         const label = `FF:${ff.toFixed(2)}${stale ? '?' : ''}`;
+        el.className = 'fo-ff-inline';
         el.textContent = label;
         el.style.color = ffColor(ff);
         el.style.background = 'rgba(255,255,255,0.06)';
@@ -5766,13 +5771,13 @@ body.wb-chain-active {
     /** Render the BSP cell for overlay rows. */
     /** Render compact inline BSP badge (next to player name). */
     function renderInlineBsp(el, targetId) {
-        el.textContent = '';
-        el.className = 'fo-bsp-inline';
-
         // 1. BSP prediction (sync)
         const pred = fetchBspPrediction(targetId);
         if (pred && pred.TBS != null) {
             const num = Number(pred.TBS);
+            const key = `bsp_${num}`;
+            if (el.dataset.foCache === key) return; // no change
+            el.dataset.foCache = key;
             const tier = bspTier(num);
             el.className = `fo-bsp-inline tier-${tier}`;
             el.textContent = formatBspNumber(num);
@@ -5780,12 +5785,17 @@ body.wb-chain-active {
             return;
         }
 
+        // If already has content, don't wipe for async reload
+        if (el.dataset.foCache && el.dataset.foCache !== 'empty') return;
+
         // 2. FFS fallback (async)
+        el.dataset.foCache = 'loading';
         el.className = 'fo-bsp-inline tier-unknown';
         getFfScouterEstimate(targetId).then((ffs) => {
             if (!ffs) return;
             const num = Number(ffs.total);
             if (isNaN(num)) return;
+            el.dataset.foCache = `ffs_${num}`;
             const tier = bspTier(num);
             el.className = `fo-bsp-inline tier-${tier}`;
             el.textContent = ffs.human || formatBspNumber(num);
@@ -5794,13 +5804,15 @@ body.wb-chain-active {
     }
 
     function renderOverlayBspCell(cell, targetId) {
-        cell.innerHTML = '';
-
         // 1. Try BSP prediction (synchronous)
         const pred = fetchBspPrediction(targetId);
         if (pred && pred.TBS != null) {
             const num = Number(pred.TBS);
             const tier = bspTier(num);
+            const key = `bsp_${num}`;
+            if (cell.dataset.foCache === key) return; // no change
+            cell.innerHTML = '';
+            cell.dataset.foCache = key;
             const span = document.createElement('span');
             span.className = `fo-bsp-stat tier-${tier}`;
             span.title = `~${num.toLocaleString()} total stats (BSP)`;
@@ -5809,7 +5821,12 @@ body.wb-chain-active {
             return;
         }
 
+        // If cell already has content, don't wipe it for async FFS reload
+        if (cell.dataset.foCache && cell.dataset.foCache !== 'empty') return;
+
         // 2. FFS fallback (async) — show dash while loading
+        cell.innerHTML = '';
+        cell.dataset.foCache = 'loading';
         const span = document.createElement('span');
         span.className = 'fo-bsp-stat tier-unknown';
         span.textContent = '\u2014';
@@ -5820,6 +5837,7 @@ body.wb-chain-active {
             const num = Number(ffs.total);
             if (isNaN(num)) return;
             const tier = bspTier(num);
+            cell.dataset.foCache = `ffs_${num}`;
             span.className = `fo-bsp-stat tier-${tier}`;
             span.title = `~${num.toLocaleString()} total stats (FFS)`;
             span.innerHTML = `${ffs.human || formatBspNumber(num)}<span class="fo-bsp-source">ffs</span>`;
