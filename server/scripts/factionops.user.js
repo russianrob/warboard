@@ -1044,8 +1044,10 @@ body.wb-chain-active {
 .fo-header-left {
     display: flex;
     align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
+    gap: 6px;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: visible;
 }
 
 .fo-header-center {
@@ -5368,8 +5370,6 @@ body.wb-chain-active {
                     <div class="fo-status-dot${state.connected ? '' : ' disconnected'}" id="fo-conn-dot" title="${state.connected ? 'Connected' : 'Disconnected'}"></div>
                     <span class="fo-rt-badge" id="fo-rt-badge"></span>
                     <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
-                    <button class="fo-settings-btn" id="fo-scout-btn" title="Scout Report">&#x1F50D;</button>
-                    <button class="fo-settings-btn" id="fo-postwar-btn" title="Post-War Report">&#x1F4CB;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                     <div class="fo-energy-display" id="fo-energy-display" title="Energy">
                         <span class="fo-energy-label">E</span>
@@ -5398,6 +5398,8 @@ body.wb-chain-active {
                         <span class="fo-war-timer-value" id="fo-war-timer-value">--:--</span>
                         <div class="fo-war-timer-detail" id="fo-war-timer-detail"></div>
                     </div>
+                    <button class="fo-settings-btn" id="fo-scout-btn" title="War Analysis">&#x1F50D;</button>
+                    <button class="fo-settings-btn" id="fo-postwar-btn" title="Post-War Report">&#x1F4CB;</button>
                     <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.ourFactionOnline ? state.ourFactionOnline.online : state.onlinePlayers.length} us</span> · <span id="fo-enemy-online-count">0 enemy</span></div>
                 </div>
             </div>
