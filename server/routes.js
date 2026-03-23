@@ -1056,14 +1056,24 @@ router.get("/api/admin/subscriptions", requireAuth, (req, res) => {
 // ── GET /api/war/:warId/scout-report ──────────────────────────────────
 // Generate a pre-war intelligence report about the enemy faction.
 
-/** Analyze faction basic data and produce a structured scout report. */
-function analyzeScoutReport(data) {
+/** Format a raw battle-stats number into compact human string. */
+function formatStatNum(n) {
+  if (n == null || isNaN(n)) return "—";
+  if (n >= 1e12) return (n / 1e12).toFixed(2) + "T";
+  if (n >= 1e9)  return (n / 1e9).toFixed(2) + "B";
+  if (n >= 1e6)  return (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3)  return (n / 1e3).toFixed(0) + "K";
+  return String(Math.round(n));
+}
+
+/** Analyze a single faction's basic data into structured info. */
+function analyzeFaction(data, estimates) {
   const members = data.members || {};
   const memberList = Object.entries(members).map(([id, m]) => ({ id, ...m }));
   const memberCount = memberList.length;
   const now = Math.floor(Date.now() / 1000);
 
-  // ── Faction Overview ──
+  // ── Overview ──
   const overview = {
     name: data.name || "Unknown",
     age: data.age || 0,
@@ -1072,7 +1082,7 @@ function analyzeScoutReport(data) {
     memberCount,
   };
 
-  // ── Strength Assessment ──
+  // ── Level distribution ──
   const levelRanges = [
     { label: "1-15", min: 1, max: 15, count: 0 },
     { label: "16-30", min: 16, max: 30, count: 0 },
@@ -1090,15 +1100,13 @@ function analyzeScoutReport(data) {
   }
   const avgLevel = memberCount > 0 ? Math.round((totalLevel / memberCount) * 10) / 10 : 0;
 
-  // Threat tier based on avg level, respect, best chain, age
+  // Threat tier
   let threatTier = "Low";
   if (avgLevel >= 70 || overview.respect >= 50000000) threatTier = "Critical";
   else if (avgLevel >= 50 || overview.respect >= 10000000) threatTier = "High";
   else if (avgLevel >= 30 || overview.respect >= 1000000) threatTier = "Medium";
 
-  const strength = { levelDistribution: levelRanges, avgLevel, threatTier };
-
-  // ── Activity Patterns ──
+  // ── Activity ──
   let onlineCount = 0, idleCount = 0, offlineCount = 0;
   const actionBuckets = { "5min": 0, "30min": 0, "1hr": 0, "1day": 0, "1week+": 0 };
   let activeCombatRoster = 0;
@@ -1109,8 +1117,6 @@ function analyzeScoutReport(data) {
     else if (activity === "idle") idleCount++;
     else offlineCount++;
 
-    // Parse last_action.relative for bucketing
-    const rel = m.last_action?.relative || "";
     const ts = m.last_action?.timestamp || 0;
     let secsAgo = ts > 0 ? Math.max(0, now - ts) : Infinity;
 
@@ -1120,7 +1126,6 @@ function analyzeScoutReport(data) {
     else if (secsAgo <= 86400) actionBuckets["1day"]++;
     else actionBuckets["1week+"]++;
 
-    // Active combat roster: online/idle within 30min, not hospitalized/jailed/traveling
     const statusState = (m.status?.state || "Okay").toLowerCase();
     const isUnavailable = ["hospital", "jail", "traveling", "abroad"].includes(statusState);
     if (!isUnavailable && secsAgo <= 1800) {
@@ -1128,15 +1133,7 @@ function analyzeScoutReport(data) {
     }
   }
 
-  const activityPatterns = {
-    online: onlineCount,
-    idle: idleCount,
-    offline: offlineCount,
-    lastAction: actionBuckets,
-    activeCombatRoster,
-  };
-
-  // ── Vulnerability Windows ──
+  // ── Vulnerability ──
   const hospitalized = [];
   const jailed = [];
   const traveling = [];
@@ -1164,13 +1161,10 @@ function analyzeScoutReport(data) {
     }
   }
 
-  // Sort hospitalized by remaining time descending
   hospitalized.sort((a, b) => b.remaining - a.remaining);
   inactive.sort((a, b) => b.lastActionAgo - a.lastActionAgo);
 
-  const vulnerabilities = { hospitalized, jailed, traveling, inactive };
-
-  // ── Faction Composition ──
+  // ── Composition ──
   let newMembers = 0, veterans = 0, totalDays = 0;
   for (const m of memberList) {
     const dif = m.days_in_faction || 0;
@@ -1180,15 +1174,40 @@ function analyzeScoutReport(data) {
   }
   const avgDaysInFaction = memberCount > 0 ? Math.round(totalDays / memberCount) : 0;
 
-  // Likely leadership: top 5 by level
   const likelyLeadership = [...memberList]
     .sort((a, b) => (b.level || 0) - (a.level || 0))
     .slice(0, 5)
     .map(m => ({ id: m.id, name: m.name, level: m.level, daysInFaction: m.days_in_faction || 0 }));
 
-  const composition = { newMembers, veterans, avgDaysInFaction, likelyLeadership };
+  // ── Members with stat estimates ──
+  const rankedMembers = memberList.map(m => {
+    const est = estimates && estimates[m.id];
+    const statusState = (m.status?.state || "Okay").toLowerCase();
+    const ts = m.last_action?.timestamp || 0;
+    const secsAgo = ts > 0 ? Math.max(0, now - ts) : Infinity;
+    const isUnavailable = ["hospital", "jail", "traveling", "abroad"].includes(statusState);
+    const isActive = !isUnavailable && secsAgo <= 1800;
+    return {
+      id: m.id,
+      name: m.name,
+      level: m.level || 0,
+      stats: est ? est.total : null,
+      statsFormatted: est ? formatStatNum(est.total) : null,
+      source: est ? est.source : null,
+      statusState,
+      isActive,
+    };
+  });
 
-  // ── Tactical Summary ──
+  // Sort by stats (if available) then level
+  rankedMembers.sort((a, b) => {
+    if (a.stats != null && b.stats != null) return b.stats - a.stats;
+    if (a.stats != null) return -1;
+    if (b.stats != null) return 1;
+    return b.level - a.level;
+  });
+
+  // ── Strengths / Weaknesses ──
   const strengths = [];
   const weaknesses = [];
 
@@ -1196,6 +1215,7 @@ function analyzeScoutReport(data) {
   if (overview.bestChain >= 1000) strengths.push("Strong chain capability (best: " + overview.bestChain.toLocaleString() + ")");
   if (veterans > memberCount * 0.5) strengths.push("Experienced roster (" + veterans + " veterans)");
   if (activeCombatRoster >= 10) strengths.push("Large active combat roster (" + activeCombatRoster + " ready)");
+  if (rankedMembers[0]?.stats >= 5e9) strengths.push("Elite top-end (" + rankedMembers[0].statsFormatted + ")");
 
   if (avgLevel < 30) weaknesses.push("Low average level (" + avgLevel + ")");
   if (newMembers > memberCount * 0.3) weaknesses.push("Many new members (" + newMembers + " under 30 days)");
@@ -1203,25 +1223,254 @@ function analyzeScoutReport(data) {
   if (hospitalized.length > 5) weaknesses.push(hospitalized.length + " members currently hospitalized");
   if (activeCombatRoster < 5) weaknesses.push("Small active combat roster (only " + activeCombatRoster + " ready)");
 
-  let approach = "Standard engagement.";
-  if (activeCombatRoster < 5) approach = "Enemy has few active fighters — blitz attack recommended.";
-  else if (hospitalized.length > memberCount * 0.3) approach = "Many enemies hospitalized — press the advantage now.";
-  else if (avgLevel >= 60 && activeCombatRoster >= 10) approach = "Strong enemy — coordinate attacks, chain carefully.";
-
-  const tacticalSummary = {
-    estimatedActiveFighters: activeCombatRoster,
+  return {
+    overview,
+    strength: { levelDistribution: levelRanges, avgLevel, threatTier },
+    activityPatterns: { online: onlineCount, idle: idleCount, offline: offlineCount, lastAction: actionBuckets, activeCombatRoster },
+    vulnerabilities: { hospitalized, jailed, traveling, inactive },
+    composition: { newMembers, veterans, avgDaysInFaction, likelyLeadership },
     strengths,
     weaknesses,
-    approach,
+    rankedMembers,
+  };
+}
+
+/** Assign stat tier based on estimated stats (or level as proxy). */
+function getStatTier(stats, level, hasEstimates) {
+  if (hasEstimates && stats != null) {
+    if (stats >= 5e9)  return "S";
+    if (stats >= 1e9)  return "A";
+    if (stats >= 250e6) return "B";
+    if (stats >= 50e6)  return "C";
+    return "D";
+  }
+  // Level-based fallback
+  if (level >= 90) return "S";
+  if (level >= 70) return "A";
+  if (level >= 50) return "B";
+  if (level >= 30) return "C";
+  return "D";
+}
+
+/** Full ranked war analysis — compares both factions with stat estimates. */
+function analyzeWarReport(ourData, enemyData, estimates) {
+  estimates = estimates || {};
+
+  const ourAnalysis = analyzeFaction(ourData, estimates);
+  const enemyAnalysis = analyzeFaction(enemyData, estimates);
+
+  const hasEstimates = ourAnalysis.rankedMembers.some(m => m.stats != null)
+    || enemyAnalysis.rankedMembers.some(m => m.stats != null);
+
+  // ── A. War Overview ──
+  const warOverview = {
+    our: ourAnalysis.overview,
+    enemy: enemyAnalysis.overview,
+    hasEstimates,
+  };
+
+  // ── B. Top-End Comparison (top 10 each) ──
+  const ourTop = ourAnalysis.rankedMembers.slice(0, 10);
+  const enemyTop = enemyAnalysis.rankedMembers.slice(0, 10);
+  const matchups = [];
+  for (let i = 0; i < Math.max(ourTop.length, enemyTop.length, 10); i++) {
+    const ours = ourTop[i] || null;
+    const theirs = enemyTop[i] || null;
+    let advantage = "even";
+    if (ours && theirs) {
+      if (ours.stats != null && theirs.stats != null) {
+        if (ours.stats > theirs.stats * 1.15) advantage = "ours";
+        else if (theirs.stats > ours.stats * 1.15) advantage = "theirs";
+      } else {
+        if (ours.level > theirs.level + 5) advantage = "ours";
+        else if (theirs.level > ours.level + 5) advantage = "theirs";
+      }
+    } else if (ours && !theirs) {
+      advantage = "ours";
+    } else if (!ours && theirs) {
+      advantage = "theirs";
+    }
+    matchups.push({ rank: i + 1, ours, theirs, advantage });
+  }
+
+  const topEnd = { ourTop, enemyTop, matchups };
+
+  // ── C. Stat Tier Breakdown ──
+  const tierLabels = ["S", "A", "B", "C", "D"];
+  const tierDescriptions = hasEstimates
+    ? { S: "5B+ (elite)", A: "1B–5B (strong)", B: "250M–1B (solid)", C: "50M–250M (filler)", D: "<50M (non-threat)" }
+    : { S: "Lv90+ (elite)", A: "Lv70–89 (strong)", B: "Lv50–69 (solid)", C: "Lv30–49 (filler)", D: "Lv<30 (non-threat)" };
+
+  const ourTiers = { S: 0, A: 0, B: 0, C: 0, D: 0 };
+  const enemyTiers = { S: 0, A: 0, B: 0, C: 0, D: 0 };
+
+  for (const m of ourAnalysis.rankedMembers) {
+    ourTiers[getStatTier(m.stats, m.level, hasEstimates)]++;
+  }
+  for (const m of enemyAnalysis.rankedMembers) {
+    enemyTiers[getStatTier(m.stats, m.level, hasEstimates)]++;
+  }
+
+  const statTiers = { labels: tierLabels, descriptions: tierDescriptions, our: ourTiers, enemy: enemyTiers, hasEstimates };
+
+  // ── D. Safe Hit Thresholds ──
+  const thresholds = [
+    { label: "1B+", min: 1e9, safeTarget: Infinity, desc: "Any enemy" },
+    { label: "500M–1B", min: 500e6, safeTarget: 600e6, desc: "Enemies ≤600M" },
+    { label: "350M–500M", min: 350e6, safeTarget: 400e6, desc: "Enemies ≤400M" },
+    { label: "250M–350M", min: 250e6, safeTarget: 300e6, desc: "Enemies ≤300M" },
+    { label: "<250M", min: 0, safeTarget: 0, desc: "Assists/cleanup only" },
+  ];
+
+  // Count our members in each bracket
+  const safeHitData = thresholds.map(t => {
+    const ourCount = ourAnalysis.rankedMembers.filter(m => {
+      const s = m.stats != null ? m.stats : m.level * 10e6; // rough proxy
+      return s >= t.min && (t.min === 0 || s < (thresholds[thresholds.indexOf(t) - 1]?.min || Infinity));
+    }).length;
+    const enemyFarmable = t.safeTarget === Infinity
+      ? enemyAnalysis.rankedMembers.length
+      : t.safeTarget === 0
+        ? 0
+        : enemyAnalysis.rankedMembers.filter(m => {
+            const s = m.stats != null ? m.stats : m.level * 10e6;
+            return s <= t.safeTarget;
+          }).length;
+    return { ...t, ourCount, enemyFarmable };
+  });
+
+  // Total safely hittable: our members with 250M+ can hit, compute % farmable
+  const ourCanHit = ourAnalysis.rankedMembers.filter(m => {
+    const s = m.stats != null ? m.stats : m.level * 10e6;
+    return s >= 250e6;
+  }).length;
+  const ourTotal = ourAnalysis.rankedMembers.length;
+  const enemyFarmable = enemyAnalysis.rankedMembers.filter(m => {
+    const s = m.stats != null ? m.stats : m.level * 10e6;
+    return s <= 600e6;
+  }).length;
+  const enemyTotal = enemyAnalysis.rankedMembers.length;
+
+  const safeHits = {
+    thresholds: safeHitData,
+    ourCanHitPct: ourTotal > 0 ? Math.round((ourCanHit / ourTotal) * 100) : 0,
+    enemyFarmablePct: enemyTotal > 0 ? Math.round((enemyFarmable / enemyTotal) * 100) : 0,
+    hasEstimates,
+  };
+
+  // ── E. Activity & Availability ──
+  const activity = {
+    our: ourAnalysis.activityPatterns,
+    enemy: enemyAnalysis.activityPatterns,
+  };
+
+  // ── F. Faction Composition ──
+  const composition = {
+    our: ourAnalysis.composition,
+    enemy: enemyAnalysis.composition,
+  };
+
+  // ── G. Tactical Battle Plan ──
+  const enemyWeak = enemyAnalysis.rankedMembers
+    .filter(m => m.isActive && (m.stats != null ? m.stats < 250e6 : m.level < 50))
+    .slice(0, 10);
+  const enemyMid = enemyAnalysis.rankedMembers
+    .filter(m => m.isActive && (m.stats != null ? (m.stats >= 250e6 && m.stats < 1e9) : (m.level >= 50 && m.level < 75)))
+    .slice(0, 10);
+  const enemyThreats = enemyAnalysis.rankedMembers
+    .filter(m => m.isActive && (m.stats != null ? m.stats >= 1e9 : m.level >= 75))
+    .slice(0, 10);
+  const enemyIgnore = enemyAnalysis.rankedMembers
+    .filter(m => !m.isActive)
+    .slice(0, 15);
+
+  const ourChainers = ourAnalysis.rankedMembers
+    .filter(m => m.isActive && (m.stats != null ? m.stats < 500e6 : m.level < 60))
+    .slice(0, 10);
+  const ourHitters = ourAnalysis.rankedMembers
+    .filter(m => m.isActive && (m.stats != null ? m.stats >= 500e6 : m.level >= 60))
+    .slice(0, 10);
+
+  const battlePlan = {
+    opening: {
+      description: "Farm their weakest active members to build chain. Focus on quick, safe hits.",
+      chainTargets: enemyWeak,
+      ourChainers,
+    },
+    midWar: {
+      description: "Target mid-tier enemies to perma-hospital them. Rotate hitters to stay rested.",
+      permaTargets: enemyMid,
+    },
+    endgame: {
+      description: "Deploy top hitters against their strongest active threats. Coordinate attacks.",
+      enemyThreats,
+      ourHitters,
+    },
+    ignore: enemyIgnore,
+    keyPermaTargets: enemyAnalysis.rankedMembers
+      .filter(m => m.isActive)
+      .sort((a, b) => (b.stats || b.level * 10e6) - (a.stats || a.level * 10e6))
+      .slice(0, 5),
+  };
+
+  // ── Win probability ──
+  let winScore = 50;
+  // Member advantage
+  const ourMemberCount = ourAnalysis.overview.memberCount;
+  const enemyMemberCount = enemyAnalysis.overview.memberCount;
+  if (ourMemberCount > enemyMemberCount * 1.2) winScore += 5;
+  else if (enemyMemberCount > ourMemberCount * 1.2) winScore -= 5;
+  // Level advantage
+  if (ourAnalysis.strength.avgLevel > enemyAnalysis.strength.avgLevel + 10) winScore += 10;
+  else if (enemyAnalysis.strength.avgLevel > ourAnalysis.strength.avgLevel + 10) winScore -= 10;
+  else if (ourAnalysis.strength.avgLevel > enemyAnalysis.strength.avgLevel + 3) winScore += 5;
+  else if (enemyAnalysis.strength.avgLevel > ourAnalysis.strength.avgLevel + 3) winScore -= 5;
+  // Active roster
+  if (ourAnalysis.activityPatterns.activeCombatRoster > enemyAnalysis.activityPatterns.activeCombatRoster * 1.5) winScore += 10;
+  else if (enemyAnalysis.activityPatterns.activeCombatRoster > ourAnalysis.activityPatterns.activeCombatRoster * 1.5) winScore -= 10;
+  // Stat tier advantage
+  if (ourTiers.S > enemyTiers.S) winScore += 8;
+  else if (enemyTiers.S > ourTiers.S) winScore -= 8;
+  if (ourTiers.A > enemyTiers.A) winScore += 5;
+  else if (enemyTiers.A > ourTiers.A) winScore -= 5;
+  // Chain capability
+  if (ourAnalysis.overview.bestChain > enemyAnalysis.overview.bestChain * 1.5) winScore += 5;
+  else if (enemyAnalysis.overview.bestChain > ourAnalysis.overview.bestChain * 1.5) winScore -= 5;
+  // Enemy vulnerabilities
+  const enemyHospPct = enemyMemberCount > 0 ? enemyAnalysis.vulnerabilities.hospitalized.length / enemyMemberCount : 0;
+  if (enemyHospPct > 0.3) winScore += 8;
+  else if (enemyHospPct > 0.15) winScore += 4;
+
+  winScore = Math.max(5, Math.min(95, winScore));
+
+  let winReasoning = [];
+  if (winScore >= 70) winReasoning.push("Strong overall advantage");
+  else if (winScore <= 30) winReasoning.push("Significant disadvantage — careful coordination needed");
+  else winReasoning.push("Competitive matchup — execution matters");
+
+  if (ourTiers.S > enemyTiers.S) winReasoning.push("Top-end advantage (" + ourTiers.S + " vs " + enemyTiers.S + " S-tier)");
+  else if (enemyTiers.S > ourTiers.S) winReasoning.push("Enemy has top-end advantage (" + enemyTiers.S + " vs " + ourTiers.S + " S-tier)");
+  if (ourAnalysis.activityPatterns.activeCombatRoster > enemyAnalysis.activityPatterns.activeCombatRoster)
+    winReasoning.push("More active fighters (" + ourAnalysis.activityPatterns.activeCombatRoster + " vs " + enemyAnalysis.activityPatterns.activeCombatRoster + ")");
+
+  // ── H. Strengths & Weaknesses ──
+  const strengthsWeaknesses = {
+    our: { strengths: ourAnalysis.strengths, weaknesses: ourAnalysis.weaknesses },
+    enemy: { strengths: enemyAnalysis.strengths, weaknesses: enemyAnalysis.weaknesses },
   };
 
   return {
-    overview,
-    strength,
-    activityPatterns,
-    vulnerabilities,
+    warOverview,
+    topEnd,
+    statTiers,
+    safeHits,
+    activity,
     composition,
-    tacticalSummary,
+    battlePlan,
+    winProbability: winScore,
+    winReasoning,
+    strengthsWeaknesses,
+    enemyVulnerabilities: enemyAnalysis.vulnerabilities,
     generatedAt: Date.now(),
   };
 }
@@ -1230,7 +1479,8 @@ function analyzeScoutReport(data) {
 const scoutReportCooldowns = new Map();
 const SCOUT_REPORT_COOLDOWN_MS = 60000; // 1 minute between requests per war
 
-router.get("/api/war/:warId/scout-report", requireAuth, async (req, res) => {
+/** Shared handler for scout/war report generation (GET and POST). */
+async function handleWarReport(req, res) {
   const { factionId } = req.user;
   const { warId } = req.params;
 
@@ -1258,16 +1508,25 @@ router.get("/api/war/:warId/scout-report", requireAuth, async (req, res) => {
     return res.status(503).json({ error: "No API key available — set a faction API key in settings" });
   }
 
+  // Accept estimates from POST body
+  const estimates = (req.body && req.body.estimates) || {};
+
   try {
     scoutReportCooldowns.set(warId, Date.now());
-    const data = await fetchFactionBasic(war.enemyFactionId, apiKey);
-    const report = analyzeScoutReport(data);
-    console.log(`[scout] Generated scout report for war ${warId} (enemy: ${war.enemyFactionId})`);
+    const [ourData, enemyData] = await Promise.all([
+      fetchFactionBasic(war.factionId, apiKey),
+      fetchFactionBasic(war.enemyFactionId, apiKey),
+    ]);
+    const report = analyzeWarReport(ourData, enemyData, estimates);
+    console.log(`[scout] Generated war report for war ${warId} (us: ${war.factionId}, enemy: ${war.enemyFactionId})`);
     return res.json({ report });
   } catch (err) {
-    console.error("[scout] Scout report failed:", err.message);
-    return res.status(502).json({ error: `Failed to generate scout report: ${err.message}` });
+    console.error("[scout] War report failed:", err.message);
+    return res.status(502).json({ error: `Failed to generate war report: ${err.message}` });
   }
-});
+}
+
+router.get("/api/war/:warId/scout-report", requireAuth, handleWarReport);
+router.post("/api/war/:warId/scout-report", requireAuth, handleWarReport);
 
 export default router;

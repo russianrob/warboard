@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.21.2
+// @version      3.22.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -171,7 +171,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.21.2',
+        VERSION: '3.22.0',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1790,7 +1790,7 @@ body.wb-chain-active {
     background: var(--wb-bg);
     border: 1px solid var(--wb-border);
     border-radius: 8px;
-    width: 600px;
+    width: 750px;
     max-width: 95vw;
     max-height: 90vh;
     overflow-y: auto;
@@ -1926,6 +1926,163 @@ body.wb-chain-active {
     animation: wb-spin 0.8s linear infinite;
 }
 @keyframes wb-spin { to { transform: rotate(360deg); } }
+.wb-scout-compare {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 0;
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+.wb-scout-compare-side {
+    padding: 8px;
+    border-radius: 6px;
+}
+.wb-scout-compare-side.ours { background: rgba(0,184,148,0.08); }
+.wb-scout-compare-side.theirs { background: rgba(214,48,49,0.08); }
+.wb-scout-compare-vs {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 11px;
+    color: var(--wb-text-muted);
+    padding: 0 8px;
+}
+.wb-scout-compare-side h4 {
+    margin: 0 0 6px 0;
+    font-size: 12px;
+    font-weight: 700;
+}
+.wb-scout-compare-side.ours h4 { color: #00b894; }
+.wb-scout-compare-side.theirs h4 { color: #d63031; }
+.wb-scout-compare-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 1px 0;
+}
+.wb-scout-compare-row .lbl { color: var(--wb-text-muted); }
+.wb-scout-compare-row .val { font-weight: 600; }
+.wb-scout-win-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 700;
+    margin: 4px 0;
+}
+.wb-scout-win-badge.high { background: rgba(0,184,148,0.25); color: #00b894; }
+.wb-scout-win-badge.mid { background: rgba(253,203,110,0.25); color: #fdcb6e; }
+.wb-scout-win-badge.low { background: rgba(214,48,49,0.25); color: #ff7675; }
+.wb-scout-matchup-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    margin-top: 4px;
+}
+.wb-scout-matchup-table th {
+    text-align: center;
+    font-size: 10px;
+    color: var(--wb-text-muted);
+    padding: 3px 4px;
+    border-bottom: 1px solid var(--wb-border);
+    text-transform: uppercase;
+}
+.wb-scout-matchup-table td {
+    padding: 3px 4px;
+    border-bottom: 1px solid rgba(45,52,54,0.3);
+    text-align: center;
+}
+.wb-scout-matchup-table tr:last-child td { border-bottom: none; }
+.wb-scout-matchup-table .adv-ours { color: #00b894; }
+.wb-scout-matchup-table .adv-theirs { color: #ff7675; }
+.wb-scout-matchup-table .adv-even { color: #636e72; }
+.wb-scout-tier-row {
+    display: grid;
+    grid-template-columns: 50px 1fr 30px 30px 1fr;
+    gap: 4px;
+    align-items: center;
+    font-size: 11px;
+    padding: 2px 0;
+}
+.wb-scout-tier-bar {
+    height: 10px;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+.wb-scout-tier-bar.ours { background: #00b894; justify-self: end; }
+.wb-scout-tier-bar.theirs { background: #d63031; justify-self: start; }
+.wb-scout-tier-label {
+    font-weight: 700;
+    text-align: center;
+}
+.wb-scout-tier-count { text-align: center; font-weight: 600; font-size: 10px; }
+.wb-scout-phase {
+    background: var(--wb-bg-secondary);
+    border: 1px solid var(--wb-border);
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 8px;
+}
+.wb-scout-phase h4 {
+    margin: 0 0 4px 0;
+    font-size: 12px;
+    color: var(--wb-call-green);
+}
+.wb-scout-phase p {
+    margin: 0 0 6px 0;
+    font-size: 11px;
+    color: var(--wb-text-muted);
+    line-height: 1.4;
+}
+.wb-scout-target-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    margin-top: 4px;
+}
+.wb-scout-target-chip {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    background: rgba(45,52,54,0.5);
+    color: var(--wb-text);
+}
+.wb-scout-target-chip.weak { background: rgba(0,184,148,0.15); color: #00b894; }
+.wb-scout-target-chip.mid { background: rgba(253,203,110,0.15); color: #fdcb6e; }
+.wb-scout-target-chip.threat { background: rgba(214,48,49,0.15); color: #ff7675; }
+.wb-scout-target-chip.ignore { background: rgba(99,110,114,0.15); color: #636e72; }
+.wb-scout-safe-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    margin-top: 4px;
+}
+.wb-scout-safe-table th {
+    text-align: left;
+    font-size: 10px;
+    color: var(--wb-text-muted);
+    padding: 3px 6px;
+    border-bottom: 1px solid var(--wb-border);
+    text-transform: uppercase;
+}
+.wb-scout-safe-table td {
+    padding: 3px 6px;
+    border-bottom: 1px solid rgba(45,52,54,0.3);
+}
+.wb-scout-safe-table tr:last-child td { border-bottom: none; }
+.wb-scout-pct-bar {
+    display: inline-block;
+    height: 16px;
+    border-radius: 3px;
+    line-height: 16px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 0 6px;
+    min-width: 30px;
+    text-align: center;
+}
 
 .fo-unavailable-section {
     border-top: 1px solid var(--wb-border);
@@ -6994,13 +7151,13 @@ body.wb-chain-active {
         modal.className = 'wb-scout-modal';
         modal.innerHTML = `
             <div class="wb-scout-header">
-                <h2>\uD83D\uDD0D Scout Report</h2>
+                <h2>\u2694\uFE0F War Analysis</h2>
                 <button class="wb-scout-close" id="wb-scout-close">\u00D7</button>
             </div>
             <div class="wb-scout-body" id="wb-scout-body">
                 <div class="wb-scout-loading">
                     <div class="wb-scout-spinner"></div>
-                    <span>Gathering intelligence...</span>
+                    <span>Analyzing both factions...</span>
                 </div>
             </div>
         `;
@@ -7018,15 +7175,73 @@ body.wb-chain-active {
         if (overlay) overlay.remove();
     }
 
+    /** Gather all BSP/FFS stat estimates from client caches. */
+    function gatherStatEstimates() {
+        const estimates = {};
+
+        // BSP predictions from localStorage
+        try {
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('tdup.battleStatsPredictor.cache.prediction.')) {
+                    const userId = key.replace('tdup.battleStatsPredictor.cache.prediction.', '');
+                    try {
+                        const pred = JSON.parse(localStorage.getItem(key));
+                        if (pred && pred.TBS != null) {
+                            estimates[userId] = { total: Number(pred.TBS), source: 'bsp' };
+                        }
+                    } catch (_) {}
+                }
+            }
+        } catch (_) {}
+
+        // FF Scouter from in-memory cache — override BSP if FFS has data
+        for (const [id, entry] of Object.entries(ffCache)) {
+            if (entry && entry.bsHuman) {
+                // Parse human-readable like "3.5B", "750M" into a number
+                const parsed = parseHumanStats(entry.bsHuman);
+                if (parsed != null) {
+                    // Only override if no BSP estimate exists (BSP is usually more accurate)
+                    if (!estimates[id]) {
+                        estimates[id] = { total: parsed, source: 'ffs' };
+                    }
+                }
+            }
+        }
+
+        return estimates;
+    }
+
+    /** Parse human stat strings like "3.5B", "750M", "250K" to numbers. */
+    function parseHumanStats(str) {
+        if (!str || typeof str !== 'string') return null;
+        const match = str.trim().match(/^([\d.]+)\s*([TGBMK])?/i);
+        if (!match) return null;
+        const num = parseFloat(match[1]);
+        if (isNaN(num)) return null;
+        const suffix = (match[2] || '').toUpperCase();
+        if (suffix === 'T') return num * 1e12;
+        if (suffix === 'G' || suffix === 'B') return num * 1e9;
+        if (suffix === 'M') return num * 1e6;
+        if (suffix === 'K') return num * 1e3;
+        return num;
+    }
+
     async function fetchScoutReport(warId) {
         try {
             const url = `${CONFIG.SERVER_URL}/api/war/${encodeURIComponent(warId)}/scout-report`;
+            const estimates = gatherStatEstimates();
+            const body = JSON.stringify({ estimates });
             const data = await new Promise((resolve, reject) => {
                 httpRequest({
-                    method: 'GET',
+                    method: 'POST',
                     url,
-                    headers: { 'Authorization': `Bearer ${state.jwtToken}` },
-                    timeout: 15000,
+                    headers: {
+                        'Authorization': `Bearer ${state.jwtToken}`,
+                        'Content-Type': 'application/json',
+                    },
+                    data: body,
+                    timeout: 30000,
                     onload(r) {
                         const d = safeParse(r.responseText);
                         if (r.status >= 200 && r.status < 300) resolve(d);
@@ -7065,119 +7280,268 @@ body.wb-chain-active {
         const body = document.getElementById('wb-scout-body');
         if (!body) return;
 
-        const o = report.overview;
-        const s = report.strength;
-        const a = report.activityPatterns;
-        const v = report.vulnerabilities;
-        const c = report.composition;
-        const t = report.tacticalSummary;
-        const maxLevelCount = Math.max(...s.levelDistribution.map(r => r.count), 1);
+        const wo = report.warOverview;
+        const te = report.topEnd;
+        const st = report.statTiers;
+        const sh = report.safeHits;
+        const act = report.activity;
+        const comp = report.composition;
+        const bp = report.battlePlan;
+        const wp = report.winProbability;
+        const wr = report.winReasoning;
+        const sw = report.strengthsWeaknesses;
+        const ev = report.enemyVulnerabilities;
 
-        const threatClass = s.threatTier.toLowerCase();
+        const winClass = wp >= 70 ? 'high' : wp >= 40 ? 'mid' : 'low';
+
+        function fmtNum(n) { return n != null ? Number(n).toLocaleString() : '\u2014'; }
+        function chipClass(m) {
+            if (!m) return '';
+            if (m.stats != null) {
+                if (m.stats >= 1e9) return 'threat';
+                if (m.stats >= 250e6) return 'mid';
+                return 'weak';
+            }
+            if (m.level >= 75) return 'threat';
+            if (m.level >= 50) return 'mid';
+            return 'weak';
+        }
+        function renderChips(list, cls) {
+            if (!list || list.length === 0) return '<span style="color:var(--wb-text-muted);font-size:10px;">None</span>';
+            return list.map(m => {
+                const statStr = m.statsFormatted ? ` (${m.statsFormatted})` : '';
+                return `<span class="wb-scout-target-chip ${cls || chipClass(m)}">${escapeHtml(m.name)} Lv${m.level}${statStr}</span>`;
+            }).join('');
+        }
 
         let html = '';
 
-        // ── Faction Overview ──
+        // ── A. WAR OVERVIEW ──
         html += `<div class="wb-scout-section">
-            <h3>Faction Overview</h3>
-            <div class="wb-scout-grid">
-                <span class="wb-scout-label">Faction</span><span class="wb-scout-value">${escapeHtml(o.name)}</span>
-                <span class="wb-scout-label">Age</span><span class="wb-scout-value">${o.age.toLocaleString()} days</span>
-                <span class="wb-scout-label">Respect</span><span class="wb-scout-value">${o.respect.toLocaleString()}</span>
-                <span class="wb-scout-label">Best Chain</span><span class="wb-scout-value">${o.bestChain.toLocaleString()}</span>
-                <span class="wb-scout-label">Members</span><span class="wb-scout-value">${o.memberCount}</span>
+            <h3>War Overview</h3>
+            <div style="text-align:center;margin-bottom:8px;">
+                <span class="wb-scout-win-badge ${winClass}">Win Probability: ${wp}%</span>
             </div>
+            <div class="wb-scout-compare">
+                <div class="wb-scout-compare-side ours">
+                    <h4>${escapeHtml(wo.our.name)}</h4>
+                    <div class="wb-scout-compare-row"><span class="lbl">Members</span><span class="val">${wo.our.memberCount}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Respect</span><span class="val">${fmtNum(wo.our.respect)}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Best Chain</span><span class="val">${fmtNum(wo.our.bestChain)}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Age</span><span class="val">${fmtNum(wo.our.age)}d</span></div>
+                </div>
+                <div class="wb-scout-compare-vs">VS</div>
+                <div class="wb-scout-compare-side theirs">
+                    <h4>${escapeHtml(wo.enemy.name)}</h4>
+                    <div class="wb-scout-compare-row"><span class="lbl">Members</span><span class="val">${wo.enemy.memberCount}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Respect</span><span class="val">${fmtNum(wo.enemy.respect)}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Best Chain</span><span class="val">${fmtNum(wo.enemy.bestChain)}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Age</span><span class="val">${fmtNum(wo.enemy.age)}d</span></div>
+                </div>
+            </div>
+            ${wr.length > 0 ? `<div style="font-size:10px;color:var(--wb-text-muted);text-align:center;">${wr.map(r => escapeHtml(r)).join(' \u2022 ')}</div>` : ''}
         </div>`;
 
-        // ── Strength Assessment ──
+        // ── B. TOP-END COMPARISON ──
         html += `<div class="wb-scout-section">
-            <h3>Strength Assessment</h3>
-            <div class="wb-scout-grid" style="margin-bottom:8px;">
-                <span class="wb-scout-label">Avg Level</span><span class="wb-scout-value">${s.avgLevel}</span>
-                <span class="wb-scout-label">Threat Tier</span><span class="wb-scout-value"><span class="wb-scout-threat ${threatClass}">${s.threatTier}</span></span>
-            </div>
-            <table class="wb-scout-table">
-                <tr><th>Level Range</th><th>Count</th><th style="width:50%">Distribution</th></tr>
-                ${s.levelDistribution.map(r => {
-                    const pct = Math.round((r.count / maxLevelCount) * 100);
-                    const color = r.min >= 76 ? '#d63031' : r.min >= 51 ? '#e17055' : r.min >= 31 ? '#fdcb6e' : r.min >= 16 ? '#00b894' : '#636e72';
+            <h3>Top-End Comparison</h3>
+            <table class="wb-scout-matchup-table">
+                <tr>
+                    <th>#</th>
+                    <th style="color:#00b894">Our Fighter</th>
+                    <th>Lv</th>
+                    <th>Stats</th>
+                    <th></th>
+                    <th style="color:#d63031">Their Fighter</th>
+                    <th>Lv</th>
+                    <th>Stats</th>
+                    <th>Edge</th>
+                </tr>
+                ${te.matchups.map(mu => {
+                    const o = mu.ours;
+                    const t = mu.theirs;
+                    const advClass = mu.advantage === 'ours' ? 'adv-ours' : mu.advantage === 'theirs' ? 'adv-theirs' : 'adv-even';
+                    const advSymbol = mu.advantage === 'ours' ? '\u25C0' : mu.advantage === 'theirs' ? '\u25B6' : '\u2022';
                     return `<tr>
-                        <td>${r.label}</td>
-                        <td style="text-align:center">${r.count}</td>
-                        <td><div class="wb-scout-bar"><div class="wb-scout-bar-fill" style="width:${pct}%;background:${color}"></div></div></td>
+                        <td style="color:var(--wb-text-muted)">${mu.rank}</td>
+                        <td style="text-align:left;color:#00b894">${o ? escapeHtml(o.name) : '\u2014'}</td>
+                        <td>${o ? o.level : ''}</td>
+                        <td>${o && o.statsFormatted ? o.statsFormatted : '\u2014'}${o && o.source ? ' <span style="font-size:9px;opacity:0.5">' + o.source + '</span>' : ''}</td>
+                        <td class="${advClass}" style="font-size:10px">${advSymbol}</td>
+                        <td style="text-align:left;color:#d63031">${t ? escapeHtml(t.name) : '\u2014'}</td>
+                        <td>${t ? t.level : ''}</td>
+                        <td>${t && t.statsFormatted ? t.statsFormatted : '\u2014'}${t && t.source ? ' <span style="font-size:9px;opacity:0.5">' + t.source + '</span>' : ''}</td>
+                        <td class="${advClass}" style="font-weight:700">${mu.advantage === 'ours' ? '+' : mu.advantage === 'theirs' ? '\u2013' : '='}</td>
                     </tr>`;
                 }).join('')}
             </table>
+            ${!wo.hasEstimates ? '<div style="font-size:10px;color:var(--wb-text-muted);margin-top:4px;text-align:center;">No stat estimates available \u2014 ranked by level. Install BSP or FFS for stat-based comparison.</div>' : ''}
         </div>`;
 
-        // ── Activity Patterns ──
+        // ── C. STAT TIER BREAKDOWN ──
+        const maxTier = Math.max(...st.labels.map(l => Math.max(st.our[l], st.enemy[l])), 1);
         html += `<div class="wb-scout-section">
-            <h3>Activity Patterns</h3>
-            <div class="wb-scout-grid">
-                <span class="wb-scout-label">Online</span><span class="wb-scout-value" style="color:#00b894">${a.online}</span>
-                <span class="wb-scout-label">Idle</span><span class="wb-scout-value" style="color:#fdcb6e">${a.idle}</span>
-                <span class="wb-scout-label">Offline</span><span class="wb-scout-value" style="color:#636e72">${a.offline}</span>
-                <span class="wb-scout-label">Active Combat Roster</span><span class="wb-scout-value" style="color:#e17055;font-size:14px;">${a.activeCombatRoster}</span>
+            <h3>Stat Tier Breakdown</h3>
+            <div style="font-size:10px;color:var(--wb-text-muted);margin-bottom:6px;">${st.hasEstimates ? 'Based on BSP/FFS estimates' : 'Based on level (no stat estimates)'}</div>
+            ${st.labels.map(label => {
+                const ourW = Math.round((st.our[label] / maxTier) * 100);
+                const enemyW = Math.round((st.enemy[label] / maxTier) * 100);
+                return `<div class="wb-scout-tier-row">
+                    <div class="wb-scout-tier-label">${label}</div>
+                    <div style="display:flex;justify-content:flex-end;align-items:center;">
+                        <span class="wb-scout-tier-count" style="color:#00b894;margin-right:4px;">${st.our[label]}</span>
+                        <div class="wb-scout-tier-bar ours" style="width:${ourW}%;min-width:${st.our[label] > 0 ? 4 : 0}px;"></div>
+                    </div>
+                    <div style="text-align:center;font-size:9px;color:var(--wb-text-muted)">${st.descriptions[label]}</div>
+                    <div style="display:flex;align-items:center;">
+                        <div class="wb-scout-tier-bar theirs" style="width:${enemyW}%;min-width:${st.enemy[label] > 0 ? 4 : 0}px;"></div>
+                        <span class="wb-scout-tier-count" style="color:#d63031;margin-left:4px;">${st.enemy[label]}</span>
+                    </div>
+                    <div></div>
+                </div>`;
+            }).join('')}
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--wb-text-muted);margin-top:4px;padding:0 4px;">
+                <span style="color:#00b894">Us</span>
+                <span style="color:#d63031">Them</span>
             </div>
-            <table class="wb-scout-table" style="margin-top:8px;">
-                <tr><th>Last Active</th><th style="text-align:center">Count</th></tr>
-                <tr><td>\u2264 5 min</td><td style="text-align:center">${a.lastAction['5min']}</td></tr>
-                <tr><td>\u2264 30 min</td><td style="text-align:center">${a.lastAction['30min']}</td></tr>
-                <tr><td>\u2264 1 hour</td><td style="text-align:center">${a.lastAction['1hr']}</td></tr>
-                <tr><td>\u2264 1 day</td><td style="text-align:center">${a.lastAction['1day']}</td></tr>
-                <tr><td>&gt; 1 week</td><td style="text-align:center">${a.lastAction['1week+']}</td></tr>
-            </table>
         </div>`;
 
-        // ── Vulnerability Windows ──
+        // ── D. SAFE HIT THRESHOLDS ──
         html += `<div class="wb-scout-section">
-            <h3>Vulnerability Windows</h3>
-            <div class="wb-scout-grid" style="margin-bottom:8px;">
-                <span class="wb-scout-label">Hospitalized</span><span class="wb-scout-value" style="color:#d63031">${v.hospitalized.length}</span>
-                <span class="wb-scout-label">Jailed</span><span class="wb-scout-value" style="color:#636e72">${v.jailed.length}</span>
-                <span class="wb-scout-label">Traveling</span><span class="wb-scout-value" style="color:#0984e3">${v.traveling.length}</span>
-                <span class="wb-scout-label">Inactive (24h+)</span><span class="wb-scout-value" style="color:#636e72">${v.inactive.length}</span>
+            <h3>Safe Hit Thresholds</h3>
+            ${!sh.hasEstimates ? '<div style="font-size:10px;color:var(--wb-text-muted);margin-bottom:4px;">Estimated from levels (install BSP/FFS for accuracy)</div>' : ''}
+            <table class="wb-scout-safe-table">
+                <tr><th>Your Stats</th><th>Safe to Hit</th></tr>
+                ${sh.thresholds.map(t => `<tr>
+                    <td style="font-weight:600">${t.label}</td>
+                    <td>${t.desc}</td>
+                </tr>`).join('')}
+            </table>
+            <div style="display:flex;gap:12px;margin-top:8px;">
+                <div style="flex:1;">
+                    <div style="font-size:10px;color:var(--wb-text-muted);margin-bottom:2px;">Your roster that can hit</div>
+                    <div class="wb-scout-pct-bar" style="width:${sh.ourCanHitPct}%;background:rgba(0,184,148,0.3);color:#00b894;">${sh.ourCanHitPct}%</div>
+                </div>
+                <div style="flex:1;">
+                    <div style="font-size:10px;color:var(--wb-text-muted);margin-bottom:2px;">Their roster farmable</div>
+                    <div class="wb-scout-pct-bar" style="width:${sh.enemyFarmablePct}%;background:rgba(214,48,49,0.3);color:#ff7675;">${sh.enemyFarmablePct}%</div>
+                </div>
+            </div>
+        </div>`;
+
+        // ── E. ACTIVITY & AVAILABILITY ──
+        html += `<div class="wb-scout-section">
+            <h3>Activity & Availability</h3>
+            <div class="wb-scout-compare">
+                <div class="wb-scout-compare-side ours">
+                    <h4>Our Activity</h4>
+                    <div class="wb-scout-compare-row"><span class="lbl">Online</span><span class="val" style="color:#00b894">${act.our.online}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Idle</span><span class="val" style="color:#fdcb6e">${act.our.idle}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Offline</span><span class="val" style="color:#636e72">${act.our.offline}</span></div>
+                    <div class="wb-scout-compare-row" style="border-top:1px solid var(--wb-border);padding-top:4px;margin-top:4px;"><span class="lbl">Combat Ready</span><span class="val" style="color:#e17055;font-weight:700">${act.our.activeCombatRoster}</span></div>
+                </div>
+                <div class="wb-scout-compare-vs">VS</div>
+                <div class="wb-scout-compare-side theirs">
+                    <h4>Enemy Activity</h4>
+                    <div class="wb-scout-compare-row"><span class="lbl">Online</span><span class="val" style="color:#00b894">${act.enemy.online}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Idle</span><span class="val" style="color:#fdcb6e">${act.enemy.idle}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Offline</span><span class="val" style="color:#636e72">${act.enemy.offline}</span></div>
+                    <div class="wb-scout-compare-row" style="border-top:1px solid var(--wb-border);padding-top:4px;margin-top:4px;"><span class="lbl">Combat Ready</span><span class="val" style="color:#e17055;font-weight:700">${act.enemy.activeCombatRoster}</span></div>
+                </div>
             </div>`;
 
-        if (v.hospitalized.length > 0) {
-            html += `<table class="wb-scout-table">
-                <tr><th>Hospitalized</th><th style="text-align:center">Lvl</th><th style="text-align:right">Time Left</th></tr>
-                ${v.hospitalized.slice(0, 10).map(m => `<tr>
-                    <td style="color:#d63031">${escapeHtml(m.name)}</td>
-                    <td style="text-align:center">${m.level}</td>
-                    <td style="text-align:right">${formatDuration(m.remaining)}</td>
-                </tr>`).join('')}
-                ${v.hospitalized.length > 10 ? `<tr><td colspan="3" style="opacity:0.5;font-size:10px">... and ${v.hospitalized.length - 10} more</td></tr>` : ''}
-            </table>`;
+        // Enemy vulnerability windows
+        if (ev) {
+            html += `<div style="margin-top:8px;">
+                <div style="font-size:11px;font-weight:600;color:var(--wb-text-muted);margin-bottom:4px;">Enemy Vulnerabilities</div>
+                <div class="wb-scout-grid">
+                    <span class="wb-scout-label">Hospitalized</span><span class="wb-scout-value" style="color:#d63031">${ev.hospitalized.length}</span>
+                    <span class="wb-scout-label">Jailed</span><span class="wb-scout-value" style="color:#636e72">${ev.jailed.length}</span>
+                    <span class="wb-scout-label">Traveling</span><span class="wb-scout-value" style="color:#0984e3">${ev.traveling.length}</span>
+                    <span class="wb-scout-label">Inactive (24h+)</span><span class="wb-scout-value" style="color:#636e72">${ev.inactive.length}</span>
+                </div>`;
+            if (ev.hospitalized.length > 0) {
+                html += `<table class="wb-scout-table" style="margin-top:4px;">
+                    <tr><th>Hospitalized Enemy</th><th style="text-align:center">Lvl</th><th style="text-align:right">Time Left</th></tr>
+                    ${ev.hospitalized.slice(0, 8).map(m => `<tr>
+                        <td style="color:#d63031">${escapeHtml(m.name)}</td>
+                        <td style="text-align:center">${m.level}</td>
+                        <td style="text-align:right">${formatDuration(m.remaining)}</td>
+                    </tr>`).join('')}
+                    ${ev.hospitalized.length > 8 ? `<tr><td colspan="3" style="opacity:0.5;font-size:10px">... and ${ev.hospitalized.length - 8} more</td></tr>` : ''}
+                </table>`;
+            }
+            html += `</div>`;
         }
         html += `</div>`;
 
-        // ── Faction Composition ──
+        // ── F. FACTION COMPOSITION ──
         html += `<div class="wb-scout-section">
             <h3>Faction Composition</h3>
-            <div class="wb-scout-grid" style="margin-bottom:8px;">
-                <span class="wb-scout-label">New Members (&lt;30d)</span><span class="wb-scout-value">${c.newMembers}</span>
-                <span class="wb-scout-label">Veterans (&gt;365d)</span><span class="wb-scout-value">${c.veterans}</span>
-                <span class="wb-scout-label">Avg Days in Faction</span><span class="wb-scout-value">${c.avgDaysInFaction.toLocaleString()}</span>
+            <div class="wb-scout-compare">
+                <div class="wb-scout-compare-side ours">
+                    <h4>Our Roster</h4>
+                    <div class="wb-scout-compare-row"><span class="lbl">New (&lt;30d)</span><span class="val">${comp.our.newMembers}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Veterans (&gt;1y)</span><span class="val">${comp.our.veterans}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Avg Days</span><span class="val">${fmtNum(comp.our.avgDaysInFaction)}</span></div>
+                </div>
+                <div class="wb-scout-compare-vs">VS</div>
+                <div class="wb-scout-compare-side theirs">
+                    <h4>Their Roster</h4>
+                    <div class="wb-scout-compare-row"><span class="lbl">New (&lt;30d)</span><span class="val">${comp.enemy.newMembers}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Veterans (&gt;1y)</span><span class="val">${comp.enemy.veterans}</span></div>
+                    <div class="wb-scout-compare-row"><span class="lbl">Avg Days</span><span class="val">${fmtNum(comp.enemy.avgDaysInFaction)}</span></div>
+                </div>
             </div>
-            <table class="wb-scout-table">
-                <tr><th>Likely Leadership</th><th style="text-align:center">Lvl</th><th style="text-align:right">Days</th></tr>
-                ${c.likelyLeadership.map(m => `<tr>
-                    <td>${escapeHtml(m.name)}</td>
-                    <td style="text-align:center">${m.level}</td>
-                    <td style="text-align:right">${m.daysInFaction.toLocaleString()}</td>
-                </tr>`).join('')}
-            </table>
         </div>`;
 
-        // ── Tactical Summary ──
+        // ── G. TACTICAL BATTLE PLAN ──
         html += `<div class="wb-scout-section">
-            <h3>Tactical Summary</h3>
-            <div class="wb-scout-summary-box">
-                <div style="margin-bottom:8px;"><strong>Est. Active Fighters:</strong> ${t.estimatedActiveFighters}</div>
-                ${t.strengths.length > 0 ? `<div style="margin-bottom:6px;"><strong>Strengths:</strong> ${t.strengths.map(s => `<span class="wb-scout-pill strength">${escapeHtml(s)}</span>`).join(' ')}</div>` : ''}
-                ${t.weaknesses.length > 0 ? `<div style="margin-bottom:6px;"><strong>Weaknesses:</strong> ${t.weaknesses.map(w => `<span class="wb-scout-pill weakness">${escapeHtml(w)}</span>`).join(' ')}</div>` : ''}
-                <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--wb-border);"><strong>Approach:</strong> ${escapeHtml(t.approach)}</div>
+            <h3>Tactical Battle Plan</h3>
+            <div class="wb-scout-phase">
+                <h4>Phase 1: Opening (0\u2013200 hits)</h4>
+                <p>${escapeHtml(bp.opening.description)}</p>
+                <div style="font-size:10px;color:var(--wb-text-muted);margin-bottom:2px;">Chain targets (their weak):</div>
+                <div class="wb-scout-target-list">${renderChips(bp.opening.chainTargets, 'weak')}</div>
+                ${bp.opening.ourChainers.length > 0 ? `<div style="font-size:10px;color:var(--wb-text-muted);margin:4px 0 2px;">Our chainers:</div><div class="wb-scout-target-list">${renderChips(bp.opening.ourChainers, 'weak')}</div>` : ''}
+            </div>
+            <div class="wb-scout-phase">
+                <h4>Phase 2: Mid-War (200\u20131000 hits)</h4>
+                <p>${escapeHtml(bp.midWar.description)}</p>
+                <div style="font-size:10px;color:var(--wb-text-muted);margin-bottom:2px;">Perma-hospital targets:</div>
+                <div class="wb-scout-target-list">${renderChips(bp.midWar.permaTargets, 'mid')}</div>
+            </div>
+            <div class="wb-scout-phase">
+                <h4>Phase 3: Endgame</h4>
+                <p>${escapeHtml(bp.endgame.description)}</p>
+                <div style="font-size:10px;color:var(--wb-text-muted);margin-bottom:2px;">Enemy threats to neutralize:</div>
+                <div class="wb-scout-target-list">${renderChips(bp.endgame.enemyThreats, 'threat')}</div>
+                ${bp.endgame.ourHitters.length > 0 ? `<div style="font-size:10px;color:var(--wb-text-muted);margin:4px 0 2px;">Deploy our top hitters:</div><div class="wb-scout-target-list">${renderChips(bp.endgame.ourHitters, 'threat')}</div>` : ''}
+            </div>
+            ${bp.keyPermaTargets.length > 0 ? `<div style="margin-top:6px;padding:8px;background:rgba(214,48,49,0.08);border-radius:6px;border:1px solid rgba(214,48,49,0.2);">
+                <div style="font-size:11px;font-weight:700;color:#ff7675;margin-bottom:4px;">Priority Perma-Hospital Targets</div>
+                <div class="wb-scout-target-list">${renderChips(bp.keyPermaTargets, 'threat')}</div>
+            </div>` : ''}
+            ${bp.ignore.length > 0 ? `<div style="margin-top:6px;"><div style="font-size:10px;color:var(--wb-text-muted);margin-bottom:2px;">Ignore (inactive/unavailable):</div><div class="wb-scout-target-list">${renderChips(bp.ignore, 'ignore')}</div></div>` : ''}
+        </div>`;
+
+        // ── H. STRENGTHS & WEAKNESSES ──
+        html += `<div class="wb-scout-section">
+            <h3>Strengths & Weaknesses</h3>
+            <div class="wb-scout-compare">
+                <div class="wb-scout-compare-side ours">
+                    <h4>Our Faction</h4>
+                    ${sw.our.strengths.length > 0 ? `<div style="margin-bottom:4px;">${sw.our.strengths.map(s => `<span class="wb-scout-pill strength">${escapeHtml(s)}</span>`).join(' ')}</div>` : ''}
+                    ${sw.our.weaknesses.length > 0 ? `<div>${sw.our.weaknesses.map(w => `<span class="wb-scout-pill weakness">${escapeHtml(w)}</span>`).join(' ')}</div>` : ''}
+                    ${sw.our.strengths.length === 0 && sw.our.weaknesses.length === 0 ? '<div style="font-size:10px;color:var(--wb-text-muted)">No notable traits</div>' : ''}
+                </div>
+                <div class="wb-scout-compare-vs"></div>
+                <div class="wb-scout-compare-side theirs">
+                    <h4>Enemy Faction</h4>
+                    ${sw.enemy.strengths.length > 0 ? `<div style="margin-bottom:4px;">${sw.enemy.strengths.map(s => `<span class="wb-scout-pill strength">${escapeHtml(s)}</span>`).join(' ')}</div>` : ''}
+                    ${sw.enemy.weaknesses.length > 0 ? `<div>${sw.enemy.weaknesses.map(w => `<span class="wb-scout-pill weakness">${escapeHtml(w)}</span>`).join(' ')}</div>` : ''}
+                    ${sw.enemy.strengths.length === 0 && sw.enemy.weaknesses.length === 0 ? '<div style="font-size:10px;color:var(--wb-text-muted)">No notable traits</div>' : ''}
+                </div>
             </div>
         </div>`;
 
