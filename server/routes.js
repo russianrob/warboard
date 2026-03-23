@@ -1562,27 +1562,47 @@ function analyzePostWarReport(warReportData, estimates) {
   const report = warReportData || {};
 
   // Extract war-level data
-  const war = report.war || {};
-  const factions = report.factions || {};
-  const factionIds = Object.keys(factions);
+  // v2 API returns factions as an array of objects with 'id' field, members as arrays
+  const rawFactions = Array.isArray(report.factions) ? report.factions : Object.values(report.factions || {});
+  const warId = report.id || null;
+  const warStart = report.start || 0;
+  const warEnd = report.end || 0;
+  const warWinner = report.winner || 0;
+  const warForfeit = report.forfeit || false;
 
-  // Determine our faction vs enemy — use the first faction as "ours" if we can't tell
-  // The API returns factions keyed by ID; we'll try to identify from the war data
-  let ourFactionId = factionIds[0] || null;
-  let enemyFactionId = factionIds[1] || null;
-  const ourFaction = factions[ourFactionId] || {};
-  const enemyFaction = factions[enemyFactionId] || {};
+  // Identify our faction (42055) vs enemy
+  let ourFaction = rawFactions[0] || {};
+  let enemyFaction = rawFactions[1] || {};
+  // Try to match by known faction ID
+  const ownerFactionId = process.env.OWNER_FACTION_ID || "42055";
+  for (const f of rawFactions) {
+    if (String(f.id) === ownerFactionId) {
+      ourFaction = f;
+      enemyFaction = rawFactions.find(x => x !== f) || rawFactions[1] || {};
+      break;
+    }
+  }
 
   const ourScore = ourFaction.score || 0;
   const enemyScore = enemyFaction.score || 0;
   const ourName = ourFaction.name || "Our Faction";
   const enemyName = enemyFaction.name || "Enemy Faction";
+  const ourRank = ourFaction.rank || {};
+  const enemyRank = enemyFaction.rank || {};
+  const ourRewards = ourFaction.rewards || {};
+  const enemyRewards = enemyFaction.rewards || {};
 
-  // Combine all members from both sides
-  const ourMembers = ourFaction.members || {};
-  const enemyMembers = enemyFaction.members || {};
+  // v2 returns members as an array — convert to object keyed by id
+  const ourMembersRaw = Array.isArray(ourFaction.members) ? ourFaction.members : Object.values(ourFaction.members || {});
+  const enemyMembersRaw = Array.isArray(enemyFaction.members) ? enemyFaction.members : Object.values(enemyFaction.members || {});
+  const ourMembers = {};
+  for (const m of ourMembersRaw) ourMembers[m.id || m.name] = m;
+  const enemyMembers = {};
+  for (const m of enemyMembersRaw) enemyMembers[m.id || m.name] = m;
 
   // Build member performance arrays
+  // v2 API returns 'score' per member which IS the respect/score contribution
+  // There's no separate 'respect' field — score is used for both
   const ourMemberList = Object.entries(ourMembers).map(([id, m]) => ({
     id,
     name: m.name || "Unknown",
@@ -1590,7 +1610,7 @@ function analyzePostWarReport(warReportData, estimates) {
     hits: (m.attacks || 0) + (m.assists || 0),
     attacks: m.attacks || 0,
     assists: m.assists || 0,
-    respect: m.respect || 0,
+    respect: m.score || m.respect || 0,
     score: m.score || 0,
   }));
 
@@ -1601,7 +1621,7 @@ function analyzePostWarReport(warReportData, estimates) {
     hits: (m.attacks || 0) + (m.assists || 0),
     attacks: m.attacks || 0,
     assists: m.assists || 0,
-    respect: m.respect || 0,
+    respect: m.score || m.respect || 0,
     score: m.score || 0,
   }));
 
