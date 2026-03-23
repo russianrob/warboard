@@ -55,7 +55,7 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 
 // ── Landing page is public — gate is applied only to /scripts/*.user.js below ──
 
@@ -212,10 +212,9 @@ store.loadPlayerKeys();
 loadHeatmaps();
 loadSubscriptions();
 
-// Resume war status monitors for any persisted wars
-// Chain data comes from clients via DOM reading — no server-side chain polling needed
+// Resume war status monitors for any persisted wars (skip ended wars)
 for (const [warId, war] of store.getAllWars()) {
-  if (war.enemyFactionId) {
+  if (war.enemyFactionId && !war.warEnded) {
     startWarStatusMonitor(io, warId);
   }
 }
