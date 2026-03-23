@@ -1187,6 +1187,7 @@ function analyzeFaction(data, estimates) {
     const secsAgo = ts > 0 ? Math.max(0, now - ts) : Infinity;
     const isUnavailable = ["hospital", "jail", "traveling", "abroad"].includes(statusState);
     const isActive = !isUnavailable && secsAgo <= 1800;
+    const isAvailable = !isUnavailable; // not in hospital/jail/traveling — may just be idle
     return {
       id: m.id,
       name: m.name,
@@ -1196,6 +1197,7 @@ function analyzeFaction(data, estimates) {
       source: est ? est.source : null,
       statusState,
       isActive,
+      isAvailable,
     };
   });
 
@@ -1269,9 +1271,13 @@ function analyzeWarReport(ourData, enemyData, estimates, warScores) {
     hasEstimates,
   };
 
-  // ── B. Top-End Comparison (top 10 each) ──
-  const ourTop = ourAnalysis.rankedMembers.slice(0, 10);
-  const enemyTop = enemyAnalysis.rankedMembers.slice(0, 10);
+  // ── B. Top-End Comparison (top 10 each, prioritize active/available members) ──
+  const ourAvailable = ourAnalysis.rankedMembers.filter(m => m.isAvailable);
+  const ourUnavailable = ourAnalysis.rankedMembers.filter(m => !m.isAvailable);
+  const ourTop = [...ourAvailable, ...ourUnavailable].slice(0, 10);
+  const enemyAvailable = enemyAnalysis.rankedMembers.filter(m => m.isAvailable);
+  const enemyUnavailable = enemyAnalysis.rankedMembers.filter(m => !m.isAvailable);
+  const enemyTop = [...enemyAvailable, ...enemyUnavailable].slice(0, 10);
   const matchups = [];
   for (let i = 0; i < Math.max(ourTop.length, enemyTop.length, 10); i++) {
     const ours = ourTop[i] || null;
@@ -1388,8 +1394,8 @@ function analyzeWarReport(ourData, enemyData, estimates, warScores) {
     .filter(m => m.isActive && (m.stats != null ? m.stats < 500e6 : m.level < 60))
     .slice(0, 10);
   const ourHitters = ourAnalysis.rankedMembers
-    .filter(m => m.isActive && (m.stats != null ? m.stats >= 500e6 : m.level >= 60))
-    .slice(0, 10);
+    .filter(m => m.isAvailable && (m.stats != null ? m.stats >= 250e6 : m.level >= 50))
+    .slice(0, 15);
 
   // Detect war phase from scores
   const totalScore = warScores ? (warScores.myScore || 0) + (warScores.enemyScore || 0) : 0;
