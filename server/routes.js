@@ -77,6 +77,8 @@ function broadcastWarUpdate(warId) {
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
     warEta: war.warEta || null,
+    warEnded: war.warEnded || false,
+    warResult: war.warResult || null,
     strategy: war.strategy || null,
     enemyActivityByHour: war.enemyActivityByHour || null,
   };
@@ -380,6 +382,8 @@ router.get("/api/stream", (req, res, next) => {
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
     warEta: war.warEta || null,
+    warEnded: war.warEnded || false,
+    warResult: war.warResult || null,
     strategy: war.strategy || null,
     enemyActivityByHour: war.enemyActivityByHour || null,
   };
@@ -491,6 +495,8 @@ router.get("/api/poll", (req, res, next) => {
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
     warEta: war.warEta || null,
+    warEnded: war.warEnded || false,
+    warResult: war.warResult || null,
     strategy: war.strategy || null,
     enemyActivityByHour: war.enemyActivityByHour || null,
   });

@@ -2446,6 +2446,8 @@ body.wb-chain-active {
         warTarget: null,
         warScores: null,  // { myScore, enemyScore } from server-side ranked war polling
         warEta: null,     // { etaTimestamp, hoursRemaining, currentTarget, calculatedAt } from server
+        warEnded: false,
+        warResult: null,  // 'victory' | 'defeat' | 'draw'
 
         // Strategy recommendation from server
         strategy: null,   // { recommendation, confidence, reasons, timing, enemyPeak, enemyDead, currentPhase }
@@ -3205,6 +3207,11 @@ body.wb-chain-active {
         if (data.warEta !== undefined) {
             state.warEta = data.warEta;
         }
+        if (data.warEnded !== undefined) {
+            state.warEnded = data.warEnded;
+            state.warResult = data.warResult;
+            if (data.warEnded) showWarEndedBanner();
+        }
 
         // ── Strategy recommendation ──
         if (data.strategy !== undefined) {
@@ -3299,6 +3306,12 @@ body.wb-chain-active {
         // Also handle the initial state sent on join
         realtimeSocket.on('war_state', (data) => {
             applyServerData(data);
+        });
+
+        realtimeSocket.on('war_ended', (data) => {
+            state.warEnded = true;
+            state.warResult = data.result;
+            showWarEndedBanner();
         });
 
         realtimeSocket.on('disconnect', (reason) => {
@@ -7475,6 +7488,58 @@ body.wb-chain-active {
             setTimeout(() => toast.remove(), 300);
             activeCallToasts.delete(targetId);
         }
+    }
+
+    // =========================================================================
+    // WAR ENDED BANNER
+    // =========================================================================
+
+    let warEndedBannerShown = false;
+    function showWarEndedBanner() {
+        if (warEndedBannerShown) return;
+        warEndedBannerShown = true;
+
+        const result = state.warResult || 'unknown';
+        const isVictory = result === 'victory';
+        const isDefeat = result === 'defeat';
+        const myScore = state.warScores?.myScore || 0;
+        const enemyScore = state.warScores?.enemyScore || 0;
+        const color = isVictory ? '#00b894' : isDefeat ? '#ff7675' : '#fdcb6e';
+        const label = isVictory ? 'VICTORY' : isDefeat ? 'DEFEAT' : 'WAR OVER';
+
+        // Update war timer to show result
+        const timerEl = document.getElementById('fo-war-timer');
+        const timerVal = document.getElementById('fo-war-timer-value');
+        if (timerEl && timerVal) {
+            timerEl.className = 'fo-war-timer ' + (isVictory ? 'safe' : 'danger');
+            timerVal.textContent = label;
+        }
+
+        // Hide strategy bar
+        const stratBar = document.getElementById('fo-strategy-bar');
+        if (stratBar) stratBar.style.display = 'none';
+
+        // Show banner above target list
+        const nextUp = document.getElementById('fo-next-up');
+        if (nextUp && !document.getElementById('fo-war-ended-banner')) {
+            const banner = document.createElement('div');
+            banner.id = 'fo-war-ended-banner';
+            banner.style.cssText = `
+                text-align:center; padding:12px 16px; margin:0;
+                background:${isVictory ? 'rgba(0,184,148,0.12)' : 'rgba(214,48,49,0.12)'};
+                border-bottom:1px solid ${color}40;
+            `;
+            banner.innerHTML = `
+                <div style="font-size:20px;font-weight:800;color:${color};letter-spacing:0.1em;">${label}</div>
+                <div style="font-size:13px;color:#dfe6e9;margin-top:4px;">
+                    ${myScore.toLocaleString()} \u2013 ${enemyScore.toLocaleString()}
+                </div>
+                <div style="font-size:11px;color:var(--wb-text-muted);margin-top:4px;">Tap the clipboard icon to view the post-war report</div>
+            `;
+            nextUp.parentElement.insertBefore(banner, nextUp.nextSibling);
+        }
+
+        log('War ended: ' + label + ' (' + myScore + ' vs ' + enemyScore + ')');
     }
 
     // =========================================================================

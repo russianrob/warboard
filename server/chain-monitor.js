@@ -116,6 +116,27 @@ export function startChainMonitor(io, warId) {
         lastScoreCheck.set(warId, Date.now());
         try {
           const rw = await fetchRankedWar(war.factionId, apiKey);
+          if (!rw && war.warScores && !war.warEnded) {
+            // War was active (had scores) but now returns null — war ended
+            war.warEnded = true;
+            war.warEndedAt = Date.now();
+            // Determine winner from last known scores
+            const myScore = war.warScores.myScore || 0;
+            const enemyScore = war.warScores.enemyScore || 0;
+            war.warResult = myScore > enemyScore ? 'victory' : myScore < enemyScore ? 'defeat' : 'draw';
+            store.saveState();
+            console.log(`[chain] War ended: ${war.factionId} vs ${war.enemyFactionId} — ${war.warResult.toUpperCase()} (${myScore} vs ${enemyScore})`);
+            // Broadcast war-ended event to all clients
+            if (io) {
+              io.to(`war_${warId}`).emit('war_ended', {
+                warId,
+                result: war.warResult,
+                myScore,
+                enemyScore,
+                endedAt: war.warEndedAt,
+              });
+            }
+          }
           if (rw) {
             // Store scores on war object so clients can display them
             war.warScores = { myScore: rw.myScore, enemyScore: rw.enemyScore };
