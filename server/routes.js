@@ -76,6 +76,8 @@ function broadcastWarUpdate(warId) {
     factionKeyStored: !!store.getFactionApiKey(war.factionId),
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
+    strategy: war.strategy || null,
+    enemyActivityByHour: war.enemyActivityByHour || null,
   };
   // Push to Socket.IO clients
   if (io) io.to(`war_${warId}`).emit("war_update", payload);
@@ -376,6 +378,8 @@ router.get("/api/stream", (req, res, next) => {
     factionKeyStored: !!store.getFactionApiKey(factionId),
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
+    strategy: war.strategy || null,
+    enemyActivityByHour: war.enemyActivityByHour || null,
   };
   res.write(`data: ${JSON.stringify(initial)}\n\n`);
 
@@ -484,6 +488,26 @@ router.get("/api/poll", (req, res, next) => {
     factionKeyStored: !!store.getFactionApiKey(factionId),
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
+    strategy: war.strategy || null,
+    enemyActivityByHour: war.enemyActivityByHour || null,
+  });
+});
+
+// ── GET /api/war/:warId/strategy ─────────────────────────────────────
+// Returns the current strategy recommendation for a war.
+
+router.get("/api/war/:warId/strategy", requireAuth, (req, res) => {
+  const { warId } = req.params;
+  const war = requireWarMember(req, res, warId);
+  if (!war) {
+    return war === null && !res.headersSent
+      ? res.status(404).json({ error: "War not found" })
+      : undefined;
+  }
+
+  return res.json({
+    strategy: war.strategy || null,
+    enemyActivityByHour: war.enemyActivityByHour || null,
   });
 });
 

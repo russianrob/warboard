@@ -9,6 +9,7 @@ import * as store from "./store.js";
 import { fetchFactionMembers } from "./torn-api.js";
 import { recordSample } from "./activity-heatmap.js";
 import { notifyEnemySurge } from "./push-notifications.js";
+import { evaluateStrategy, getEnemyActivityByHour } from "./strategy-engine.js";
 
 const POLL_INTERVAL_MS = 15_000; // 15 seconds
 const MAX_BACKOFF_MS = 120_000;   // max 2 minutes between retries on failure
@@ -21,6 +22,7 @@ const backoffs = new Map();
 const prevEnemyOnline = new Map();
 
 const SURGE_THRESHOLD = 3; // fire alert when ≥ 3 new enemies come online between polls
+const MAX_ACTIVITY_LOG = 5760; // 24 hours at 15s intervals
 
 // Legacy compat
 const intervals = new Map();
@@ -56,12 +58,14 @@ export function startWarStatusMonitor(io, warId) {
       // Success — reset backoff
       backoffs.set(warId, POLL_INTERVAL_MS);
 
+      // ── Enemy counts (used by surge detection, activity log, and strategy) ──
+      const onlineNow = Object.values(freshStatuses).filter(
+        (m) => m.status?.state === "Okay" && m.activity === "online",
+      ).length;
+      const totalEnemies = Object.keys(freshStatuses).length;
+
       // ── Enemy Online Surge Detection ──
       try {
-        const onlineNow = Object.values(freshStatuses).filter(
-          (m) => m.status?.state === "Okay" && m.activity === "online",
-        ).length;
-        const totalEnemies = Object.keys(freshStatuses).length;
         const prevCount = prevEnemyOnline.get(warId) ?? onlineNow; // first poll = no alert
         const delta = onlineNow - prevCount;
         prevEnemyOnline.set(warId, onlineNow);
@@ -74,6 +78,23 @@ export function startWarStatusMonitor(io, warId) {
       } catch (_) { /* non-critical */ }
 
       io.to(`war_${warId}`).emit("status_update", freshStatuses);
+
+      // ── Enemy Activity Logging ──
+      try {
+        if (!war.enemyActivityLog) war.enemyActivityLog = [];
+        war.enemyActivityLog.push({
+          timestamp: Date.now(),
+          online: onlineNow,
+          idle: Object.values(freshStatuses).filter(
+            (m) => m.activity === "idle",
+          ).length,
+          total: totalEnemies,
+        });
+        // Cap at ~24 hours of data
+        while (war.enemyActivityLog.length > MAX_ACTIVITY_LOG) {
+          war.enemyActivityLog.shift();
+        }
+      } catch (_) { /* non-critical */ }
 
       // Record our faction's online count for the activity heatmap + header display
       try {
@@ -88,10 +109,19 @@ export function startWarStatusMonitor(io, warId) {
         recordSample(war.factionId, ourOnline + ourIdle);
         // Store on war for poll response
         war.ourFactionOnline = { online: ourOnline, idle: ourIdle, total: ourTotal };
+
+        // ── Strategy Engine ──
+        try {
+          const activityByHour = getEnemyActivityByHour(war.enemyActivityLog || []);
+          const strategy = evaluateStrategy(war, ourOnline, onlineNow, activityByHour);
+          war.strategy = strategy;
+          war.enemyActivityByHour = activityByHour;
+        } catch (_) { /* non-critical */ }
       } catch (_) {
         // Non-critical — skip silently
       }
 
+      store.saveState();
       scheduleNext(POLL_INTERVAL_MS);
     } catch (err) {
       // Exponential backoff on failure
