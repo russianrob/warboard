@@ -179,7 +179,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
         CHAIN_ALERT: GM_getValue('factionops_chain_alert', true),
         CHAIN_ALERT_THRESHOLD: GM_getValue('factionops_chain_alert_threshold', 60),
         PDA_NOTIFICATIONS: GM_getValue('factionops_pda_notif', IS_PDA),
-        KEEP_ALIVE: GM_getValue('factionops_keep_alive', true),
+        KEEP_ALIVE: GM_getValue('factionops_keep_alive', false),
         CALL_TIMEOUT: 5 * 60 * 1000,       // 5 minute call expiry
         DEAL_TIMEOUT: 15 * 60 * 1000,      // 15 minute deal call expiry
         REFRESH_INTERVAL: 30 * 1000,        // 30 second status refresh
