@@ -469,7 +469,10 @@ router.get("/api/poll", (req, res, next) => {
 
   // Server-side chain polling as fallback when no client is reporting chain data.
   // Only actually polls when no client has reported in the last 15 seconds.
-  startChainMonitor(null, warId);
+  // Skip if war already ended.
+  if (!war.warEnded) {
+    startChainMonitor(null, warId);
+  }
 
   // Track player as online (use playerId as pseudo-socketId for polling clients)
   store.setPlayer(playerId, {

@@ -5527,6 +5527,11 @@ body.wb-chain-active {
 
         renderOverlay();
 
+        // Check if war already ended (persisted state from server)
+        if (state.warEnded) {
+            setTimeout(showWarEndedBanner, 500);
+        }
+
         // Set RT badge initial state
         updateRtBadge(realtimeSocket && realtimeSocket.connected);
 
