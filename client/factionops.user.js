@@ -5604,6 +5604,7 @@ body.wb-chain-active {
             }
 
             function updateWarTimer() {
+                if (state.warEnded) return; // don't overwrite war-ended display
                 // ── Read timer + score from DOM ──
                 const timerSpans = document.querySelectorAll('.timer___fSGg8 span');
                 const targetBox = document.querySelector('.target___NBVXq');
@@ -5797,6 +5798,8 @@ body.wb-chain-active {
             }
             // Use server-side ETA for consistent countdown across all clients
             function updateWarTimerDisplay() {
+                // If war ended, don't overwrite the result
+                if (state.warEnded) return;
                 // Prefer server ETA, fall back to client-calculated
                 const eta = state.warEta;
                 const etaMs = eta?.etaTimestamp || warTimerEtaMs;
@@ -7538,6 +7541,16 @@ body.wb-chain-active {
             `;
             nextUp.parentElement.insertBefore(banner, nextUp.nextSibling);
         }
+
+        // Gray out target list
+        const targetList = document.getElementById('fo-target-list');
+        if (targetList) {
+            targetList.style.opacity = '0.4';
+            targetList.style.pointerEvents = 'none';
+        }
+        // Hide NEXT UP bar
+        const nextUpBar = document.getElementById('fo-next-up');
+        if (nextUpBar) nextUpBar.style.display = 'none';
 
         log('War ended: ' + label + ' (' + myScore + ' vs ' + enemyScore + ')');
     }
