@@ -2275,6 +2275,11 @@ body.wb-chain-active {
 .wb-postwar-member-table td {
     padding: 3px 6px;
     border-bottom: 1px solid rgba(45,52,54,0.3);
+    color: #dfe6e9;
+}
+.wb-postwar-member-table td:first-child {
+    color: #fff;
+    font-weight: 600;
 }
 .wb-postwar-member-table tr:last-child td { border-bottom: none; }
 .wb-postwar-member-table .eff-green { color: #00b894; }
