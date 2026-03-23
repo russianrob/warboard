@@ -5228,8 +5228,13 @@ body.wb-chain-active {
         if (row) applyRowHighlights(row, targetId);
     }
 
+    let warEndedBannerShown = false;
+
     /** Re-render all enhanced rows (after bulk state update). */
     function refreshAllRows() {
+        // Check war-ended state on every refresh cycle
+        if (state.warEnded && !warEndedBannerShown) showWarEndedBanner();
+
         const overlayActive = !!document.getElementById('fo-overlay');
         // If the overlay is active, re-render it (renderOverlay already sorts)
         if (overlayActive) {
@@ -7502,7 +7507,6 @@ body.wb-chain-active {
     // WAR ENDED BANNER
     // =========================================================================
 
-    let warEndedBannerShown = false;
     function showWarEndedBanner() {
         if (warEndedBannerShown) return;
         warEndedBannerShown = true;
