@@ -5785,17 +5785,26 @@ body.wb-chain-active {
             function updateWarTimerDisplay() {
                 if (!warTimerEtaMs) return;
                 const msLeft = Math.max(0, warTimerEtaMs - Date.now());
-                const totalMin = Math.floor(msLeft / 60000);
-                const h = Math.floor(totalMin / 60).toString().padStart(2, '0');
-                const m = (totalMin % 60).toString().padStart(2, '0');
-                warTimerValue.textContent = h + ':' + m;
+                const totalSec = Math.floor(msLeft / 1000);
+                const hrs = Math.floor(totalSec / 3600);
+                const mins = Math.floor((totalSec % 3600) / 60);
+                const secs = totalSec % 60;
+                if (hrs > 0) {
+                    warTimerValue.textContent = hrs.toString().padStart(2, '0') + ':' + mins.toString().padStart(2, '0');
+                } else {
+                    warTimerValue.textContent = mins + 'm ' + secs.toString().padStart(2, '0') + 's';
+                }
+                // Update urgency class in real time
+                const hrsLeft = totalSec / 3600;
+                const urg = hrsLeft <= 0 ? 'safe' : hrsLeft <= 2 ? 'danger' : hrsLeft <= 6 ? 'warning' : 'safe';
+                warTimerEl.className = 'fo-war-timer ' + urg;
             }
 
             // Recalculate the ETA from score/target every 30s
             updateWarTimer();
             setInterval(updateWarTimer, 30000);
-            // Tick down the display every 15s between recalculations
-            setInterval(updateWarTimerDisplay, 15000);
+            // Tick down the display every second for a live countdown
+            setInterval(updateWarTimerDisplay, 1000);
         }
 
         log('War overlay initialised');
