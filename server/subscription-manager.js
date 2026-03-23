@@ -103,16 +103,14 @@ async function pollPayments() {
       const amount = entry.data?.money || entry.data?.amount || 0;
       const senderId = entry.data?.sender || entry.data?.user || null;
 
-      if (!senderId || amount < TRIAL_PRICE) {
-        // Mark as processed even if under threshold to avoid re-checking
+      if (!senderId || amount < SUBSCRIPTION_PRICE) {
+        // Mark as processed — under full subscription price
         state.processedTransactions.push(txId);
         continue;
       }
 
-      // Determine tier: full sub or trial
-      const isFull = amount >= SUBSCRIPTION_PRICE;
-      const tier = isFull ? "full" : "trial";
-      const grantDays = isFull ? SUBSCRIPTION_DAYS : TRIAL_DAYS;
+      const tier = "full";
+      const grantDays = SUBSCRIPTION_DAYS;
 
       // Look up the sender's faction
       try {
@@ -255,8 +253,7 @@ export function getOwnerFactionId() {
  */
 export function getSubscriptionRejectionMessage() {
   const priceFormatted = SUBSCRIPTION_PRICE.toLocaleString();
-  const trialFormatted = TRIAL_PRICE.toLocaleString();
-  return `Faction not subscribed. Send $${trialFormatted} to RussianRob [137558] for a ${TRIAL_DAYS}-day trial, or $${priceFormatted} for ${SUBSCRIPTION_DAYS}-day access.`;
+  return `Faction not subscribed. Send $${priceFormatted} to RussianRob [137558] to activate ${SUBSCRIPTION_DAYS}-day access.`;
 }
 
 /**
