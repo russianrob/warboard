@@ -1120,9 +1120,10 @@ body.wb-chain-active {
 .fo-header-right {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     flex-shrink: 1;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow: hidden;
 }
 
 .fo-online-badge {
@@ -1218,9 +1219,10 @@ body.wb-chain-active {
 
 /* Ranked war timer (estimated time to target drop win) */
 .fo-war-timer {
-    display: flex; align-items: center; gap: 5px;
+    display: flex; align-items: center; gap: 3px;
     font-size: 11px; font-weight: 600;
-    padding: 3px 10px; border-radius: 20px;
+    padding: 3px 8px; border-radius: 20px;
+    flex-shrink: 0;
     background: rgba(108,92,231,0.15);
     border: 1px solid rgba(108,92,231,0.3);
     white-space: nowrap;
