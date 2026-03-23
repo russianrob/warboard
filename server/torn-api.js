@@ -151,6 +151,27 @@ export async function fetchRankedWar(factionId, apiKey) {
 }
 
 /**
+ * Fetch the ranked war report for a faction's most recent ranked war.
+ * Returns the raw rankedwarreport data from the Torn API.
+ */
+export async function fetchRankedWarReport(factionId, apiKey) {
+  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=rankedwarreport&key=${encodeURIComponent(apiKey)}`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Torn API returned HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+
+  if (data.error) {
+    throw new Error(`Torn API error: ${data.error.error} (code ${data.error.code})`);
+  }
+
+  return data.rankedwarreport || data;
+}
+
+/**
  * Fetch a player's energy, nerve bars and cooldowns.
  * Returns { energy: { current, maximum, fulltime }, nerve: { current, maximum, fulltime }, cooldowns: { drug, medical, booster } }.
  */

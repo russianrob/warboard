@@ -5,7 +5,7 @@
 import { Router } from "express";
 import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.js";
 import * as store from "./store.js";
-import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBasic } from "./torn-api.js";
+import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBasic, fetchRankedWarReport } from "./torn-api.js";
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
@@ -1548,5 +1548,440 @@ async function handleWarReport(req, res) {
 
 router.get("/api/war/:warId/scout-report", requireAuth, handleWarReport);
 router.post("/api/war/:warId/scout-report", requireAuth, handleWarReport);
+
+// ── GET/POST /api/war/:warId/post-war-report ─────────────────────────
+// Generate a post-war performance analysis report.
+
+/** Track post-war report cooldowns per war. */
+const postWarReportCooldowns = new Map();
+const POST_WAR_REPORT_COOLDOWN_MS = 60000;
+
+/** Analyze ranked war report data into a structured post-war performance breakdown. */
+function analyzePostWarReport(warReportData, estimates) {
+  estimates = estimates || {};
+  const report = warReportData || {};
+
+  // Extract war-level data
+  const war = report.war || {};
+  const factions = report.factions || {};
+  const factionIds = Object.keys(factions);
+
+  // Determine our faction vs enemy — use the first faction as "ours" if we can't tell
+  // The API returns factions keyed by ID; we'll try to identify from the war data
+  let ourFactionId = factionIds[0] || null;
+  let enemyFactionId = factionIds[1] || null;
+  const ourFaction = factions[ourFactionId] || {};
+  const enemyFaction = factions[enemyFactionId] || {};
+
+  const ourScore = ourFaction.score || 0;
+  const enemyScore = enemyFaction.score || 0;
+  const ourName = ourFaction.name || "Our Faction";
+  const enemyName = enemyFaction.name || "Enemy Faction";
+
+  // Combine all members from both sides
+  const ourMembers = ourFaction.members || {};
+  const enemyMembers = enemyFaction.members || {};
+
+  // Build member performance arrays
+  const ourMemberList = Object.entries(ourMembers).map(([id, m]) => ({
+    id,
+    name: m.name || "Unknown",
+    level: m.level || 0,
+    hits: (m.attacks || 0) + (m.assists || 0),
+    attacks: m.attacks || 0,
+    assists: m.assists || 0,
+    respect: m.respect || 0,
+    score: m.score || 0,
+  }));
+
+  const enemyMemberList = Object.entries(enemyMembers).map(([id, m]) => ({
+    id,
+    name: m.name || "Unknown",
+    level: m.level || 0,
+    hits: (m.attacks || 0) + (m.assists || 0),
+    attacks: m.attacks || 0,
+    assists: m.assists || 0,
+    respect: m.respect || 0,
+    score: m.score || 0,
+  }));
+
+  // ── A. WAR SUMMARY ──
+  const totalOurHits = ourMemberList.reduce((s, m) => s + m.attacks, 0);
+  const totalEnemyHits = enemyMemberList.reduce((s, m) => s + m.attacks, 0);
+  const totalRespect = ourMemberList.reduce((s, m) => s + m.respect, 0);
+  const winner = war.winner ? String(war.winner) : null;
+  const weWon = winner === ourFactionId;
+  const warResult = winner ? (weWon ? "VICTORY" : "DEFEAT") : "UNKNOWN";
+
+  const startTs = war.start || 0;
+  const endTs = war.end || 0;
+  const durationSec = startTs && endTs ? endTs - startTs : 0;
+
+  const warSummary = {
+    ourName,
+    enemyName,
+    ourScore,
+    enemyScore,
+    result: warResult,
+    totalOurHits,
+    totalEnemyHits,
+    totalRespect,
+    duration: durationSec,
+    durationFormatted: durationSec > 0 ? formatWarDuration(durationSec) : null,
+  };
+
+  // ── B. OVERALL FACTION PERFORMANCE ──
+  const totalRoster = ourMemberList.length;
+  const participatingMembers = ourMemberList.filter(m => m.attacks > 0);
+  const participationCount = participatingMembers.length;
+  const participationRate = totalRoster > 0 ? Math.round((participationCount / totalRoster) * 100) : 0;
+  const avgHitsPerMember = participationCount > 0 ? Math.round((totalOurHits / participationCount) * 10) / 10 : 0;
+  const avgRespectPerHit = totalOurHits > 0 ? Math.round((totalRespect / totalOurHits) * 100) / 100 : 0;
+
+  // Fair fight average from estimates if available
+  let avgFairFight = null;
+  const ffValues = [];
+  for (const m of ourMemberList) {
+    const est = estimates[m.id];
+    if (est && est.ff != null) ffValues.push(est.ff);
+  }
+  if (ffValues.length > 0) avgFairFight = Math.round((ffValues.reduce((a, b) => a + b, 0) / ffValues.length) * 100) / 100;
+
+  // Efficiency rating: 0-100 based on participation, respect/hit, score
+  let efficiencyRating = 0;
+  if (participationRate >= 80) efficiencyRating += 30;
+  else if (participationRate >= 60) efficiencyRating += 20;
+  else if (participationRate >= 40) efficiencyRating += 10;
+  if (avgRespectPerHit >= 5) efficiencyRating += 30;
+  else if (avgRespectPerHit >= 3) efficiencyRating += 20;
+  else if (avgRespectPerHit >= 1) efficiencyRating += 10;
+  if (weWon) efficiencyRating += 40;
+  else if (ourScore > enemyScore * 0.8) efficiencyRating += 20;
+  efficiencyRating = Math.min(100, efficiencyRating);
+
+  const factionPerformance = {
+    totalRoster,
+    participationCount,
+    participationRate,
+    avgHitsPerMember,
+    avgRespectPerHit,
+    avgFairFight,
+    efficiencyRating,
+  };
+
+  // ── C. ENERGY EFFICIENCY ANALYSIS ──
+  const energyAnalysis = [];
+  const factionAvgRph = avgRespectPerHit;
+
+  for (const m of ourMemberList) {
+    if (m.attacks === 0) continue;
+    const rph = m.attacks > 0 ? Math.round((m.respect / m.attacks) * 100) / 100 : 0;
+    const estEnergy = m.attacks * 25;
+    const rphRatio = factionAvgRph > 0 ? rph / factionAvgRph : 1;
+    const isBelowThreshold = rphRatio < 0.5;
+    const wastedEnergy = isBelowThreshold ? Math.round((factionAvgRph - rph) * m.attacks * 25) : 0;
+
+    energyAnalysis.push({
+      id: m.id,
+      name: m.name,
+      level: m.level,
+      attacks: m.attacks,
+      respect: m.respect,
+      respectPerHit: rph,
+      estimatedEnergy: estEnergy,
+      efficiencyPct: Math.round(rphRatio * 100),
+      wastedEnergy,
+      isBelowThreshold,
+    });
+  }
+
+  energyAnalysis.sort((a, b) => b.respectPerHit - a.respectPerHit);
+
+  const totalEstEnergy = energyAnalysis.reduce((s, m) => s + m.estimatedEnergy, 0);
+  const totalWastedEnergy = energyAnalysis.reduce((s, m) => s + m.wastedEnergy, 0);
+  const energyEfficiencyPct = totalEstEnergy > 0 ? Math.round(((totalEstEnergy - totalWastedEnergy) / totalEstEnergy) * 100) : 100;
+
+  const energyEfficiency = {
+    members: energyAnalysis,
+    totalEstimatedEnergy: totalEstEnergy,
+    totalWastedEnergy: totalWastedEnergy,
+    efficiencyPct: energyEfficiencyPct,
+    factionAvgRespectPerHit: factionAvgRph,
+  };
+
+  // ── D. INDIVIDUAL HIGHLIGHTS: POSITIVE ──
+  // Composite score: normalize hits, respect/hit, and net score
+  const maxHits = Math.max(...participatingMembers.map(m => m.attacks), 1);
+  const maxRph = Math.max(...participatingMembers.map(m => m.attacks > 0 ? m.respect / m.attacks : 0), 1);
+  const maxNetScore = Math.max(...participatingMembers.map(m => m.score), 1);
+
+  const scoredMembers = participatingMembers.map(m => {
+    const rph = m.attacks > 0 ? m.respect / m.attacks : 0;
+    const composite = (m.attacks / maxHits) * 0.3 + (rph / maxRph) * 0.3 + (m.score / maxNetScore) * 0.4;
+    return { ...m, respectPerHit: Math.round(rph * 100) / 100, composite };
+  });
+  scoredMembers.sort((a, b) => b.composite - a.composite);
+
+  // Top 5-8 performers
+  const topCount = Math.min(8, Math.max(5, Math.ceil(participationCount * 0.2)));
+  const topPerformers = scoredMembers.slice(0, topCount);
+
+  // Special achievements
+  const achievements = [];
+  const mostHits = [...participatingMembers].sort((a, b) => b.attacks - a.attacks)[0];
+  if (mostHits) achievements.push({ title: "Most Hits", name: mostHits.name, value: mostHits.attacks + " attacks" });
+
+  const highestRph = [...participatingMembers].filter(m => m.attacks >= 3).sort((a, b) => {
+    return (b.respect / b.attacks) - (a.respect / a.attacks);
+  })[0];
+  if (highestRph) achievements.push({ title: "Highest Respect/Hit", name: highestRph.name, value: (highestRph.respect / highestRph.attacks).toFixed(2) + " resp/hit" });
+
+  const mostEfficient = energyAnalysis.filter(m => m.attacks >= 3).sort((a, b) => b.efficiencyPct - a.efficiencyPct)[0];
+  if (mostEfficient) achievements.push({ title: "Most Efficient", name: mostEfficient.name, value: mostEfficient.efficiencyPct + "% of avg" });
+
+  const bestNetScore = [...participatingMembers].sort((a, b) => b.score - a.score)[0];
+  if (bestNetScore) achievements.push({ title: "Best Net Score", name: bestNetScore.name, value: formatStatNum(bestNetScore.score) });
+
+  const positiveHighlights = {
+    topPerformers: topPerformers.map(m => ({
+      id: m.id,
+      name: m.name,
+      level: m.level,
+      attacks: m.attacks,
+      assists: m.assists,
+      respect: m.respect,
+      respectPerHit: m.respectPerHit,
+      score: m.score,
+    })),
+    achievements,
+  };
+
+  // ── E. INDIVIDUAL HIGHLIGHTS: AREAS TO IMPROVE ──
+  const bottomPerformers = [];
+
+  // Members with low respect/hit (participated but bad target selection)
+  const lowRphMembers = scoredMembers
+    .filter(m => m.attacks >= 3 && m.respectPerHit < factionAvgRph * 0.5)
+    .sort((a, b) => a.respectPerHit - b.respectPerHit)
+    .slice(0, 5);
+
+  for (const m of lowRphMembers) {
+    bottomPerformers.push({
+      id: m.id,
+      name: m.name,
+      level: m.level,
+      attacks: m.attacks,
+      respect: m.respect,
+      respectPerHit: m.respectPerHit,
+      score: m.score,
+      issue: "Low respect/hit — poor target selection",
+    });
+  }
+
+  // Members with high hits but low total respect (wasted energy)
+  const wastedEnergyMembers = scoredMembers
+    .filter(m => m.attacks >= 5 && m.respect < totalRespect * 0.01 && !lowRphMembers.find(l => l.id === m.id))
+    .sort((a, b) => b.attacks - a.attacks)
+    .slice(0, 3);
+
+  for (const m of wastedEnergyMembers) {
+    bottomPerformers.push({
+      id: m.id,
+      name: m.name,
+      level: m.level,
+      attacks: m.attacks,
+      respect: m.respect,
+      respectPerHit: m.respectPerHit,
+      score: m.score,
+      issue: "High activity but low respect — energy could be better spent",
+    });
+  }
+
+  // Members who didn't participate at all
+  const nonParticipants = ourMemberList
+    .filter(m => m.attacks === 0)
+    .sort((a, b) => b.level - a.level)
+    .slice(0, 5);
+
+  for (const m of nonParticipants) {
+    bottomPerformers.push({
+      id: m.id,
+      name: m.name,
+      level: m.level,
+      attacks: 0,
+      respect: 0,
+      respectPerHit: 0,
+      score: m.score,
+      issue: "Did not participate",
+    });
+  }
+
+  const negativeHighlights = {
+    areasToImprove: bottomPerformers.slice(0, 8),
+  };
+
+  // ── F. AREAS FOR IMPROVEMENT ──
+  const recommendations = [];
+
+  // Low respect/hit across faction
+  const lowRphCount = energyAnalysis.filter(m => m.efficiencyPct < 50).length;
+  if (lowRphCount > participationCount * 0.3) {
+    recommendations.push({
+      category: "Target Selection",
+      text: "Many members have low respect per hit. Focus on vulnerable targets with higher fair fight values for better respect gains.",
+      priority: "high",
+    });
+  }
+
+  // Low participation
+  if (participationRate < 60) {
+    recommendations.push({
+      category: "Participation",
+      text: `Only ${participationRate}% of the roster participated. Encourage more faction members to contribute — even a few hits help.`,
+      priority: "high",
+    });
+  } else if (participationRate < 80) {
+    recommendations.push({
+      category: "Participation",
+      text: `${participationRate}% participation — good but room for improvement. Coordinate with inactive members for future wars.`,
+      priority: "medium",
+    });
+  }
+
+  // Top-heavy carry
+  if (topPerformers.length > 0) {
+    const topRespect = topPerformers.slice(0, 3).reduce((s, m) => s + m.respect, 0);
+    if (totalRespect > 0 && topRespect / totalRespect > 0.5) {
+      recommendations.push({
+        category: "Balance",
+        text: "Top 3 performers carried over 50% of total respect. Distribute attack load more evenly to reduce burnout and vulnerability.",
+        priority: "medium",
+      });
+    }
+  }
+
+  // Low average fair fight
+  if (avgFairFight != null && avgFairFight < 2.0) {
+    recommendations.push({
+      category: "Fair Fight",
+      text: `Average fair fight value is ${avgFairFight.toFixed(2)}. Target selection can be improved for better respect gains — aim for opponents closer to your stat range.`,
+      priority: "medium",
+    });
+  }
+
+  // Low energy efficiency
+  if (energyEfficiencyPct < 70) {
+    recommendations.push({
+      category: "Energy Management",
+      text: `Energy efficiency is at ${energyEfficiencyPct}%. Significant energy was wasted on low-value targets. Coordinate target assignments to maximize respect per energy spent.`,
+      priority: "high",
+    });
+  }
+
+  // We lost
+  if (warResult === "DEFEAT") {
+    if (totalOurHits < totalEnemyHits * 0.7) {
+      recommendations.push({
+        category: "Activity",
+        text: "Enemy significantly out-hit us. Increase hit volume through better scheduling, energy refills, and coordination.",
+        priority: "high",
+      });
+    }
+    recommendations.push({
+      category: "Strategy",
+      text: "Review enemy composition and adjust scouting approach for the next ranked war. Consider pre-war stat checks to better plan target assignments.",
+      priority: "medium",
+    });
+  }
+
+  // ── G. MEMBER PERFORMANCE TABLE ──
+  const memberTable = ourMemberList.map(m => {
+    const rph = m.attacks > 0 ? Math.round((m.respect / m.attacks) * 100) / 100 : 0;
+    const estEnergy = m.attacks * 25;
+    const effPct = factionAvgRph > 0 ? Math.round((rph / factionAvgRph) * 100) : 100;
+    return {
+      id: m.id,
+      name: m.name,
+      level: m.level,
+      attacks: m.attacks,
+      assists: m.assists,
+      respect: m.respect,
+      respectPerHit: rph,
+      estimatedEnergy: estEnergy,
+      efficiencyPct: effPct,
+      score: m.score,
+    };
+  });
+  memberTable.sort((a, b) => b.score - a.score);
+
+  return {
+    warSummary,
+    factionPerformance,
+    energyEfficiency,
+    positiveHighlights,
+    negativeHighlights,
+    recommendations,
+    memberTable,
+    generatedAt: Date.now(),
+  };
+}
+
+/** Format war duration in human-readable form. */
+function formatWarDuration(seconds) {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h ${mins}m`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+}
+
+/** Shared handler for post-war report generation (GET and POST). */
+async function handlePostWarReport(req, res) {
+  const { factionId } = req.user;
+  const { warId } = req.params;
+
+  const war = requireWarMember(req, res, warId);
+  if (!war) {
+    return war === null && !res.headersSent
+      ? res.status(404).json({ error: "War not found" })
+      : undefined;
+  }
+
+  // Cooldown check
+  const lastReport = postWarReportCooldowns.get(warId) || 0;
+  const elapsed = Date.now() - lastReport;
+  if (elapsed < POST_WAR_REPORT_COOLDOWN_MS) {
+    const waitSec = Math.ceil((POST_WAR_REPORT_COOLDOWN_MS - elapsed) / 1000);
+    return res.status(429).json({ error: `Please wait ${waitSec}s before requesting another post-war report` });
+  }
+
+  const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
+  if (!apiKey) {
+    return res.status(503).json({ error: "No API key available — set a faction API key in settings" });
+  }
+
+  // Accept estimates from POST body
+  const estimates = (req.body && req.body.estimates) || {};
+
+  try {
+    postWarReportCooldowns.set(warId, Date.now());
+    const warReportData = await fetchRankedWarReport(factionId, apiKey);
+
+    if (!warReportData || (!warReportData.factions && !warReportData.war)) {
+      return res.status(404).json({ error: "No ranked war report available — a ranked war may not have been completed recently" });
+    }
+
+    const report = analyzePostWarReport(warReportData, estimates);
+    console.log(`[post-war] Generated post-war report for war ${warId} (faction: ${factionId})`);
+    return res.json({ report });
+  } catch (err) {
+    console.error("[post-war] Post-war report failed:", err.message);
+    return res.status(502).json({ error: `Failed to generate post-war report: ${err.message}` });
+  }
+}
+
+router.get("/api/war/:warId/post-war-report", requireAuth, handlePostWarReport);
+router.post("/api/war/:warId/post-war-report", requireAuth, handlePostWarReport);
 
 export default router;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      3.22.0
+// @version      3.23.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -171,7 +171,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '3.22.0',
+        VERSION: '3.23.0',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2082,6 +2082,226 @@ body.wb-chain-active {
     padding: 0 6px;
     min-width: 30px;
     text-align: center;
+}
+
+/* ── Post-War Report Styles ── */
+.wb-postwar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 1000001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: Arial, sans-serif;
+}
+.wb-postwar-modal {
+    background: var(--wb-bg);
+    border: 1px solid var(--wb-border);
+    border-radius: 8px;
+    width: 800px;
+    max-width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
+    color: var(--wb-text);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+.wb-postwar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--wb-border);
+}
+.wb-postwar-header h2 {
+    margin: 0;
+    font-size: 16px;
+    color: #fdcb6e;
+}
+.wb-postwar-close {
+    background: none;
+    border: none;
+    color: var(--wb-text);
+    font-size: 22px;
+    cursor: pointer;
+    opacity: 0.6;
+    padding: 0 4px;
+}
+.wb-postwar-close:hover { opacity: 1; }
+.wb-postwar-body {
+    padding: 16px 20px;
+}
+.wb-postwar-section {
+    margin-bottom: 16px;
+}
+.wb-postwar-section h3 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    color: #fdcb6e;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--wb-border);
+    padding-bottom: 4px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.wb-postwar-section h3::after {
+    content: ' \u25BC';
+    font-size: 9px;
+    opacity: 0.5;
+}
+.wb-postwar-section h3.collapsed::after {
+    content: ' \u25B6';
+}
+.wb-postwar-section-body {
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+.wb-postwar-section-body.collapsed {
+    max-height: 0 !important;
+    overflow: hidden;
+}
+.wb-postwar-result-badge {
+    display: inline-block;
+    padding: 6px 16px;
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: 700;
+    margin: 4px 0;
+}
+.wb-postwar-result-badge.victory { background: rgba(0,184,148,0.25); color: #00b894; }
+.wb-postwar-result-badge.defeat { background: rgba(214,48,49,0.25); color: #ff7675; }
+.wb-postwar-result-badge.unknown { background: rgba(99,110,114,0.25); color: #636e72; }
+.wb-postwar-score {
+    font-size: 24px;
+    font-weight: 700;
+    text-align: center;
+    margin: 8px 0;
+}
+.wb-postwar-score .our-score { color: #00b894; }
+.wb-postwar-score .enemy-score { color: #ff7675; }
+.wb-postwar-score .score-sep { color: var(--wb-text-muted); margin: 0 8px; }
+.wb-postwar-stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 16px;
+    font-size: 12px;
+}
+.wb-postwar-stat-grid .lbl { color: var(--wb-text-muted); }
+.wb-postwar-stat-grid .val { font-weight: 600; text-align: right; }
+.wb-postwar-card {
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 6px;
+    font-size: 12px;
+}
+.wb-postwar-card.positive {
+    background: rgba(0,184,148,0.08);
+    border: 1px solid rgba(0,184,148,0.2);
+}
+.wb-postwar-card.negative {
+    background: rgba(253,203,110,0.08);
+    border: 1px solid rgba(253,203,110,0.2);
+}
+.wb-postwar-card .card-name {
+    font-weight: 700;
+    font-size: 13px;
+}
+.wb-postwar-card.positive .card-name { color: #00b894; }
+.wb-postwar-card.negative .card-name { color: #fdcb6e; }
+.wb-postwar-card .card-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--wb-text-muted);
+}
+.wb-postwar-card .card-stats span { white-space: nowrap; }
+.wb-postwar-achievement {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(0,184,148,0.15);
+    color: #00b894;
+    margin: 2px;
+}
+.wb-postwar-recommendation {
+    background: var(--wb-bg-secondary);
+    border: 1px solid var(--wb-border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    font-size: 12px;
+}
+.wb-postwar-recommendation .rec-category {
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+}
+.wb-postwar-recommendation .rec-category.high { color: #ff7675; }
+.wb-postwar-recommendation .rec-category.medium { color: #fdcb6e; }
+.wb-postwar-recommendation .rec-text {
+    color: var(--wb-text-muted);
+    line-height: 1.4;
+}
+.wb-postwar-member-table-wrap {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--wb-border);
+    border-radius: 6px;
+}
+.wb-postwar-member-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+.wb-postwar-member-table th {
+    text-align: left;
+    font-size: 10px;
+    color: var(--wb-text-muted);
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--wb-border);
+    text-transform: uppercase;
+    position: sticky;
+    top: 0;
+    background: var(--wb-bg);
+    z-index: 1;
+}
+.wb-postwar-member-table td {
+    padding: 3px 6px;
+    border-bottom: 1px solid rgba(45,52,54,0.3);
+}
+.wb-postwar-member-table tr:last-child td { border-bottom: none; }
+.wb-postwar-member-table .eff-green { color: #00b894; }
+.wb-postwar-member-table .eff-yellow { color: #fdcb6e; }
+.wb-postwar-member-table .eff-red { color: #ff7675; }
+.wb-postwar-energy-bar {
+    height: 20px;
+    background: var(--wb-bg-secondary);
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 8px 0;
+    position: relative;
+}
+.wb-postwar-energy-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+.wb-postwar-energy-bar-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--wb-text);
 }
 
 .fo-unavailable-section {
@@ -5144,6 +5364,7 @@ body.wb-chain-active {
                     <span class="fo-rt-badge" id="fo-rt-badge"></span>
                     <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
                     <button class="fo-settings-btn" id="fo-scout-btn" title="Scout Report">&#x1F50D;</button>
+                    <button class="fo-settings-btn" id="fo-postwar-btn" title="Post-War Report">&#x1F4CB;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                     <div class="fo-energy-display" id="fo-energy-display" title="Energy">
                         <span class="fo-energy-label">E</span>
@@ -5234,6 +5455,15 @@ body.wb-chain-active {
             scoutBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 openScoutReport();
+            });
+        }
+
+        // Wire up post-war report button in overlay header
+        const postwarBtn = document.getElementById('fo-postwar-btn');
+        if (postwarBtn) {
+            postwarBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openPostWarReport();
             });
         }
 
@@ -7553,6 +7783,277 @@ body.wb-chain-active {
         </div>`;
 
         body.innerHTML = html;
+    }
+
+    // =========================================================================
+    // POST-WAR REPORT
+    // =========================================================================
+
+    function openPostWarReport() {
+        if (document.getElementById('wb-postwar-overlay')) return;
+
+        const warId = deriveWarId();
+        if (!warId) {
+            showToast('Not connected to a war', 'error');
+            return;
+        }
+
+        const overlay = document.createElement('div');
+        overlay.className = 'wb-postwar-overlay';
+        overlay.id = 'wb-postwar-overlay';
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closePostWarReport();
+        });
+
+        const modal = document.createElement('div');
+        modal.className = 'wb-postwar-modal';
+        modal.innerHTML = `
+            <div class="wb-postwar-header">
+                <h2>\uD83C\uDFC6 Post-War Report</h2>
+                <button class="wb-postwar-close" id="wb-postwar-close">\u00D7</button>
+            </div>
+            <div class="wb-postwar-body" id="wb-postwar-body">
+                <div class="wb-scout-loading">
+                    <div class="wb-scout-spinner"></div>
+                    <span>Analyzing war performance...</span>
+                </div>
+            </div>
+        `;
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        document.getElementById('wb-postwar-close').addEventListener('click', closePostWarReport);
+        fetchPostWarReport(warId);
+    }
+
+    function closePostWarReport() {
+        const overlay = document.getElementById('wb-postwar-overlay');
+        if (overlay) overlay.remove();
+    }
+
+    async function fetchPostWarReport(warId) {
+        try {
+            const url = `${CONFIG.SERVER_URL}/api/war/${encodeURIComponent(warId)}/post-war-report`;
+            const estimates = gatherStatEstimates();
+            const body = JSON.stringify({ estimates });
+            const data = await new Promise((resolve, reject) => {
+                httpRequest({
+                    method: 'POST',
+                    url,
+                    headers: {
+                        'Authorization': `Bearer ${state.jwtToken}`,
+                        'Content-Type': 'application/json',
+                    },
+                    data: body,
+                    timeout: 30000,
+                    onload(r) {
+                        const d = safeParse(r.responseText);
+                        if (r.status >= 200 && r.status < 300) resolve(d);
+                        else reject(new Error((d && d.error) || `HTTP ${r.status}`));
+                    },
+                    onerror() { reject(new Error('Network error')); },
+                    ontimeout() { reject(new Error('Request timed out')); },
+                });
+            });
+
+            if (data && data.report) {
+                renderPostWarReport(data.report);
+            } else {
+                throw new Error('Invalid response');
+            }
+        } catch (e) {
+            warn('Post-war report failed:', e.message);
+            const body = document.getElementById('wb-postwar-body');
+            if (body) {
+                body.innerHTML = `<div style="padding:20px;text-align:center;color:var(--wb-call-red);">
+                    <div style="font-size:24px;margin-bottom:8px;">\u26A0</div>
+                    <div>${escapeHtml(e.message)}</div>
+                </div>`;
+            }
+        }
+    }
+
+    function renderPostWarReport(report) {
+        const body = document.getElementById('wb-postwar-body');
+        if (!body) return;
+
+        const ws = report.warSummary || {};
+        const fp = report.factionPerformance || {};
+        const ee = report.energyEfficiency || {};
+        const ph = report.positiveHighlights || {};
+        const nh = report.negativeHighlights || {};
+        const recs = report.recommendations || [];
+        const mt = report.memberTable || [];
+
+        function fmtNum(n) { return n != null ? Number(n).toLocaleString() : '\u2014'; }
+        function fmtResp(n) { return n != null ? Number(n).toFixed(2) : '\u2014'; }
+
+        function effClass(pct) {
+            if (pct >= 120) return 'eff-green';
+            if (pct >= 80) return 'eff-yellow';
+            return 'eff-red';
+        }
+
+        function makeSection(title, contentHtml, collapsed) {
+            const colClass = collapsed ? ' collapsed' : '';
+            return `<div class="wb-postwar-section">
+                <h3 class="wb-postwar-toggle${colClass}">${title}</h3>
+                <div class="wb-postwar-section-body${colClass}">${contentHtml}</div>
+            </div>`;
+        }
+
+        let html = '';
+
+        // ── A. WAR SUMMARY ──
+        const resultClass = ws.result === 'VICTORY' ? 'victory' : ws.result === 'DEFEAT' ? 'defeat' : 'unknown';
+        let summaryContent = `
+            <div style="text-align:center;">
+                <span class="wb-postwar-result-badge ${resultClass}">${ws.result || 'UNKNOWN'}</span>
+            </div>
+            <div class="wb-postwar-score">
+                <span class="our-score">${fmtNum(ws.ourScore)}</span>
+                <span class="score-sep">-</span>
+                <span class="enemy-score">${fmtNum(ws.enemyScore)}</span>
+            </div>
+            <div style="text-align:center;font-size:11px;color:var(--wb-text-muted);margin-bottom:8px;">
+                ${escapeHtml(ws.ourName || 'Us')} vs ${escapeHtml(ws.enemyName || 'Enemy')}
+            </div>
+            <div class="wb-postwar-stat-grid">
+                <span class="lbl">Our Total Hits</span><span class="val">${fmtNum(ws.totalOurHits)}</span>
+                <span class="lbl">Enemy Total Hits</span><span class="val">${fmtNum(ws.totalEnemyHits)}</span>
+                <span class="lbl">Total Respect Earned</span><span class="val">${fmtNum(ws.totalRespect)}</span>
+                ${ws.durationFormatted ? `<span class="lbl">War Duration</span><span class="val">${escapeHtml(ws.durationFormatted)}</span>` : ''}
+            </div>`;
+        html += makeSection('War Summary', summaryContent, false);
+
+        // ── B. OVERALL FACTION PERFORMANCE ──
+        const effColor = fp.efficiencyRating >= 70 ? '#00b894' : fp.efficiencyRating >= 40 ? '#fdcb6e' : '#ff7675';
+        let perfContent = `
+            <div class="wb-postwar-stat-grid">
+                <span class="lbl">Participating Members</span><span class="val">${fp.participationCount} / ${fp.totalRoster}</span>
+                <span class="lbl">Participation Rate</span><span class="val" style="color:${fp.participationRate >= 70 ? '#00b894' : fp.participationRate >= 50 ? '#fdcb6e' : '#ff7675'}">${fp.participationRate}%</span>
+                <span class="lbl">Avg Hits per Member</span><span class="val">${fp.avgHitsPerMember}</span>
+                <span class="lbl">Avg Respect per Hit</span><span class="val">${fmtResp(fp.avgRespectPerHit)}</span>
+                ${fp.avgFairFight != null ? `<span class="lbl">Avg Fair Fight</span><span class="val">${fp.avgFairFight.toFixed(2)}</span>` : ''}
+                <span class="lbl">Efficiency Rating</span><span class="val" style="color:${effColor};font-size:14px;">${fp.efficiencyRating}/100</span>
+            </div>`;
+        html += makeSection('Overall Faction Performance', perfContent, false);
+
+        // ── C. ENERGY EFFICIENCY ANALYSIS ──
+        const barColor = ee.efficiencyPct >= 80 ? '#00b894' : ee.efficiencyPct >= 60 ? '#fdcb6e' : '#ff7675';
+        let energyContent = `
+            <div class="wb-postwar-stat-grid" style="margin-bottom:8px;">
+                <span class="lbl">Total Estimated Energy</span><span class="val">${fmtNum(ee.totalEstimatedEnergy)}</span>
+                <span class="lbl">Estimated Wasted Energy</span><span class="val" style="color:#ff7675">${fmtNum(ee.totalWastedEnergy)}</span>
+                <span class="lbl">Faction Avg Respect/Hit</span><span class="val">${fmtResp(ee.factionAvgRespectPerHit)}</span>
+            </div>
+            <div class="wb-postwar-energy-bar">
+                <div class="wb-postwar-energy-bar-fill" style="width:${ee.efficiencyPct}%;background:${barColor};"></div>
+                <div class="wb-postwar-energy-bar-label">Energy Efficiency: ${ee.efficiencyPct}%</div>
+            </div>`;
+        if (ee.members && ee.members.filter(m => m.isBelowThreshold).length > 0) {
+            energyContent += `<div style="font-size:10px;color:var(--wb-text-muted);margin-top:4px;">Members below 50% of faction avg respect/hit are flagged for energy waste.</div>`;
+        }
+        html += makeSection('Energy Efficiency Analysis', energyContent, false);
+
+        // ── D. INDIVIDUAL HIGHLIGHTS: POSITIVE ──
+        let posContent = '';
+        if (ph.achievements && ph.achievements.length > 0) {
+            posContent += `<div style="margin-bottom:8px;">${ph.achievements.map(a =>
+                `<span class="wb-postwar-achievement">${escapeHtml(a.title)}: ${escapeHtml(a.name)} (${escapeHtml(a.value)})</span>`
+            ).join('')}</div>`;
+        }
+        if (ph.topPerformers && ph.topPerformers.length > 0) {
+            for (const m of ph.topPerformers) {
+                posContent += `<div class="wb-postwar-card positive">
+                    <div class="card-name">${escapeHtml(m.name)} <span style="font-size:10px;font-weight:400;color:var(--wb-text-muted)">Lv${m.level}</span></div>
+                    <div class="card-stats">
+                        <span>Hits: ${m.attacks}</span>
+                        ${m.assists ? `<span>Assists: ${m.assists}</span>` : ''}
+                        <span>Respect: ${fmtNum(m.respect)}</span>
+                        <span>Resp/Hit: ${fmtResp(m.respectPerHit)}</span>
+                        <span>Score: ${fmtNum(m.score)}</span>
+                    </div>
+                </div>`;
+            }
+        } else {
+            posContent += '<div style="font-size:11px;color:var(--wb-text-muted);">No performance data available.</div>';
+        }
+        html += makeSection('Top Performers', posContent, false);
+
+        // ── E. INDIVIDUAL HIGHLIGHTS: NEGATIVE ──
+        let negContent = '';
+        if (nh.areasToImprove && nh.areasToImprove.length > 0) {
+            for (const m of nh.areasToImprove) {
+                negContent += `<div class="wb-postwar-card negative">
+                    <div class="card-name">${escapeHtml(m.name)} <span style="font-size:10px;font-weight:400;color:var(--wb-text-muted)">Lv${m.level}</span></div>
+                    <div class="card-stats">
+                        <span>Hits: ${m.attacks}</span>
+                        <span>Respect: ${fmtNum(m.respect)}</span>
+                        ${m.attacks > 0 ? `<span>Resp/Hit: ${fmtResp(m.respectPerHit)}</span>` : ''}
+                        <span>Score: ${fmtNum(m.score)}</span>
+                    </div>
+                    <div style="font-size:10px;color:#fdcb6e;margin-top:3px;">${escapeHtml(m.issue)}</div>
+                </div>`;
+            }
+        } else {
+            negContent += '<div style="font-size:11px;color:var(--wb-text-muted);">No notable issues — great performance across the board!</div>';
+        }
+        html += makeSection('Areas to Improve', negContent, false);
+
+        // ── F. AREAS FOR IMPROVEMENT ──
+        let recContent = '';
+        if (recs.length > 0) {
+            for (const r of recs) {
+                recContent += `<div class="wb-postwar-recommendation">
+                    <div class="rec-category ${r.priority || 'medium'}">${escapeHtml(r.category)}</div>
+                    <div class="rec-text">${escapeHtml(r.text)}</div>
+                </div>`;
+            }
+        } else {
+            recContent += '<div style="font-size:11px;color:var(--wb-text-muted);">No specific recommendations — solid performance overall.</div>';
+        }
+        html += makeSection('Recommendations', recContent, false);
+
+        // ── G. MEMBER PERFORMANCE TABLE ──
+        let tableContent = `<div class="wb-postwar-member-table-wrap">
+            <table class="wb-postwar-member-table">
+                <tr>
+                    <th>Name</th>
+                    <th style="text-align:center">Lv</th>
+                    <th style="text-align:center">Hits</th>
+                    <th style="text-align:right">Respect</th>
+                    <th style="text-align:right">Resp/Hit</th>
+                    <th style="text-align:right">Est. Energy</th>
+                    <th style="text-align:center">Efficiency</th>
+                    <th style="text-align:right">Net Score</th>
+                </tr>`;
+        for (const m of mt) {
+            const ec = effClass(m.efficiencyPct);
+            tableContent += `<tr>
+                <td>${escapeHtml(m.name)}</td>
+                <td style="text-align:center">${m.level}</td>
+                <td style="text-align:center">${m.attacks}</td>
+                <td style="text-align:right">${fmtNum(m.respect)}</td>
+                <td style="text-align:right">${m.attacks > 0 ? fmtResp(m.respectPerHit) : '\u2014'}</td>
+                <td style="text-align:right">${fmtNum(m.estimatedEnergy)}</td>
+                <td style="text-align:center" class="${ec}">${m.attacks > 0 ? m.efficiencyPct + '%' : '\u2014'}</td>
+                <td style="text-align:right;font-weight:600">${fmtNum(m.score)}</td>
+            </tr>`;
+        }
+        tableContent += `</table></div>`;
+        html += makeSection('Member Performance', tableContent, true);
+
+        body.innerHTML = html;
+
+        // Wire up collapsible sections
+        body.querySelectorAll('.wb-postwar-toggle').forEach(h3 => {
+            h3.addEventListener('click', () => {
+                h3.classList.toggle('collapsed');
+                const sectionBody = h3.nextElementSibling;
+                if (sectionBody) sectionBody.classList.toggle('collapsed');
+            });
+        });
     }
 
     function showToast(message, type = 'info') {
