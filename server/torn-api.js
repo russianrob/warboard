@@ -154,8 +154,35 @@ export async function fetchRankedWar(factionId, apiKey) {
  * Fetch the ranked war report for a faction's most recent ranked war.
  * Returns the raw rankedwarreport data from the Torn API.
  */
-export async function fetchRankedWarReport(factionId, apiKey) {
-  const url = `https://api.torn.com/v2/faction?selections=rankedwarreport&key=${encodeURIComponent(apiKey)}`;
+export async function fetchRankedWarReport(factionId, apiKey, warId) {
+  // v2 endpoint: /v2/faction/rankedwarreport?id=WAR_ID
+  // If no warId provided, fetch rankedwars first to find the last completed war
+  let rwId = warId;
+  if (!rwId) {
+    const rwUrl = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=rankedwars&key=${encodeURIComponent(apiKey)}`;
+    const rwRes = await fetch(rwUrl);
+    if (rwRes.ok) {
+      const rwData = await rwRes.json();
+      if (rwData.rankedwars) {
+        // Find the most recent completed war (winner !== 0)
+        let latest = null;
+        for (const [id, w] of Object.entries(rwData.rankedwars)) {
+          if (w.war && w.war.winner && w.war.winner !== 0) {
+            if (!latest || Number(id) > Number(latest)) latest = id;
+          }
+        }
+        // If no completed war, try the most recent active one
+        if (!latest) {
+          for (const id of Object.keys(rwData.rankedwars)) {
+            if (!latest || Number(id) > Number(latest)) latest = id;
+          }
+        }
+        rwId = latest;
+      }
+    }
+  }
+  if (!rwId) throw new Error("No ranked war found");
+  const url = `https://api.torn.com/v2/faction/rankedwarreport?id=${encodeURIComponent(rwId)}&key=${encodeURIComponent(apiKey)}`;
 
   const res = await fetch(url);
   if (!res.ok) {
