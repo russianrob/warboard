@@ -7496,8 +7496,15 @@ body.wb-chain-active {
         </div>`;
 
         // ── G. TACTICAL BATTLE PLAN ──
+        const phaseLabel = bp.warPhase === 'pre' ? 'Pre-War Battle Plan' : 'Tactical Battle Plan';
+        const phaseNote = bp.warPhase === 'pre'
+            ? '<div style="font-size:11px;color:#74b9ff;margin-bottom:8px;padding:6px 8px;background:rgba(116,185,255,0.08);border-radius:4px;border:1px solid rgba(116,185,255,0.15);">War has not started yet \u2014 this is a pre-war scouting plan based on current enemy roster.</div>'
+            : bp.warPhase === 'opening'
+                ? '<div style="font-size:11px;color:#00b894;margin-bottom:8px;padding:6px 8px;background:rgba(0,184,148,0.08);border-radius:4px;border:1px solid rgba(0,184,148,0.15);">War is in opening phase \u2014 focus on building chain.</div>'
+                : '';
         html += `<div class="wb-scout-section">
-            <h3>Tactical Battle Plan</h3>
+            <h3>${phaseLabel}</h3>
+            ${phaseNote}
             <div class="wb-scout-phase">
                 <h4>Phase 1: Opening (0\u2013200 hits)</h4>
                 <p>${escapeHtml(bp.opening.description)}</p>

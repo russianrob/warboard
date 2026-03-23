@@ -1253,7 +1253,7 @@ function getStatTier(stats, level, hasEstimates) {
 }
 
 /** Full ranked war analysis — compares both factions with stat estimates. */
-function analyzeWarReport(ourData, enemyData, estimates) {
+function analyzeWarReport(ourData, enemyData, estimates, warScores) {
   estimates = estimates || {};
 
   const ourAnalysis = analyzeFaction(ourData, estimates);
@@ -1391,18 +1391,31 @@ function analyzeWarReport(ourData, enemyData, estimates) {
     .filter(m => m.isActive && (m.stats != null ? m.stats >= 500e6 : m.level >= 60))
     .slice(0, 10);
 
+  // Detect war phase from scores
+  const totalScore = warScores ? (warScores.myScore || 0) + (warScores.enemyScore || 0) : 0;
+  const warStarted = totalScore > 0;
+  const warPhase = !warStarted ? "pre" : totalScore < 200 ? "opening" : totalScore < 1000 ? "mid" : "late";
+
   const battlePlan = {
+    warPhase,
+    warStarted,
     opening: {
-      description: "Farm their weakest active members to build chain. Focus on quick, safe hits.",
+      description: warPhase === "pre"
+        ? "When war starts: farm their weakest active members to build chain. Focus on quick, safe hits."
+        : "Farm their weakest active members to build chain. Focus on quick, safe hits.",
       chainTargets: enemyWeak,
       ourChainers,
     },
     midWar: {
-      description: "Target mid-tier enemies to perma-hospital them. Rotate hitters to stay rested.",
+      description: warPhase === "pre"
+        ? "After building chain: target mid-tier enemies to perma-hospital them. Rotate hitters to stay rested."
+        : "Target mid-tier enemies to perma-hospital them. Rotate hitters to stay rested.",
       permaTargets: enemyMid,
     },
     endgame: {
-      description: "Deploy top hitters against their strongest active threats. Coordinate attacks.",
+      description: warPhase === "pre"
+        ? "To close the war: deploy top hitters against their strongest threats. Coordinate attacks."
+        : "Deploy top hitters against their strongest active threats. Coordinate attacks.",
       enemyThreats,
       ourHitters,
     },
@@ -1517,7 +1530,8 @@ async function handleWarReport(req, res) {
       fetchFactionBasic(war.factionId, apiKey),
       fetchFactionBasic(war.enemyFactionId, apiKey),
     ]);
-    const report = analyzeWarReport(ourData, enemyData, estimates);
+    const warScores = war.warScores || null;
+    const report = analyzeWarReport(ourData, enemyData, estimates, warScores);
     console.log(`[scout] Generated war report for war ${warId} (us: ${war.factionId}, enemy: ${war.enemyFactionId})`);
     return res.json({ report });
   } catch (err) {
