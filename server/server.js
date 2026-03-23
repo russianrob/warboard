@@ -27,6 +27,8 @@ import { startMembershipSchedule, stopMembershipSchedule } from "./membership-ch
 import { startSubscriptionManager, stopSubscriptionManager } from "./subscription-manager.js";
 import * as store from "./store.js";
 import { loadSubscriptions } from "./push-notifications.js";
+import { fetchRankedWar } from "./torn-api.js";
+import { isFactionAllowed } from "./subscription-manager.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -224,6 +226,59 @@ startMembershipSchedule();
 // Start faction subscription manager (polls for 50M payments)
 startSubscriptionManager();
 
+// ── Auto-detect new ranked wars every 5 minutes ─────────────────────────
+let warDetectTimer = null;
+const WAR_DETECT_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
+async function detectNewWars() {
+  try {
+    // Only check on Tuesdays (day 2) or if there's already an active war being tracked
+    const now = new Date();
+    const day = now.getUTCDay(); // 0=Sun, 2=Tue
+    const hasActiveWar = [...store.getAllWars()].some(([, w]) => w.enemyFactionId);
+    if (day !== 2 && !hasActiveWar) return; // skip unless Tuesday or active war
+
+    // Check all factions that have stored API keys
+    const allWars = store.getAllWars();
+    const activeWarFactions = new Set();
+    for (const [, war] of allWars) {
+      if (war.factionId) activeWarFactions.add(war.factionId);
+    }
+
+    // Check each faction with a stored key
+    const factionKeys = store.getAllFactionKeys ? store.getAllFactionKeys() : [];
+    for (const [factionId, apiKey] of factionKeys) {
+      if (!isFactionAllowed(factionId)) continue;
+      try {
+        const rw = await fetchRankedWar(factionId, apiKey);
+        if (!rw || !rw.warId || !rw.enemyFactionId) continue;
+
+        const warId = `war_${factionId}`;
+        const existing = store.getWar(warId);
+
+        // If no existing war or the enemy changed, create/update
+        if (!existing || !existing.enemyFactionId) {
+          const war = store.getOrCreateWar(warId, factionId, rw.enemyFactionId);
+          war.enemyFactionName = rw.enemyFactionName;
+          war.enemyFactionId = rw.enemyFactionId;
+          store.saveState();
+          startWarStatusMonitor(io, warId);
+          console.log(`[war-detect] Auto-detected ranked war: ${factionId} vs ${rw.enemyFactionName} (${rw.enemyFactionId})`);
+        }
+      } catch (_) {
+        // API error for this faction, skip
+      }
+    }
+  } catch (err) {
+    console.error('[war-detect] Detection failed:', err.message);
+  }
+}
+
+// Run detection on startup (after a short delay) and every 5 minutes
+setTimeout(detectNewWars, 10000);
+warDetectTimer = setInterval(detectNewWars, WAR_DETECT_INTERVAL);
+console.log('[war-detect] Auto-detection scheduled (every 5 min)');
+
 httpServer.listen(PORT, () => {
   console.log(`[server] FactionOps server listening on port ${PORT}`);
   console.log(`[server] Landing page: http://localhost:${PORT}`);
@@ -238,7 +293,8 @@ function shutdown(signal) {
   console.log(`\n[server] Received ${signal}, shutting down...`);
   stopAllChainMonitors();
   stopAllWarStatusMonitors();
-  stopPersonalMonitor();
+  if (warDetectTimer) { clearInterval(warDetectTimer); warDetectTimer = null; }
+  try { stopPersonalMonitor(); } catch (_) {}
   stopHeatmapFlush();
   stopMembershipSchedule();
   stopSubscriptionManager();

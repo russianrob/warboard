@@ -251,6 +251,10 @@ export function saveFactionKeys() {
   }
 }
 
+export function getAllFactionKeys() {
+  return Array.from(factionApiKeys.entries());
+}
+
 export function storeFactionApiKey(factionId, apiKey) {
   factionApiKeys.set(factionId, apiKey);
   saveFactionKeys();
