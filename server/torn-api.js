@@ -155,7 +155,7 @@ export async function fetchRankedWar(factionId, apiKey) {
  * Returns the raw rankedwarreport data from the Torn API.
  */
 export async function fetchRankedWarReport(factionId, apiKey) {
-  const url = `https://api.torn.com/v2/faction/${encodeURIComponent(factionId)}?selections=rankedwarreport&key=${encodeURIComponent(apiKey)}`;
+  const url = `https://api.torn.com/v2/faction?selections=rankedwarreport&key=${encodeURIComponent(apiKey)}`;
 
   const res = await fetch(url);
   if (!res.ok) {
