@@ -5673,6 +5673,8 @@ body.wb-chain-active {
                                         + warTimerDetailRow('War target', currentTarget.toLocaleString())
                                         + warTimerDetailRow('Elapsed', elapsedStr);
                                 } else {
+                                    warTimerEtaMs = Date.now() + (hrsLeft * 3600000);
+                                    warTimerLastCalc = Date.now();
                                     const tMin = Math.floor(hrsLeft * 60);
                                     const h = Math.floor(tMin / 60).toString().padStart(2, '0');
                                     const m = (tMin % 60).toString().padStart(2, '0');
@@ -5749,6 +5751,8 @@ body.wb-chain-active {
                 const DROP_PER_HOUR = originalTarget * 0.01;
                 const gap = currentTarget - lead;
                 const hoursRemaining = gap / DROP_PER_HOUR;
+                warTimerEtaMs = Date.now() + (hoursRemaining * 3600000);
+                warTimerLastCalc = Date.now();
                 if (hoursRemaining <= 0) {
                     warTimerEl.className = 'fo-war-timer safe';
                     warTimerValue.textContent = 'WON';
@@ -5774,8 +5778,24 @@ body.wb-chain-active {
                     + warTimerDetailRow('Lead gap', gap.toLocaleString())
                     + warTimerDetailRow('Elapsed', elapsedStr);
             }
+            // Store the last calculated ETA so we can count down between recalculations
+            let warTimerEtaMs = null; // absolute time when war ends
+            let warTimerLastCalc = 0;  // when we last recalculated
+
+            function updateWarTimerDisplay() {
+                if (!warTimerEtaMs) return;
+                const msLeft = Math.max(0, warTimerEtaMs - Date.now());
+                const totalMin = Math.floor(msLeft / 60000);
+                const h = Math.floor(totalMin / 60).toString().padStart(2, '0');
+                const m = (totalMin % 60).toString().padStart(2, '0');
+                warTimerValue.textContent = h + ':' + m;
+            }
+
+            // Recalculate the ETA from score/target every 30s
             updateWarTimer();
-            setInterval(updateWarTimer, 30000); // refresh every 30s
+            setInterval(updateWarTimer, 30000);
+            // Tick down the display every 15s between recalculations
+            setInterval(updateWarTimerDisplay, 15000);
         }
 
         log('War overlay initialised');
