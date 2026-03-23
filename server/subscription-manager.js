@@ -268,15 +268,8 @@ export function startSubscriptionManager() {
     return;
   }
 
-  // Initial poll
-  pollPayments();
-
-  // Schedule recurring polls
-  pollTimer = setInterval(pollPayments, POLL_INTERVAL_MS);
-  console.log(
-    `[subscriptions] Polling started (every ${POLL_INTERVAL_MS / 60000} min) — ` +
-    `price: $${SUBSCRIPTION_PRICE.toLocaleString()}, duration: ${SUBSCRIPTION_DAYS} days`
-  );
+  // Payment polling disabled — manual subscription management only
+  console.log(`[subscriptions] Payment polling disabled — owner faction (${OWNER_FACTION_ID}) has permanent access`);
 }
 
 /**
