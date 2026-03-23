@@ -236,26 +236,24 @@ export async function sendToPlayer(playerId, payload, notifType, pushOptions) {
   if (!subs || subs.length === 0) return;
 
   const message = JSON.stringify(payload);
-  const stale = [];
 
-  for (const sub of subs) {
-    try {
-      await webPush.sendNotification(sub, message, pushOptions);
-    } catch (err) {
-      if (err.statusCode === 410 || err.statusCode === 404) {
-        // Subscription expired or invalid — mark for removal
-        stale.push(sub.endpoint);
-      } else {
-        console.error(`[push] Failed to send to ${playerId}:`, err.message);
+  // Send to the most recent subscription only to avoid duplicate notifications
+  const sub = subs[subs.length - 1];
+  try {
+    await webPush.sendNotification(sub, message, pushOptions);
+  } catch (err) {
+    if (err.statusCode === 410 || err.statusCode === 404) {
+      // Subscription expired — remove it and try the next most recent
+      subscriptions[playerId] = subs.filter((s) => s.endpoint !== sub.endpoint);
+      if (subscriptions[playerId].length === 0) delete subscriptions[playerId];
+      saveSubscriptions();
+      // Retry with remaining subs
+      if (subscriptions[playerId]?.length > 0) {
+        return sendToPlayer(playerId, payload, notifType, pushOptions);
       }
+    } else {
+      console.error(`[push] Failed to send to ${playerId}:`, err.message);
     }
-  }
-
-  // Clean up stale subscriptions
-  if (stale.length > 0) {
-    subscriptions[playerId] = subs.filter((s) => !stale.includes(s.endpoint));
-    if (subscriptions[playerId].length === 0) delete subscriptions[playerId];
-    saveSubscriptions();
   }
 }
 
