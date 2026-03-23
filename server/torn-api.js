@@ -144,6 +144,8 @@ export async function fetchRankedWar(factionId, apiKey) {
       enemyFactionName: factions[enemyFid]?.name || null,
       myScore: factions[myFid]?.score || 0,
       enemyScore: factions[enemyFid]?.score || 0,
+      warStart: warData.war?.start || 0,
+      warTarget: warData.war?.target || 0,
     };
   }
 

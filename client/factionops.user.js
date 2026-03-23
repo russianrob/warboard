@@ -2445,6 +2445,7 @@ body.wb-chain-active {
         // Custom war target (server-synced, set by leader)
         warTarget: null,
         warScores: null,  // { myScore, enemyScore } from server-side ranked war polling
+        warEta: null,     // { etaTimestamp, hoursRemaining, currentTarget, calculatedAt } from server
 
         // Strategy recommendation from server
         strategy: null,   // { recommendation, confidence, reasons, timing, enemyPeak, enemyDead, currentPhase }
@@ -3200,6 +3201,9 @@ body.wb-chain-active {
         }
         if (data.warScores !== undefined) {
             state.warScores = data.warScores;
+        }
+        if (data.warEta !== undefined) {
+            state.warEta = data.warEta;
         }
 
         // ── Strategy recommendation ──
@@ -5778,32 +5782,44 @@ body.wb-chain-active {
                     + warTimerDetailRow('Lead gap', gap.toLocaleString())
                     + warTimerDetailRow('Elapsed', elapsedStr);
             }
-            // Store the last calculated ETA so we can count down between recalculations
-            let warTimerEtaMs = null; // absolute time when war ends
-            let warTimerLastCalc = 0;  // when we last recalculated
-
+            // Use server-side ETA for consistent countdown across all clients
             function updateWarTimerDisplay() {
-                if (!warTimerEtaMs) return;
-                const msLeft = Math.max(0, warTimerEtaMs - Date.now());
+                // Prefer server ETA, fall back to client-calculated
+                const eta = state.warEta;
+                const etaMs = eta?.etaTimestamp || warTimerEtaMs;
+                if (!etaMs) return;
+                const msLeft = Math.max(0, etaMs - Date.now());
                 const totalSec = Math.floor(msLeft / 1000);
                 const hrs = Math.floor(totalSec / 3600);
                 const mins = Math.floor((totalSec % 3600) / 60);
                 const secs = totalSec % 60;
+                if (eta?.preDropPhase) {
+                    warTimerEl.className = 'fo-war-timer waiting';
+                    warTimerValue.textContent = 'Pre-24h';
+                    return;
+                }
+                if (totalSec <= 0) {
+                    warTimerEl.className = 'fo-war-timer safe';
+                    warTimerValue.textContent = 'WON';
+                    return;
+                }
                 if (hrs > 0) {
                     warTimerValue.textContent = hrs.toString().padStart(2, '0') + ':' + mins.toString().padStart(2, '0');
                 } else {
                     warTimerValue.textContent = mins + 'm ' + secs.toString().padStart(2, '0') + 's';
                 }
-                // Update urgency class in real time
                 const hrsLeft = totalSec / 3600;
-                const urg = hrsLeft <= 0 ? 'safe' : hrsLeft <= 2 ? 'danger' : hrsLeft <= 6 ? 'warning' : 'safe';
+                const urg = hrsLeft <= 2 ? 'danger' : hrsLeft <= 6 ? 'warning' : 'safe';
                 warTimerEl.className = 'fo-war-timer ' + urg;
             }
 
-            // Recalculate the ETA from score/target every 30s
+            // Client-side fallback ETA (used if server hasn't sent one yet)
+            let warTimerEtaMs = null;
+
+            // Recalculate client-side ETA from DOM every 30s (fallback only)
             updateWarTimer();
             setInterval(updateWarTimer, 30000);
-            // Tick down the display every second for a live countdown
+            // Tick down the display every second
             setInterval(updateWarTimerDisplay, 1000);
         }
 

@@ -76,6 +76,7 @@ function broadcastWarUpdate(warId) {
     factionKeyStored: !!store.getFactionApiKey(war.factionId),
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
+    warEta: war.warEta || null,
     strategy: war.strategy || null,
     enemyActivityByHour: war.enemyActivityByHour || null,
   };
@@ -378,6 +379,7 @@ router.get("/api/stream", (req, res, next) => {
     factionKeyStored: !!store.getFactionApiKey(factionId),
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
+    warEta: war.warEta || null,
     strategy: war.strategy || null,
     enemyActivityByHour: war.enemyActivityByHour || null,
   };
@@ -488,6 +490,7 @@ router.get("/api/poll", (req, res, next) => {
     factionKeyStored: !!store.getFactionApiKey(factionId),
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
+    warEta: war.warEta || null,
     strategy: war.strategy || null,
     enemyActivityByHour: war.enemyActivityByHour || null,
   });
