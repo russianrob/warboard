@@ -1629,12 +1629,13 @@ function analyzePostWarReport(warReportData, estimates) {
   const totalOurHits = ourMemberList.reduce((s, m) => s + m.attacks, 0);
   const totalEnemyHits = enemyMemberList.reduce((s, m) => s + m.attacks, 0);
   const totalRespect = ourMemberList.reduce((s, m) => s + m.respect, 0);
-  const winner = war.winner ? String(war.winner) : null;
+  const winner = warWinner ? String(warWinner) : null;
+  const ourFactionId = String(ourFaction.id || "");
   const weWon = winner === ourFactionId;
-  const warResult = winner ? (weWon ? "VICTORY" : "DEFEAT") : "UNKNOWN";
+  const warResult = warForfeit ? (weWon ? "VICTORY (Forfeit)" : "DEFEAT (Forfeit)") : winner ? (weWon ? "VICTORY" : "DEFEAT") : "UNKNOWN";
 
-  const startTs = war.start || 0;
-  const endTs = war.end || 0;
+  const startTs = warStart || 0;
+  const endTs = warEnd || 0;
   const durationSec = startTs && endTs ? endTs - startTs : 0;
 
   const warSummary = {
