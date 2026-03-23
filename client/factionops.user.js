@@ -8024,8 +8024,8 @@ body.wb-chain-active {
                     <th style="text-align:center">Hits</th>
                     <th style="text-align:right">Respect</th>
                     <th style="text-align:right">Resp/Hit</th>
-                    <th style="text-align:right">Est. Energy</th>
-                    <th style="text-align:center">Efficiency</th>
+                    <th style="text-align:center">Def</th>
+                    <th style="text-align:right">Bled</th>
                     <th style="text-align:right">Net Score</th>
                 </tr>`;
         for (const m of mt) {
@@ -8036,9 +8036,9 @@ body.wb-chain-active {
                 <td style="text-align:center">${m.attacks}</td>
                 <td style="text-align:right">${fmtNum(m.respect)}</td>
                 <td style="text-align:right">${m.attacks > 0 ? fmtResp(m.respectPerHit) : '\u2014'}</td>
-                <td style="text-align:right">${fmtNum(m.estimatedEnergy)}</td>
-                <td style="text-align:center" class="${ec}">${m.attacks > 0 ? m.efficiencyPct + '%' : '\u2014'}</td>
-                <td style="text-align:right;font-weight:600">${fmtNum(m.score)}</td>
+                <td style="text-align:center">${m.timesAttacked || 0}</td>
+                <td style="text-align:right;color:#ff7675">${m.respectBled ? fmtResp(m.respectBled) : '\u2014'}</td>
+                <td style="text-align:right;font-weight:600;color:${m.netScore < 0 ? '#ff7675' : m.netScore > 0 ? '#00b894' : 'inherit'}">${fmtResp(m.netScore)}</td>
             </tr>`;
         }
         tableContent += `</table></div>`;

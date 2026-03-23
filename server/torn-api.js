@@ -199,6 +199,41 @@ export async function fetchRankedWarReport(factionId, apiKey, warId) {
 }
 
 /**
+ * Fetch faction attack log for a time period, paginating through all results.
+ * Returns array of attack objects. Filters to ranked_war attacks only.
+ */
+export async function fetchFactionAttacks(factionId, apiKey, fromTs, toTs) {
+  const allAttacks = [];
+  let currentFrom = fromTs;
+  const MAX_PAGES = 30; // safety limit
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=attacks&from=${currentFrom}&to=${toTs}&key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url);
+    if (!res.ok) break;
+    const data = await res.json();
+    if (data.error) break;
+
+    const attacks = Object.values(data.attacks || {});
+    if (attacks.length === 0) break;
+
+    // Only keep ranked war attacks
+    const rwAttacks = attacks.filter(a => a.ranked_war === 1);
+    allAttacks.push(...rwAttacks);
+
+    // If we got fewer than 100, we've reached the end
+    if (attacks.length < 100) break;
+
+    // Paginate: move from to the latest timestamp + 1
+    const maxTs = Math.max(...attacks.map(a => a.timestamp_ended || a.timestamp_started || 0));
+    if (maxTs <= currentFrom) break; // no progress
+    currentFrom = maxTs + 1;
+  }
+
+  return allAttacks;
+}
+
+/**
  * Fetch a player's energy, nerve bars and cooldowns.
  * Returns { energy: { current, maximum, fulltime }, nerve: { current, maximum, fulltime }, cooldowns: { drug, medical, booster } }.
  */

@@ -5,7 +5,7 @@
 import { Router } from "express";
 import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.js";
 import * as store from "./store.js";
-import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBasic, fetchRankedWarReport } from "./torn-api.js";
+import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBasic, fetchRankedWarReport, fetchFactionAttacks } from "./torn-api.js";
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
@@ -1557,7 +1557,7 @@ const postWarReportCooldowns = new Map();
 const POST_WAR_REPORT_COOLDOWN_MS = 60000;
 
 /** Analyze ranked war report data into a structured post-war performance breakdown. */
-function analyzePostWarReport(warReportData, estimates) {
+function analyzePostWarReport(warReportData, estimates, attackLog) {
   estimates = estimates || {};
   const report = warReportData || {};
 
@@ -1600,19 +1600,40 @@ function analyzePostWarReport(warReportData, estimates) {
   const enemyMembers = {};
   for (const m of enemyMembersRaw) enemyMembers[m.id || m.name] = m;
 
+  // ── Bleed analysis from attack log ──
+  // Calculate how much respect each of our members gave away by being attacked
+  attackLog = attackLog || [];
+  const bleedByMember = {}; // our member ID -> { timesAttacked, respectBled }
+  const ourFactionId_str = String(ourFaction.id || "");
+  for (const atk of attackLog) {
+    // Enemy attacked one of our members
+    if (String(atk.defender_faction) === ourFactionId_str && String(atk.attacker_faction) !== ourFactionId_str) {
+      const defId = String(atk.defender_id);
+      if (!bleedByMember[defId]) bleedByMember[defId] = { timesAttacked: 0, respectBled: 0 };
+      bleedByMember[defId].timesAttacked++;
+      bleedByMember[defId].respectBled += (atk.respect_gain || atk.respect || 0);
+    }
+  }
+  const hasBleedData = attackLog.length > 0;
+
   // Build member performance arrays
   // v2 API returns 'score' per member which IS the respect/score contribution
   // There's no separate 'respect' field — score is used for both
-  const ourMemberList = Object.entries(ourMembers).map(([id, m]) => ({
-    id,
-    name: m.name || "Unknown",
-    level: m.level || 0,
-    hits: (m.attacks || 0) + (m.assists || 0),
-    attacks: m.attacks || 0,
-    assists: m.assists || 0,
-    respect: m.score || m.respect || 0,
-    score: m.score || 0,
-  }));
+  const ourMemberList = Object.entries(ourMembers).map(([id, m]) => {
+    const bleed = bleedByMember[id] || { timesAttacked: 0, respectBled: 0 };
+    return {
+      id,
+      name: m.name || "Unknown",
+      level: m.level || 0,
+      hits: (m.attacks || 0) + (m.assists || 0),
+      attacks: m.attacks || 0,
+      assists: m.assists || 0,
+      respect: m.score || m.respect || 0,
+      score: m.score || 0,
+      timesAttacked: bleed.timesAttacked,
+      respectBled: Math.round(bleed.respectBled * 100) / 100,
+    };
+  });
 
   const enemyMemberList = Object.entries(enemyMembers).map(([id, m]) => ({
     id,
@@ -1701,6 +1722,9 @@ function analyzePostWarReport(warReportData, estimates) {
     const rphRatio = factionAvgRph > 0 ? rph / factionAvgRph : 1;
     const isBelowThreshold = rphRatio < 0.5;
     const wastedEnergy = isBelowThreshold ? Math.round((factionAvgRph - rph) * m.attacks * 25) : 0;
+    // Net Score = score earned - respect bled to enemy
+    // This is the TRUE contribution: what you earned minus what you gave away
+    const netScore = Math.round((m.respect - m.respectBled) * 100) / 100;
 
     energyAnalysis.push({
       id: m.id,
@@ -1712,6 +1736,9 @@ function analyzePostWarReport(warReportData, estimates) {
       estimatedEnergy: estEnergy,
       efficiencyPct: Math.round(rphRatio * 100),
       wastedEnergy,
+      timesAttacked: m.timesAttacked,
+      respectBled: m.respectBled,
+      netScore,
       isBelowThreshold,
     });
   }
@@ -1920,6 +1947,8 @@ function analyzePostWarReport(warReportData, estimates) {
     const rph = m.attacks > 0 ? Math.round((m.respect / m.attacks) * 100) / 100 : 0;
     const estEnergy = m.attacks * 25;
     const effPct = factionAvgRph > 0 ? Math.round((rph / factionAvgRph) * 100) : 100;
+    const rphRatio = factionAvgRph > 0 ? rph / factionAvgRph : 1;
+    const netScore = Math.round((m.respect - m.respectBled) * 100) / 100;
     return {
       id: m.id,
       name: m.name,
@@ -1931,9 +1960,12 @@ function analyzePostWarReport(warReportData, estimates) {
       estimatedEnergy: estEnergy,
       efficiencyPct: effPct,
       score: m.score,
+      timesAttacked: m.timesAttacked,
+      respectBled: m.respectBled,
+      netScore,
     };
   });
-  memberTable.sort((a, b) => b.score - a.score);
+  memberTable.sort((a, b) => b.netScore - a.netScore);
 
   return {
     warSummary,
@@ -1993,7 +2025,20 @@ async function handlePostWarReport(req, res) {
       return res.status(404).json({ error: "No ranked war report available — a ranked war may not have been completed recently" });
     }
 
-    const report = analyzePostWarReport(warReportData, estimates);
+    // Fetch attack log for bleed analysis
+    let attackLog = [];
+    try {
+      const startTs = warReportData.rankedwarreport?.start || warReportData.start || 0;
+      const endTs = warReportData.rankedwarreport?.end || warReportData.end || 0;
+      if (startTs && endTs) {
+        attackLog = await fetchFactionAttacks(war.factionId, apiKey, startTs, endTs);
+        console.log(`[post-war] Fetched ${attackLog.length} ranked war attacks for bleed analysis`);
+      }
+    } catch (atkErr) {
+      console.warn(`[post-war] Attack log fetch failed (bleed analysis will be skipped):`, atkErr.message);
+    }
+
+    const report = analyzePostWarReport(warReportData, estimates, attackLog);
     console.log(`[post-war] Generated post-war report for war ${warId} (faction: ${factionId})`);
     return res.json({ report });
   } catch (err) {
