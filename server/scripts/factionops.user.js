@@ -7529,7 +7529,7 @@ body.wb-chain-active {
                 <div style="font-size:11px;font-weight:700;color:#ff7675;margin-bottom:4px;">Priority Perma-Hospital Targets</div>
                 <div class="wb-scout-target-list">${renderChips(bp.keyPermaTargets, 'threat')}</div>
             </div>` : ''}
-            ${bp.ignore.length > 0 ? `<div style="margin-top:6px;"><div style="font-size:10px;color:var(--wb-text-muted);margin-bottom:2px;">Ignore (inactive/unavailable):</div><div class="wb-scout-target-list">${renderChips(bp.ignore, 'ignore')}</div></div>` : ''}
+
         </div>`;
 
         // ── H. STRENGTHS & WEAKNESSES ──
