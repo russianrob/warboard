@@ -7509,6 +7509,11 @@ body.wb-chain-active {
 
     function showWarEndedBanner() {
         if (warEndedBannerShown) return;
+
+        // Don't mark as shown until we actually insert the banner
+        const nextUp = document.getElementById('fo-next-up');
+        if (!nextUp) return; // overlay not ready yet, will retry on next refresh
+
         warEndedBannerShown = true;
 
         const result = state.warResult || 'unknown';
