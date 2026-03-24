@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn OC Loan Manager (PDA)
 // @namespace    https://torn.com
-// @version      2.0.3-pda
+// @version      2.0.4-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary), tracks unpaid OC payouts (PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.0.4-pda - Fix: Payouts detection — accept any success-like status, use cat=successful, add debug logging
 // v2.0.3-pda - Fix: prevent double-loan — better success detection, disable button permanently after loan attempt
 // v2.0.2-pda - Fix: loan button now always refreshes armory cache (fixes needing to press twice)
 // v2.0.1-pda - Unused tab: exclude temporary items (members can freely loan temps)
@@ -185,21 +186,29 @@
 
   const getUnpaidCompletedCrimes = async () => {
     const key = requireApiKeyOrThrow();
-    // Fetch completed crimes from the last 30 days
+    // Fetch successful crimes from the last 30 days
     const now = Math.floor(Date.now() / 1000);
     const thirtyDaysAgo = now - (30 * 24 * 60 * 60);
-    const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=completed&filter=executed_at&from=${thirtyDaysAgo}&to=${now}&sort=DESC&key=${key}`);
+    // Use cat=successful to only get successful crimes (not failures)
+    const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=successful&sort=DESC&key=${key}`);
     if (!res.ok) throw new Error('Failed to load completed crimes');
     const data = await res.json();
+    if (data?.error) throw new Error(`API error: ${data.error.error || JSON.stringify(data.error)}`);
     const crimes = Array.isArray(data?.crimes) ? data.crimes : (data?.crimes && typeof data.crimes === 'object' ? Object.values(data.crimes) : []);
+    console.log('[OCLM] Fetched crimes:', crimes.length, 'raw data keys:', Object.keys(data || {}));
     const unpaid = [];
     for (const c of crimes) {
-      const status = String(c?.status || '').toLowerCase();
-      if (status !== 'successful') continue;
+      // Log first few crimes for debugging
+      if (unpaid.length === 0 && crimes.indexOf(c) < 3) {
+        console.log('[OCLM] Crime sample:', JSON.stringify({
+          id: c.id, name: c.name, status: c.status,
+          money: c?.rewards?.money, paid_at: c?.rewards?.payout?.paid_at
+        }));
+      }
       const paidAt = c?.rewards?.payout?.paid_at;
       if (paidAt) continue; // already paid
       const money = Number(c?.rewards?.money || 0);
-      if (money <= 0) continue; // chain link 1 — waiting on link 2, can't be paid yet
+      if (money <= 0) continue; // chain link 1 — waiting on link 2
       unpaid.push({
         id: c.id,
         name: c.name || 'Unknown OC',
@@ -210,6 +219,7 @@
         payoutPct: c?.rewards?.payout?.percentage ?? null
       });
     }
+    console.log('[OCLM] Unpaid crimes found:', unpaid.length);
     return unpaid;
   };
 
