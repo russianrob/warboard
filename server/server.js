@@ -227,15 +227,29 @@ startSubscriptionManager();
 
 // ── Auto-detect new ranked wars every 5 minutes ─────────────────────────
 let warDetectTimer = null;
-const WAR_DETECT_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const WAR_DETECT_INTERVAL_NORMAL = 5 * 60 * 1000; // 5 minutes
+const WAR_DETECT_INTERVAL_ACTIVE = 60 * 1000;      // 1 minute during war start window
 
 async function detectNewWars() {
   try {
-    // Only check on Tuesdays (day 2) or if there's already an active war being tracked
     const now = new Date();
     const day = now.getUTCDay(); // 0=Sun, 2=Tue
-    const hasActiveWar = [...store.getAllWars()].some(([, w]) => w.enemyFactionId);
-    if (day !== 2 && !hasActiveWar) return; // skip unless Tuesday or active war
+    const utcHour = now.getUTCHours();
+    const hasActiveWar = [...store.getAllWars()].some(([, w]) => w.enemyFactionId && !w.warEnded);
+
+    // Skip unless: Tuesday, or active war tracking
+    if (day !== 2 && !hasActiveWar) return;
+
+    // On Tuesdays, poll every 1 min between 11:45-12:30 UTC (war start window)
+    // Outside that window, poll every 5 min
+    const inStartWindow = day === 2 && ((utcHour === 11 && now.getUTCMinutes() >= 45) || utcHour === 12 && now.getUTCMinutes() <= 30);
+    if (inStartWindow && warDetectTimer) {
+      clearInterval(warDetectTimer);
+      warDetectTimer = setInterval(detectNewWars, WAR_DETECT_INTERVAL_ACTIVE);
+    } else if (!inStartWindow && warDetectTimer) {
+      clearInterval(warDetectTimer);
+      warDetectTimer = setInterval(detectNewWars, WAR_DETECT_INTERVAL_NORMAL);
+    }
 
     // Check all factions that have stored API keys
     const allWars = store.getAllWars();
@@ -275,8 +289,8 @@ async function detectNewWars() {
 
 // Run detection on startup (after a short delay) and every 5 minutes
 setTimeout(detectNewWars, 10000);
-warDetectTimer = setInterval(detectNewWars, WAR_DETECT_INTERVAL);
-console.log('[war-detect] Auto-detection scheduled (every 5 min)');
+warDetectTimer = setInterval(detectNewWars, WAR_DETECT_INTERVAL_NORMAL);
+console.log('[war-detect] Auto-detection scheduled (5 min normal, 1 min during Tuesday 11:45-12:30 UTC)');
 
 httpServer.listen(PORT, () => {
   console.log(`[server] FactionOps server listening on port ${PORT}`);
