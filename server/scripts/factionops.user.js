@@ -7536,9 +7536,11 @@ body.wb-chain-active {
             timerVal.textContent = label;
         }
 
-        // Hide strategy bar
+        // Hide strategy bar and scout button
         const stratBar = document.getElementById('fo-strategy-bar');
         if (stratBar) stratBar.style.display = 'none';
+        const scoutBtn = document.getElementById('fo-scout-btn');
+        if (scoutBtn) scoutBtn.style.display = 'none';
 
         // Show banner above target list
         if (nextUp && !document.getElementById('fo-war-ended-banner')) {
