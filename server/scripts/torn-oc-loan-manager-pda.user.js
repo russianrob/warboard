@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn OC Loan Manager (PDA)
 // @namespace    https://torn.com
-// @version      2.0.4-pda
+// @version      2.0.5-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary), tracks unpaid OC payouts (PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.0.5-pda - Fix: Payouts — add time range + limit to catch recent OCs, log total count for debugging
 // v2.0.4-pda - Fix: Payouts detection — accept any success-like status, use cat=successful, add debug logging
 // v2.0.3-pda - Fix: prevent double-loan — better success detection, disable button permanently after loan attempt
 // v2.0.2-pda - Fix: loan button now always refreshes armory cache (fixes needing to press twice)
@@ -189,8 +190,8 @@
     // Fetch successful crimes from the last 30 days
     const now = Math.floor(Date.now() / 1000);
     const thirtyDaysAgo = now - (30 * 24 * 60 * 60);
-    // Use cat=successful to only get successful crimes (not failures)
-    const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=successful&sort=DESC&key=${key}`);
+    // Use cat=successful with time range to catch recent OCs
+    const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=successful&filter=executed_at&from=${thirtyDaysAgo}&to=${now}&sort=DESC&limit=100&key=${key}`);
     if (!res.ok) throw new Error('Failed to load completed crimes');
     const data = await res.json();
     if (data?.error) throw new Error(`API error: ${data.error.error || JSON.stringify(data.error)}`);
@@ -199,11 +200,8 @@
     const unpaid = [];
     for (const c of crimes) {
       // Log first few crimes for debugging
-      if (unpaid.length === 0 && crimes.indexOf(c) < 3) {
-        console.log('[OCLM] Crime sample:', JSON.stringify({
-          id: c.id, name: c.name, status: c.status,
-          money: c?.rewards?.money, paid_at: c?.rewards?.payout?.paid_at
-        }));
+      if (crimes.indexOf(c) < 3) {
+        console.log('[OCLM] Crime #' + c.id + ':', JSON.stringify(c).substring(0, 500));
       }
       const paidAt = c?.rewards?.payout?.paid_at;
       if (paidAt) continue; // already paid
