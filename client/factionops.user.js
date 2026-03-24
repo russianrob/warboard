@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.3.3
+// @version      4.3.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -176,7 +176,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.3.3',
+        VERSION: '4.3.4',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -1872,7 +1872,8 @@ body.wb-chain-active {
 }
 .wb-scout-table td {
     padding: 3px 6px;
-    border-bottom: 1px solid rgba(45,52,54,0.3);
+    border-bottom: 1px solid var(--wb-border);
+    color: var(--wb-text);
 }
 .wb-scout-table tr:last-child td { border-bottom: none; }
 .wb-scout-bar {
@@ -2260,35 +2261,38 @@ body.wb-chain-active {
 }
 .wb-postwar-member-table-wrap {
     max-height: 400px;
-    overflow-y: auto;
+    overflow: auto;
     border: 1px solid var(--wb-border);
     border-radius: 6px;
 }
 .wb-postwar-member-table {
-    width: 100%;
+    min-width: 520px;
     border-collapse: collapse;
-    font-size: 11px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
 }
 .wb-postwar-member-table th {
     text-align: left;
     font-size: 10px;
     color: var(--wb-text-muted);
-    padding: 4px 6px;
+    padding: 6px 8px;
     border-bottom: 1px solid var(--wb-border);
     text-transform: uppercase;
     position: sticky;
     top: 0;
     background: var(--wb-bg);
     z-index: 1;
+    white-space: nowrap;
 }
 .wb-postwar-member-table td {
-    padding: 3px 6px;
-    border-bottom: 1px solid rgba(45,52,54,0.3);
-    color: #dfe6e9;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--wb-border);
+    color: var(--wb-text);
+    white-space: nowrap;
 }
 .wb-postwar-member-table td:first-child {
-    color: #fff;
-    font-weight: 600;
+    color: var(--wb-text);
+    font-weight: 700;
 }
 .wb-postwar-member-table tr:last-child td { border-bottom: none; }
 .wb-postwar-member-table .eff-green { color: #00b894; }
@@ -7547,7 +7551,7 @@ body.wb-chain-active {
             `;
             banner.innerHTML = `
                 <div style="font-size:20px;font-weight:800;color:${color};letter-spacing:0.1em;">${label}</div>
-                <div style="font-size:13px;color:#dfe6e9;margin-top:4px;">
+                <div style="font-size:13px;color:var(--wb-text);margin-top:4px;">
                     ${myScore.toLocaleString()} \u2013 ${enemyScore.toLocaleString()}
                 </div>
                 <div style="font-size:11px;color:var(--wb-text-muted);margin-top:4px;">Tap the clipboard icon to view the post-war report</div>
