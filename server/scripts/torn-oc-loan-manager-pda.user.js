@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn OC Loan Manager (PDA)
 // @namespace    https://torn.com
-// @version      2.0.5-pda
+// @version      2.0.6-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary), tracks unpaid OC payouts (PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.0.6-pda - Fix: Payouts now detects item-reward OCs (e.g. Xanax payouts), not just cash
 // v2.0.5-pda - Fix: Payouts — add time range + limit to catch recent OCs, log total count for debugging
 // v2.0.4-pda - Fix: Payouts detection — accept any success-like status, use cat=successful, add debug logging
 // v2.0.3-pda - Fix: prevent double-loan — better success detection, disable button permanently after loan attempt
@@ -206,14 +207,19 @@
       const paidAt = c?.rewards?.payout?.paid_at;
       if (paidAt) continue; // already paid
       const money = Number(c?.rewards?.money || 0);
-      if (money <= 0) continue; // chain link 1 — waiting on link 2
+      const respect = Number(c?.rewards?.respect || 0);
+      const hasItems = Array.isArray(c?.rewards?.items) ? c.rewards.items.length > 0 : false;
+      // Skip only if there's truly nothing to pay out (no money, no respect, no items)
+      // This catches chain link 1 crimes that have $0 and are waiting on link 2
+      if (money <= 0 && respect <= 0 && !hasItems) continue;
       unpaid.push({
         id: c.id,
         name: c.name || 'Unknown OC',
         difficulty: c.difficulty || null,
         executedAt: c.executed_at,
         money,
-        respect: Number(c?.rewards?.respect || 0),
+        respect,
+        hasItems,
         payoutPct: c?.rewards?.payout?.percentage ?? null
       });
     }
@@ -902,11 +908,17 @@
         }
 
         let totalMoney = 0;
-        unpaid.forEach(c => { totalMoney += c.money; });
+        let itemRewardCount = 0;
+        unpaid.forEach(c => { totalMoney += c.money; if (c.hasItems) itemRewardCount++; });
 
         let html = `<div style="margin-bottom:10px;font-size:12px;color:#aaa;">Completed OCs awaiting payout: <strong style="color:#f8d866;">${unpaid.length}</strong></div>`;
         html += `<div style="margin-bottom:12px;padding:8px 10px;border-radius:6px;background:#1a1a2e;border:1px solid #333;">`;
-        html += `<span style="font-size:12px;color:#888;">Total unpaid:</span> <strong style="color:#6c6;font-size:14px;">$${formatNumber(totalMoney)}</strong>`;
+        if (totalMoney > 0) {
+          html += `<span style="font-size:12px;color:#888;">Total unpaid:</span> <strong style="color:#6c6;font-size:14px;">$${formatNumber(totalMoney)}</strong>`;
+        }
+        if (itemRewardCount > 0) {
+          html += `${totalMoney > 0 ? '<br>' : ''}<span style="font-size:12px;color:#888;">Item rewards:</span> <strong style="color:#7af;font-size:13px;">${itemRewardCount} OC${itemRewardCount !== 1 ? 's' : ''}</strong>`;
+        }
         html += `</div>`;
 
         // Open Payouts button — navigates to Torn's completed crimes page
@@ -925,7 +937,7 @@
           const ageColor = ageDays >= 7 ? '#f88' : (ageDays >= 3 ? '#f8d866' : '#aaa');
           html += `<tr>
             <td style="font-size:12px;">${c.name}${diffLabel}</td>
-            <td style="font-size:12px;text-align:right;">$${formatNumber(c.money)}${pctLabel}</td>
+            <td style="font-size:12px;text-align:right;">${c.money > 0 ? '$' + formatNumber(c.money) : ''}${c.hasItems ? '<span style="color:#7af;">Items</span>' : ''}${c.money <= 0 && !c.hasItems && c.respect > 0 ? '<span style="color:#ccc;">Respect</span>' : ''}${pctLabel}</td>
             <td style="font-size:12px;text-align:right;color:${ageColor};">${ageStr}</td>
           </tr>`;
         }
