@@ -141,6 +141,15 @@ export function startChainMonitor(io, warId) {
             // Store scores on war object so clients can display them
             war.warScores = { myScore: rw.myScore, enemyScore: rw.enemyScore };
 
+            // If war was marked as ended but we now see it active (or a new war started), clear end flags
+            if (war.warEnded) {
+              delete war.warEnded;
+              delete war.warEndedAt;
+              delete war.warResult;
+              console.log(`[chain] War back active or new war detected for faction ${war.factionId}`);
+              store.saveState();
+            }
+
             // Calculate server-side war ETA
             const warStart = rw.warStart || war.warStart || 0;
             const warOrigTarget = rw.warTarget || war.warOrigTarget || 0;

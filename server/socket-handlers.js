@@ -51,11 +51,21 @@ export function registerSocketHandlers(io, socket) {
       warId: war.warId,
       factionId: war.factionId,
       enemyFactionId: war.enemyFactionId,
+      enemyFactionName: war.enemyFactionName || null,
       calls: war.calls,
       priorities: war.priorities,
       enemyStatuses: war.enemyStatuses,
       chainData: war.chainData,
       onlinePlayers: store.getOnlinePlayersForWar(warId),
+      viewers: store.getViewersForWar(warId),
+      ourFactionOnline: war.ourFactionOnline || null,
+      warTarget: war.warTarget || null,
+      warScores: war.warScores || null,
+      warEta: war.warEta || null,
+      warEnded: war.warEnded || false,
+      warResult: war.warResult || null,
+      strategy: war.strategy || null,
+      enemyActivityByHour: war.enemyActivityByHour || null,
     });
   });
 

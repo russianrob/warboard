@@ -239,7 +239,7 @@ async function detectNewWars() {
 
     // Skip unless: Tuesday before 14:00 UTC, or active war tracking
     if (day !== 2 && !hasActiveWar) return;
-    if (day === 2 && utcHour >= 14 && !hasActiveWar) return; // no match this week, stop polling
+    // if (day === 2 && utcHour >= 14 && !hasActiveWar) return; // no match this week, stop polling
 
     // On Tuesdays, poll every 1 min between 11:45-12:30 UTC (war start window)
     // Outside that window, poll every 5 min
@@ -271,7 +271,7 @@ async function detectNewWars() {
         const existing = store.getWar(warId);
 
         // If no existing war or the enemy changed, create/update
-        if (!existing || !existing.enemyFactionId) {
+        if (!existing || !existing.enemyFactionId || existing.warEnded) {
           const war = store.getOrCreateWar(warId, factionId, rw.enemyFactionId);
           war.enemyFactionName = rw.enemyFactionName;
           war.enemyFactionId = rw.enemyFactionId;

@@ -42,7 +42,15 @@ export function startWarStatusMonitor(io, warId) {
 
   const poll = async () => {
     const war = store.getWar(warId);
-    if (!war || !war.enemyFactionId) { scheduleNext(POLL_INTERVAL_MS); return; }
+    if (!war || !war.enemyFactionId || war.warEnded) {
+      if (war?.warEnded) {
+        console.log(`[war-status] War ${warId} ended. Stopping status monitor.`);
+        stopWarStatusMonitor(warId);
+        return;
+      }
+      scheduleNext(POLL_INTERVAL_MS);
+      return;
+    }
 
     // Prefer faction-dedicated key, fall back to any player key
     const apiKey =

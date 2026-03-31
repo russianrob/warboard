@@ -89,7 +89,31 @@ export function getWar(warId) {
 }
 
 export function getOrCreateWar(warId, factionId, enemyFactionId = null) {
-  if (wars.has(warId)) return wars.get(warId);
+  if (wars.has(warId)) {
+    const war = wars.get(warId);
+    if (enemyFactionId && war.enemyFactionId !== enemyFactionId) {
+      console.log(`[store] New enemy detected (${enemyFactionId}). Resetting stale war data.`);
+      war.enemyFactionId = enemyFactionId;
+      war.calls = {};
+      war.priorities = {};
+      war.enemyStatuses = {};
+      war.warTarget = null;
+      war.enemyActivityLog = [];
+      war.strategy = null;
+      war.enemyActivityByHour = null;
+      war.chainData = { current: 0, max: 0, timeout: 0, cooldown: 0 };
+      delete war.status;
+      delete war.ourScore;
+      delete war.enemyScore;
+      delete war.winner;
+      delete war.warResult;
+      delete war.warEnded;
+      delete war.warEndedAt;
+      delete war.warEta;
+      saveState();
+    }
+    return war;
+  }
 
   const war = {
     warId,
