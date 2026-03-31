@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.3.4
+// @version      4.3.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -6907,12 +6907,20 @@ body.wb-chain-active {
                 const myFid = state.myFactionId;
                 if (!myFid) continue;
                 const enemyFid = fids.find(f => String(f) !== String(myFid));
-                if (enemyFid && !state.enemyFactionId) {
+                if (enemyFid && state.enemyFactionId !== enemyFid) {
+                    // WIPE STALE WAR DATA if enemy changed (bug fix)
+                    state.statuses = {};
+                    state.calls = {};
+                    state.priorities = {};
+
                     state.enemyFactionId = enemyFid;
                     state.enemyFactionName = factions[enemyFid]?.name || null;
                     log('Intercepted ranked war — enemy faction:', enemyFid, state.enemyFactionName);
                     const enemyEl = document.getElementById('fo-enemy-name');
                     if (enemyEl && state.enemyFactionName) enemyEl.textContent = state.enemyFactionName;
+
+                    refreshAllRows();
+                    pollOnce();
                 }
             }
         }

@@ -435,6 +435,26 @@ router.get("/api/poll", (req, res, next) => {
     return res.status(403).json({ error: "You are not a member of this war's faction" });
   }
 
+  // WIPE STALE WAR DATA if enemy faction ID changed (bug fix)
+  if (enemyFactionId && war.enemyFactionId !== enemyFactionId) {
+    console.log(`[api] War ${warId} enemy changed from ${war.enemyFactionId} to ${enemyFactionId}. Wiping stale state.`);
+    war.enemyFactionId = enemyFactionId;
+    war.enemyStatuses = {};
+    war.calls = {};
+    war.priorities = {};
+
+    // Clear call timers for this war
+    for (const [key, timeoutId] of callTimers.entries()) {
+      if (key.startsWith(`${warId}:`)) {
+        clearTimeout(timeoutId);
+        callTimers.delete(key);
+      }
+    }
+
+    store.saveState();
+    broadcastWarUpdate(warId);
+  }
+
   // Auto-detect ranked war enemy if not set
   if (!war.enemyFactionId) {
     const lastDetect = rankedWarDetectCooldowns.get(warId) || 0;
