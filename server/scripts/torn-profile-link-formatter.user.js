@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.8
+// @version      3.6.10
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -19,6 +19,8 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.10 - Make profile injection completely bulletproof against DOM updates by falling back to #skip-to-content and document.title
+// v3.6.9  - Update profile name DOM selector to support Torn's new HTML layout
 // v3.6.8  - Fix profile page injection by using correct name selector (restored from 3.6.1 to fix syntax errors)
 // v3.6.2 to 3.6.7 - Rolled back due to severe syntax errors introduced in earlier commit
 // v3.6.1  - Update URLs to tornwar.com hosting
@@ -79,10 +81,22 @@
     }
 
     function initProfilePage() {
-        const nameElement = document.querySelector('h4[class^="name___"], h4[class*="name_"]');
-        const infoTable = document.querySelector('.basic-information .info-table');
+        // Extremely broad selector for the user's name element on the profile page, handling Torn's recent React updates
+        const nameElement = document.querySelector(
+            '[class*="profile-wrapper"] [class*="name___"], ' +
+            '[class*="profile-wrapper"] h1[class*="name_"], ' +
+            '[class*="profile-wrapper"] h2[class*="name_"], ' +
+            '[class*="profile-wrapper"] h3[class*="name_"], ' +
+            '[class*="profile-wrapper"] h4[class*="name_"], ' +
+            '[class*="profile-wrapper"] div[class*="name_"], ' +
+            '[class*="profileWrapper"] [class*="name___"], ' +
+            'h1[class*="name___"], h2[class*="name___"], h3[class*="name___"], h4[class*="name___"], div[class*="name___"], ' +
+            '.profile-heading, ' +
+            '#skip-to-content' // Fallback to ensure UI injection
+        );
+        const infoTable = document.querySelector('div[class*="basicInformation"] ul[class*="infoTable"], .basic-information .info-table, [class*="infoTable"], [class*="basicInformation"], [class*="profile-right-wrapper"] ul, [class*="profileRightWrapper"]');
         const alreadyInjected = document.querySelector('.gnsc-copy-container');
-        if (nameElement && infoTable && infoTable.children.length > 5 && !alreadyInjected) {
+        if (nameElement && !alreadyInjected) {
             mainProfile(nameElement, infoTable);
             return true;
         }
@@ -160,18 +174,28 @@
         const userId = urlParams.get('XID');
         if (!userId) return;
 
-        const cleanedName = nameElement.textContent.replace("'s Profile", "").split(' [')[0].trim();
+        let cleanedName = nameElement.textContent.replace("'s Profile", "").split(' [')[0].trim();
+        
+        // If we hit the fallback, try to extract the real name from the document title
+        if (cleanedName === 'Skip to content' || nameElement.id === 'skip-to-content') {
+            const titleMatch = document.title.match(/(.+?)'s Profile/i);
+            if (titleMatch && titleMatch[1]) {
+                cleanedName = titleMatch[1].trim();
+            } else {
+                cleanedName = 'Unknown Player';
+            }
+        }
         let factionLinkEl = null;
         let companyLinkEl = null;
         let activityStatus = 'Offline';
 
-        const infoListItems = infoTable.querySelectorAll('li');
+        const infoListItems = infoTable ? infoTable.querySelectorAll('li, div[class*="infoRow_"], div[class*="info-row"], [class*="row_"]') : [];
         infoListItems.forEach(item => {
-            const titleEl = item.querySelector('.user-information-section .bold');
+            const titleEl = item.querySelector('[class*="userInformationSection"] [class*="bold"], [class*="title_"], .title, .user-information-section .bold');
             if (!titleEl) return;
             const title = titleEl.textContent.trim();
-            if (title === 'Faction') factionLinkEl = item.querySelector('.user-info-value a');
-            if (title === 'Job') companyLinkEl = item.querySelector('.user-info-value a');
+            if (title === 'Faction') factionLinkEl = item.querySelector('.user-info-value a, a');
+            if (title === 'Job') companyLinkEl = item.querySelector('.user-info-value a, a');
         });
 
         const statusIconEl = document.querySelector('li[id^="icon1-profile-"], li[id^="icon2-profile-"], li[id^="icon62-profile-"]');
