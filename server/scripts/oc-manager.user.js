@@ -557,10 +557,9 @@
       const lastTab = storage.get('OCLM_LAST_TAB', 'missing');
       const hashTab = getTabFromHash();
       
-      // If we are on Crimes page, don't auto-switch if user prefers Payouts.
-      // Use hash only if it explicitly demands a specific tab (like payouts).
+      // If a tab is explicitly requested by the hash, use it. Otherwise, default to the last saved tab.
       let targetTab = lastTab;
-      if (hashTab === 'payouts' || hashTab === 'unused') {
+      if (hashTab) {
         targetTab = hashTab;
       }
       
