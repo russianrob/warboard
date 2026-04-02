@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Manager
 // @namespace    https://torn.com
-// @version      2.3.21-pda
+// @version      2.3.22-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern UI, Dark/Light Mode, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.3.22-pda - Fix: Better tab persistence logic in openPanel
 // v2.3.21-pda - Fix: Robustness check for API responses in getUnpaidCompletedCrimes
 // v2.3.20-pda - Debug: Add logging to track tab persistence issues
 // v2.3.19-pda - Fix: properly prioritize persistent last-used tab in openPanel
@@ -547,11 +548,19 @@
       panel.style.visibility = 'visible'; 
       panel.style.transform = 'translateY(0) scale(1)'; 
       isOpen = true; 
+      
       const lastTab = storage.get('OCLM_LAST_TAB', 'missing');
-      console.log('[OCLM] Debug: openPanel called. lastTab from storage:', lastTab);
       const hashTab = getTabFromHash();
-      console.log('[OCLM] Debug: hashTab:', hashTab);
-      loadTab(hashTab || lastTab); 
+      
+      // If we are on Crimes page, don't auto-switch if user prefers Payouts.
+      // Use hash only if it explicitly demands a specific tab (like payouts).
+      let targetTab = lastTab;
+      if (hashTab === 'payouts' || hashTab === 'unused') {
+        targetTab = hashTab;
+      }
+      
+      console.log('[OCLM] Debug: openPanel logic targetTab:', targetTab, 'hashTab:', hashTab, 'lastTab:', lastTab);
+      loadTab(targetTab); 
     };
     const closePanel = () => { panel.style.opacity = '0'; panel.style.transform = 'translateY(10px) scale(0.98)'; setTimeout(() => { if (!isOpen) panel.style.visibility = 'hidden'; }, 200); isOpen = false; };
 
