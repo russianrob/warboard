@@ -70,7 +70,8 @@
                           img.src.includes('easter-egg');
 
             if (isEgg) processEgg(img);
-        }    }
+        }
+    }
 
     function processEgg(img) {
         if (img.dataset.foundByHunter) return;
