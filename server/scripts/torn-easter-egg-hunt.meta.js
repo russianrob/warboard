@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Easter Egg Hunter 2026
 // @namespace    torn.easter.egg.hunter
-// @version      1.0.0
-// @description  Detects, highlights, and helps you navigate for Easter Eggs in Torn City.
+// @version      1.1.0
+// @description  Ultimate Detection & Navigation for Torn Easter Eggs. Detects eggs in the root container, highlights them, and provides a 200+ page navigation tool with keyboard shortcuts.
 // @author       RussianRob
 // @match        https://www.torn.com/*
 // @run-at       document-end
