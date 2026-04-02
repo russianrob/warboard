@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Easter Egg Hunter 2026
 // @namespace    torn.easter.egg.hunter
-// @version      1.1.9
+// @version      1.2.0
 // @description  Ultimate Detection & Navigation for Torn Easter Eggs. Detects eggs in the root container, highlights them, and provides a 300+ page navigation tool with keyboard shortcuts.
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -17,7 +17,10 @@
     'use strict';
 
     // --- CONFIGURATION ---
-    const EGG_IDS = [618, 619, 620, 621, 622, 623, 624, 625, 626]; // IDs for Green, Red, Yellow, White, Black, Blue, Brown, Purple, Gold
+    const EGG_COLORS = {
+        618: 'Green', 619: 'Red', 620: 'Yellow', 621: 'White',
+        622: 'Black', 623: 'Blue', 624: 'Brown', 625: 'Purple', 626: 'Gold'
+    };
     
     // FULL LIST of 315+ pages extracted from Ultimate Hunter
     const NAV_PAGES = [
@@ -40,6 +43,24 @@
 
     const STORAGE_KEY_NAV_INDEX = 'torn_egg_nav_index';
     const STORAGE_KEY_ENABLED = 'torn_egg_hunter_enabled';
+    const STORAGE_KEY_ROUTE = 'torn_egg_route';
+    const STORAGE_KEY_FOUND_EGGS = 'torn_egg_found_dict';
+
+    // --- AUDIO HELPER ---
+    function playBeep() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gainNode = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(880, ctx.currentTime);
+            gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+            osc.connect(gainNode);
+            gainNode.connect(ctx.destination);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.3);
+        } catch(e) {}
+    }
 
     // --- EGG FINDER LOGIC ---
     function highlightEggs() {
@@ -49,44 +70,62 @@
         const nativeRoot = document.getElementById('easter-egg-hunt-root');
         if (nativeRoot) {
             const eggImages = nativeRoot.querySelectorAll('img');
-            eggImages.forEach(img => processEgg(img));
+            eggImages.forEach(img => {
+                let color = null;
+                for (let [id, col] of Object.entries(EGG_COLORS)) {
+                    if (img.src.includes(`/items/${id}/`)) { color = col; break; }
+                }
+                processEgg(img, color);
+            });
         }
 
         // 2. Detection via Image Scan (Fallback/Safety)
         const allImages = document.getElementsByTagName('img');
         for (let img of allImages) {
-            // Ignore tiny UI icons, large banners, and images inside specific UI/Calendar containers
+            // Ignore UI icons, large banners, and images inside specific containers (chat, profiles, etc.)
             if (
                 img.width < 20 ||
                 img.width > 150 ||
                 img.height < 20 ||
-                img.closest('[class*="filter"], [class*="category"], [class*="calendar"], [class*="title-black"], [class*="museum"], [class*="inventory"], [class*="item-wrap"], [class*="display"]')            ) {
+                img.closest('[class*="filter"], [class*="category"], [class*="calendar"], [class*="title-black"], [class*="museum"], [class*="inventory"], [class*="item-wrap"], [class*="display"], [class*="chat"], [class*="profile-image"], [class*="user-info"], [class*="signature"]')
+            ) {
                 continue;
             }
 
             const cleanSrc = img.src.split('?')[0].split('#')[0];
-            const isEgg = EGG_IDS.some(id => cleanSrc.includes(`/items/${id}/`)) || 
-                          cleanSrc.includes('easter_egg') || 
-                          cleanSrc.includes('easter-egg');
+            let foundColor = null;
+            let isEgg = false;
+            
+            for (let [id, col] of Object.entries(EGG_COLORS)) {
+                if (cleanSrc.includes(`/items/${id}/`)) { 
+                    foundColor = col; 
+                    isEgg = true;
+                    break; 
+                }
+            }
 
-            if (isEgg) processEgg(img);
+            if (!isEgg && (cleanSrc.includes('easter_egg') || cleanSrc.includes('easter-egg'))) {
+                isEgg = true;
+            }
+
+            if (isEgg) processEgg(img, foundColor);
         }
     }
 
-    function processEgg(img) {
+    function processEgg(img, color) {
         if (img.dataset.foundByHunter) return;
         img.dataset.foundByHunter = "true";
 
+        if (color) addFoundEgg(color);
+
         console.log("%c [EGG FOUND!] ", "background: #222; color: #bada55; font-size: 20px;");
         
-        // Ensure parent doesn't clip the enlarged egg
         let parent = img.parentElement;
         while (parent && parent !== document.body) {
             parent.style.overflow = 'visible';
             parent = parent.parentElement;
         }
 
-        // Apply "Mega-Egg" Center-Screen Styles
         Object.assign(img.style, {
             position: 'fixed',
             top: '50%',
@@ -106,7 +145,6 @@
             background: 'rgba(0,0,0,0.5)'
         });
 
-        // Add visual indicator styles
         if (!document.getElementById('egg-hunter-styles')) {
             const style = document.createElement('style');
             style.id = 'egg-hunter-styles';
@@ -127,26 +165,23 @@
             document.head.appendChild(style);
         }
 
-        // Visual Toast Notification
         const toast = document.createElement('div');
         toast.className = 'ueeh-toast';
-        toast.innerText = '🥚 EGG DETECTED! 🥚';
+        toast.innerText = color ? `🥚 ${color.toUpperCase()} EGG DETECTED! 🥚` : '🥚 EGG DETECTED! 🥚';
         document.body.appendChild(toast);
         setTimeout(() => toast.remove(), 5000);
 
-        // System Notification
         if (typeof GM_notification === 'function') {
             GM_notification({ title: 'Torn Egg Found!', text: 'An egg has been centered on your screen!', timeout: 10000 });
         }
         
-        // Audio Alert
-        try {
-            new Audio('https://www.myinstants.com/media/sounds/ding-sound-effect.mp3').play().catch(() => {});
-        } catch (e) {}
+        playBeep();
     }
 
     // --- SIDEBAR UI ---
     function addNavUI() {
+        if (window.location.href.includes('sid=attack')) return; // Hide on attack pages
+
         const sidebar = document.querySelector('#sidebarroot') || document.querySelector('.sidebar-menu');
         if (!sidebar || document.getElementById('egg-hunter-container')) return;
 
@@ -159,8 +194,8 @@
         `;
 
         const header = document.createElement('div');
-        header.style.cssText = 'font-weight: bold; color: gold; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;';
-        header.innerHTML = '<span>🥚 Egg Hunter v1.1.9</span>';
+        header.style.cssText = 'font-weight: bold; color: gold; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center;';
+        header.innerHTML = '<span>🥚 Egg Hunter v1.2.0</span>';
         
         const toggleBtn = document.createElement('span');
         toggleBtn.id = 'egg-hunter-toggle';
@@ -173,12 +208,26 @@
         };
         header.appendChild(toggleBtn);
 
+        const routeControls = document.createElement('div');
+        routeControls.style.cssText = 'display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 10px;';
+        
+        const isShuffled = getRoute()[0] !== NAV_PAGES[0];
+        const shuffleBtn = document.createElement('span');
+        shuffleBtn.id = 'egg-shuffle-btn';
+        shuffleBtn.innerText = isShuffled ? '🔀 Route: Shuffled' : '▶ Route: Default';
+        shuffleBtn.style.cursor = 'pointer';
+        shuffleBtn.style.color = isShuffled ? '#bada55' : '#ccc';
+        shuffleBtn.onclick = () => {
+            if (getRoute()[0] !== NAV_PAGES[0]) resetRoute();
+            else shuffleCurrentRoute();
+        };
+        routeControls.appendChild(shuffleBtn);
+
         const progressContainer = document.createElement('div');
         progressContainer.style.cssText = 'height: 4px; background: #333; border-radius: 2px; margin-bottom: 10px; overflow: hidden;';
         const progressBar = document.createElement('div');
         progressBar.id = 'egg-progress-bar';
-        const percent = (getNavIndex() / NAV_PAGES.length) * 100;
-        progressBar.style.cssText = `height: 100%; width: ${percent}%; background: gold; transition: width 0.3s;`;
+        progressBar.style.cssText = `height: 100%; width: 0%; background: gold; transition: width 0.3s;`;
         progressContainer.appendChild(progressBar);
 
         const navBtn = document.createElement('div');
@@ -191,7 +240,6 @@
         navBtn.onmouseover = () => { navBtn.style.background = '#333'; navBtn.style.borderColor = 'gold'; };
         navBtn.onmouseout = () => { navBtn.style.background = '#222'; navBtn.style.borderColor = '#444'; };
         
-        updateNavBtnLabel(navBtn);
         navBtn.onclick = () => navigate(1);
 
         const footer = document.createElement('div');
@@ -210,41 +258,73 @@
         footer.appendChild(prevBtn);
         footer.appendChild(resetBtn);
 
+        // Tracker UI
+        const trackerContainer = document.createElement('div');
+        trackerContainer.id = 'egg-tracker';
+        trackerContainer.style.cssText = 'margin-top: 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; font-size: 9px; text-align: center;';
+
         container.appendChild(header);
+        container.appendChild(routeControls);
         container.appendChild(progressContainer);
         container.appendChild(navBtn);
         container.appendChild(footer);
+        container.appendChild(trackerContainer);
 
         const firstChild = sidebar.firstChild;
         if (firstChild) sidebar.insertBefore(container, firstChild);
         else sidebar.appendChild(container);
+
+        updateNavUI();
     }
 
     function navigate(direction) {
-        let idx = getNavIndex(); // Current 1-based index (page to visit next)
+        let idx = getNavIndex();
+        const route = getRoute();
         
         if (direction > 0) {
-            if (idx >= NAV_PAGES.length) idx = 0;
+            if (idx >= route.length) idx = 0;
         } else {
             idx -= 2;
-            if (idx < 0) idx = NAV_PAGES.length + idx;
+            if (idx < 0) idx = route.length + idx;
         }
         
-        const nextPage = NAV_PAGES[idx];
+        const nextPage = route[idx];
         setNavIndex(idx + 1);
-        window.location.href = `https://www.torn.com/${nextPage}`;
-    }
 
-    function updateNavBtnLabel(btn) {
-        const currentIndex = getNavIndex();
-        btn.innerHTML = `HUNT NEXT PAGE <br> (${currentIndex}/${NAV_PAGES.length})`;
+        // Humanized Delay
+        const delay = Math.floor(Math.random() * 200) + 100;
+        setTimeout(() => {
+            window.location.href = `https://www.torn.com/${nextPage}`;
+        }, delay);
     }
 
     function updateNavUI() {
+        const route = getRoute();
         const btn = document.getElementById('egg-nav-btn');
-        if (btn) updateNavBtnLabel(btn);
+        if (btn) btn.innerHTML = `HUNT NEXT PAGE <br> (${getNavIndex()}/${route.length})`;
+        
         const bar = document.getElementById('egg-progress-bar');
-        if (bar) bar.style.width = `${(getNavIndex() / NAV_PAGES.length) * 100}%`;
+        if (bar) bar.style.width = `${(getNavIndex() / route.length) * 100}%`;
+
+        const tracker = document.getElementById('egg-tracker');
+        if (tracker) {
+            tracker.innerHTML = '';
+            const foundEggs = getFoundEggs();
+            Object.values(EGG_COLORS).forEach(col => {
+                const el = document.createElement('div');
+                const found = foundEggs[col];
+                el.style.cssText = `padding: 3px; border-radius: 3px; background: ${found ? '#2d4d2d' : '#222'}; color: ${found ? '#bada55' : '#555'}; border: 1px solid ${found ? '#4caf50' : '#333'};`;
+                el.innerText = col;
+                tracker.appendChild(el);
+            });
+        }
+
+        const shuffleBtn = document.getElementById('egg-shuffle-btn');
+        if (shuffleBtn) {
+            const isShuffled = route[0] !== NAV_PAGES[0];
+            shuffleBtn.innerText = isShuffled ? '🔀 Route: Shuffled' : '▶ Route: Default';
+            shuffleBtn.style.color = isShuffled ? '#bada55' : '#ccc';
+        }
     }
 
     function updateToggleStyle(btn) {
@@ -253,6 +333,39 @@
         btn.style.background = enabled ? '#2d4d2d' : '#4d2d2d';
         btn.style.color = enabled ? '#4caf50' : '#f44336';
         btn.style.border = `1px solid ${enabled ? '#4caf50' : '#f44336'}`;
+    }
+
+    // --- ROUTE & STORAGE HELPERS ---
+    function shuffleCurrentRoute() {
+        let route = [...NAV_PAGES];
+        for (let i = route.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [route[i], route[j]] = [route[j], route[i]];
+        }
+        setRoute(route);
+        setNavIndex(0);
+        updateNavUI();
+    }
+
+    function resetRoute() {
+        setRoute(NAV_PAGES);
+        setNavIndex(0);
+        updateNavUI();
+    }
+
+    function getNavIndex() { return GM_getValue(STORAGE_KEY_NAV_INDEX, 0); }
+    function setNavIndex(idx) { GM_setValue(STORAGE_KEY_NAV_INDEX, idx); }
+    function getEnabled() { return GM_getValue(STORAGE_KEY_ENABLED, true); }
+    function setEnabled(val) { GM_setValue(STORAGE_KEY_ENABLED, val); }
+    function getRoute() { return GM_getValue(STORAGE_KEY_ROUTE, NAV_PAGES); }
+    function setRoute(route) { GM_setValue(STORAGE_KEY_ROUTE, route); }
+    function getFoundEggs() { return JSON.parse(GM_getValue(STORAGE_KEY_FOUND_EGGS, '{}')); }
+    function addFoundEgg(color) { 
+        if(!color) return;
+        const eggs = getFoundEggs(); 
+        eggs[color] = true; 
+        GM_setValue(STORAGE_KEY_FOUND_EGGS, JSON.stringify(eggs)); 
+        updateNavUI(); 
     }
 
     // --- KEYBOARD SHORTCUTS ---
@@ -264,19 +377,16 @@
         }
     }
 
-    // --- STORAGE HELPERS ---
-    function getNavIndex() { return parseInt(localStorage.getItem(STORAGE_KEY_NAV_INDEX) || '0', 10); }
-    function setNavIndex(idx) { localStorage.setItem(STORAGE_KEY_NAV_INDEX, idx.toString()); }
-    function getEnabled() { const val = localStorage.getItem(STORAGE_KEY_ENABLED); return val === null ? true : val === 'true'; }
-    function setEnabled(val) { localStorage.setItem(STORAGE_KEY_ENABLED, val.toString()); }
-
     // --- INITIALIZATION ---
     function init() {
         highlightEggs();
         addNavUI();
         window.addEventListener('keydown', handleKeydown);
 
-        const observer = new MutationObserver(() => {
+        const observer = new MutationObserver((mutations) => {
+            let hasAddedNodes = mutations.some(m => m.addedNodes.length > 0);
+            if (!hasAddedNodes) return;
+
             if (window.eggHunterTimeout) clearTimeout(window.eggHunterTimeout);
             window.eggHunterTimeout = setTimeout(() => {
                 highlightEggs();
@@ -290,4 +400,3 @@
     else init();
 
 })();
-
