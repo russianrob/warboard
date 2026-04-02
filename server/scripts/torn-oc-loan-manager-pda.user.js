@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn OC Loan Manager (PDA)
 // @namespace    https://torn.com
-// @version      2.0.7-pda
+// @version      2.0.8-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.0.8-pda - Fix: robust double-loan prevention (disables button immediately, prevents pointer events during loan)
 // v2.0.7-pda - Add support for clothing and armor (e.g. Construction Helmet) in armory categories
 // v2.0.6-pda - Fix: Payouts now detects item-reward OCs (e.g. Xanax payouts), not just cash
 // v2.0.5-pda - Fix: Payouts — add time range + limit to catch recent OCs, log total count for debugging
@@ -772,20 +773,28 @@
         // Loan buttons
         content.querySelectorAll('.loan-btn').forEach(btn => {
           btn.onclick = async () => {
-            if (btn.dataset.loaning === 'true') return; // prevent double-click
+            if (btn.dataset.loaning === 'true' || btn.disabled) return;
             btn.dataset.loaning = 'true';
+            btn.disabled = true;
+            btn.style.pointerEvents = 'none';
+            btn.style.cursor = 'not-allowed';
+            btn.textContent = 'Refreshing…';
+            btn.style.opacity = '0.6';
+
             const itemID = parseInt(btn.dataset.itemid, 10);
             const userID = parseInt(btn.dataset.userid, 10);
             const userName = btn.dataset.username;
-            btn.disabled = true;
-            btn.textContent = '…';
-            btn.style.opacity = '0.6';
+
             try {
+              // This is the slow part (refreshes cache)
               const armoryID = await prepareArmouryForItem(itemID);
+              
               if (!armoryID) {
                 btn.textContent = 'No stock';
                 btn.style.background = '#555';
                 btn.style.opacity = '1';
+                btn.style.pointerEvents = 'auto';
+                btn.style.cursor = 'pointer';
                 // Allow retry for no stock — item might be restocked
                 setTimeout(() => {
                   btn.dataset.loaning = 'false';
@@ -795,7 +804,10 @@
                 }, 3000);
                 return;
               }
+
+              btn.textContent = 'Loaning…';
               await loanPreparedItem({ userID, userName });
+              
               btn.textContent = '✓ Loaned';
               btn.style.background = '#1a7a1a';
               btn.style.opacity = '1';
@@ -806,7 +818,8 @@
               btn.textContent = '? Check';
               btn.style.background = '#b8860b';
               btn.style.opacity = '1';
-              // Don't re-enable — user should refresh the tab to see current state
+              btn.style.pointerEvents = 'none';
+              btn.style.cursor = 'default';
               console.error('[OCLM] Loan error:', e);
             }
           };
