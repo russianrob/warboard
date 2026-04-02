@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn OC Loan Manager (PDA)
 // @namespace    https://torn.com
-// @version      2.2.1-pda
+// @version      2.2.2-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern Dark UI, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.2.2-pda - Fix: UI lag (removed backdrop-filter), double-click toggle bug, and improved drag performance
 // v2.2.1-pda - Fix: corrupted template strings from previous update
 // v2.2.0-pda - Modern Dark UI overhaul: Glassmorphism, card-based layouts, and refined animations
 // v2.1.0-pda - Fix: robust retrieve button double-click prevention and better feedback
@@ -101,40 +102,24 @@
 
   // Torn item type -> armory tab type mapping
   const ITEM_TYPE_TO_ARMORY_TAB = {
-    'Tool': 'utilities',
-    'Drug': 'drugs',
-    'Medical': 'medical',
-    'Booster': 'boosters',
-    'Temporary': 'temporary',
-    'Clothing': 'clothing',
-    'Armor': 'armor'
+    'Tool': 'utilities', 'Drug': 'drugs', 'Medical': 'medical',
+    'Booster': 'boosters', 'Temporary': 'temporary', 'Clothing': 'clothing', 'Armor': 'armor'
   };
 
   // Armory tab type -> POST `type` param for loan/retrieve actions
   const ARMORY_TAB_TO_POST_TYPE = {
-    'utilities': 'Tool',
-    'drugs': 'Drug',
-    'medical': 'Medical',
-    'boosters': 'Booster',
-    'temporary': 'Temporary',
-    'clothing': 'Clothing',
-    'armor': 'Armor'
+    'utilities': 'Tool', 'drugs': 'Drug', 'medical': 'Medical',
+    'boosters': 'Booster', 'temporary': 'Temporary', 'clothing': 'Clothing', 'armor': 'Armor'
   };
 
-  // All armory categories that can hold OC items
   const ARMORY_CATEGORIES = ['utilities', 'drugs', 'medical', 'boosters', 'temporary', 'clothing', 'armor'];
 
-  // Cache: itemID -> Torn item type (e.g. 'Tool', 'Drug', 'Medical')
   const itemTypeCache = new Map();
 
   // ------------------- Utilities -------------------
   const getRfcvToken = () => {
     const match = document.cookie.match(/rfc_v=([^;]+)/);
     return match ? match[1] : null;
-  };
-
-  const isOnArmoryUtilities = () => {
-    return location.hash.includes('#/tab=armoury') && location.hash.includes('sub=utilities');
   };
 
   const formatNumber = (num) => {
@@ -161,10 +146,7 @@
     const missing = [];
     data.crimes.forEach(crime => {
       crime.slots?.forEach(slot => {
-        if (slot.item_requirement && !slot.item_requirement.is_available &&
-            slot.user?.id &&
-            !BLACKLISTED_ITEM_IDS.has(slot.item_requirement.id)
-        ) {
+        if (slot.item_requirement && !slot.item_requirement.is_available && slot.user?.id && !BLACKLISTED_ITEM_IDS.has(slot.item_requirement.id)) {
           missing.push({
             crimeName: crime.name,
             position: slot.position,
@@ -178,13 +160,11 @@
     return missing;
   };
 
-  // Returns ALL item requirements for active OCs (both available and missing)
   const getAllOCItemRequirements = async () => {
     const key = requireApiKeyOrThrow();
     const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}`);
     if (!res.ok) throw new Error('Failed to load OC data');
     const data = await res.json();
-    // userID -> Set of itemIDs they need for any OC
     const neededByUser = new Map();
     data.crimes.forEach(crime => {
       crime.slots?.forEach(slot => {
@@ -201,10 +181,8 @@
 
   const getUnpaidCompletedCrimes = async () => {
     const key = requireApiKeyOrThrow();
-    // Fetch successful crimes from the last 30 days
     const now = Math.floor(Date.now() / 1000);
     const thirtyDaysAgo = now - (30 * 24 * 60 * 60);
-    // Use cat=successful with time range to catch recent OCs
     const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=successful&filter=executed_at&from=${thirtyDaysAgo}&to=${now}&sort=DESC&limit=100&key=${key}`);
     if (!res.ok) throw new Error('Failed to load completed crimes');
     const data = await res.json();
@@ -213,57 +191,34 @@
     const unpaid = [];
     for (const c of crimes) {
       const paidAt = c?.rewards?.payout?.paid_at;
-      if (paidAt) continue; // already paid
+      if (paidAt) continue;
       const money = Number(c?.rewards?.money || 0);
       const respect = Number(c?.rewards?.respect || 0);
       const hasItems = Array.isArray(c?.rewards?.items) ? c.rewards.items.length > 0 : false;
       if (money <= 0 && respect <= 0 && !hasItems) continue;
-      unpaid.push({
-        id: c.id,
-        name: c.name || 'Unknown OC',
-        difficulty: c.difficulty || null,
-        executedAt: c.executed_at,
-        money,
-        respect,
-        hasItems,
-        payoutPct: c?.rewards?.payout?.percentage ?? null
-      });
+      unpaid.push({ id: c.id, name: c.name || 'Unknown OC', difficulty: c.difficulty || null, executedAt: c.executed_at, money, respect, hasItems, payoutPct: c?.rewards?.payout?.percentage ?? null });
     }
     return unpaid;
   };
 
   const ITEM_NAME_CACHE_KEY = 'UTILITY_ITEM_ID_NAME_MAP';
-
-  const getItemNameMap = () => {
-    return JSON.parse(storage.get(ITEM_NAME_CACHE_KEY, '{}'));
-  };
-
+  const getItemNameMap = () => JSON.parse(storage.get(ITEM_NAME_CACHE_KEY, '{}'));
   const setItemName = (itemID, name) => {
     const map = getItemNameMap();
-    if (!map[itemID]) {
-      map[itemID] = name;
-      storage.set(ITEM_NAME_CACHE_KEY, JSON.stringify(map));
-    }
+    if (!map[itemID]) { map[itemID] = name; storage.set(ITEM_NAME_CACHE_KEY, JSON.stringify(map)); }
   };
-
-  const getItemName = (itemID) => {
-    const map = getItemNameMap();
-    return map[itemID] || null;
-  };
+  const getItemName = (itemID) => getItemNameMap()[itemID] || null;
 
   const resolveItemNames = async (itemIDs) => {
     const unknown = itemIDs.filter(id => !getItemName(id));
     if (unknown.length === 0) return;
-
     const unique = [...new Set(unknown)];
     try {
       const key = requireApiKeyOrThrow();
       const res = await fetch(`https://api.torn.com/v2/torn/items?ids=${unique.join(',')}&key=${key}`);
       const data = await res.json();
       const items = Array.isArray(data?.items) ? data.items : Object.values(data?.items || {});
-      items.forEach(item => {
-        if (item.id && item.name) setItemName(item.id, item.name);
-      });
+      items.forEach(item => { if (item.id && item.name) setItemName(item.id, item.name); });
     } catch { /* ignore */ }
   };
 
@@ -271,66 +226,42 @@
   const fetchArmoryCategoryJSON = async (category) => {
     const rfcv = getRfcvToken();
     if (!rfcv) throw new Error('Missing RFCV token');
-    const body = new URLSearchParams({
-      step: 'armouryTabContent',
-      type: category,
-      start: '0',
-      ajax: 'true'
-    });
+    const body = new URLSearchParams({ step: 'armouryTabContent', type: category, start: '0', ajax: 'true' });
     const res = await fetch(`https://www.torn.com/factions.php?rfcv=${rfcv}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      body,
-      credentials: 'same-origin'
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' },
+      body, credentials: 'same-origin'
     });
     if (!res.ok) return []; 
     try {
       const data = await res.json();
       if (!data?.items) return [];
-      for (const entry of data.items) {
-        if (entry.itemID && entry.name) {
-          setItemName(entry.itemID, entry.name);
-        }
-      }
+      for (const entry of data.items) { if (entry.itemID && entry.name) setItemName(entry.itemID, entry.name); }
       return data.items.map(item => ({ ...item, armoryCategory: category }));
     } catch { return []; }
   };
 
   const fetchAllArmoryItems = async () => {
-    const results = await Promise.all(
-      ARMORY_CATEGORIES.map(cat => fetchArmoryCategoryJSON(cat))
-    );
+    const results = await Promise.all(ARMORY_CATEGORIES.map(cat => fetchArmoryCategoryJSON(cat)));
     return results.flat();
   };
 
   const refreshArmoryCache = async (force = false) => {
     const now = Date.now();
-    if (!force && armoryCache.size > 0 && (now - lastRefreshTime < REFRESH_COOLDOWN_MS)) {
-      return; 
-    }
+    if (!force && armoryCache.size > 0 && (now - lastRefreshTime < REFRESH_COOLDOWN_MS)) return; 
     armoryCache.clear();
     const items = await fetchAllArmoryItems();
     for (const entry of items) {
       if (entry.user === false && entry.qty > 0) {
-        armoryCache.set(entry.itemID, {
-          armoryID: entry.armoryID,
-          qty: entry.qty,
-          armoryCategory: entry.armoryCategory
-        });
+        armoryCache.set(entry.itemID, { armoryID: entry.armoryID, qty: entry.qty, armoryCategory: entry.armoryCategory });
       }
     }
     lastRefreshTime = Date.now();
   };
 
   const prepareArmouryForItem = async (itemID) => {
-    if (!armoryCache.has(itemID)) {
-      await refreshArmoryCache(true);
-    } else {
-      await refreshArmoryCache(false);
-    }
+    if (!armoryCache.has(itemID)) await refreshArmoryCache(true);
+    else await refreshArmoryCache(false);
     const entry = armoryCache.get(itemID);
     if (!entry || entry.qty <= 0) return null;
     preparedArmoryID = entry.armoryID;
@@ -340,34 +271,18 @@
 
   const getPostTypeForItem = (itemID) => {
     const cached = armoryCache.get(itemID);
-    if (cached?.armoryCategory) {
-      return ARMORY_TAB_TO_POST_TYPE[cached.armoryCategory] || 'Tool';
-    }
-    return 'Tool';
+    return (cached?.armoryCategory ? ARMORY_TAB_TO_POST_TYPE[cached.armoryCategory] : null) || 'Tool';
   };
 
   const retrieveItem = async ({ armoryID, itemID, userID, userName, postType }) => {
     const rfcv = getRfcvToken();
     if (!rfcv) throw new Error('Missing RFCV token');
     const itemPostType = postType || getPostTypeForItem(itemID);
-    const body = new URLSearchParams({
-      ajax: 'true',
-      step: 'armouryActionItem',
-      role: 'retrieve',
-      item: armoryID,
-      itemID: itemID,
-      type: itemPostType,
-      user: `${userName} [${userID}]`,
-      quantity: '1'
-    });
+    const body = new URLSearchParams({ ajax: 'true', step: 'armouryActionItem', role: 'retrieve', item: armoryID, itemID: itemID, type: itemPostType, user: `${userName} [${userID}]`, quantity: '1' });
     const res = await fetch(`https://www.torn.com/factions.php?rfcv=${rfcv}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      body,
-      credentials: 'same-origin'
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' },
+      body, credentials: 'same-origin'
     });
     if (!res.ok) throw new Error('Retrieve request failed');
     const text = await res.text();
@@ -378,24 +293,11 @@
     const rfcv = getRfcvToken();
     if (!rfcv) throw new Error('Missing RFCV token');
     const itemPostType = getPostTypeForItem(itemID);
-    const body = new URLSearchParams({
-      ajax: 'true',
-      step: 'armouryActionItem',
-      role: 'loan',
-      item: armoryID,
-      itemID: itemID,
-      type: itemPostType,
-      user: `${userName} [${userID}]`,
-      quantity: '1'
-    });
+    const body = new URLSearchParams({ ajax: 'true', step: 'armouryActionItem', role: 'loan', item: armoryID, itemID: itemID, type: itemPostType, user: `${userName} [${userID}]`, quantity: '1' });
     const res = await fetch(`https://www.torn.com/factions.php?rfcv=${rfcv}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      body,
-      credentials: 'same-origin'
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' },
+      body, credentials: 'same-origin'
     });
     if (!res.ok) throw new Error('Loan request failed');
     const text = await res.text();
@@ -406,12 +308,8 @@
     if (!preparedArmoryID || pendingArmoryItemID === null) throw new Error('Armoury not prepared');
     await loanItem({ armoryID: preparedArmoryID, itemID: pendingArmoryItemID, userID, userName });
     const entry = armoryCache.get(pendingArmoryItemID);
-    if (entry) {
-      entry.qty -= 1;
-      if (entry.qty <= 0) armoryCache.delete(pendingArmoryItemID);
-    }
-    preparedArmoryID = null;
-    pendingArmoryItemID = null;
+    if (entry) { entry.qty -= 1; if (entry.qty <= 0) armoryCache.delete(pendingArmoryItemID); }
+    preparedArmoryID = null; pendingArmoryItemID = null;
   };
 
   // ------------------- UI (Modern) -------------------
@@ -423,24 +321,12 @@
     button.setAttribute('role', 'button');
     button.setAttribute('aria-label', 'OC Loan Manager');
     button.style.cssText = `
-      position: fixed;
-      width: 48px;
-      height: 48px;
-      background: linear-gradient(135deg, #2a3cff, #1a27b0);
-      color: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 50%;
-      font-size: 14px;
-      font-weight: 800;
-      cursor: grab;
-      z-index: 99999;
+      position: fixed; width: 48px; height: 48px; background: linear-gradient(135deg, #2a3cff, #1a27b0);
+      color: #fff; display: flex; align-items: center; justify-content: center; border-radius: 50%;
+      font-size: 14px; font-weight: 800; cursor: grab; z-index: 99999;
       box-shadow: 0 4px 15px rgba(42, 60, 255, 0.4), inset 0 1px 1px rgba(255,255,255,0.3);
-      user-select: none;
-      transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.2s ease, opacity 0.2s ease;
-      -webkit-tap-highlight-color: transparent;
-      touch-action: none;
+      user-select: none; transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.2s ease;
+      -webkit-tap-highlight-color: transparent; touch-action: none;
     `;
     button.innerHTML = '<span style="letter-spacing:-1px; margin-left:-1px;">OC</span>';
 
@@ -448,15 +334,12 @@
     if (savedPos) {
       try {
         const { x, y } = JSON.parse(savedPos);
-        button.style.left = x + 'px';
-        button.style.top = y + 'px';
+        button.style.left = x + 'px'; button.style.top = y + 'px';
       } catch {
-        button.style.right = '14px';
-        button.style.top = '14px';
+        button.style.right = '14px'; button.style.top = '14px';
       }
     } else {
-      button.style.right = '14px';
-      button.style.top = '14px';
+      button.style.right = '14px'; button.style.top = '14px';
     }
 
     let isDragging = false, wasDragged = false;
@@ -470,13 +353,10 @@
 
     const onDragStart = (e) => {
       const pos = getClientPos(e);
-      dragStartX = pos.x;
-      dragStartY = pos.y;
+      dragStartX = pos.x; dragStartY = pos.y;
       const rect = button.getBoundingClientRect();
-      btnStartX = rect.left;
-      btnStartY = rect.top;
-      isDragging = true;
-      wasDragged = false;
+      btnStartX = rect.left; btnStartY = rect.top;
+      isDragging = true; wasDragged = false;
       button.style.cursor = 'grabbing';
       button.style.transform = 'scale(0.95)';
 
@@ -489,17 +369,14 @@
     const onDragMove = (e) => {
       if (!isDragging) return;
       const pos = getClientPos(e);
-      const dx = pos.x - dragStartX;
-      const dy = pos.y - dragStartY;
+      const dx = pos.x - dragStartX, dy = pos.y - dragStartY;
       if (!wasDragged && Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
       wasDragged = true;
       e.preventDefault();
       const bw = button.offsetWidth, bh = button.offsetHeight;
       const newX = Math.max(0, Math.min(window.innerWidth - bw, btnStartX + dx));
       const newY = Math.max(0, Math.min(window.innerHeight - bh, btnStartY + dy));
-      button.style.left = newX + 'px';
-      button.style.top = newY + 'px';
-      button.style.right = 'auto';
+      button.style.left = newX + 'px'; button.style.top = newY + 'px'; button.style.right = 'auto';
     };
 
     const onDragEnd = (e) => {
@@ -515,8 +392,6 @@
       if (wasDragged) {
         const rect = button.getBoundingClientRect();
         storage.set('OCLM_BTN_POS', JSON.stringify({ x: Math.round(rect.left), y: Math.round(rect.top) }));
-      } else if (e.type === 'touchend' || e.type === 'mouseup') {
-        isOpen ? closePanel() : openPanel();
       }
     };
 
@@ -526,126 +401,53 @@
     const panel = document.createElement('div');
     panel.id = 'oc-loan-panel';
     panel.style.cssText = `
-      position:fixed;
-      width:340px;
-      max-width:92vw;
-      max-height:85vh;
-      background: rgba(18, 18, 18, 0.85);
-      backdrop-filter: blur(12px) saturate(160%);
-      -webkit-backdrop-filter: blur(12px) saturate(160%);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 16px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
-      z-index:99998;
-      opacity:0;
-      visibility:hidden;
+      position:fixed; width:340px; max-width:92vw; max-height:85vh;
+      background: rgba(24, 24, 24, 0.98); border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+      z-index:99998; opacity:0; visibility:hidden;
       transform:translateY(10px) scale(0.98);
-      transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.3s;
-      display:flex;
-      flex-direction:column;
-      overflow:hidden;
-      color: #efefef;
+      transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+      display:flex; flex-direction:column; overflow:hidden; color: #efefef;
     `;
 
     const style = document.createElement('style');
     style.textContent = `
       #oc-loan-panel * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-      #oc-loan-panel .oc-header {
-        padding: 14px 16px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        background: rgba(0, 0, 0, 0.2);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      }
+      #oc-loan-panel .oc-header { padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; background: rgba(0, 0, 0, 0.2); border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
       #oc-loan-panel .oc-title { font-size: 16px; font-weight: 700; background: linear-gradient(90deg, #fff, #aaa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
       #oc-loan-panel .oc-close { cursor: pointer; font-size: 20px; color: #888; transition: color 0.2s; line-height: 1; }
       #oc-loan-panel .oc-close:hover { color: #fff; }
-      
-      #oc-loan-panel .oc-nav {
-        padding: 8px 12px;
-        display: flex;
-        gap: 4px;
-        background: rgba(0, 0, 0, 0.1);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      }
-      #oc-loan-panel .oc-tab {
-        flex: 1;
-        padding: 8px 4px;
-        background: transparent;
-        border-radius: 8px;
-        border: none;
-        color: #888;
-        cursor: pointer;
-        font-weight: 600;
-        font-size: 12px;
-        transition: all 0.2s ease;
-      }
+      #oc-loan-panel .oc-nav { padding: 8px 12px; display: flex; gap: 4px; background: rgba(0, 0, 0, 0.1); border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+      #oc-loan-panel .oc-tab { flex: 1; padding: 8px 4px; background: transparent; border-radius: 8px; border: none; color: #888; cursor: pointer; font-weight: 600; font-size: 12px; transition: all 0.2s ease; }
       #oc-loan-panel .oc-tab.active { background: rgba(42, 60, 255, 0.15); color: #7af; box-shadow: inset 0 0 0 1px rgba(42, 60, 255, 0.3); }
       #oc-loan-panel .oc-tab:hover:not(.active) { background: rgba(255, 255, 255, 0.05); color: #ccc; }
-
-      #oc-content {
-        padding: 16px;
-        overflow-y: auto;
-        overflow-x: hidden;
-        flex: 1;
-        scrollbar-width: thin;
-        scrollbar-color: rgba(255,255,255,0.1) transparent;
-      }
+      #oc-content { padding: 16px; overflow-y: auto; overflow-x: hidden; flex: 1; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent; }
       #oc-content::-webkit-scrollbar { width: 4px; }
       #oc-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
-
-      .oc-card {
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        border-radius: 12px;
-        padding: 12px;
-        margin-bottom: 12px;
-        transition: transform 0.2s ease, border-color 0.2s ease;
-      }
+      .oc-card { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 12px; margin-bottom: 12px; transition: transform 0.2s ease, border-color 0.2s ease; }
       .oc-card:hover { border-color: rgba(255, 255, 255, 0.12); transform: translateY(-1px); }
-      
       .oc-card-header { display: flex; justify-content: space-between; margin-bottom: 8px; align-items: flex-start; }
       .oc-crime-name { font-weight: 700; font-size: 13.5px; color: #fff; flex: 1; padding-right: 8px; }
       .oc-pos-tag { font-size: 10px; padding: 2px 6px; background: rgba(255,255,255,0.08); border-radius: 4px; color: #aaa; text-transform: uppercase; }
-      
       .oc-card-body { font-size: 12.5px; color: #bbb; line-height: 1.5; }
       .oc-item-row, .oc-player-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
       .oc-label { color: #666; width: 45px; flex-shrink: 0; }
       .oc-value { color: #ddd; }
       .oc-player-link { color: #7af; text-decoration: none; font-weight: 500; transition: color 0.2s; }
       .oc-player-link:hover { color: #9cf; text-decoration: underline; }
-
-      .oc-action-btn {
-        width: 100%;
-        margin-top: 10px;
-        padding: 10px;
-        border-radius: 10px;
-        border: none;
-        font-weight: 700;
-        font-size: 13px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-      }
+      .oc-action-btn { width: 100%; margin-top: 10px; padding: 10px; border-radius: 10px; border: none; font-weight: 700; font-size: 13px; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 6px; }
       .btn-loan { background: #2a3cff; color: #fff; box-shadow: 0 4px 12px rgba(42, 60, 255, 0.25); }
       .btn-loan:hover:not(:disabled) { background: #3d4dff; transform: translateY(-1px); box-shadow: 0 6px 15px rgba(42, 60, 255, 0.35); }
       .btn-retrieve { background: rgba(200, 60, 60, 0.15); color: #f66; border: 1px solid rgba(200, 60, 60, 0.3); }
       .btn-retrieve:hover:not(:disabled) { background: rgba(200, 60, 60, 0.25); color: #fff; border-color: transparent; }
-      
       .oc-action-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(0.5); }
       .btn-success { background: #1a7a1a !important; color: #fff !important; cursor: default !important; transform: none !important; box-shadow: none !important; }
       .btn-warning { background: #b8860b !important; color: #fff !important; cursor: default !important; }
-
       .oc-status-bar { padding: 8px 16px; font-size: 10px; color: #555; background: rgba(0,0,0,0.2); display: flex; justify-content: space-between; border-top: 1px solid rgba(255, 255, 255, 0.05); }
     `;
     document.head.appendChild(style);
 
     const apiStatusShort = inPDA ? 'PDA' : (getApiKey() ? 'Local' : 'None');
-
     panel.innerHTML = `
       <div class="oc-header">
         <span class="oc-title">OC Manager</span>
@@ -659,7 +461,7 @@
       </div>
       <div id="oc-content"></div>
       <div class="oc-status-bar">
-        <span>v2.2.1-pda</span>
+        <span>v2.2.2-pda</span>
         <span>API: ${apiStatusShort}</span>
       </div>
     `;
@@ -668,7 +470,6 @@
     document.body.appendChild(panel);
 
     let isOpen = false;
-
     const positionPanel = () => {
       const btnRect = button.getBoundingClientRect();
       const panelW = 340, panelH = panel.offsetHeight || 400;
@@ -693,25 +494,22 @@
     const closePanel = () => {
       panel.style.opacity = '0';
       panel.style.transform = 'translateY(10px) scale(0.98)';
-      setTimeout(() => { if (!isOpen) panel.style.visibility = 'hidden'; }, 300);
+      setTimeout(() => { if (!isOpen) panel.style.visibility = 'hidden'; }, 200);
       isOpen = false;
     };
 
+    button.addEventListener('click', () => { if (!wasDragged) { isOpen ? closePanel() : openPanel(); } });
     panel.querySelector('.oc-close').onclick = closePanel;
 
     const loadTab = (tab) => {
-      panel.querySelectorAll('.oc-tab').forEach(t => {
-        t.classList.toggle('active', t.dataset.tab === tab);
-      });
+      panel.querySelectorAll('.oc-tab').forEach(t => { t.classList.toggle('active', t.dataset.tab === tab); });
       if (tab === 'missing') loadMissingTab();
       else if (tab === 'unused') loadUnusedTab();
       else if (tab === 'payouts') loadPayoutsTab();
       else if (tab === 'settings') loadSettingsTab();
     };
 
-    panel.querySelectorAll('.oc-tab').forEach(t => {
-      t.onclick = () => loadTab(t.dataset.tab);
-    });
+    panel.querySelectorAll('.oc-tab').forEach(t => { t.onclick = () => loadTab(t.dataset.tab); });
 
     const loadMissingTab = async () => {
       const content = document.getElementById('oc-content');
@@ -719,10 +517,7 @@
       try {
         await loadMembers();
         const missing = await getMissingOCItems();
-        if (!missing.length) {
-          content.innerHTML = '<div style="text-align:center;color:#4a4;padding:40px;font-size:14px;font-weight:600;">All OC items allocated ✓</div>';
-          return;
-        }
+        if (!missing.length) { content.innerHTML = '<div style="text-align:center;color:#4a4;padding:40px;font-size:14px;font-weight:600;">All OC items allocated ✓</div>'; return; }
         await resolveItemNames(missing.map(m => m.itemID));
         let html = '';
         for (const m of missing) {
@@ -734,18 +529,10 @@
                 <span class="oc-pos-tag">${m.position}</span>
               </div>
               <div class="oc-card-body">
-                <div class="oc-item-row">
-                  <span class="oc-label">Item</span>
-                  <span class="oc-value" style="font-weight:600;color:#ddd;">${itemName}</span>
-                </div>
-                <div class="oc-player-row">
-                  <span class="oc-label">Player</span>
-                  <a href="/profiles.php?XID=${m.userID}" class="oc-player-link">${m.userName}</a>
-                </div>
+                <div class="oc-item-row"><span class="oc-label">Item</span><span class="oc-value" style="font-weight:600;color:#ddd;">${itemName}</span></div>
+                <div class="oc-player-row"><span class="oc-label">Player</span><a href="/profiles.php?XID=${m.userID}" class="oc-player-link">${m.userName}</a></div>
               </div>
-              <button class="oc-action-btn btn-loan loan-btn" data-itemid="${m.itemID}" data-userid="${m.userID}" data-username="${m.userName}">
-                Loan Item
-              </button>
+              <button class="oc-action-btn btn-loan loan-btn" data-itemid="${m.itemID}" data-userid="${m.userID}" data-username="${m.userName}">Loan Item</button>
             </div>
           `;
         }
@@ -753,39 +540,25 @@
         content.querySelectorAll('.loan-btn').forEach(btn => {
           btn.onclick = async () => {
             if (btn.dataset.loaning === 'true' || btn.disabled) return;
-            btn.dataset.loaning = 'true';
-            btn.disabled = true;
-            btn.textContent = 'Refreshing…';
+            btn.dataset.loaning = 'true'; btn.disabled = true; btn.textContent = 'Refreshing…';
             const itemID = parseInt(btn.dataset.itemid, 10);
             const userID = parseInt(btn.dataset.userid, 10);
             const userName = btn.dataset.username;
             try {
               const armoryID = await prepareArmouryForItem(itemID);
               if (!armoryID) {
-                btn.textContent = 'No stock';
-                btn.classList.add('btn-warning');
-                setTimeout(() => {
-                  btn.dataset.loaning = 'false';
-                  btn.disabled = false;
-                  btn.textContent = 'Loan Item';
-                  btn.classList.remove('btn-warning');
-                }, 3000);
+                btn.textContent = 'No stock'; btn.classList.add('btn-warning');
+                setTimeout(() => { btn.dataset.loaning = 'false'; btn.disabled = false; btn.textContent = 'Loan Item'; btn.classList.remove('btn-warning'); }, 3000);
                 return;
               }
-              btn.textContent = 'Loaning…';
-              await loanPreparedItem({ userID, userName });
-              btn.textContent = '✓ Loaned';
-              btn.classList.add('btn-success');
+              btn.textContent = 'Loaning…'; await loanPreparedItem({ userID, userName });
+              btn.textContent = '✓ Loaned'; btn.classList.add('btn-success');
             } catch (e) {
-              btn.textContent = '? Check';
-              btn.classList.add('btn-warning');
-              console.error('[OCLM] Loan error:', e);
+              btn.textContent = '? Check'; btn.classList.add('btn-warning'); console.error('[OCLM] Loan error:', e);
             }
           };
         });
-      } catch (e) {
-        content.innerHTML = `<div style="text-align:center;color:#f66;padding:20px;">${e.isApiKeyError ? 'API key required' : 'Error: ' + e.message}</div>`;
-      }
+      } catch (e) { content.innerHTML = `<div style="text-align:center;color:#f66;padding:20px;">${e.isApiKeyError ? 'API key required' : 'Error: ' + e.message}</div>`; }
     };
 
     const loadUnusedTab = async () => {
@@ -802,37 +575,23 @@
             const needed = neededByUser.get(uid);
             if (!needed || !needed.has(iid)) {
               unused.push({
-                itemID: iid,
-                itemName: entry.name || getItemName(iid) || `Item #${iid}`,
-                armoryID: entry.armoryID,
-                armoryCategory: entry.armoryCategory || 'utilities',
-                userID: uid,
-                userName: entry.user.userName || memberNameMap.get(uid) || `Unknown [${uid}]`
+                itemID: iid, itemName: entry.name || getItemName(iid) || `Item #${iid}`,
+                armoryID: entry.armoryID, armoryCategory: entry.armoryCategory || 'utilities',
+                userID: uid, userName: entry.user.userName || memberNameMap.get(uid) || `Unknown [${uid}]`
               });
             }
           }
         }
-        if (!unused.length) {
-          content.innerHTML = '<div style="text-align:center;color:#4a4;padding:40px;font-size:14px;font-weight:600;">No unused loaned items ✓</div>';
-          return;
-        }
+        if (!unused.length) { content.innerHTML = '<div style="text-align:center;color:#4a4;padding:40px;font-size:14px;font-weight:600;">No unused loaned items ✓</div>'; return; }
         let html = '<div style="margin-bottom:12px;font-size:12px;color:#666;text-align:center;">Loaned but not needed for any OC:</div>';
         for (const u of unused) {
           html += `
             <div class="oc-card">
               <div class="oc-card-body">
-                <div class="oc-item-row">
-                  <span class="oc-label">Item</span>
-                  <span class="oc-value" style="font-weight:600;color:#ddd;">${u.itemName}</span>
-                </div>
-                <div class="oc-player-row">
-                  <span class="oc-label">Player</span>
-                  <a href="/profiles.php?XID=${u.userID}" class="oc-player-link">${u.userName}</a>
-                </div>
+                <div class="oc-item-row"><span class="oc-label">Item</span><span class="oc-value" style="font-weight:600;color:#ddd;">${u.itemName}</span></div>
+                <div class="oc-player-row"><span class="oc-label">Player</span><a href="/profiles.php?XID=${u.userID}" class="oc-player-link">${u.userName}</a></div>
               </div>
-              <button class="oc-action-btn btn-retrieve retrieve-btn" data-armoryid="${u.armoryID}" data-itemid="${u.itemID}" data-userid="${u.userID}" data-username="${u.userName}" data-category="${u.armoryCategory}">
-                Retrieve Item
-              </button>
+              <button class="oc-action-btn btn-retrieve retrieve-btn" data-armoryid="${u.armoryID}" data-itemid="${u.itemID}" data-userid="${u.userID}" data-username="${u.userName}" data-category="${u.armoryCategory}">Retrieve Item</button>
             </div>
           `;
         }
@@ -840,31 +599,15 @@
         content.querySelectorAll('.retrieve-btn').forEach(btn => {
           btn.onclick = async () => {
             if (btn.dataset.retrieving === 'true' || btn.disabled) return;
-            btn.dataset.retrieving = 'true';
-            btn.disabled = true;
-            btn.textContent = 'Retrieving…';
+            btn.dataset.retrieving = 'true'; btn.disabled = true; btn.textContent = 'Retrieving…';
             try {
               const postType = ARMORY_TAB_TO_POST_TYPE[btn.dataset.category] || 'Tool';
-              await retrieveItem({
-                armoryID: parseInt(btn.dataset.armoryid, 10),
-                itemID: parseInt(btn.dataset.itemid, 10),
-                userID: parseInt(btn.dataset.userid, 10),
-                userName: btn.dataset.username,
-                postType
-              });
-              btn.textContent = '✓ Retrieved';
-              btn.classList.add('btn-success');
-            } catch (e) {
-              btn.textContent = 'Error';
-              btn.classList.add('btn-warning');
-              btn.disabled = false;
-              btn.dataset.retrieving = 'false';
-            }
+              await retrieveItem({ armoryID: parseInt(btn.dataset.armoryid, 10), itemID: parseInt(btn.dataset.itemid, 10), userID: parseInt(btn.dataset.userid, 10), userName: btn.dataset.username, postType });
+              btn.textContent = '✓ Retrieved'; btn.classList.add('btn-success');
+            } catch (e) { btn.textContent = 'Error'; btn.classList.add('btn-warning'); btn.disabled = false; btn.dataset.retrieving = 'false'; }
           };
         });
-      } catch (e) {
-        content.innerHTML = `<div style="text-align:center;color:#f66;padding:20px;">Error: ${e.message}</div>`;
-      }
+      } catch (e) { content.innerHTML = `<div style="text-align:center;color:#f66;padding:20px;">Error: ${e.message}</div>`; }
     };
 
     const loadPayoutsTab = async () => {
@@ -872,10 +615,7 @@
       content.innerHTML = '<div style="text-align:center;color:#666;padding:40px;font-size:13px;">Checking completions…</div>';
       try {
         const unpaid = await getUnpaidCompletedCrimes();
-        if (!unpaid.length) {
-          content.innerHTML = '<div style="text-align:center;color:#4a4;padding:40px;font-size:14px;font-weight:600;">All OCs paid out ✓</div>';
-          return;
-        }
+        if (!unpaid.length) { content.innerHTML = '<div style="text-align:center;color:#4a4;padding:40px;font-size:14px;font-weight:600;">All OCs paid out ✓</div>'; return; }
         let totalMoney = 0, items = 0;
         unpaid.forEach(c => { totalMoney += c.money; if (c.hasItems) items++; });
         let html = `
@@ -884,9 +624,7 @@
             ${totalMoney > 0 ? `<div style="font-size:18px; font-weight:800; color:#fff;">$${formatNumber(totalMoney)}</div>` : ''}
             <div style="font-size:12px; color:#888;">${unpaid.length} Unpaid OCs ${items > 0 ? `• ${items} with Items` : ''}</div>
             <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&crimeSubTab=completed" target="_blank" 
-               style="display:block; margin-top:12px; padding:10px; background:#2a3cff; color:#fff; text-align:center; border-radius:8px; text-decoration:none; font-weight:700; font-size:13px; box-shadow:0 4px 10px rgba(42,60,255,0.3);">
-               Open Payouts Page
-            </a>
+               style="display:block; margin-top:12px; padding:10px; background:#2a3cff; color:#fff; text-align:center; border-radius:8px; text-decoration:none; font-weight:700; font-size:13px; box-shadow:0 4px 10px rgba(42,60,255,0.3);">Open Payouts Page</a>
           </div>
         `;
         for (const c of unpaid) {
@@ -896,21 +634,13 @@
           const ageColor = ageDays >= 7 ? '#f66' : (ageDays >= 3 ? '#f8d866' : '#888');
           html += `
             <div class="oc-card" style="padding:10px 12px;">
-              <div class="oc-card-header" style="margin-bottom:4px;">
-                <span class="oc-crime-name" style="font-size:12.5px;">${c.name}</span>
-                <span style="font-size:11px; font-weight:700; color:${ageColor};">${ageStr}</span>
-              </div>
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-size:13px; color:#4a4; font-weight:700;">${c.money > 0 ? '$' + formatNumber(c.money) : ''}</span>
-                <span style="font-size:11px; color:#555;">${c.hasItems ? '<span style="color:#7af;">Items</span>' : ''}${c.payoutPct ? ` ${c.payoutPct}%` : ''}</span>
-              </div>
+              <div class="oc-card-header" style="margin-bottom:4px;"><span class="oc-crime-name" style="font-size:12.5px;">${c.name}</span><span style="font-size:11px; font-weight:700; color:${ageColor};">${ageStr}</span></div>
+              <div style="display:flex; justify-content:space-between; align-items:center;"><span style="font-size:13px; color:#4a4; font-weight:700;">${c.money > 0 ? '$' + formatNumber(c.money) : ''}</span><span style="font-size:11px; color:#555;">${c.hasItems ? '<span style="color:#7af;">Items</span>' : ''}${c.payoutPct ? ` ${c.payoutPct}%` : ''}</span></div>
             </div>
           `;
         }
         content.innerHTML = html;
-      } catch (e) {
-        content.innerHTML = `<div style="text-align:center;color:#f66;padding:20px;">Error: ${e.message}</div>`;
-      }
+      } catch (e) { content.innerHTML = `<div style="text-align:center;color:#f66;padding:20px;">Error: ${e.message}</div>`; }
     };
 
     const loadSettingsTab = () => {
@@ -928,26 +658,14 @@
         <div style="font-size:12px; color:#888; margin-bottom:6px;">New Override Key</div>
         <input id="settings-key" type="text" placeholder="Paste Torn API Key" 
                style="width:100%; padding:12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#fff; font-family:monospace; margin-bottom:12px; outline:none;">
-        <div style="display:flex; gap:10px;">
-          <button id="settings-save" class="oc-action-btn btn-loan" style="margin-top:0;">Save</button>
-          <button id="settings-clear" class="oc-action-btn btn-retrieve" style="margin-top:0;">Clear</button>
-        </div>
-        <div style="margin-top:20px; font-size:11px; color:#444; line-height:1.4;">
-          API keys are stored locally and only used for OC data.
-        </div>
+        <div style="display:flex; gap:10px;"><button id="settings-save" class="oc-action-btn btn-loan" style="margin-top:0;">Save</button><button id="settings-clear" class="oc-action-btn btn-retrieve" style="margin-top:0;">Clear</button></div>
+        <div style="margin-top:20px; font-size:11px; color:#444; line-height:1.4;">API keys are stored locally and only used for OC data.</div>
       `;
-      document.getElementById('settings-save').onclick = () => {
-        const val = document.getElementById('settings-key').value.trim();
-        if (val) { storage.set('OCLM_API_KEY', val); alert('Key saved!'); loadSettingsTab(); }
-      };
-      document.getElementById('settings-clear').onclick = () => {
-        storage.set('OCLM_API_KEY', ''); alert('Override cleared.'); loadSettingsTab();
-      };
+      document.getElementById('settings-save').onclick = () => { const val = document.getElementById('settings-key').value.trim(); if (val) { storage.set('OCLM_API_KEY', val); alert('Key saved!'); loadSettingsTab(); } };
+      document.getElementById('settings-clear').onclick = () => { storage.set('OCLM_API_KEY', ''); alert('Override cleared.'); loadSettingsTab(); };
     };
 
-    document.addEventListener('click', (e) => {
-      if (isOpen && !panel.contains(e.target) && !button.contains(e.target)) closePanel();
-    });
+    document.addEventListener('click', (e) => { if (isOpen && !panel.contains(e.target) && !button.contains(e.target)) closePanel(); });
   };
 
   createUI();
