@@ -1,16 +1,17 @@
 // ==UserScript==
-// @name         Torn OC Loan Manager (PDA)
+// @name         OC Manager
 // @namespace    https://torn.com
-// @version      2.3.0-pda
+// @version      2.3.1-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern UI, Dark/Light Mode, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
-// @downloadURL  https://tornwar.com/scripts/torn-oc-loan-manager-pda.user.js
-// @updateURL    https://tornwar.com/scripts/torn-oc-loan-manager-pda.meta.js
+// @downloadURL  https://tornwar.com/scripts/oc-manager.user.js
+// @updateURL    https://tornwar.com/scripts/oc-manager.meta.js
 // ==/UserScript==
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.3.1-pda - Rename script and files to OC Manager
 // v2.3.0-pda - Add Light Mode toggle in settings; implemented CSS variables for theme support
 // v2.2.2-pda - Fix: UI lag (removed backdrop-filter), double-click toggle bug, and improved drag performance
 // v2.2.1-pda - Fix: corrupted template strings from previous update
