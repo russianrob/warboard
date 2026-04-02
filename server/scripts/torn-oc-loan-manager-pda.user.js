@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn OC Loan Manager (PDA)
 // @namespace    https://torn.com
-// @version      2.0.6-pda
-// @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary), tracks unpaid OC payouts (PDA compatible)
+// @version      2.0.7-pda
+// @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
 // @downloadURL  https://tornwar.com/scripts/torn-oc-loan-manager-pda.user.js
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.0.7-pda - Add support for clothing and armor (e.g. Construction Helmet) in armory categories
 // v2.0.6-pda - Fix: Payouts now detects item-reward OCs (e.g. Xanax payouts), not just cash
 // v2.0.5-pda - Fix: Payouts — add time range + limit to catch recent OCs, log total count for debugging
 // v2.0.4-pda - Fix: Payouts detection — accept any success-like status, use cat=successful, add debug logging
@@ -97,7 +98,9 @@
     'Drug': 'drugs',
     'Medical': 'medical',
     'Booster': 'boosters',
-    'Temporary': 'temporary'
+    'Temporary': 'temporary',
+    'Clothing': 'clothing',
+    'Armor': 'armor'
   };
 
   // Armory tab type -> POST `type` param for loan/retrieve actions
@@ -106,11 +109,13 @@
     'drugs': 'Drug',
     'medical': 'Medical',
     'boosters': 'Booster',
-    'temporary': 'Temporary'
+    'temporary': 'Temporary',
+    'clothing': 'Clothing',
+    'armor': 'Armor'
   };
 
   // All armory categories that can hold OC items
-  const ARMORY_CATEGORIES = ['utilities', 'drugs', 'medical', 'boosters', 'temporary'];
+  const ARMORY_CATEGORIES = ['utilities', 'drugs', 'medical', 'boosters', 'temporary', 'clothing', 'armor'];
 
   // Cache: itemID -> Torn item type (e.g. 'Tool', 'Drug', 'Medical')
   const itemTypeCache = new Map();
