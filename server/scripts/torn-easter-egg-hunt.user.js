@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Easter Egg Hunter 2026
 // @namespace    torn.easter.egg.hunter
-// @version      1.1.8
+// @version      1.1.9
 // @description  Ultimate Detection & Navigation for Torn Easter Eggs. Detects eggs in the root container, highlights them, and provides a 300+ page navigation tool with keyboard shortcuts.
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -60,8 +60,7 @@
                 img.width < 20 ||
                 img.width > 150 ||
                 img.height < 20 ||
-                img.closest('[class*="filter"], [class*="category"], [class*="calendar"], [class*="title-black"]')
-            ) {
+                img.closest('[class*="filter"], [class*="category"], [class*="calendar"], [class*="title-black"], [class*="museum"], [class*="inventory"], [class*="item-wrap"], [class*="display"]')            ) {
                 continue;
             }
 
@@ -161,7 +160,7 @@
 
         const header = document.createElement('div');
         header.style.cssText = 'font-weight: bold; color: gold; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;';
-        header.innerHTML = '<span>🥚 Egg Hunter v1.1.8</span>';
+        header.innerHTML = '<span>🥚 Egg Hunter v1.1.9</span>';
         
         const toggleBtn = document.createElement('span');
         toggleBtn.id = 'egg-hunter-toggle';
@@ -291,3 +290,4 @@
     else init();
 
 })();
+
