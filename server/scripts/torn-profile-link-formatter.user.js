@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Torn Profile Link Formatter
 // @namespace GNSC4 [268863]
-// @version 3.6.5
+// @version 3.6.6
 // @description Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author RussianRob
 // @match https://www.torn.com/profiles.php?XID=*
@@ -19,6 +19,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.6 - Fix profile page injection by using more robust attribute selectors (brackets)
 // v3.6.5 - Anchor copy progress to faction header instead of floating overlay
 // v3.6.4 - Remove level from faction copy output
 // v3.6.3 - Move copy toast higher (top: 45%) and increase size/contrast for PDA readability
@@ -40,6 +41,7 @@ const MY_FACTION_ID = '42055';
 
 function getApiKey() {
 return GNSC_getValue('tornProfileFormatterApiKey', null);
+}
 
 let hospTime = {};
 let warMemberFaction = {}; // userID -> factionID from war JSON
@@ -72,7 +74,7 @@ GM_addStyle(`
 .gnsc-settings-panel input[type="checkbox"] { margin-left: 5px; }
 .gnsc-settings-panel label.disabled { color: #888; }
 .gnsc-settings-container { position: relative; }
-.buttons-list .gnsc-list-btn { padding: 4px; font-size: 16px; height: 34px; line-height: 26px; }
+[class*="buttonsList"] .gnsc-list-btn { padding: 4px; font-size: 16px; height: 34px; line-height: 26px; }
 #gnsc-battlestats-format-wrapper { flex-direction: column; align-items: flex-start; margin-top: 8px; }
 #gnsc-battlestats-format-wrapper label { margin-bottom: 4px; }
 #gnsc-select-battlestats-format { background-color: #1e1e1e; border: 1px solid #555; color: #ddd; border-radius: 3px; padding: 2px 4px; width: 100%; }
@@ -82,25 +84,27 @@ GM_addStyle(`
 `);
 
 function initProfilePage() {
-const nameElement = document.querySelector('#skip-to-content');
-const infoTable = document.querySelector('.basic-information .info-table');
+const nameElement = document.querySelector('h4[class*="name_"]');
+const infoTable = document.querySelector('div[class*="basicInformation"] ul[class*="infoTable"]');
 const alreadyInjected = document.querySelector('.gnsc-copy-container');
 if (nameElement && infoTable && infoTable.children.length > 5 && !alreadyInjected) {
 mainProfile(nameElement, infoTable);
 return true;
-
+}
 return false;
+}
 
 function initFactionPage() {
-const memberLists = document.querySelectorAll('.members-list, .enemy-list, .your-faction');
+const memberLists = document.querySelectorAll('[class*="membersList"], [class*="enemyList"], [class*="yourFaction"], .members-list, .enemy-list, .your-faction');
 if (memberLists.length > 0) {
 memberLists.forEach(list => injectButtonsIntoList(list));
 return true;
-
+}
 return false;
+}
 
 function initRankedWarPage() {
-const factionNames = document.querySelectorAll('.faction-names .name___PlMCO');
+const factionNames = document.querySelectorAll('div[class*="factionNames"] div[class*="name_"]');
 factionNames.forEach(nameDiv => {
 if (!nameDiv.querySelector('.gnsc-faction-copy-btn')) {
 const button = document.createElement('span');
@@ -110,19 +114,20 @@ button.title = 'Copy Faction Member List (BSP/FF cache)';
 button.addEventListener('click', (e) =>
 handleFactionCopyClick(e, button, nameDiv.classList.contains('left'))
 );
-const textNode = nameDiv.querySelector('.text___chra_') || nameDiv;
+const textNode = nameDiv.querySelector('div[class*="text_"]') || nameDiv;
 textNode.appendChild(button);
-
+}
 });
+}
 
 function initMiniProfile() {
-const miniProfile = document.querySelector('.profile-mini-_wrapper___Arw8R:not(.gnsc-injected), .mini-profile-wrapper:not(.gnsc-injected)');
+const miniProfile = document.querySelector('div[class*="profile-mini-_wrapper"]:not(.gnsc-injected), .mini-profile-wrapper:not(.gnsc-injected)');
 if (miniProfile) {
 miniProfile.classList.add('gnsc-injected');
 let attempts = 0;
 const maxAttempts = 25;
 const interval = setInterval(() => {
-const buttonContainer = miniProfile.querySelector('.buttons-list');
+const buttonContainer = miniProfile.querySelector('ul[class*="buttonsList"]');
 const nameLink = miniProfile.querySelector('a[href*="profiles.php?XID="]');
 if (buttonContainer && nameLink && !buttonContainer.querySelector('.gnsc-list-btn')) {
 clearInterval(interval);
@@ -134,12 +139,14 @@ button.addEventListener('click', (e) => handleListCopyClick(e, button, miniProfi
 buttonContainer.insertAdjacentElement('beforeend', button);
 } else if (attempts >= maxAttempts) {
 clearInterval(interval);
-
+}
 attempts++;
 }, 200);
+}
+}
 
 function injectButtonsIntoList(listElement) {
-const members = listElement.querySelectorAll('li.member, li.table-row, li.enemy, li.your');
+const members = listElement.querySelectorAll('li[class*="member"], li[class*="tableRow"], li[class*="enemy"], li[class*="your"], li.member, li.table-row, li.enemy, li.your');
 members.forEach(member => {
 const nameLink = member.querySelector('a[href*="profiles.php"]');
 if (nameLink && !member.querySelector('.gnsc-list-btn')) {
@@ -149,8 +156,9 @@ button.textContent = '📄';
 button.title = 'Copy Formatted Link';
 button.addEventListener('click', (e) => handleListCopyClick(e, button, member));
 nameLink.insertAdjacentElement('afterend', button);
-
+}
 });
+}
 
 function mainProfile(nameElement, infoTable) {
 const urlParams = new URLSearchParams(window.location.search);
@@ -164,19 +172,20 @@ let activityStatus = 'Offline';
 
 const infoListItems = infoTable.querySelectorAll('li');
 infoListItems.forEach(item => {
-const titleEl = item.querySelector('.user-information-section .bold');
+const titleEl = item.querySelector('[class*="userInformationSection"] [class*="bold"]');
 if (!titleEl) return;
 const title = titleEl.textContent.trim();
-if (title === 'Faction') factionLinkEl = item.querySelector('.user-info-value a');
-if (title === 'Job') companyLinkEl = item.querySelector('.user-info-value a');
+if (title === 'Faction') factionLinkEl = item.querySelector('a');
+if (title === 'Job') companyLinkEl = item.querySelector('a');
 });
 
 const statusIconEl = document.querySelector('li[id^="icon1-profile-"], li[id^="icon2-profile-"], li[id^="icon62-profile-"]');
 if (statusIconEl) {
 if (statusIconEl.className.includes('-Online')) activityStatus = 'Online';
 else if (statusIconEl.className.includes('-Away')) activityStatus = 'Idle';
+}
 
-const statusDescEl = document.querySelector('.profile-status.hospital .main-desc');
+const statusDescEl = document.querySelector('[class*="profileStatus"][class*="hospital"] [class*="mainDesc"]');
 const isInHospital = !!statusDescEl;
 const hospitalTimeStr = isInHospital ? statusDescEl.textContent.trim().replace(/\s+/g, ' ') : null;
 
@@ -193,6 +202,7 @@ hospitalTimeStr: hospitalTimeStr
 };
 
 createUI(nameElement, userInfo);
+}
 
 function createUI(targetElement, userInfo) {
 const container = document.createElement('div');
@@ -221,7 +231,7 @@ settingsPanel.style.display = settingsPanel.style.display === 'block' ? 'none' :
 document.addEventListener('click', (e) => {
 if (!settingsContainer.contains(e.target)) {
 settingsPanel.style.display = 'none';
-
+}
 });
 
 settingsContainer.appendChild(settingsButton);
@@ -229,6 +239,7 @@ settingsContainer.appendChild(settingsPanel);
 container.appendChild(copyButton);
 container.appendChild(settingsContainer);
 targetElement.insertAdjacentElement('afterend', container);
+}
 
 function createSettingsPanel(userInfo) {
 const panel = document.createElement('div');
@@ -257,7 +268,7 @@ checkbox.disabled = !option.available;
 checkbox.addEventListener('change', () => {
 if (option.key === 'battlestats') {
 updateBattleStatsAvailability();
-
+}
 saveSettings();
 });
 
@@ -316,6 +327,7 @@ panel.appendChild(apiKeyWrapper);
 
 updateBattleStatsAvailability();
 return panel;
+}
 
 // --- Helpers ---
 
@@ -327,11 +339,13 @@ const cache = JSON.parse(raw);
 const entry = cache[userId] || cache[String(userId)];
 if (entry && typeof entry.xantaken !== 'undefined') {
 return entry.xantaken;
-
+}
 return null;
 } catch (e) {
 if (debug) console.error('GNSC getXanaxViewerCache error:', e);
 return null;
+}
+}
 
 // In-memory cache for API-fetched personal stats to avoid re-fetching
 const apiStatsCache = {};
@@ -352,6 +366,7 @@ if (debug) console.error('GNSC API error for', userId, data.error);
 apiStatsCache[userId] = null;
 resolve(null);
 return;
+}
 
 const ps = data?.personalstats;
 if (ps) {
@@ -361,7 +376,7 @@ boostersused: ps.boostersused ?? null
 };
 } else {
 apiStatsCache[userId] = null;
-
+}
 resolve(apiStatsCache[userId]);
 };
 
@@ -376,13 +391,13 @@ handleResponse(JSON.parse(response.responseText));
 if (debug) console.error('GNSC API parse error for', userId, e);
 apiStatsCache[userId] = null;
 resolve(null);
-
+}
 },
 onerror: () => {
 if (debug) console.error('GNSC API request failed for', userId);
 apiStatsCache[userId] = null;
 resolve(null);
-
+}
 });
 } else {
 // Fallback: use fetch (works in PDA)
@@ -393,12 +408,13 @@ fetch(url)
 apiStatsCache[userId] = null;
 resolve(null);
 });
-
+}
 } catch (e) {
 if (debug) console.error('GNSC fetchPersonalStatsFromApi error:', e);
 resolve(null);
-
+}
 });
+}
 
 async function getPersonalStats(userId) {
 // Try Xanax Viewer cache first for xanax (no API call needed)
@@ -411,6 +427,7 @@ return {
 xantaken: xanCached ?? apiStats?.xantaken ?? null,
 boostersused: apiStats?.boostersused ?? null
 };
+}
 
 function getMemberLevel(userId, row) {
 // Try war JSON cache first
@@ -422,13 +439,15 @@ const lvlEl = row.querySelector('[class*="level"], .lvl, .member-level, td.level
 if (lvlEl) {
 const lvlMatch = lvlEl.textContent.match(/(\d+)/);
 if (lvlMatch) return parseInt(lvlMatch[1], 10);
+}
 
 // Also try finding level text pattern anywhere in the row
 const allText = row.textContent;
 const lvlPattern = allText.match(/(?:Lv|Lvl|Level)\s*(\d+)/i);
 if (lvlPattern) return parseInt(lvlPattern[1], 10);
-
+}
 return null;
+}
 
 function stripBspPrefix(name) {
 try {
@@ -437,6 +456,8 @@ return name.replace(/^\s*\d+(\.\d+)?[KMBTQkmbtq]\s*/, '').trim();
 } catch (e) {
 if (debug) console.error('GNSC stripBspPrefix error for name:', name, e);
 return name || '';
+}
+}
 
 // --- BSP cache readers ---
 
@@ -458,6 +479,7 @@ if (tornSpy && yataSpy) {
 best = (yataSpy.timestamp >= tornSpy.timestamp) ? yataSpy : tornSpy;
 } else {
 best = tornSpy || yataSpy;
+}
 
 if (!best || typeof best.total === 'undefined') return null;
 
@@ -470,11 +492,13 @@ speed: best.spd,
 dexterity: best.dex,
 total: best.total,
 timestamp: best.timestamp
-
+}
 };
 } catch (e) {
 if (debug) console.error('Torn Profile Link Formatter: error reading BSP spy cache', e);
 return null;
+}
+}
 
 function fetchBspPredictionFromLocalCache(userId) {
 try {
@@ -487,6 +511,8 @@ return prediction || null;
 } catch (e) {
 if (debug) console.error('Torn Profile Link Formatter: error reading BSP prediction cache', e);
 return null;
+}
+}
 
 // --- FF Scouter (V2) fallback via IndexedDB ---
 
@@ -521,23 +547,26 @@ total: res.bs_estimate,
 human: res.bs_estimate_human || null,
 timestamp: res.last_updated || null
 });
-
+}
 };
 };
 } catch (e) {
 if (debug) console.error("FF Scouter: exception accessing cache", e);
 resolve(null);
-
+}
 });
+}
 
 function getBspPredictionOrFf(userId) {
 // Returns BSP prediction or FF scouter data, skipping spy data entirely
 const pred = fetchBspPredictionFromLocalCache(userId);
 if (pred && pred.TBS != null) {
 return { type: 'prediction', prediction: pred };
+}
 
 // FF scouter is async, handled separately
 return null;
+}
 
 // --- Handlers ---
 
@@ -552,6 +581,7 @@ if (settings.activity) {
 statusEmoji = userInfo.activityStatus === 'Online'
 ? '🟢 '
 : (userInfo.activityStatus === 'Idle' ? '🟡 ' : '⚫ ');
+}
 
 const releaseTimestamp = hospTime[userInfo.id] || null;
 if (releaseTimestamp) {
@@ -560,7 +590,8 @@ if (settings.timeRemaining) {
 const remainingSeconds = releaseTimestamp - (Date.now() / 1000);
 if (remainingSeconds > 0) {
 timeParts.push(`In hospital for ${formatRemainingTime(remainingSeconds)}`);
-
+}
+}
 if (settings.releaseTime) {
 const releaseDate = new Date(releaseTimestamp * 1000);
 const tctTimeString = releaseDate.toLocaleTimeString([], {
@@ -568,10 +599,11 @@ hour: '2-digit', minute: '2-digit', second: '2-digit',
 hour12: false, timeZone: 'UTC'
 });
 timeParts.push(`Out at ${tctTimeString} TCT`);
-
+}
 if (timeParts.length > 0) hospitalStr = `(${timeParts.join(' | ')})`;
 } else if (userInfo.hospitalTimeStr && settings.timeRemaining) {
 hospitalStr = `(${userInfo.hospitalTimeStr})`;
+}
 
 if (settings.battlestats) {
 try {
@@ -585,10 +617,13 @@ if (ff && ff.total != null) {
 statsStr = formatFfScouterString(ff, settings.battleStatsFormat);
 } else {
 statsStr = "(Stats: N/A)";
-
+}
+}
 } catch (err) {
 if (debug) console.error('Torn Profile Link Formatter: BSP/FF format error (profile)', userInfo.id, err);
 statsStr = "(Stats: Error)";
+}
+}
 
 const linkedName = `${userInfo.name} [${userInfo.id}]`;
 const details = [];
@@ -610,6 +645,7 @@ setTimeout(() => {
 button.innerHTML = 'Copy';
 button.style.backgroundColor = '';
 }, 2000);
+}
 
 async function handleListCopyClick(e, button, memberElement) {
 e.preventDefault();
@@ -631,13 +667,15 @@ let healthStr = null;
 let statsStr = null;
 
 if (settings.activity) {
-const statusEl = memberElement.querySelector('.userStatusWrap___ljSJG svg, li[class*="user-status-16-"]');
+const statusEl = memberElement.querySelector('[class*="userStatusWrap"] svg, li[class*="user-status-16-"]');
 statusEmoji = '⚫ ';
 if (statusEl) {
 const cls = statusEl.className.toString();
 const fill = statusEl.getAttribute && statusEl.getAttribute('fill') || '';
 if (cls.includes('-Online') || fill.includes('online')) statusEmoji = '🟢 ';
 else if (cls.includes('-Away') || cls.includes('-Idle') || fill.includes('idle')) statusEmoji = '🟡 ';
+}
+}
 
 const releaseTimestamp = hospTime[id] || null;
 if (releaseTimestamp && (settings.timeRemaining || settings.releaseTime)) {
@@ -646,7 +684,8 @@ if (settings.timeRemaining) {
 const remainingSeconds = releaseTimestamp - (Date.now() / 1000);
 if (remainingSeconds > 0) {
 timeParts.push(`In hospital for ${formatRemainingTime(remainingSeconds)}`);
-
+}
+}
 if (settings.releaseTime) {
 const releaseDate = new Date(releaseTimestamp * 1000);
 const tctTimeString = releaseDate.toLocaleTimeString([], {
@@ -654,8 +693,9 @@ hour: '2-digit', minute: '2-digit', second: '2-digit',
 hour12: false, timeZone: 'UTC'
 });
 timeParts.push(`Out at ${tctTimeString} TCT`);
-
+}
 if (timeParts.length > 0) healthStr = `(${timeParts.join(' | ')})`;
+}
 
 if (settings.battlestats) {
 button.textContent = '...';
@@ -670,10 +710,13 @@ if (ff && ff.total != null) {
 statsStr = formatFfScouterString(ff, settings.battleStatsFormat);
 } else {
 statsStr = "(Stats: N/A)";
-
+}
+}
 } catch (error) {
 if (debug) console.error("Torn Profile Link Formatter: BSP/FF format error (list)", id, error);
 statsStr = "(Stats: Error)";
+}
+}
 
 const linkedName = `${name} [${id}]`;
 const attackLink = `Attack`;
@@ -685,6 +728,7 @@ copyToClipboard(`${statusEmoji}${linkedName} - ${details.join(' - ')}`);
 
 button.textContent = '✅';
 setTimeout(() => { button.textContent = '📄'; }, 1500);
+}
 
 function showCopyToast(text) {
 let toast = document.getElementById('gnsc-copy-toast');
@@ -693,16 +737,18 @@ toast = document.createElement('div');
 toast.id = 'gnsc-copy-toast';
 toast.className = 'gnsc-copy-toast';
 // Anchor into the faction header area
-const anchor = document.querySelector('.faction-names, .faction-war-info, [class*="factionTitle"]');
+const anchor = document.querySelector('[class*="factionNames"], [class*="factionWarInfo"], [class*="factionTitle"]');
 if (anchor && anchor.parentNode) {
 anchor.parentNode.insertBefore(toast, anchor.nextSibling);
 } else {
 document.body.appendChild(toast);
-
+}
+}
 toast.classList.remove('fade-out');
 toast.textContent = text;
 toast.style.display = 'block';
 return toast;
+}
 
 function hideCopyToast(delay) {
 const toast = document.getElementById('gnsc-copy-toast');
@@ -711,6 +757,7 @@ setTimeout(() => {
 toast.classList.add('fade-out');
 setTimeout(() => { toast.style.display = 'none'; toast.classList.remove('fade-out'); }, 300);
 }, delay || 0);
+}
 
 async function handleFactionCopyClick(e, button, isLeftFactionButton) {
 e.preventDefault();
@@ -721,12 +768,12 @@ showCopyToast('Starting...');
 
 try {
 const warRoot =
-document.querySelector('.faction-war-info, .ranked-war, .war-report, #react-root, #root') ||
+document.querySelector('[class*="factionWarInfo"], [class*="rankedWar"], [class*="warReport"], #react-root, #root') ||
 document.body;
 
 const headerFactionLinks = warRoot.querySelectorAll(
-'.faction-war-info a[href*="factions.php?step=profile&ID="],' +
-'.faction-war-info a[href*="factions.php?step=profile&factionID="]'
+'a[href*="factions.php?step=profile&ID="],' +
+'a[href*="factions.php?step=profile&factionID="]'
 );
 
 let leftFactionId = null;
@@ -754,6 +801,7 @@ enemyFactionId = rightFactionId;
 mySide = 'right';
 enemySide = 'left';
 enemyFactionId = leftFactionId;
+}
 
 let targetFactionId = null;
 
@@ -762,9 +810,11 @@ const buttonIsMySide = isLeftFactionButton
 ? (mySide === 'left')
 : (mySide === 'right');
 targetFactionId = buttonIsMySide ? MY_FACTION_ID : enemyFactionId;
+}
 
 if (!targetFactionId) {
 targetFactionId = isLeftFactionButton ? leftFactionId : rightFactionId;
+}
 
 if (debug) console.log('[Faction Copy BSP/FF] targetFactionId:', targetFactionId);
 
@@ -796,6 +846,7 @@ if (targetFactionId && memberFactionId && memberFactionId.toString() !== targetF
 if (seenIds.has(id)) continue;
 seenIds.add(id);
 validRows.push({ row, link, id });
+}
 
 const totalMembers = validRows.length;
 let processed = 0;
@@ -822,6 +873,9 @@ if (ff && ff.total != null) {
 statsString = formatFfScouterString(ff, settings.battleStatsFormat);
 } else {
 statsString = "(Stats: N/A)";
+}
+}
+}
 
 const extras = [];
 
@@ -836,12 +890,14 @@ const extraStr = extras.length > 0 ? ` - ${extras.join(' - ')}` : '';
 lines.push(`${profileLabel} - ${statsString}${extraStr}`);
 } catch (rowErr) {
 if (debug) console.error('GNSC faction copy: error on member row', row, rowErr);
+}
 
 processed++;
 button.textContent = `${processed}/${totalMembers}`;
 showCopyToast(`Copying: ${processed}/${totalMembers}`);
 // Yield to UI so the counter visually updates
 await new Promise(r => setTimeout(r, 0));
+}
 
 if (!lines.length) {
 if (debug) console.error('GNSC faction copy: no member rows parsed for side selector', sideSelector, 'targetFactionId', targetFactionId);
@@ -854,6 +910,7 @@ button.textContent = '📋';
 button.title = 'Copy Faction Member List (BSP/FF cache)';
 }, 2500);
 return;
+}
 
 copyToClipboard(lines.join('\n'));
 
@@ -865,6 +922,7 @@ setTimeout(() => {
 button.textContent = '📋';
 button.title = 'Copy Faction Member List (BSP/FF cache)';
 }, 5000);
+}
 } catch (err) {
 if (debug) console.error('[Faction Copy BSP/FF] Error:', err);
 button.textContent = '❌';
@@ -875,6 +933,8 @@ setTimeout(() => {
 button.textContent = '📋';
 button.title = 'Copy Faction Member List (BSP/FF cache)';
 }, 2500);
+}
+}
 
 // --- Formatting helpers ---
 
@@ -895,7 +955,7 @@ const stats = {
 const highestStatName = Object.keys(stats).reduce((a, b) => stats[a] > stats[b] ? a : b);
 const highestStatValue = formatNumber(stats[highestStatName]);
 return `(Highest: ${highestStatName} ${highestStatValue} | ${totalStr} | ${spyStr})`;
-
+}
 case 'total':
 return `(${totalStr} | ${spyStr})`;
 case 'all':
@@ -905,6 +965,9 @@ const def = `Def: ${formatNumber(spyResult.defense)}`;
 const spd = `Spd: ${formatNumber(spyResult.speed)}`;
 const dex = `Dex: ${formatNumber(spyResult.dexterity)}`;
 return `(${str} | ${def} | ${spd} | ${dex} | ${totalStr} | ${spyStr})`;
+}
+}
+}
 
 function formatPredictionString(pred) {
 try {
@@ -912,12 +975,14 @@ if (!pred || pred.TBS == null) return "(Stats: N/A)";
 let tbs = pred.TBS;
 if (typeof tbs === 'string') {
 tbs = parseFloat(tbs.replace(/,/g, ''));
-
+}
 const tbsStr = isFinite(tbs) ? formatNumber(tbs) : 'N/A';
 return `(Stats: ${tbsStr})`;
 } catch (e) {
 if (debug) console.error('Torn Profile Link Formatter: formatPredictionString error', pred, e);
 return "(Stats: Error)";
+}
+}
 
 function formatFfScouterString(ff, format) {
 try {
@@ -928,7 +993,7 @@ let baseHuman = ff.human && typeof ff.human === "string" ? ff.human : null;
 let totalNumeric = ff.total;
 if (typeof totalNumeric === "string") {
 totalNumeric = parseFloat(totalNumeric.replace(/,/g, ''));
-
+}
 const totalStr = baseHuman || (isFinite(totalNumeric) ? formatNumber(totalNumeric) : "N/A");
 
 switch (format) {
@@ -939,10 +1004,12 @@ return `(FF: Total ${totalStr})`;
 case "all":
 default:
 return `(FF: Est ${totalStr})`;
-
+}
 } catch (e) {
 if (debug) console.error('Torn Profile Link Formatter: formatFfScouterString error', ff, e);
 return "(Stats: Error)";
+}
+}
 
 function formatNumber(num) {
 if (typeof num !== 'number' || isNaN(num)) return 'N/A';
@@ -952,6 +1019,7 @@ if (num < 1e9) return +(num / 1e6).toFixed(2) + "M";
 if (num < 1e12) return +(num / 1e9).toFixed(2) + "B";
 if (num < 1e15) return +(num / 1e12).toFixed(2) + "T";
 return +(num / 1e15).toFixed(2) + "Q";
+}
 
 function formatRemainingTime(totalSeconds) {
 if (totalSeconds <= 0) return "0s";
@@ -961,6 +1029,7 @@ const seconds = Math.floor(totalSeconds % 60);
 return [hours > 0 ? `${hours}h` : '', minutes > 0 ? `${minutes}m` : '', seconds > 0 ? `${seconds}s` : '']
 .filter(Boolean)
 .join(' ');
+}
 
 function formatTimeDifference(timestamp) {
 const seconds = Math.floor(Date.now() / 1000) - timestamp;
@@ -970,6 +1039,7 @@ if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
 if (seconds < 2592000) return `${Math.floor(seconds / 86400)}d ago`;
 if (seconds < 31536000) return `${Math.floor(seconds / 2592000)}mo ago`;
 return `${Math.floor(seconds / 31536000)}y ago`;
+}
 
 function loadSettings() {
 return GNSC_getValue('tornProfileFormatterSettings', {
@@ -982,12 +1052,14 @@ battlestats: false,
 activity: true,
 battleStatsFormat: 'all'
 });
+}
 
 function updateBattleStatsAvailability() {
 const battleStatsCheckbox = document.getElementById('gnsc-check-battlestats');
 const formatWrapper = document.getElementById('gnsc-battlestats-format-wrapper');
 if (!battleStatsCheckbox || !formatWrapper) return;
 formatWrapper.style.display = battleStatsCheckbox.checked ? 'flex' : 'none';
+}
 
 function saveSettings() {
 const settings = {
@@ -1001,6 +1073,7 @@ battlestats: document.getElementById('gnsc-check-battlestats')?.checked || false
 battleStatsFormat: document.getElementById('gnsc-select-battlestats-format')?.value || 'all'
 };
 GNSC_setValue('tornProfileFormatterSettings', settings);
+}
 
 function copyToClipboard(text) {
 const tempTextarea = document.createElement('textarea');
@@ -1013,8 +1086,9 @@ try {
 document.execCommand('copy');
 } catch (err) {
 if (debug) console.error('Torn Profile Link Formatter: Clipboard copy failed.', err);
-
+}
 document.body.removeChild(tempTextarea);
+}
 
 // --- Live Data Interception (war JSON -> hospTime + warMemberFaction) ---
 
@@ -1048,6 +1122,7 @@ if (hospTime[userId]) delete hospTime[userId];
 return;
 } else {
 return;
+}
 
 if (members) {
 Object.keys(members).forEach((id) => {
@@ -1058,18 +1133,20 @@ const userId = m.userID || id;
 const fid = m.factionID || m.faction_id || m.factionId;
 if (fid) {
 warMemberFaction[userId] = fid;
+}
 
 const lvl = m.level || m.Level;
 if (lvl) {
 warMemberLevel[userId] = lvl;
+}
 
 if (status.text === "Hospital") {
 hospTime[userId] = status.updateAt;
 } else if (hospTime[userId]) {
 delete hospTime[userId];
-
+}
 });
-
+}
 }).catch(err => {
 if (debug) console.error("Torn Profile Link Formatter: Error parsing fetch JSON.", err);
 });
@@ -1085,7 +1162,7 @@ initProfilePage();
 } else if (window.location.href.includes('factions.php')) {
 initFactionPage();
 initRankedWarPage();
-
+}
 initMiniProfile();
 });
 
