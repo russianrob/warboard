@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Manager
 // @namespace    https://torn.com
-// @version      2.3.19-pda
+// @version      2.3.20-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern UI, Dark/Light Mode, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.3.20-pda - Debug: Add logging to track tab persistence issues
 // v2.3.19-pda - Fix: properly prioritize persistent last-used tab in openPanel
 // v2.3.18-pda - Fix: prevent hashchange from overriding manually set tabs
 // v2.3.17-pda - Bump version to force PDA update
@@ -546,8 +547,9 @@
       panel.style.transform = 'translateY(0) scale(1)'; 
       isOpen = true; 
       const lastTab = storage.get('OCLM_LAST_TAB', 'missing');
-      // If the current URL hash implies a specific tab, use that; otherwise, use the last used tab.
+      console.log('[OCLM] Debug: openPanel called. lastTab from storage:', lastTab);
       const hashTab = getTabFromHash();
+      console.log('[OCLM] Debug: hashTab:', hashTab);
       loadTab(hashTab || lastTab); 
     };
     const closePanel = () => { panel.style.opacity = '0'; panel.style.transform = 'translateY(10px) scale(0.98)'; setTimeout(() => { if (!isOpen) panel.style.visibility = 'hidden'; }, 200); isOpen = false; };
@@ -557,13 +559,16 @@
     window.addEventListener('hashchange', () => { 
       if (isOpen) { 
         const t = getTabFromHash(); 
+        console.log('[OCLM] Debug: hashchange detected. Tab from hash:', t);
         if (t && t !== 'missing') loadTab(t); 
       } 
     });
 
     const loadTab = (tab) => {
+      console.log('[OCLM] Debug: loadTab called with:', tab);
       panel.querySelectorAll('.oc-tab').forEach(t => { t.classList.toggle('active', t.dataset.tab === tab); });
       storage.set('OCLM_LAST_TAB', tab);
+      console.log('[OCLM] Debug: storage set OCLM_LAST_TAB to:', tab);
       if (tab === 'missing') loadMissingTab();
       else if (tab === 'unused') loadUnusedTab();
       else if (tab === 'payouts') loadPayoutsTab();
