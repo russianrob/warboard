@@ -508,11 +508,22 @@
         <button class="oc-tab" style="max-width:36px;" data-tab="settings">⚙</button>
       </div>
       <div id="oc-content"></div>
-      <div class="oc-status-bar"><span>v2.3.14-pda</span><span>API: ${apiStatusShort}</span></div>
+      <div class="oc-status-bar"><span>v2.3.15-pda</span><span>API: ${apiStatusShort}</span></div>
     `;
 
     document.body.appendChild(button);
     document.body.appendChild(panel);
+
+    const getTabFromHash = () => {
+      const h = window.location.hash;
+      if (h.includes('tab=crimes')) {
+        if (h.includes('completed')) return 'payouts';
+        if (h.includes('planning') || h.includes('available')) return 'missing';
+        return 'missing';
+      }
+      if (h.includes('tab=armoury')) return 'unused';
+      return null;
+    };
 
     let isOpen = false;
     const positionPanel = () => {
@@ -526,11 +537,19 @@
       panel.style.left = left + 'px'; panel.style.top = top + 'px';
     };
 
-    const openPanel = () => { positionPanel(); panel.style.opacity = '1'; panel.style.visibility = 'visible'; panel.style.transform = 'translateY(0) scale(1)'; isOpen = true; loadTab('missing'); };
+    const openPanel = () => { 
+      positionPanel(); 
+      panel.style.opacity = '1'; 
+      panel.style.visibility = 'visible'; 
+      panel.style.transform = 'translateY(0) scale(1)'; 
+      isOpen = true; 
+      loadTab(getTabFromHash() || 'missing'); 
+    };
     const closePanel = () => { panel.style.opacity = '0'; panel.style.transform = 'translateY(10px) scale(0.98)'; setTimeout(() => { if (!isOpen) panel.style.visibility = 'hidden'; }, 200); isOpen = false; };
 
     button.addEventListener('click', () => { if (!wasDragged) { isOpen ? closePanel() : openPanel(); } });
     panel.querySelector('.oc-close').onclick = closePanel;
+    window.addEventListener('hashchange', () => { if (isOpen) { const t = getTabFromHash(); if (t) loadTab(t); } });
 
     const loadTab = (tab) => {
       panel.querySelectorAll('.oc-tab').forEach(t => { t.classList.toggle('active', t.dataset.tab === tab); });
@@ -653,7 +672,7 @@
             <div style="font-size:11px; color:#2a3cff; text-transform:uppercase; font-weight:700; margin-bottom:4px; letter-spacing:0.5px;">Summary</div>
             ${totalMoney > 0 ? `<div style="font-size:18px; font-weight:800;">$${formatNumber(totalMoney)}</div>` : ''}
             <div style="font-size:12px; color:#888;">${unpaid.length} Unpaid OCs ${items > 0 ? `• ${items} with Items` : ''}</div>
-            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&subTab=completed" target="_blank" 
+            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&cat=completed" target="_blank" 
                style="display:block; margin-top:12px; padding:10px; background:#2a3cff; color:#fff; text-align:center; border-radius:8px; text-decoration:none; font-weight:700; font-size:13px; box-shadow:0 4px 10px rgba(42,60,255,0.3);">Open Payouts Page</a>
           </div>
         `;
@@ -662,7 +681,7 @@
           const ageDays = Math.floor(ageSec / 86400);
           const ageColor = ageDays >= 7 ? '#f66' : (ageDays >= 3 ? '#b8860b' : '#888');
           html += `
-            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&subTab=completed" target="_blank" style="text-decoration:none; color:inherit; display:block;">
+            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&cat=completed" target="_blank" style="text-decoration:none; color:inherit; display:block;">
               <div class="oc-card" style="padding:10px 12px;">
                 <div class="oc-card-header"><span class="oc-crime-name" style="font-size:12.5px;">${c.name}</span><span style="font-size:11px; font-weight:700; color:${ageColor};">${ageDays > 0 ? ageDays+'d' : Math.floor(ageSec/3600)+'h'}</span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="font-size:13px; color:#1a7a1a; font-weight:700;">${c.money > 0 ? '$' + formatNumber(c.money) : ''}</span><span style="font-size:11px; color:#888;">${c.hasItems ? '<span style="color:#2a3cff;">Items</span>' : ''}${c.payoutPct ? ` ${c.payoutPct}%` : ''}</span></div>
