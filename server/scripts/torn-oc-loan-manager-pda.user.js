@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn OC Loan Manager (PDA)
 // @namespace    https://torn.com
-// @version      2.2.2-pda
-// @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern Dark UI, PDA compatible)
+// @version      2.3.0-pda
+// @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern UI, Dark/Light Mode, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
 // @downloadURL  https://tornwar.com/scripts/torn-oc-loan-manager-pda.user.js
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.3.0-pda - Add Light Mode toggle in settings; implemented CSS variables for theme support
 // v2.2.2-pda - Fix: UI lag (removed backdrop-filter), double-click toggle bug, and improved drag performance
 // v2.2.1-pda - Fix: corrupted template strings from previous update
 // v2.2.0-pda - Modern Dark UI overhaul: Glassmorphism, card-based layouts, and refined animations
@@ -51,11 +52,9 @@
     const PDAKey = "###PDA-APIKEY###";
     if (PDAKey && PDAKey.charAt(0) !== "#") {
       inPDA = true;
-      apiKey = PDAKey; // Use PDA API key
+      apiKey = PDAKey;
     }
-  } catch (e) {
-    // Not in PDA, ignore
-  }
+  } catch (e) {}
 
   // ------------------- Storage shim (no GM_* APIs) -------------------
   const storage = {
@@ -92,29 +91,24 @@
   const memberNameMap = new Map();
   let membersLoaded = false;
 
-  // itemID -> { armoryID, qty, armoryType }
   const armoryCache = new Map();
   let lastRefreshTime = 0;
-  const REFRESH_COOLDOWN_MS = 10000; // 10 seconds
+  const REFRESH_COOLDOWN_MS = 10000; 
 
   let preparedArmoryID = null;
   let pendingArmoryItemID = null;
 
-  // Torn item type -> armory tab type mapping
   const ITEM_TYPE_TO_ARMORY_TAB = {
     'Tool': 'utilities', 'Drug': 'drugs', 'Medical': 'medical',
     'Booster': 'boosters', 'Temporary': 'temporary', 'Clothing': 'clothing', 'Armor': 'armor'
   };
 
-  // Armory tab type -> POST `type` param for loan/retrieve actions
   const ARMORY_TAB_TO_POST_TYPE = {
     'utilities': 'Tool', 'drugs': 'Drug', 'medical': 'Medical',
     'boosters': 'Booster', 'temporary': 'Temporary', 'clothing': 'Clothing', 'armor': 'Armor'
   };
 
   const ARMORY_CATEGORIES = ['utilities', 'drugs', 'medical', 'boosters', 'temporary', 'clothing', 'armor'];
-
-  const itemTypeCache = new Map();
 
   // ------------------- Utilities -------------------
   const getRfcvToken = () => {
@@ -359,7 +353,6 @@
       isDragging = true; wasDragged = false;
       button.style.cursor = 'grabbing';
       button.style.transform = 'scale(0.95)';
-
       document.addEventListener('mousemove', onDragMove, { passive: false });
       document.addEventListener('mouseup', onDragEnd);
       document.addEventListener('touchmove', onDragMove, { passive: false });
@@ -388,7 +381,6 @@
       document.removeEventListener('mouseup', onDragEnd);
       document.removeEventListener('touchmove', onDragMove);
       document.removeEventListener('touchend', onDragEnd);
-
       if (wasDragged) {
         const rect = button.getBoundingClientRect();
         storage.set('OCLM_BTN_POS', JSON.stringify({ x: Math.round(rect.left), y: Math.round(rect.top) }));
@@ -400,59 +392,76 @@
 
     const panel = document.createElement('div');
     panel.id = 'oc-loan-panel';
-    panel.style.cssText = `
-      position:fixed; width:340px; max-width:92vw; max-height:85vh;
-      background: rgba(24, 24, 24, 0.98); border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 16px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
-      z-index:99998; opacity:0; visibility:hidden;
-      transform:translateY(10px) scale(0.98);
-      transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
-      display:flex; flex-direction:column; overflow:hidden; color: #efefef;
-    `;
 
     const style = document.createElement('style');
-    style.textContent = `
-      #oc-loan-panel * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-      #oc-loan-panel .oc-header { padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; background: rgba(0, 0, 0, 0.2); border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
-      #oc-loan-panel .oc-title { font-size: 16px; font-weight: 700; background: linear-gradient(90deg, #fff, #aaa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-      #oc-loan-panel .oc-close { cursor: pointer; font-size: 20px; color: #888; transition: color 0.2s; line-height: 1; }
-      #oc-loan-panel .oc-close:hover { color: #fff; }
-      #oc-loan-panel .oc-nav { padding: 8px 12px; display: flex; gap: 4px; background: rgba(0, 0, 0, 0.1); border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
-      #oc-loan-panel .oc-tab { flex: 1; padding: 8px 4px; background: transparent; border-radius: 8px; border: none; color: #888; cursor: pointer; font-weight: 600; font-size: 12px; transition: all 0.2s ease; }
-      #oc-loan-panel .oc-tab.active { background: rgba(42, 60, 255, 0.15); color: #7af; box-shadow: inset 0 0 0 1px rgba(42, 60, 255, 0.3); }
-      #oc-loan-panel .oc-tab:hover:not(.active) { background: rgba(255, 255, 255, 0.05); color: #ccc; }
-      #oc-content { padding: 16px; overflow-y: auto; overflow-x: hidden; flex: 1; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent; }
-      #oc-content::-webkit-scrollbar { width: 4px; }
-      #oc-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
-      .oc-card { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 12px; margin-bottom: 12px; transition: transform 0.2s ease, border-color 0.2s ease; }
-      .oc-card:hover { border-color: rgba(255, 255, 255, 0.12); transform: translateY(-1px); }
-      .oc-card-header { display: flex; justify-content: space-between; margin-bottom: 8px; align-items: flex-start; }
-      .oc-crime-name { font-weight: 700; font-size: 13.5px; color: #fff; flex: 1; padding-right: 8px; }
-      .oc-pos-tag { font-size: 10px; padding: 2px 6px; background: rgba(255,255,255,0.08); border-radius: 4px; color: #aaa; text-transform: uppercase; }
-      .oc-card-body { font-size: 12.5px; color: #bbb; line-height: 1.5; }
-      .oc-item-row, .oc-player-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-      .oc-label { color: #666; width: 45px; flex-shrink: 0; }
-      .oc-value { color: #ddd; }
-      .oc-player-link { color: #7af; text-decoration: none; font-weight: 500; transition: color 0.2s; }
-      .oc-player-link:hover { color: #9cf; text-decoration: underline; }
-      .oc-action-btn { width: 100%; margin-top: 10px; padding: 10px; border-radius: 10px; border: none; font-weight: 700; font-size: 13px; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 6px; }
-      .btn-loan { background: #2a3cff; color: #fff; box-shadow: 0 4px 12px rgba(42, 60, 255, 0.25); }
-      .btn-loan:hover:not(:disabled) { background: #3d4dff; transform: translateY(-1px); box-shadow: 0 6px 15px rgba(42, 60, 255, 0.35); }
-      .btn-retrieve { background: rgba(200, 60, 60, 0.15); color: #f66; border: 1px solid rgba(200, 60, 60, 0.3); }
-      .btn-retrieve:hover:not(:disabled) { background: rgba(200, 60, 60, 0.25); color: #fff; border-color: transparent; }
-      .oc-action-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(0.5); }
-      .btn-success { background: #1a7a1a !important; color: #fff !important; cursor: default !important; transform: none !important; box-shadow: none !important; }
-      .btn-warning { background: #b8860b !important; color: #fff !important; cursor: default !important; }
-      .oc-status-bar { padding: 8px 16px; font-size: 10px; color: #555; background: rgba(0,0,0,0.2); display: flex; justify-content: space-between; border-top: 1px solid rgba(255, 255, 255, 0.05); }
-    `;
+    style.id = 'oc-theme-style';
+    const updateThemeCSS = () => {
+      const isLight = storage.get('OCLM_THEME', 'dark') === 'light';
+      style.textContent = `
+        :root {
+          --oc-bg: ${isLight ? '#f4f4f4' : 'rgba(24, 24, 24, 0.98)'};
+          --oc-text: ${isLight ? '#111' : '#efefef'};
+          --oc-header-bg: ${isLight ? '#e0e0e0' : 'rgba(0, 0, 0, 0.2)'};
+          --oc-border: ${isLight ? '#ccc' : 'rgba(255, 255, 255, 0.1)'};
+          --oc-card-bg: ${isLight ? '#fff' : 'rgba(255, 255, 255, 0.03)'};
+          --oc-card-border: ${isLight ? '#ddd' : 'rgba(255, 255, 255, 0.06)'};
+          --oc-card-text: ${isLight ? '#333' : '#bbb'};
+          --oc-card-title: ${isLight ? '#000' : '#fff'};
+          --oc-tab-inactive: ${isLight ? '#888' : '#888'};
+          --oc-tab-hover: ${isLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)'};
+          --oc-scrollbar: ${isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)'};
+          --oc-status-bar: ${isLight ? '#e8e8e8' : 'rgba(0,0,0,0.2)'};
+          --oc-input-bg: ${isLight ? '#fff' : 'rgba(0,0,0,0.3)'};
+        }
+        #oc-loan-panel {
+          position:fixed; width:340px; max-width:92vw; max-height:85vh;
+          background: var(--oc-bg); border: 1px solid var(--oc-border);
+          border-radius: 16px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+          z-index:99998; opacity:0; visibility:hidden;
+          transform:translateY(10px) scale(0.98);
+          transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+          display:flex; flex-direction:column; overflow:hidden; color: var(--oc-text);
+        }
+        #oc-loan-panel * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        #oc-loan-panel .oc-header { padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; background: var(--oc-header-bg); border-bottom: 1px solid var(--oc-border); }
+        #oc-loan-panel .oc-title { font-size: 16px; font-weight: 700; color: var(--oc-text); }
+        #oc-loan-panel .oc-close { cursor: pointer; font-size: 20px; color: #888; transition: color 0.2s; line-height: 1; }
+        #oc-loan-panel .oc-close:hover { color: var(--oc-text); }
+        #oc-loan-panel .oc-nav { padding: 8px 12px; display: flex; gap: 4px; background: var(--oc-header-bg); border-bottom: 1px solid var(--oc-border); }
+        #oc-loan-panel .oc-tab { flex: 1; padding: 8px 4px; background: transparent; border-radius: 8px; border: none; color: var(--oc-tab-inactive); cursor: pointer; font-weight: 600; font-size: 12px; transition: all 0.2s ease; }
+        #oc-loan-panel .oc-tab.active { background: rgba(42, 60, 255, 0.15); color: #2a3cff; box-shadow: inset 0 0 0 1px rgba(42, 60, 255, 0.3); }
+        #oc-loan-panel .oc-tab:hover:not(.active) { background: var(--oc-tab-hover); color: var(--oc-text); }
+        #oc-content { padding: 16px; overflow-y: auto; overflow-x: hidden; flex: 1; scrollbar-width: thin; scrollbar-color: var(--oc-scrollbar) transparent; }
+        #oc-content::-webkit-scrollbar { width: 4px; }
+        #oc-content::-webkit-scrollbar-thumb { background: var(--oc-scrollbar); border-radius: 2px; }
+        .oc-card { background: var(--oc-card-bg); border: 1px solid var(--oc-card-border); border-radius: 12px; padding: 12px; margin-bottom: 12px; transition: transform 0.2s ease, border-color 0.2s ease; }
+        .oc-card:hover { border-color: rgba(42, 60, 255, 0.2); transform: translateY(-1px); }
+        .oc-card-header { display: flex; justify-content: space-between; margin-bottom: 8px; align-items: flex-start; }
+        .oc-crime-name { font-weight: 700; font-size: 13.5px; color: var(--oc-card-title); flex: 1; padding-right: 8px; }
+        .oc-pos-tag { font-size: 10px; padding: 2px 6px; background: rgba(0,0,0,0.05); border-radius: 4px; color: #888; text-transform: uppercase; }
+        .oc-card-body { font-size: 12.5px; color: var(--oc-card-text); line-height: 1.5; }
+        .oc-item-row, .oc-player-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+        .oc-label { color: #888; width: 45px; flex-shrink: 0; }
+        .oc-value { color: var(--oc-text); }
+        .oc-player-link { color: #2a3cff; text-decoration: none; font-weight: 500; transition: color 0.2s; }
+        .oc-action-btn { width: 100%; margin-top: 10px; padding: 10px; border-radius: 10px; border: none; font-weight: 700; font-size: 13px; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .btn-loan { background: #2a3cff; color: #fff; }
+        .btn-loan:hover:not(:disabled) { background: #1a27b0; }
+        .btn-retrieve { background: rgba(200, 60, 60, 0.1); color: #c33; border: 1px solid rgba(200, 60, 60, 0.2); }
+        .btn-retrieve:hover:not(:disabled) { background: rgba(200, 60, 60, 0.2); }
+        .btn-success { background: #1a7a1a !important; color: #fff !important; }
+        .btn-warning { background: #b8860b !important; color: #fff !important; }
+        .oc-status-bar { padding: 8px 16px; font-size: 10px; color: #888; background: var(--oc-status-bar); display: flex; justify-content: space-between; border-top: 1px solid var(--oc-border); }
+        .settings-input { width:100%; padding:12px; border-radius:10px; background:var(--oc-input-bg); border:1px solid var(--oc-border); color:var(--oc-text); font-family:monospace; margin-bottom:12px; outline:none; }
+        .theme-toggle-container { display: flex; align-items: center; justify-content: space-between; padding: 12px; background: var(--oc-card-bg); border-radius: 12px; border: 1px solid var(--oc-card-border); margin-bottom: 16px; }
+      `;
+    };
+    updateThemeCSS();
     document.head.appendChild(style);
 
     const apiStatusShort = inPDA ? 'PDA' : (getApiKey() ? 'Local' : 'None');
     panel.innerHTML = `
-      <div class="oc-header">
-        <span class="oc-title">OC Manager</span>
-        <span class="oc-close">&times;</span>
-      </div>
+      <div class="oc-header"><span class="oc-title">OC Manager</span><span class="oc-close">&times;</span></div>
       <div class="oc-nav">
         <button class="oc-tab active" data-tab="missing">Missing</button>
         <button class="oc-tab" data-tab="unused">Unused</button>
@@ -460,10 +469,7 @@
         <button class="oc-tab" style="max-width:36px;" data-tab="settings">⚙</button>
       </div>
       <div id="oc-content"></div>
-      <div class="oc-status-bar">
-        <span>v2.2.2-pda</span>
-        <span>API: ${apiStatusShort}</span>
-      </div>
+      <div class="oc-status-bar"><span>v2.3.0-pda</span><span>API: ${apiStatusShort}</span></div>
     `;
 
     document.body.appendChild(button);
@@ -473,30 +479,16 @@
     const positionPanel = () => {
       const btnRect = button.getBoundingClientRect();
       const panelW = 340, panelH = panel.offsetHeight || 400;
-      let left = btnRect.right + 12;
-      let top = btnRect.top;
+      let left = btnRect.right + 12, top = btnRect.top;
       if (left + panelW > window.innerWidth) left = btnRect.left - panelW - 12;
       if (left < 8) left = 8;
       if (top + panelH > window.innerHeight) top = window.innerHeight - panelH - 12;
       if (top < 8) top = 8;
-      panel.style.left = left + 'px';
-      panel.style.top = top + 'px';
+      panel.style.left = left + 'px'; panel.style.top = top + 'px';
     };
 
-    const openPanel = () => {
-      positionPanel();
-      panel.style.opacity = '1';
-      panel.style.visibility = 'visible';
-      panel.style.transform = 'translateY(0) scale(1)';
-      isOpen = true;
-      loadTab('missing');
-    };
-    const closePanel = () => {
-      panel.style.opacity = '0';
-      panel.style.transform = 'translateY(10px) scale(0.98)';
-      setTimeout(() => { if (!isOpen) panel.style.visibility = 'hidden'; }, 200);
-      isOpen = false;
-    };
+    const openPanel = () => { positionPanel(); panel.style.opacity = '1'; panel.style.visibility = 'visible'; panel.style.transform = 'translateY(0) scale(1)'; isOpen = true; loadTab('missing'); };
+    const closePanel = () => { panel.style.opacity = '0'; panel.style.transform = 'translateY(10px) scale(0.98)'; setTimeout(() => { if (!isOpen) panel.style.visibility = 'hidden'; }, 200); isOpen = false; };
 
     button.addEventListener('click', () => { if (!wasDragged) { isOpen ? closePanel() : openPanel(); } });
     panel.querySelector('.oc-close').onclick = closePanel;
@@ -524,12 +516,9 @@
           const itemName = getItemName(m.itemID) || `Item #${m.itemID}`;
           html += `
             <div class="oc-card">
-              <div class="oc-card-header">
-                <span class="oc-crime-name">${m.crimeName}</span>
-                <span class="oc-pos-tag">${m.position}</span>
-              </div>
+              <div class="oc-card-header"><span class="oc-crime-name">${m.crimeName}</span><span class="oc-pos-tag">${m.position}</span></div>
               <div class="oc-card-body">
-                <div class="oc-item-row"><span class="oc-label">Item</span><span class="oc-value" style="font-weight:600;color:#ddd;">${itemName}</span></div>
+                <div class="oc-item-row"><span class="oc-label">Item</span><span class="oc-value" style="font-weight:600;">${itemName}</span></div>
                 <div class="oc-player-row"><span class="oc-label">Player</span><a href="/profiles.php?XID=${m.userID}" class="oc-player-link">${m.userName}</a></div>
               </div>
               <button class="oc-action-btn btn-loan loan-btn" data-itemid="${m.itemID}" data-userid="${m.userID}" data-username="${m.userName}">Loan Item</button>
@@ -553,9 +542,7 @@
               }
               btn.textContent = 'Loaning…'; await loanPreparedItem({ userID, userName });
               btn.textContent = '✓ Loaned'; btn.classList.add('btn-success');
-            } catch (e) {
-              btn.textContent = '? Check'; btn.classList.add('btn-warning'); console.error('[OCLM] Loan error:', e);
-            }
+            } catch (e) { btn.textContent = '? Check'; btn.classList.add('btn-warning'); console.error('[OCLM] Loan error:', e); }
           };
         });
       } catch (e) { content.innerHTML = `<div style="text-align:center;color:#f66;padding:20px;">${e.isApiKeyError ? 'API key required' : 'Error: ' + e.message}</div>`; }
@@ -583,12 +570,12 @@
           }
         }
         if (!unused.length) { content.innerHTML = '<div style="text-align:center;color:#4a4;padding:40px;font-size:14px;font-weight:600;">No unused loaned items ✓</div>'; return; }
-        let html = '<div style="margin-bottom:12px;font-size:12px;color:#666;text-align:center;">Loaned but not needed for any OC:</div>';
+        let html = '<div style="margin-bottom:12px;font-size:12px;color:#888;text-align:center;">Loaned but not needed for any OC:</div>';
         for (const u of unused) {
           html += `
             <div class="oc-card">
               <div class="oc-card-body">
-                <div class="oc-item-row"><span class="oc-label">Item</span><span class="oc-value" style="font-weight:600;color:#ddd;">${u.itemName}</span></div>
+                <div class="oc-item-row"><span class="oc-label">Item</span><span class="oc-value" style="font-weight:600;">${u.itemName}</span></div>
                 <div class="oc-player-row"><span class="oc-label">Player</span><a href="/profiles.php?XID=${u.userID}" class="oc-player-link">${u.userName}</a></div>
               </div>
               <button class="oc-action-btn btn-retrieve retrieve-btn" data-armoryid="${u.armoryID}" data-itemid="${u.itemID}" data-userid="${u.userID}" data-username="${u.userName}" data-category="${u.armoryCategory}">Retrieve Item</button>
@@ -620,8 +607,8 @@
         unpaid.forEach(c => { totalMoney += c.money; if (c.hasItems) items++; });
         let html = `
           <div style="background:rgba(42,60,255,0.1); border-radius:12px; padding:14px; margin-bottom:16px; border:1px solid rgba(42,60,255,0.2);">
-            <div style="font-size:11px; color:#7af; text-transform:uppercase; font-weight:700; margin-bottom:4px; letter-spacing:0.5px;">Summary</div>
-            ${totalMoney > 0 ? `<div style="font-size:18px; font-weight:800; color:#fff;">$${formatNumber(totalMoney)}</div>` : ''}
+            <div style="font-size:11px; color:#2a3cff; text-transform:uppercase; font-weight:700; margin-bottom:4px; letter-spacing:0.5px;">Summary</div>
+            ${totalMoney > 0 ? `<div style="font-size:18px; font-weight:800;">$${formatNumber(totalMoney)}</div>` : ''}
             <div style="font-size:12px; color:#888;">${unpaid.length} Unpaid OCs ${items > 0 ? `• ${items} with Items` : ''}</div>
             <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&crimeSubTab=completed" target="_blank" 
                style="display:block; margin-top:12px; padding:10px; background:#2a3cff; color:#fff; text-align:center; border-radius:8px; text-decoration:none; font-weight:700; font-size:13px; box-shadow:0 4px 10px rgba(42,60,255,0.3);">Open Payouts Page</a>
@@ -630,12 +617,11 @@
         for (const c of unpaid) {
           const ageSec = Math.floor(Date.now() / 1000) - c.executedAt;
           const ageDays = Math.floor(ageSec / 86400);
-          const ageStr = ageDays > 0 ? `${ageDays}d` : `${Math.floor(ageSec / 3600)}h`;
-          const ageColor = ageDays >= 7 ? '#f66' : (ageDays >= 3 ? '#f8d866' : '#888');
+          const ageColor = ageDays >= 7 ? '#f66' : (ageDays >= 3 ? '#b8860b' : '#888');
           html += `
             <div class="oc-card" style="padding:10px 12px;">
-              <div class="oc-card-header" style="margin-bottom:4px;"><span class="oc-crime-name" style="font-size:12.5px;">${c.name}</span><span style="font-size:11px; font-weight:700; color:${ageColor};">${ageStr}</span></div>
-              <div style="display:flex; justify-content:space-between; align-items:center;"><span style="font-size:13px; color:#4a4; font-weight:700;">${c.money > 0 ? '$' + formatNumber(c.money) : ''}</span><span style="font-size:11px; color:#555;">${c.hasItems ? '<span style="color:#7af;">Items</span>' : ''}${c.payoutPct ? ` ${c.payoutPct}%` : ''}</span></div>
+              <div class="oc-card-header"><span class="oc-crime-name" style="font-size:12.5px;">${c.name}</span><span style="font-size:11px; font-weight:700; color:${ageColor};">${ageDays > 0 ? ageDays+'d' : Math.floor(ageSec/3600)+'h'}</span></div>
+              <div style="display:flex; justify-content:space-between; align-items:center;"><span style="font-size:13px; color:#1a7a1a; font-weight:700;">${c.money > 0 ? '$' + formatNumber(c.money) : ''}</span><span style="font-size:11px; color:#888;">${c.hasItems ? '<span style="color:#2a3cff;">Items</span>' : ''}${c.payoutPct ? ` ${c.payoutPct}%` : ''}</span></div>
             </div>
           `;
         }
@@ -648,19 +634,31 @@
       const overrideKey = storage.get('OCLM_API_KEY', '');
       const activeKey = overrideKey || (inPDA ? apiKey : '');
       const masked = activeKey ? activeKey.slice(0, 4) + '…' + activeKey.slice(-4) : 'None';
+      const isLight = storage.get('OCLM_THEME', 'dark') === 'light';
+
       content.innerHTML = `
-        <div style="font-weight:700; color:#fff; margin-bottom:12px; font-size:15px;">Settings</div>
-        <div class="oc-card" style="background:rgba(255,255,255,0.02);">
-          <div style="font-size:11px; color:#666; text-transform:uppercase; margin-bottom:6px;">Current Key</div>
-          <div style="font-family:monospace; color:#7af; font-size:14px; margin-bottom:4px;">${masked}</div>
-          <div style="font-size:10px; color:#444;">Source: ${overrideKey ? 'Override' : (inPDA ? 'PDA' : 'Not set')}</div>
+        <div style="font-weight:700; margin-bottom:12px; font-size:15px;">Appearance</div>
+        <div class="theme-toggle-container">
+          <span style="font-size:13px; font-weight:600;">Light Mode</span>
+          <input type="checkbox" id="theme-toggle" ${isLight ? 'checked' : ''} style="width:18px; height:18px; cursor:pointer;">
+        </div>
+
+        <div style="font-weight:700; margin-bottom:12px; font-size:15px; margin-top:20px;">API Settings</div>
+        <div class="oc-card">
+          <div style="font-size:11px; color:#888; text-transform:uppercase; margin-bottom:6px;">Current Key</div>
+          <div style="font-family:monospace; color:#2a3cff; font-size:14px; margin-bottom:4px;">${masked}</div>
+          <div style="font-size:10px; color:#888;">Source: ${overrideKey ? 'Override' : (inPDA ? 'PDA' : 'Not set')}</div>
         </div>
         <div style="font-size:12px; color:#888; margin-bottom:6px;">New Override Key</div>
-        <input id="settings-key" type="text" placeholder="Paste Torn API Key" 
-               style="width:100%; padding:12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#fff; font-family:monospace; margin-bottom:12px; outline:none;">
+        <input id="settings-key" type="text" placeholder="Paste Torn API Key" class="settings-input">
         <div style="display:flex; gap:10px;"><button id="settings-save" class="oc-action-btn btn-loan" style="margin-top:0;">Save</button><button id="settings-clear" class="oc-action-btn btn-retrieve" style="margin-top:0;">Clear</button></div>
-        <div style="margin-top:20px; font-size:11px; color:#444; line-height:1.4;">API keys are stored locally and only used for OC data.</div>
       `;
+
+      document.getElementById('theme-toggle').onchange = (e) => {
+        storage.set('OCLM_THEME', e.target.checked ? 'light' : 'dark');
+        updateThemeCSS();
+        loadSettingsTab();
+      };
       document.getElementById('settings-save').onclick = () => { const val = document.getElementById('settings-key').value.trim(); if (val) { storage.set('OCLM_API_KEY', val); alert('Key saved!'); loadSettingsTab(); } };
       document.getElementById('settings-clear').onclick = () => { storage.set('OCLM_API_KEY', ''); alert('Override cleared.'); loadSettingsTab(); };
     };
