@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Easter Egg Hunter 2026
 // @namespace    torn.easter.egg.hunter
-// @version      1.1.0
+// @version      1.1.1
 // @description  Ultimate Detection & Navigation for Torn Easter Eggs. Detects eggs in the root container, highlights them, and provides a 200+ page navigation tool with keyboard shortcuts.
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -203,11 +203,16 @@
     }
 
     function navigate(direction) {
-        let idx = getNavIndex() + (direction - 1); // getNavIndex is 1-based in storage for display
-        idx += direction;
+        let idx = getNavIndex(); // Current 1-based index (page to visit next)
         
-        if (idx < 0) idx = 0;
-        if (idx >= NAV_PAGES.length) idx = 0;
+        if (direction > 0) {
+            // Next: if we are at the end, wrap to the beginning
+            if (idx >= NAV_PAGES.length) idx = 0;
+        } else {
+            // Previous: go back two steps from the 'next' pointer
+            idx -= 2;
+            if (idx < 0) idx = NAV_PAGES.length + idx;
+        }
         
         const nextPage = NAV_PAGES[idx];
         setNavIndex(idx + 1);
