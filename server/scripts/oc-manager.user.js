@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Manager
 // @namespace    https://torn.com
-// @version      2.3.20-pda
+// @version      2.3.21-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern UI, Dark/Light Mode, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,10 +11,10 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.3.21-pda - Fix: Robustness check for API responses in getUnpaidCompletedCrimes
 // v2.3.20-pda - Debug: Add logging to track tab persistence issues
 // v2.3.19-pda - Fix: properly prioritize persistent last-used tab in openPanel
 // v2.3.18-pda - Fix: prevent hashchange from overriding manually set tabs
-// v2.3.17-pda - Bump version to force PDA update
 // v2.3.14-pda - Fix: update Payout link to camelCase subTab=completed and forward slash (fixes OC 2.0 navigation)
 // v2.3.13-pda - Fix: Payouts detection — change cat=successful to cat=completed (Modern OC 2.0 compatible), update links to subtab=completed
 // v2.3.12-pda - Fix: update Payout link to subTab=completed (Modern OC 2.0 UI compatible)
@@ -204,6 +204,7 @@
     const crimes = Array.isArray(data?.crimes) ? data.crimes : (data?.crimes && typeof data.crimes === 'object' ? Object.values(data.crimes) : []);
     const unpaid = [];
     for (const c of crimes) {
+      if (!c) continue;
       const paidAt = c?.rewards?.payout?.paid_at;
       if (paidAt) continue;
       const money = Number(c?.rewards?.money || 0);
