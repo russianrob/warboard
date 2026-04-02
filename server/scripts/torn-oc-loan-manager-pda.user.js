@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn OC Loan Manager (PDA)
 // @namespace    https://torn.com
-// @version      2.0.8-pda
+// @version      2.1.0-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,8 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.1.0-pda - Fix: robust retrieve button double-click prevention and better feedback
+// v2.0.9-pda - Fix: optimize armory cache refresh (no more 7-request hang), restore strict success detection (fixes double-loan)
 // v2.0.8-pda - Fix: robust double-loan prevention (disables button immediately, prevents pointer events during loan)
 // v2.0.7-pda - Add support for clothing and armor (e.g. Construction Helmet) in armory categories
 // v2.0.6-pda - Fix: Payouts now detects item-reward OCs (e.g. Xanax payouts), not just cash
@@ -900,20 +902,33 @@
         // Retrieve buttons
         content.querySelectorAll('.retrieve-btn').forEach(btn => {
           btn.onclick = async () => {
+            if (btn.dataset.retrieving === 'true' || btn.disabled) return;
+            btn.dataset.retrieving = 'true';
+            btn.disabled = true;
+            btn.style.pointerEvents = 'none';
+            btn.style.cursor = 'not-allowed';
+            btn.textContent = 'Retrieving…';
+            btn.style.opacity = '0.6';
+
             const armoryID = parseInt(btn.dataset.armoryid, 10);
             const itemID = parseInt(btn.dataset.itemid, 10);
             const userID = parseInt(btn.dataset.userid, 10);
             const userName = btn.dataset.username;
-            btn.disabled = true;
-            btn.textContent = '…';
+
             try {
               const postType = ARMORY_TAB_TO_POST_TYPE[btn.dataset.category] || 'Tool';
               await retrieveItem({ armoryID, itemID, userID, userName, postType });
               btn.textContent = '✓ Retrieved';
               btn.style.background = '#1a7a1a';
+              btn.style.opacity = '1';
             } catch (e) {
               btn.textContent = 'Error';
               btn.style.background = '#a00';
+              btn.style.opacity = '1';
+              btn.style.pointerEvents = 'auto';
+              btn.style.cursor = 'pointer';
+              btn.disabled = false;
+              btn.dataset.retrieving = 'false';
               console.error('[OCLM] Retrieve error:', e);
             }
           };
