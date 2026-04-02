@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn OC Loan Manager (PDA)
 // @namespace    https://torn.com
-// @version      2.1.0-pda
-// @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (PDA compatible)
+// @version      2.2.1-pda
+// @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern Dark UI, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
 // @downloadURL  https://tornwar.com/scripts/torn-oc-loan-manager-pda.user.js
@@ -11,6 +11,8 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.2.1-pda - Fix: corrupted template strings from previous update
+// v2.2.0-pda - Modern Dark UI overhaul: Glassmorphism, card-based layouts, and refined animations
 // v2.1.0-pda - Fix: robust retrieve button double-click prevention and better feedback
 // v2.0.9-pda - Fix: optimize armory cache refresh (no more 7-request hang), restore strict success detection (fixes double-loan)
 // v2.0.8-pda - Fix: robust double-loan prevention (disables button immediately, prevents pointer events during loan)
@@ -98,7 +100,6 @@
   let pendingArmoryItemID = null;
 
   // Torn item type -> armory tab type mapping
-  // The armory POST `type` param needs the armory tab name, not the Torn item type
   const ITEM_TYPE_TO_ARMORY_TAB = {
     'Tool': 'utilities',
     'Drug': 'drugs',
@@ -147,7 +148,8 @@
     const res = await fetch(`https://api.torn.com/v2/faction/members?key=${key}`);
     if (!res.ok) throw new Error('Failed to load members');
     const data = await res.json();
-    Object.values(data.members || {}).forEach(m => memberNameMap.set(m.id, m.name));
+    const members = Array.isArray(data?.members) ? data.members : Object.values(data?.members || {});
+    members.forEach(m => memberNameMap.set(String(m.id), m.name));
     membersLoaded = true;
   };
 
@@ -168,7 +170,7 @@
             position: slot.position,
             itemID: slot.item_requirement.id,
             userID: slot.user.id,
-            userName: memberNameMap.get(slot.user.id) || `Unknown [${slot.user.id}]`
+            userName: memberNameMap.get(String(slot.user.id)) || `Unknown [${slot.user.id}]`
           });
         }
       });
@@ -187,7 +189,7 @@
     data.crimes.forEach(crime => {
       crime.slots?.forEach(slot => {
         if (slot.item_requirement && slot.user?.id) {
-          const uid = slot.user.id;
+          const uid = String(slot.user.id);
           const iid = slot.item_requirement.id;
           if (!neededByUser.has(uid)) neededByUser.set(uid, new Set());
           neededByUser.get(uid).add(iid);
@@ -208,20 +210,13 @@
     const data = await res.json();
     if (data?.error) throw new Error(`API error: ${data.error.error || JSON.stringify(data.error)}`);
     const crimes = Array.isArray(data?.crimes) ? data.crimes : (data?.crimes && typeof data.crimes === 'object' ? Object.values(data.crimes) : []);
-    console.log('[OCLM] Fetched crimes:', crimes.length, 'raw data keys:', Object.keys(data || {}));
     const unpaid = [];
     for (const c of crimes) {
-      // Log first few crimes for debugging
-      if (crimes.indexOf(c) < 3) {
-        console.log('[OCLM] Crime #' + c.id + ':', JSON.stringify(c).substring(0, 500));
-      }
       const paidAt = c?.rewards?.payout?.paid_at;
       if (paidAt) continue; // already paid
       const money = Number(c?.rewards?.money || 0);
       const respect = Number(c?.rewards?.respect || 0);
       const hasItems = Array.isArray(c?.rewards?.items) ? c.rewards.items.length > 0 : false;
-      // Skip only if there's truly nothing to pay out (no money, no respect, no items)
-      // This catches chain link 1 crimes that have $0 and are waiting on link 2
       if (money <= 0 && respect <= 0 && !hasItems) continue;
       unpaid.push({
         id: c.id,
@@ -234,18 +229,13 @@
         payoutPct: c?.rewards?.payout?.percentage ?? null
       });
     }
-    console.log('[OCLM] Unpaid crimes found:', unpaid.length);
     return unpaid;
   };
 
   const ITEM_NAME_CACHE_KEY = 'UTILITY_ITEM_ID_NAME_MAP';
 
   const getItemNameMap = () => {
-    try {
-      const raw = storage.get(ITEM_NAME_CACHE_KEY, '{}');
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch { return {}; }
+    return JSON.parse(storage.get(ITEM_NAME_CACHE_KEY, '{}'));
   };
 
   const setItemName = (itemID, name) => {
@@ -261,27 +251,23 @@
     return map[itemID] || null;
   };
 
-  // Resolve unknown item names via Torn API
   const resolveItemNames = async (itemIDs) => {
     const unknown = itemIDs.filter(id => !getItemName(id));
-    if (!unknown.length) return;
-    const key = requireApiKeyOrThrow();
+    if (unknown.length === 0) return;
+
     const unique = [...new Set(unknown)];
-    // Torn API v2 items endpoint
     try {
+      const key = requireApiKeyOrThrow();
       const res = await fetch(`https://api.torn.com/v2/torn/items?ids=${unique.join(',')}&key=${key}`);
-      if (!res.ok) return;
       const data = await res.json();
       const items = Array.isArray(data?.items) ? data.items : Object.values(data?.items || {});
-      for (const item of items) {
-        if (item?.id && item?.name) {
-          setItemName(item.id, item.name);
-        }
-      }
-    } catch { /* non-critical, fall back to ID */ }
+      items.forEach(item => {
+        if (item.id && item.name) setItemName(item.id, item.name);
+      });
+    } catch { /* ignore */ }
   };
 
-  // ------------------- Armory Cache (multi-category) -------------------
+  // ------------------- Armory Cache -------------------
   const fetchArmoryCategoryJSON = async (category) => {
     const rfcv = getRfcvToken();
     if (!rfcv) throw new Error('Missing RFCV token');
@@ -300,7 +286,7 @@
       body,
       credentials: 'same-origin'
     });
-    if (!res.ok) return []; // Category may not be unlocked
+    if (!res.ok) return []; 
     try {
       const data = await res.json();
       if (!data?.items) return [];
@@ -309,12 +295,10 @@
           setItemName(entry.itemID, entry.name);
         }
       }
-      // Tag each item with its armory category
       return data.items.map(item => ({ ...item, armoryCategory: category }));
     } catch { return []; }
   };
 
-  // Fetch all armory categories and return combined items
   const fetchAllArmoryItems = async () => {
     const results = await Promise.all(
       ARMORY_CATEGORIES.map(cat => fetchArmoryCategoryJSON(cat))
@@ -325,9 +309,8 @@
   const refreshArmoryCache = async (force = false) => {
     const now = Date.now();
     if (!force && armoryCache.size > 0 && (now - lastRefreshTime < REFRESH_COOLDOWN_MS)) {
-      return; // Use cache if fresh
+      return; 
     }
-
     armoryCache.clear();
     const items = await fetchAllArmoryItems();
     for (const entry of items) {
@@ -343,14 +326,11 @@
   };
 
   const prepareArmouryForItem = async (itemID) => {
-    // Only force refresh if not in cache
     if (!armoryCache.has(itemID)) {
       await refreshArmoryCache(true);
     } else {
-      // Background check if it's potentially stale, but don't block
       await refreshArmoryCache(false);
     }
-
     const entry = armoryCache.get(itemID);
     if (!entry || entry.qty <= 0) return null;
     preparedArmoryID = entry.armoryID;
@@ -358,16 +338,14 @@
     return entry.armoryID;
   };
 
-  // Get the correct POST type for an item based on its armory category
   const getPostTypeForItem = (itemID) => {
     const cached = armoryCache.get(itemID);
     if (cached?.armoryCategory) {
       return ARMORY_TAB_TO_POST_TYPE[cached.armoryCategory] || 'Tool';
     }
-    return 'Tool'; // fallback
+    return 'Tool';
   };
 
-  // ------------------- Retrieve (return loaned item) -------------------
   const retrieveItem = async ({ armoryID, itemID, userID, userName, postType }) => {
     const rfcv = getRfcvToken();
     if (!rfcv) throw new Error('Missing RFCV token');
@@ -396,7 +374,6 @@
     if (!text.includes('success')) throw new Error('Retrieve failed');
   };
 
-  // ------------------- Loaning (correct armoryID + itemID) -------------------
   const loanItem = async ({ armoryID, itemID, userID, userName }) => {
     const rfcv = getRfcvToken();
     if (!rfcv) throw new Error('Missing RFCV token');
@@ -422,21 +399,12 @@
     });
     if (!res.ok) throw new Error('Loan request failed');
     const text = await res.text();
-    // Revert to strict success check
-    if (!text.includes('success')) {
-      throw new Error('Loan failed');
-    }
+    if (!text.includes('success')) throw new Error('Loan failed');
   };
 
   const loanPreparedItem = async ({ userID, userName }) => {
-    if (!preparedArmoryID || pendingArmoryItemID === null)
-      throw new Error('Armoury not prepared');
-    await loanItem({
-      armoryID: preparedArmoryID,
-      itemID: pendingArmoryItemID,
-      userID,
-      userName
-    });
+    if (!preparedArmoryID || pendingArmoryItemID === null) throw new Error('Armoury not prepared');
+    await loanItem({ armoryID: preparedArmoryID, itemID: pendingArmoryItemID, userID, userName });
     const entry = armoryCache.get(pendingArmoryItemID);
     if (entry) {
       entry.qty -= 1;
@@ -446,108 +414,61 @@
     pendingArmoryItemID = null;
   };
 
-  // ------------------- Highlighting -------------------
-  let highlightedRows = new Set();
-
-  const clearHighlights = () => {
-    highlightedRows.forEach(el => {
-      if (el?.style) {
-        el.style.outline = '';
-        el.style.boxShadow = '';
-        el.style.background = '';
-      }
-    });
-    highlightedRows.clear();
-  };
-
-  const highlightOverAllocated = () => {
-    clearHighlights();
-    const container = document.querySelector('#tab\\=armoury\\&sub\\=utilities');
-    if (!container) return;
-    container.querySelectorAll('li').forEach(li => {
-      const loanedDiv = li.querySelector('.loaned');
-      if (!loanedDiv) return;
-      const link = loanedDiv.querySelector('a[href^="/profiles.php?XID="]');
-      if (!link) return;
-      const playerId = parseInt(link.href.match(/XID=(\d+)/)?.[1], 10);
-      if (!playerId) return;
-      const itemImg = li.querySelector('.img-wrap');
-      const itemId = parseInt(itemImg?.getAttribute('data-itemid'), 10);
-      if (!itemId) return;
-      if (overAllocated.get(playerId)?.has(itemId)) {
-        li.style.outline = '2px solid var(--default-yellow-color)';
-        li.style.outlineOffset = '-2px';
-        li.style.background = 'linear-gradient(90deg, rgba(240,200,90,0.22), transparent)';
-        li.style.transition = 'background 0.25s ease, outline 0.25s ease';
-        highlightedRows.add(li);
-      }
-    });
-  };
-
-  // ------------------- UI -------------------
+  // ------------------- UI (Modern) -------------------
   const createUI = async () => {
     document.querySelectorAll('#oc-loan-btn, #oc-loan-panel').forEach(el => el.remove());
 
-    const button = document.createElement('button');
+    const button = document.createElement('div');
     button.id = 'oc-loan-btn';
-    button.textContent = 'OC';
-
-    // Restore saved position or use default
-    const savedPos = (() => {
-      try {
-        const raw = storage.get('OCLM_BTN_POS', '');
-        if (!raw) return null;
-        const p = JSON.parse(raw);
-        if (typeof p.x === 'number' && typeof p.y === 'number') return p;
-      } catch { /* ignore */ }
-      return null;
-    })();
-
+    button.setAttribute('role', 'button');
+    button.setAttribute('aria-label', 'OC Loan Manager');
     button.style.cssText = `
       position: fixed;
-      z-index: 99999;
-      padding: 5px 10px;
-      min-height: 26px;
-      background: #2a3cff;
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, #2a3cff, #1a27b0);
       color: #fff;
-      border: none;
-      border-radius: 6px;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      font-size: 14px;
+      font-weight: 800;
       cursor: grab;
-      box-shadow: 0 3px 10px rgba(42, 60, 255, 0.3), inset 0 0 0 1px rgba(255,255,255,0.15);
-      touch-action: none;
+      z-index: 99999;
+      box-shadow: 0 4px 15px rgba(42, 60, 255, 0.4), inset 0 1px 1px rgba(255,255,255,0.3);
       user-select: none;
-      -webkit-user-select: none;
+      transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.2s ease, opacity 0.2s ease;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
     `;
+    button.innerHTML = '<span style="letter-spacing:-1px; margin-left:-1px;">OC</span>';
 
+    const savedPos = storage.get('OCLM_BTN_POS', '');
     if (savedPos) {
-      button.style.left = Math.min(savedPos.x, window.innerWidth - 40) + 'px';
-      button.style.top = Math.min(savedPos.y, window.innerHeight - 26) + 'px';
+      try {
+        const { x, y } = JSON.parse(savedPos);
+        button.style.left = x + 'px';
+        button.style.top = y + 'px';
+      } catch {
+        button.style.right = '14px';
+        button.style.top = '14px';
+      }
     } else {
-      button.style.top = '10px';
-      button.style.right = '10px';
+      button.style.right = '14px';
+      button.style.top = '14px';
     }
 
-    // ---- Drag logic (mouse + touch, with click detection) ----
-    let isDragging = false;
-    let wasDragged = false;
-    let dragStartX = 0, dragStartY = 0;
-    let btnStartX = 0, btnStartY = 0;
-    const DRAG_THRESHOLD = 5; // px movement before it counts as a drag
+    let isDragging = false, wasDragged = false;
+    let dragStartX, dragStartY, btnStartX, btnStartY;
+    const DRAG_THRESHOLD = 5;
 
     const getClientPos = (e) => {
-      if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
       return { x: e.clientX, y: e.clientY };
     };
 
     const onDragStart = (e) => {
-      // Only left mouse button or touch
-      if (e.type === 'mousedown' && e.button !== 0) return;
-      // Only preventDefault for touch (prevents scroll); mouse needs click to fire
-      if (e.type === 'touchstart') e.preventDefault();
-
       const pos = getClientPos(e);
       dragStartX = pos.x;
       dragStartY = pos.y;
@@ -557,6 +478,7 @@
       isDragging = true;
       wasDragged = false;
       button.style.cursor = 'grabbing';
+      button.style.transform = 'scale(0.95)';
 
       document.addEventListener('mousemove', onDragMove, { passive: false });
       document.addEventListener('mouseup', onDragEnd);
@@ -572,9 +494,7 @@
       if (!wasDragged && Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
       wasDragged = true;
       e.preventDefault();
-      // Clamp to viewport
-      const bw = button.offsetWidth;
-      const bh = button.offsetHeight;
+      const bw = button.offsetWidth, bh = button.offsetHeight;
       const newX = Math.max(0, Math.min(window.innerWidth - bw, btnStartX + dx));
       const newY = Math.max(0, Math.min(window.innerHeight - bh, btnStartY + dy));
       button.style.left = newX + 'px';
@@ -586,120 +506,162 @@
       if (!isDragging) return;
       isDragging = false;
       button.style.cursor = 'grab';
+      button.style.transform = 'scale(1)';
       document.removeEventListener('mousemove', onDragMove);
       document.removeEventListener('mouseup', onDragEnd);
       document.removeEventListener('touchmove', onDragMove);
       document.removeEventListener('touchend', onDragEnd);
 
       if (wasDragged) {
-        // Persist position
         const rect = button.getBoundingClientRect();
         storage.set('OCLM_BTN_POS', JSON.stringify({ x: Math.round(rect.left), y: Math.round(rect.top) }));
-      } else if (e.type === 'touchend') {
-        // Touch didn't drag — treat as a tap (click won't fire after touchstart preventDefault)
+      } else if (e.type === 'touchend' || e.type === 'mouseup') {
         isOpen ? closePanel() : openPanel();
       }
     };
 
     button.addEventListener('mousedown', onDragStart);
     button.addEventListener('touchstart', onDragStart, { passive: false });
-    button.onmouseover = () => { if (!isDragging) button.style.opacity = '0.85'; };
-    button.onmouseout = () => { button.style.opacity = '1'; };
 
     const panel = document.createElement('div');
     panel.id = 'oc-loan-panel';
     panel.style.cssText = `
       position:fixed;
-      width:320px;
-      max-width:90vw;
-      max-height:80vh;
-      background: var(--default-bg-panel-color);
-      border: 1px solid var(--default-panel-divider-outer-side-color);
-      border-radius: 8px;
-      box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+      width:340px;
+      max-width:92vw;
+      max-height:85vh;
+      background: rgba(18, 18, 18, 0.85);
+      backdrop-filter: blur(12px) saturate(160%);
+      -webkit-backdrop-filter: blur(12px) saturate(160%);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
       z-index:99998;
       opacity:0;
       visibility:hidden;
-      transform:translateY(-8px);
-      transition: opacity 0.25s ease, transform 0.25s ease;
+      transform:translateY(10px) scale(0.98);
+      transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.3s;
       display:flex;
       flex-direction:column;
       overflow:hidden;
+      color: #efefef;
     `;
 
     const style = document.createElement('style');
     style.textContent = `
-      #oc-loan-panel { color: #e6e6e6; font-size: 13.5px; }
-      #oc-loan-panel * { box-sizing: border-box; }
+      #oc-loan-panel * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
       #oc-loan-panel .oc-header {
-        padding: 8px 10px 4px 10px;
+        padding: 14px 16px;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        background: #121212;
-        border-bottom: 1px solid #222;
-        gap: 4px;
-        flex-wrap: wrap;
+        background: rgba(0, 0, 0, 0.2);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
       }
-      #oc-loan-panel .oc-title { font-size: 15px; font-weight: 700; letter-spacing: 0.3px; }
-      #oc-loan-panel .oc-status { font-size: 11px; color: #888; }
-      #oc-loan-panel .oc-tabs { display: flex; gap: 6px; }
+      #oc-loan-panel .oc-title { font-size: 16px; font-weight: 700; background: linear-gradient(90deg, #fff, #aaa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+      #oc-loan-panel .oc-close { cursor: pointer; font-size: 20px; color: #888; transition: color 0.2s; line-height: 1; }
+      #oc-loan-panel .oc-close:hover { color: #fff; }
+      
+      #oc-loan-panel .oc-nav {
+        padding: 8px 12px;
+        display: flex;
+        gap: 4px;
+        background: rgba(0, 0, 0, 0.1);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
       #oc-loan-panel .oc-tab {
-        padding: 6px 12px;
-        background: #1b1b1b;
-        border-radius: 999px;
+        flex: 1;
+        padding: 8px 4px;
+        background: transparent;
+        border-radius: 8px;
         border: none;
-        color: #aaa;
+        color: #888;
         cursor: pointer;
         font-weight: 600;
+        font-size: 12px;
+        transition: all 0.2s ease;
       }
-      #oc-loan-panel .oc-tab.active { background: #2a3cff; color: #fff; }
-      #oc-loan-panel .oc-tab:hover:not(.active) { background: #222; color: #ddd; }
+      #oc-loan-panel .oc-tab.active { background: rgba(42, 60, 255, 0.15); color: #7af; box-shadow: inset 0 0 0 1px rgba(42, 60, 255, 0.3); }
+      #oc-loan-panel .oc-tab:hover:not(.active) { background: rgba(255, 255, 255, 0.05); color: #ccc; }
+
       #oc-content {
-        padding: 12px 14px 14px 14px;
+        padding: 16px;
         overflow-y: auto;
         overflow-x: hidden;
-        max-height: calc(80vh - 52px);
+        flex: 1;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255,255,255,0.1) transparent;
       }
-      #action-btn {
+      #oc-content::-webkit-scrollbar { width: 4px; }
+      #oc-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+      .oc-card {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 12px;
+        transition: transform 0.2s ease, border-color 0.2s ease;
+      }
+      .oc-card:hover { border-color: rgba(255, 255, 255, 0.12); transform: translateY(-1px); }
+      
+      .oc-card-header { display: flex; justify-content: space-between; margin-bottom: 8px; align-items: flex-start; }
+      .oc-crime-name { font-weight: 700; font-size: 13.5px; color: #fff; flex: 1; padding-right: 8px; }
+      .oc-pos-tag { font-size: 10px; padding: 2px 6px; background: rgba(255,255,255,0.08); border-radius: 4px; color: #aaa; text-transform: uppercase; }
+      
+      .oc-card-body { font-size: 12.5px; color: #bbb; line-height: 1.5; }
+      .oc-item-row, .oc-player-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+      .oc-label { color: #666; width: 45px; flex-shrink: 0; }
+      .oc-value { color: #ddd; }
+      .oc-player-link { color: #7af; text-decoration: none; font-weight: 500; transition: color 0.2s; }
+      .oc-player-link:hover { color: #9cf; text-decoration: underline; }
+
+      .oc-action-btn {
         width: 100%;
-        padding: 14px;
-        margin-top: 14px;
+        margin-top: 10px;
+        padding: 10px;
         border-radius: 10px;
         border: none;
         font-weight: 700;
-        font-size: 14px;
-        background: #2a2a2a;
-        color: #aaa;
+        font-size: 13px;
         cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
       }
-      #action-btn.ready { background: #2a3cff; color: #fff; }
-      #action-btn.ready:hover { filter: brightness(1.1); }
-      #oc-loan-panel table { width: 100%; border-collapse: collapse; }
-      #oc-loan-panel th { text-align: left; color: #888; font-weight: 600; padding-bottom: 6px; }
-      #oc-loan-panel td { padding: 6px 0; }
-      #oc-close { cursor: pointer; font-size: 22px; opacity: 0.6; }
-      #oc-close:hover { opacity: 1; }
+      .btn-loan { background: #2a3cff; color: #fff; box-shadow: 0 4px 12px rgba(42, 60, 255, 0.25); }
+      .btn-loan:hover:not(:disabled) { background: #3d4dff; transform: translateY(-1px); box-shadow: 0 6px 15px rgba(42, 60, 255, 0.35); }
+      .btn-retrieve { background: rgba(200, 60, 60, 0.15); color: #f66; border: 1px solid rgba(200, 60, 60, 0.3); }
+      .btn-retrieve:hover:not(:disabled) { background: rgba(200, 60, 60, 0.25); color: #fff; border-color: transparent; }
+      
+      .oc-action-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(0.5); }
+      .btn-success { background: #1a7a1a !important; color: #fff !important; cursor: default !important; transform: none !important; box-shadow: none !important; }
+      .btn-warning { background: #b8860b !important; color: #fff !important; cursor: default !important; }
+
+      .oc-status-bar { padding: 8px 16px; font-size: 10px; color: #555; background: rgba(0,0,0,0.2); display: flex; justify-content: space-between; border-top: 1px solid rgba(255, 255, 255, 0.05); }
     `;
     document.head.appendChild(style);
 
-    const apiStatus = inPDA ? 'API: PDA key' : (getApiKey() ? 'API: Local key' : 'API: missing — set key in ⚙');
+    const apiStatusShort = inPDA ? 'PDA' : (getApiKey() ? 'Local' : 'None');
 
     panel.innerHTML = `
       <div class="oc-header">
-        <span class="oc-title">OC Loan Manager</span>
-        <span id="oc-close">&times;</span>
+        <span class="oc-title">OC Manager</span>
+        <span class="oc-close">&times;</span>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;padding:6px 10px 2px 10px;flex-wrap:wrap;">
-        <div class="oc-tabs">
-          <button class="oc-tab active" data-tab="missing">Missing</button>
-          <button class="oc-tab" data-tab="unused">Unused</button>
-          <button class="oc-tab" data-tab="payouts">Payouts</button>
-          <button class="oc-tab" data-tab="settings">⚙</button>
-        </div>
-        <span class="oc-status">${apiStatus}</span>
+      <div class="oc-nav">
+        <button class="oc-tab active" data-tab="missing">Missing</button>
+        <button class="oc-tab" data-tab="unused">Unused</button>
+        <button class="oc-tab" data-tab="payouts">Payouts</button>
+        <button class="oc-tab" style="max-width:36px;" data-tab="settings">⚙</button>
       </div>
       <div id="oc-content"></div>
+      <div class="oc-status-bar">
+        <span>v2.2.1-pda</span>
+        <span>API: ${apiStatusShort}</span>
+      </div>
     `;
 
     document.body.appendChild(button);
@@ -709,14 +671,13 @@
 
     const positionPanel = () => {
       const btnRect = button.getBoundingClientRect();
-      const panelW = 320;
-      const panelH = panel.offsetHeight || 300;
-      let left = btnRect.right + 8;
+      const panelW = 340, panelH = panel.offsetHeight || 400;
+      let left = btnRect.right + 12;
       let top = btnRect.top;
-      if (left + panelW > window.innerWidth) left = btnRect.left - panelW - 8;
-      if (left < 4) left = 4;
-      if (top + panelH > window.innerHeight) top = window.innerHeight - panelH - 8;
-      if (top < 4) top = 4;
+      if (left + panelW > window.innerWidth) left = btnRect.left - panelW - 12;
+      if (left < 8) left = 8;
+      if (top + panelH > window.innerHeight) top = window.innerHeight - panelH - 12;
+      if (top < 8) top = 8;
       panel.style.left = left + 'px';
       panel.style.top = top + 'px';
     };
@@ -725,147 +686,119 @@
       positionPanel();
       panel.style.opacity = '1';
       panel.style.visibility = 'visible';
-      panel.style.transform = 'translateY(0)';
+      panel.style.transform = 'translateY(0) scale(1)';
       isOpen = true;
       loadTab('missing');
     };
     const closePanel = () => {
       panel.style.opacity = '0';
-      panel.style.visibility = 'hidden';
-      panel.style.transform = 'translateY(-8px)';
+      panel.style.transform = 'translateY(10px) scale(0.98)';
+      setTimeout(() => { if (!isOpen) panel.style.visibility = 'hidden'; }, 300);
       isOpen = false;
     };
 
-    // Click (mouse only — touch tap handled in onDragEnd)
-    button.addEventListener('click', (e) => {
-      if (wasDragged) return; // ignore click after drag
-      isOpen ? closePanel() : openPanel();
+    panel.querySelector('.oc-close').onclick = closePanel;
+
+    const loadTab = (tab) => {
+      panel.querySelectorAll('.oc-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === tab);
+      });
+      if (tab === 'missing') loadMissingTab();
+      else if (tab === 'unused') loadUnusedTab();
+      else if (tab === 'payouts') loadPayoutsTab();
+      else if (tab === 'settings') loadSettingsTab();
+    };
+
+    panel.querySelectorAll('.oc-tab').forEach(t => {
+      t.onclick = () => loadTab(t.dataset.tab);
     });
 
-    panel.querySelector('#oc-close').onclick = closePanel;
-
-    // ----------- Tabs -----------
-    let activeTab = 'missing';
-    panel.querySelectorAll('.oc-tab').forEach(tab => {
-      tab.onclick = () => {
-        panel.querySelectorAll('.oc-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        activeTab = tab.dataset.tab;
-        loadTab(activeTab);
-      };
-    });
-
-    const content = panel.querySelector('#oc-content');
-
-    // ----------- Missing Tab -----------
     const loadMissingTab = async () => {
-      content.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Loading OC data…</div>';
+      const content = document.getElementById('oc-content');
+      content.innerHTML = '<div style="text-align:center;color:#666;padding:40px;font-size:13px;">Loading OC data…</div>';
       try {
         await loadMembers();
         const missing = await getMissingOCItems();
         if (!missing.length) {
-          content.innerHTML = '<div style="text-align:center;color:#6c6;padding:20px;">All OC items allocated ✓</div>';
+          content.innerHTML = '<div style="text-align:center;color:#4a4;padding:40px;font-size:14px;font-weight:600;">All OC items allocated ✓</div>';
           return;
         }
-        // Resolve any unknown item names from the API
         await resolveItemNames(missing.map(m => m.itemID));
-        let html = '<table><tr><th>Crime</th><th>Item</th><th>Player</th><th></th></tr>';
+        let html = '';
         for (const m of missing) {
           const itemName = getItemName(m.itemID) || `Item #${m.itemID}`;
-          html += `<tr>
-            <td style="font-size:12px;">${m.crimeName}</td>
-            <td style="font-size:12px;">${itemName}</td>
-            <td style="font-size:12px;"><a href="/profiles.php?XID=${m.userID}" style="color:#7af;">${m.userName}</a></td>
-            <td><button class="loan-btn" data-itemid="${m.itemID}" data-userid="${m.userID}" data-username="${m.userName}"
-              style="padding:4px 10px;border-radius:6px;border:none;background:#2a3cff;color:#fff;font-size:11px;cursor:pointer;white-space:nowrap;">
-              Loan</button></td>
-          </tr>`;
+          html += `
+            <div class="oc-card">
+              <div class="oc-card-header">
+                <span class="oc-crime-name">${m.crimeName}</span>
+                <span class="oc-pos-tag">${m.position}</span>
+              </div>
+              <div class="oc-card-body">
+                <div class="oc-item-row">
+                  <span class="oc-label">Item</span>
+                  <span class="oc-value" style="font-weight:600;color:#ddd;">${itemName}</span>
+                </div>
+                <div class="oc-player-row">
+                  <span class="oc-label">Player</span>
+                  <a href="/profiles.php?XID=${m.userID}" class="oc-player-link">${m.userName}</a>
+                </div>
+              </div>
+              <button class="oc-action-btn btn-loan loan-btn" data-itemid="${m.itemID}" data-userid="${m.userID}" data-username="${m.userName}">
+                Loan Item
+              </button>
+            </div>
+          `;
         }
-        html += '</table>';
         content.innerHTML = html;
-
-        // Loan buttons
         content.querySelectorAll('.loan-btn').forEach(btn => {
           btn.onclick = async () => {
             if (btn.dataset.loaning === 'true' || btn.disabled) return;
             btn.dataset.loaning = 'true';
             btn.disabled = true;
-            btn.style.pointerEvents = 'none';
-            btn.style.cursor = 'not-allowed';
             btn.textContent = 'Refreshing…';
-            btn.style.opacity = '0.6';
-
             const itemID = parseInt(btn.dataset.itemid, 10);
             const userID = parseInt(btn.dataset.userid, 10);
             const userName = btn.dataset.username;
-
             try {
-              // This is the slow part (refreshes cache)
               const armoryID = await prepareArmouryForItem(itemID);
-              
               if (!armoryID) {
                 btn.textContent = 'No stock';
-                btn.style.background = '#555';
-                btn.style.opacity = '1';
-                btn.style.pointerEvents = 'auto';
-                btn.style.cursor = 'pointer';
-                // Allow retry for no stock — item might be restocked
+                btn.classList.add('btn-warning');
                 setTimeout(() => {
                   btn.dataset.loaning = 'false';
                   btn.disabled = false;
-                  btn.textContent = 'Loan';
-                  btn.style.background = '#2a3cff';
+                  btn.textContent = 'Loan Item';
+                  btn.classList.remove('btn-warning');
                 }, 3000);
                 return;
               }
-
               btn.textContent = 'Loaning…';
               await loanPreparedItem({ userID, userName });
-              
               btn.textContent = '✓ Loaned';
-              btn.style.background = '#1a7a1a';
-              btn.style.opacity = '1';
-              // Stay disabled permanently — item is loaned
+              btn.classList.add('btn-success');
             } catch (e) {
-              // Loan may have gone through even if response was unexpected
-              // Keep disabled to prevent accidental double-loan
               btn.textContent = '? Check';
-              btn.style.background = '#b8860b';
-              btn.style.opacity = '1';
-              btn.style.pointerEvents = 'none';
-              btn.style.cursor = 'default';
+              btn.classList.add('btn-warning');
               console.error('[OCLM] Loan error:', e);
             }
           };
         });
       } catch (e) {
-        if (e.isApiKeyError) {
-          content.innerHTML = '<div style="text-align:center;color:#f88;padding:20px;">API key required.<br>Set it in the ⚙ tab.</div>';
-        } else {
-          content.innerHTML = `<div style="text-align:center;color:#f88;padding:20px;">Error: ${e.message}</div>`;
-        }
+        content.innerHTML = `<div style="text-align:center;color:#f66;padding:20px;">${e.isApiKeyError ? 'API key required' : 'Error: ' + e.message}</div>`;
       }
     };
 
-    // ----------- Unused Tab -----------
     const loadUnusedTab = async () => {
-      content.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Loading armory & OC data…</div>';
+      const content = document.getElementById('oc-content');
+      content.innerHTML = '<div style="text-align:center;color:#666;padding:40px;font-size:13px;">Scanning armory…</div>';
       try {
         await loadMembers();
-        const [armoryItems, neededByUser] = await Promise.all([
-          fetchAllArmoryItems(),
-          getAllOCItemRequirements()
-        ]);
-
-        // Find items loaned to members who do NOT need them for any OC
-        // Skip temporary items — members can freely loan those for personal use
+        const [armoryItems, neededByUser] = await Promise.all([fetchAllArmoryItems(), getAllOCItemRequirements()]);
         const unused = [];
         for (const entry of armoryItems) {
           if (entry.armoryCategory === 'temporary') continue;
-          if (entry.user && entry.user !== false && entry.user.userID) {
-            const uid = entry.user.userID;
-            const iid = entry.itemID;
-            // Loaned to someone — check if they need this item for an OC (available or not)
+          if (entry.user && entry.user.userID) {
+            const uid = String(entry.user.userID), iid = entry.itemID;
             const needed = neededByUser.get(uid);
             if (!needed || !needed.has(iid)) {
               unused.push({
@@ -879,202 +812,143 @@
             }
           }
         }
-
         if (!unused.length) {
-          content.innerHTML = '<div style="text-align:center;color:#6c6;padding:20px;">No unused loaned items ✓</div>';
+          content.innerHTML = '<div style="text-align:center;color:#4a4;padding:40px;font-size:14px;font-weight:600;">No unused loaned items ✓</div>';
           return;
         }
-
-        let html = '<div style="margin-bottom:8px;font-size:12px;color:#aaa;">Items loaned but not needed for any current OC:</div>';
-        html += '<table><tr><th>Item</th><th>Loaned To</th><th></th></tr>';
+        let html = '<div style="margin-bottom:12px;font-size:12px;color:#666;text-align:center;">Loaned but not needed for any OC:</div>';
         for (const u of unused) {
-          html += `<tr>
-            <td style="font-size:12px;">${u.itemName}</td>
-            <td style="font-size:12px;"><a href="/profiles.php?XID=${u.userID}" style="color:#7af;">${u.userName}</a></td>
-            <td><button class="retrieve-btn" data-armoryid="${u.armoryID}" data-itemid="${u.itemID}" data-userid="${u.userID}" data-username="${u.userName}" data-category="${u.armoryCategory || 'utilities'}"
-              style="padding:4px 10px;border-radius:6px;border:none;background:#c44;color:#fff;font-size:11px;cursor:pointer;white-space:nowrap;">
-              Retrieve</button></td>
-          </tr>`;
+          html += `
+            <div class="oc-card">
+              <div class="oc-card-body">
+                <div class="oc-item-row">
+                  <span class="oc-label">Item</span>
+                  <span class="oc-value" style="font-weight:600;color:#ddd;">${u.itemName}</span>
+                </div>
+                <div class="oc-player-row">
+                  <span class="oc-label">Player</span>
+                  <a href="/profiles.php?XID=${u.userID}" class="oc-player-link">${u.userName}</a>
+                </div>
+              </div>
+              <button class="oc-action-btn btn-retrieve retrieve-btn" data-armoryid="${u.armoryID}" data-itemid="${u.itemID}" data-userid="${u.userID}" data-username="${u.userName}" data-category="${u.armoryCategory}">
+                Retrieve Item
+              </button>
+            </div>
+          `;
         }
-        html += '</table>';
         content.innerHTML = html;
-
-        // Retrieve buttons
         content.querySelectorAll('.retrieve-btn').forEach(btn => {
           btn.onclick = async () => {
             if (btn.dataset.retrieving === 'true' || btn.disabled) return;
             btn.dataset.retrieving = 'true';
             btn.disabled = true;
-            btn.style.pointerEvents = 'none';
-            btn.style.cursor = 'not-allowed';
             btn.textContent = 'Retrieving…';
-            btn.style.opacity = '0.6';
-
-            const armoryID = parseInt(btn.dataset.armoryid, 10);
-            const itemID = parseInt(btn.dataset.itemid, 10);
-            const userID = parseInt(btn.dataset.userid, 10);
-            const userName = btn.dataset.username;
-
             try {
               const postType = ARMORY_TAB_TO_POST_TYPE[btn.dataset.category] || 'Tool';
-              await retrieveItem({ armoryID, itemID, userID, userName, postType });
+              await retrieveItem({
+                armoryID: parseInt(btn.dataset.armoryid, 10),
+                itemID: parseInt(btn.dataset.itemid, 10),
+                userID: parseInt(btn.dataset.userid, 10),
+                userName: btn.dataset.username,
+                postType
+              });
               btn.textContent = '✓ Retrieved';
-              btn.style.background = '#1a7a1a';
-              btn.style.opacity = '1';
+              btn.classList.add('btn-success');
             } catch (e) {
               btn.textContent = 'Error';
-              btn.style.background = '#a00';
-              btn.style.opacity = '1';
-              btn.style.pointerEvents = 'auto';
-              btn.style.cursor = 'pointer';
+              btn.classList.add('btn-warning');
               btn.disabled = false;
               btn.dataset.retrieving = 'false';
-              console.error('[OCLM] Retrieve error:', e);
             }
           };
         });
       } catch (e) {
-        if (e.isApiKeyError) {
-          content.innerHTML = '<div style="text-align:center;color:#f88;padding:20px;">API key required.<br>Set it in the ⚙ tab.</div>';
-        } else {
-          content.innerHTML = `<div style="text-align:center;color:#f88;padding:20px;">Error: ${e.message}</div>`;
-        }
+        content.innerHTML = `<div style="text-align:center;color:#f66;padding:20px;">Error: ${e.message}</div>`;
       }
     };
 
-    // ----------- Payouts Tab -----------
     const loadPayoutsTab = async () => {
-      content.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Loading completed crimes…</div>';
+      const content = document.getElementById('oc-content');
+      content.innerHTML = '<div style="text-align:center;color:#666;padding:40px;font-size:13px;">Checking completions…</div>';
       try {
         const unpaid = await getUnpaidCompletedCrimes();
         if (!unpaid.length) {
-          content.innerHTML = '<div style="text-align:center;color:#6c6;padding:20px;">All completed OCs have been paid out ✓</div>';
+          content.innerHTML = '<div style="text-align:center;color:#4a4;padding:40px;font-size:14px;font-weight:600;">All OCs paid out ✓</div>';
           return;
         }
-
-        let totalMoney = 0;
-        let itemRewardCount = 0;
-        unpaid.forEach(c => { totalMoney += c.money; if (c.hasItems) itemRewardCount++; });
-
-        let html = `<div style="margin-bottom:10px;font-size:12px;color:#aaa;">Completed OCs awaiting payout: <strong style="color:#f8d866;">${unpaid.length}</strong></div>`;
-        html += `<div style="margin-bottom:12px;padding:8px 10px;border-radius:6px;background:#1a1a2e;border:1px solid #333;">`;
-        if (totalMoney > 0) {
-          html += `<span style="font-size:12px;color:#888;">Total unpaid:</span> <strong style="color:#6c6;font-size:14px;">$${formatNumber(totalMoney)}</strong>`;
-        }
-        if (itemRewardCount > 0) {
-          html += `${totalMoney > 0 ? '<br>' : ''}<span style="font-size:12px;color:#888;">Item rewards:</span> <strong style="color:#7af;font-size:13px;">${itemRewardCount} OC${itemRewardCount !== 1 ? 's' : ''}</strong>`;
-        }
-        html += `</div>`;
-
-        // Open Payouts button — navigates to Torn's completed crimes page
-        html += `<div style="margin-bottom:12px;">`;
-        html += `<a id="open-payouts-btn" href="https://www.torn.com/factions.php?step=your#/tab=crimes&crimeSubTab=completed" target="_blank" style="display:block;text-align:center;padding:10px 12px;border-radius:6px;background:#2a3cff;color:#fff;font-weight:700;font-size:13px;text-decoration:none;cursor:pointer;">Open Payouts Page (${unpaid.length} unpaid)</a>`;
-        html += `</div>`;
-
-        html += '<table><tr><th>Crime</th><th style="text-align:right;">Reward</th><th style="text-align:right;">Age</th></tr>';
+        let totalMoney = 0, items = 0;
+        unpaid.forEach(c => { totalMoney += c.money; if (c.hasItems) items++; });
+        let html = `
+          <div style="background:rgba(42,60,255,0.1); border-radius:12px; padding:14px; margin-bottom:16px; border:1px solid rgba(42,60,255,0.2);">
+            <div style="font-size:11px; color:#7af; text-transform:uppercase; font-weight:700; margin-bottom:4px; letter-spacing:0.5px;">Summary</div>
+            ${totalMoney > 0 ? `<div style="font-size:18px; font-weight:800; color:#fff;">$${formatNumber(totalMoney)}</div>` : ''}
+            <div style="font-size:12px; color:#888;">${unpaid.length} Unpaid OCs ${items > 0 ? `• ${items} with Items` : ''}</div>
+            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&crimeSubTab=completed" target="_blank" 
+               style="display:block; margin-top:12px; padding:10px; background:#2a3cff; color:#fff; text-align:center; border-radius:8px; text-decoration:none; font-weight:700; font-size:13px; box-shadow:0 4px 10px rgba(42,60,255,0.3);">
+               Open Payouts Page
+            </a>
+          </div>
+        `;
         for (const c of unpaid) {
           const ageSec = Math.floor(Date.now() / 1000) - c.executedAt;
           const ageDays = Math.floor(ageSec / 86400);
-          const ageHrs = Math.floor((ageSec % 86400) / 3600);
-          const ageStr = ageDays > 0 ? `${ageDays}d ${ageHrs}h` : `${ageHrs}h`;
-          const diffLabel = c.difficulty ? ` <span style="color:#666;">(Lv${c.difficulty})</span>` : '';
-          const pctLabel = c.payoutPct !== null ? ` <span style="color:#666;font-size:10px;">${c.payoutPct}%</span>` : '';
-          const ageColor = ageDays >= 7 ? '#f88' : (ageDays >= 3 ? '#f8d866' : '#aaa');
-          html += `<tr>
-            <td style="font-size:12px;">${c.name}${diffLabel}</td>
-            <td style="font-size:12px;text-align:right;">${c.money > 0 ? '$' + formatNumber(c.money) : ''}${c.hasItems ? '<span style="color:#7af;">Items</span>' : ''}${c.money <= 0 && !c.hasItems && c.respect > 0 ? '<span style="color:#ccc;">Respect</span>' : ''}${pctLabel}</td>
-            <td style="font-size:12px;text-align:right;color:${ageColor};">${ageStr}</td>
-          </tr>`;
+          const ageStr = ageDays > 0 ? `${ageDays}d` : `${Math.floor(ageSec / 3600)}h`;
+          const ageColor = ageDays >= 7 ? '#f66' : (ageDays >= 3 ? '#f8d866' : '#888');
+          html += `
+            <div class="oc-card" style="padding:10px 12px;">
+              <div class="oc-card-header" style="margin-bottom:4px;">
+                <span class="oc-crime-name" style="font-size:12.5px;">${c.name}</span>
+                <span style="font-size:11px; font-weight:700; color:${ageColor};">${ageStr}</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:13px; color:#4a4; font-weight:700;">${c.money > 0 ? '$' + formatNumber(c.money) : ''}</span>
+                <span style="font-size:11px; color:#555;">${c.hasItems ? '<span style="color:#7af;">Items</span>' : ''}${c.payoutPct ? ` ${c.payoutPct}%` : ''}</span>
+              </div>
+            </div>
+          `;
         }
-        html += '</table>';
         content.innerHTML = html;
-
-        // Open payouts button hover effect
-        const openBtn = document.getElementById('open-payouts-btn');
-        openBtn.onmouseover = () => { openBtn.style.filter = 'brightness(1.15)'; };
-        openBtn.onmouseout = () => { openBtn.style.filter = ''; };
       } catch (e) {
-        if (e.isApiKeyError) {
-          content.innerHTML = '<div style="text-align:center;color:#f88;padding:20px;">API key required.<br>Set it in the ⚙ tab.</div>';
-        } else {
-          content.innerHTML = `<div style="text-align:center;color:#f88;padding:20px;">Error: ${e.message}</div>`;
-        }
+        content.innerHTML = `<div style="text-align:center;color:#f66;padding:20px;">Error: ${e.message}</div>`;
       }
     };
 
-    // ----------- Settings Tab -----------
     const loadSettingsTab = () => {
+      const content = document.getElementById('oc-content');
       const overrideKey = storage.get('OCLM_API_KEY', '');
       const activeKey = overrideKey || (inPDA ? apiKey : '');
-      const masked = activeKey ? activeKey.slice(0, 4) + '…' + activeKey.slice(-4) : 'No key saved';
-      const sourceLabel = overrideKey ? 'Local override' : (inPDA ? 'PDA key' : 'Not set');
-
-      let html = `<div style="font-size:15px;font-weight:700;color:#ccc;margin-bottom:10px;">API Settings</div>`;
-
-      if (inPDA) {
-        html += `<div style="font-size:12.5px;color:#aaa;margin-bottom:14px;">Running in PDA — API key is provided automatically. You can still override it below.</div>`;
-      }
-
-      html += `<div style="font-size:12px;color:#888;margin-bottom:4px;">Current Key <span style="color:#666;">(${sourceLabel})</span></div>`;
-      html += `<div style="padding:10px;border-radius:6px;background:#1b1b1b;color:#999;border:1px solid #333;margin-bottom:14px;font-family:monospace;font-size:13px;">${masked}</div>`;
-
-      html += `<div style="font-size:12px;color:#888;margin-bottom:4px;">New API Key</div>`;
-      html += `<input id="settings-key" type="text" placeholder="Paste your Torn API key" style="width:100%;padding:10px;border-radius:6px;background:#1b1b1b;color:#eee;border:1px solid #333;margin-bottom:10px;font-family:monospace;font-size:13px;">`;
-
-      html += `<div style="display:flex;gap:8px;">`;
-      html += `<button id="settings-save" style="flex:1;padding:12px;border-radius:8px;border:none;background:#2a3cff;color:#fff;font-weight:700;font-size:14px;cursor:pointer;">Save Key</button>`;
-      html += `<button id="settings-clear" style="flex:1;padding:12px;border-radius:8px;border:1px solid #444;background:#1b1b1b;color:#ccc;font-weight:700;font-size:14px;cursor:pointer;">Clear Key</button>`;
-      html += `</div>`;
-
-      html += `<div style="margin-top:14px;font-size:11px;color:#555;">Your key is stored in localStorage and never leaves your browser. Use a <strong style="color:#888;">Limited Access</strong> key with only the permissions this script needs.</div>`;
-
-      content.innerHTML = html;
-
+      const masked = activeKey ? activeKey.slice(0, 4) + '…' + activeKey.slice(-4) : 'None';
+      content.innerHTML = `
+        <div style="font-weight:700; color:#fff; margin-bottom:12px; font-size:15px;">Settings</div>
+        <div class="oc-card" style="background:rgba(255,255,255,0.02);">
+          <div style="font-size:11px; color:#666; text-transform:uppercase; margin-bottom:6px;">Current Key</div>
+          <div style="font-family:monospace; color:#7af; font-size:14px; margin-bottom:4px;">${masked}</div>
+          <div style="font-size:10px; color:#444;">Source: ${overrideKey ? 'Override' : (inPDA ? 'PDA' : 'Not set')}</div>
+        </div>
+        <div style="font-size:12px; color:#888; margin-bottom:6px;">New Override Key</div>
+        <input id="settings-key" type="text" placeholder="Paste Torn API Key" 
+               style="width:100%; padding:12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#fff; font-family:monospace; margin-bottom:12px; outline:none;">
+        <div style="display:flex; gap:10px;">
+          <button id="settings-save" class="oc-action-btn btn-loan" style="margin-top:0;">Save</button>
+          <button id="settings-clear" class="oc-action-btn btn-retrieve" style="margin-top:0;">Clear</button>
+        </div>
+        <div style="margin-top:20px; font-size:11px; color:#444; line-height:1.4;">
+          API keys are stored locally and only used for OC data.
+        </div>
+      `;
       document.getElementById('settings-save').onclick = () => {
         const val = document.getElementById('settings-key').value.trim();
-        if (val) {
-          storage.set('OCLM_API_KEY', val);
-          const saveBtn = document.getElementById('settings-save');
-          saveBtn.textContent = '✓ Saved';
-          saveBtn.style.background = '#1a7a1a';
-          panel.querySelector('.oc-status').textContent = 'API: Local override';
-          // Refresh display after short delay
-          setTimeout(() => loadSettingsTab(), 800);
-        }
+        if (val) { storage.set('OCLM_API_KEY', val); alert('Key saved!'); loadSettingsTab(); }
       };
-
       document.getElementById('settings-clear').onclick = () => {
-        storage.set('OCLM_API_KEY', '');
-        const clearBtn = document.getElementById('settings-clear');
-        clearBtn.textContent = '✓ Cleared';
-        clearBtn.style.background = '#1a7a1a';
-        clearBtn.style.color = '#fff';
-        clearBtn.style.borderColor = '#1a7a1a';
-        panel.querySelector('.oc-status').textContent = inPDA ? 'API: PDA key' : 'API: missing — set key in ⚙';
-        setTimeout(() => loadSettingsTab(), 800);
+        storage.set('OCLM_API_KEY', ''); alert('Override cleared.'); loadSettingsTab();
       };
     };
 
-    // ----------- Tab Router -----------
-    const loadTab = (tab) => {
-      if (tab === 'missing') loadMissingTab();
-      else if (tab === 'unused') loadUnusedTab();
-      else if (tab === 'payouts') loadPayoutsTab();
-      else if (tab === 'settings') loadSettingsTab();
-    };
+    document.addEventListener('click', (e) => {
+      if (isOpen && !panel.contains(e.target) && !button.contains(e.target)) closePanel();
+    });
   };
 
-  // ------------------- Init -------------------
-  const init = () => {
-    if (window.location.href.includes('factions.php?step=your')) {
-      createUI();
-    }
-  };
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
-
+  createUI();
 })();
