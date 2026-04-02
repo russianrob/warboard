@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Manager
 // @namespace    https://torn.com
-// @version      2.3.1-pda
+// @version      2.3.10-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern UI, Dark/Light Mode, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,15 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.3.10-pda - Fix: fetch both 'armor' and 'armour' categories to bypass Torn API spelling inconsistencies
+// v2.3.9-pda - Bump version for PDA cache clearing
+// v2.3.8-pda - Fix: deduplicate armory items during pagination to prevent infinite loop of the same page
+// v2.3.7-pda - Fix: add armory pagination (support for large inventories) and ensure strict numeric ID matching
+// v2.3.6-pda - Bump version for script manager cache clearing
+// v2.3.5-pda - Fix: cast armory item IDs to integer to resolve Set lookup failure for Unused tab
+// v2.3.4-pda - Fix: Unused tab now excludes combat armoury, only checking known OC armour items
+// v2.3.3-pda - Fix: correct armory category spelling from 'armor' to 'armour' so these items show in Unused tab
+// v2.3.2-pda - Fix: update Payout link to subTab=completed (Modern OC 2.0 UI compatible)
 // v2.3.1-pda - Rename script and files to OC Manager
 // v2.3.0-pda - Add Light Mode toggle in settings; implemented CSS variables for theme support
 // v2.2.2-pda - Fix: UI lag (removed backdrop-filter), double-click toggle bug, and improved drag performance
@@ -109,7 +118,7 @@
     'boosters': 'Booster', 'temporary': 'Temporary', 'clothing': 'Clothing', 'armor': 'Armor'
   };
 
-  const ARMORY_CATEGORIES = ['utilities', 'drugs', 'medical', 'boosters', 'temporary', 'clothing', 'armor'];
+  const ARMORY_CATEGORIES = ['utilities', 'drugs', 'medical', 'boosters', 'temporary', 'clothing', 'armor', 'armour'];
 
   // ------------------- Utilities -------------------
   const getRfcvToken = () => {
@@ -139,13 +148,14 @@
     if (!res.ok) throw new Error('Failed to load OC data');
     const data = await res.json();
     const missing = [];
-    data.crimes.forEach(crime => {
+    const crimes = Array.isArray(data?.crimes) ? data.crimes : Object.values(data?.crimes || {});
+    crimes.forEach(crime => {
       crime.slots?.forEach(slot => {
-        if (slot.item_requirement && !slot.item_requirement.is_available && slot.user?.id && !BLACKLISTED_ITEM_IDS.has(slot.item_requirement.id)) {
+        if (slot.item_requirement && !slot.item_requirement.is_available && slot.user?.id && !BLACKLISTED_ITEM_IDS.has(Number(slot.item_requirement.id))) {
           missing.push({
             crimeName: crime.name,
             position: slot.position,
-            itemID: slot.item_requirement.id,
+            itemID: Number(slot.item_requirement.id),
             userID: slot.user.id,
             userName: memberNameMap.get(String(slot.user.id)) || `Unknown [${slot.user.id}]`
           });
@@ -161,11 +171,12 @@
     if (!res.ok) throw new Error('Failed to load OC data');
     const data = await res.json();
     const neededByUser = new Map();
-    data.crimes.forEach(crime => {
+    const crimes = Array.isArray(data?.crimes) ? data.crimes : Object.values(data?.crimes || {});
+    crimes.forEach(crime => {
       crime.slots?.forEach(slot => {
         if (slot.item_requirement && slot.user?.id) {
           const uid = String(slot.user.id);
-          const iid = slot.item_requirement.id;
+          const iid = Number(slot.item_requirement.id);
           if (!neededByUser.has(uid)) neededByUser.set(uid, new Set());
           neededByUser.get(uid).add(iid);
         }
@@ -221,19 +232,41 @@
   const fetchArmoryCategoryJSON = async (category) => {
     const rfcv = getRfcvToken();
     if (!rfcv) throw new Error('Missing RFCV token');
-    const body = new URLSearchParams({ step: 'armouryTabContent', type: category, start: '0', ajax: 'true' });
-    const res = await fetch(`https://www.torn.com/factions.php?rfcv=${rfcv}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' },
-      body, credentials: 'same-origin'
-    });
-    if (!res.ok) return []; 
-    try {
-      const data = await res.json();
-      if (!data?.items) return [];
-      for (const entry of data.items) { if (entry.itemID && entry.name) setItemName(entry.itemID, entry.name); }
-      return data.items.map(item => ({ ...item, armoryCategory: category }));
-    } catch { return []; }
+    let allItems = [];
+    const seenArmoryIDs = new Set();
+    let start = 0;
+    while (start < 1000) { // Limit to 20 pages
+      const body = new URLSearchParams({ step: 'armouryTabContent', type: category, start: String(start), ajax: 'true' });
+      const res = await fetch(`https://www.torn.com/factions.php?rfcv=${rfcv}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' },
+        body, credentials: 'same-origin'
+      });
+      if (!res.ok) break;
+      try {
+        const data = await res.json();
+        if (!data?.items) break;
+        const itemsArr = Array.isArray(data.items) ? data.items : Object.values(data.items);
+        if (itemsArr.length === 0) break;
+        
+        let newItemsAdded = 0;
+        for (const entry of itemsArr) {
+          if (entry.itemID && entry.name) setItemName(entry.itemID, entry.name);
+          if (entry.armoryID && !seenArmoryIDs.has(entry.armoryID)) {
+            seenArmoryIDs.add(entry.armoryID);
+            allItems.push({ ...entry, itemID: Number(entry.itemID), armoryCategory: category });
+            newItemsAdded++;
+          }
+        }
+        
+        // If we didn't add any new items from this page, the API is just returning the same first page
+        if (newItemsAdded === 0) break;
+        
+        if (itemsArr.length < 50) break;
+        start += 50;
+      } catch (e) { console.error('[OCLM] Armory fetch error for', category, e); break; }
+    }
+    return allItems;
   };
 
   const fetchAllArmoryItems = async () => {
@@ -470,7 +503,7 @@
         <button class="oc-tab" style="max-width:36px;" data-tab="settings">⚙</button>
       </div>
       <div id="oc-content"></div>
-      <div class="oc-status-bar"><span>v2.3.0-pda</span><span>API: ${apiStatusShort}</span></div>
+      <div class="oc-status-bar"><span>v2.3.10-pda</span><span>API: ${apiStatusShort}</span></div>
     `;
 
     document.body.appendChild(button);
@@ -556,8 +589,12 @@
         await loadMembers();
         const [armoryItems, neededByUser] = await Promise.all([fetchAllArmoryItems(), getAllOCItemRequirements()]);
         const unused = [];
+        const OC_ARMOUR_ITEM_IDS = new Set([348, 643, 644]); // Hazmat Suit, Construction Helmet, Welding Helmet
+        
         for (const entry of armoryItems) {
           if (entry.armoryCategory === 'temporary') continue;
+          if ((entry.armoryCategory === 'armor' || entry.armoryCategory === 'armour') && !OC_ARMOUR_ITEM_IDS.has(entry.itemID)) continue;
+          
           if (entry.user && entry.user.userID) {
             const uid = String(entry.user.userID), iid = entry.itemID;
             const needed = neededByUser.get(uid);
@@ -611,7 +648,7 @@
             <div style="font-size:11px; color:#2a3cff; text-transform:uppercase; font-weight:700; margin-bottom:4px; letter-spacing:0.5px;">Summary</div>
             ${totalMoney > 0 ? `<div style="font-size:18px; font-weight:800;">$${formatNumber(totalMoney)}</div>` : ''}
             <div style="font-size:12px; color:#888;">${unpaid.length} Unpaid OCs ${items > 0 ? `• ${items} with Items` : ''}</div>
-            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&crimeSubTab=completed" target="_blank" 
+            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&subTab=completed" target="_blank" 
                style="display:block; margin-top:12px; padding:10px; background:#2a3cff; color:#fff; text-align:center; border-radius:8px; text-decoration:none; font-weight:700; font-size:13px; box-shadow:0 4px 10px rgba(42,60,255,0.3);">Open Payouts Page</a>
           </div>
         `;
@@ -620,10 +657,12 @@
           const ageDays = Math.floor(ageSec / 86400);
           const ageColor = ageDays >= 7 ? '#f66' : (ageDays >= 3 ? '#b8860b' : '#888');
           html += `
-            <div class="oc-card" style="padding:10px 12px;">
-              <div class="oc-card-header"><span class="oc-crime-name" style="font-size:12.5px;">${c.name}</span><span style="font-size:11px; font-weight:700; color:${ageColor};">${ageDays > 0 ? ageDays+'d' : Math.floor(ageSec/3600)+'h'}</span></div>
-              <div style="display:flex; justify-content:space-between; align-items:center;"><span style="font-size:13px; color:#1a7a1a; font-weight:700;">${c.money > 0 ? '$' + formatNumber(c.money) : ''}</span><span style="font-size:11px; color:#888;">${c.hasItems ? '<span style="color:#2a3cff;">Items</span>' : ''}${c.payoutPct ? ` ${c.payoutPct}%` : ''}</span></div>
-            </div>
+            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&subTab=completed" target="_blank" style="text-decoration:none; color:inherit; display:block;">
+              <div class="oc-card" style="padding:10px 12px;">
+                <div class="oc-card-header"><span class="oc-crime-name" style="font-size:12.5px;">${c.name}</span><span style="font-size:11px; font-weight:700; color:${ageColor};">${ageDays > 0 ? ageDays+'d' : Math.floor(ageSec/3600)+'h'}</span></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="font-size:13px; color:#1a7a1a; font-weight:700;">${c.money > 0 ? '$' + formatNumber(c.money) : ''}</span><span style="font-size:11px; color:#888;">${c.hasItems ? '<span style="color:#2a3cff;">Items</span>' : ''}${c.payoutPct ? ` ${c.payoutPct}%` : ''}</span></div>
+              </div>
+            </a>
           `;
         }
         content.innerHTML = html;
