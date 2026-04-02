@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Easter Egg Hunter 2026
 // @namespace    torn.easter.egg.hunter
-// @version      1.2.1
+// @version      1.2.2
 // @description  Ultimate Detection & Navigation for Torn Easter Eggs. Detects eggs in the root container, highlights them, and provides a 300+ page navigation tool with keyboard shortcuts.
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -44,7 +44,6 @@
     const STORAGE_KEY_NAV_INDEX = 'torn_egg_nav_index';
     const STORAGE_KEY_ENABLED = 'torn_egg_hunter_enabled';
     const STORAGE_KEY_ROUTE = 'torn_egg_route';
-    const STORAGE_KEY_FOUND_EGGS = 'torn_egg_found_dict';
     const STORAGE_KEY_MINIMIZED = 'torn_egg_minimized';
 
     // --- AUDIO HELPER ---
@@ -116,8 +115,6 @@
     function processEgg(img, color) {
         if (img.dataset.foundByHunter) return;
         img.dataset.foundByHunter = "true";
-
-        if (color) addFoundEgg(color);
 
         console.log("%c [EGG FOUND!] ", "background: #222; color: #bada55; font-size: 20px;");
         
@@ -196,7 +193,7 @@
 
         const header = document.createElement('div');
         header.style.cssText = 'font-weight: bold; color: gold; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center;';
-        header.innerHTML = '<span>🥚 Egg Hunter v1.2.1</span>';
+        header.innerHTML = '<span>🥚 Egg Hunter v1.2.2</span>';
         
         const headerControls = document.createElement('div');
         headerControls.style.cssText = 'display: flex; align-items: center;';
@@ -276,17 +273,11 @@
         footer.appendChild(prevBtn);
         footer.appendChild(resetBtn);
 
-        // Tracker UI
-        const trackerContainer = document.createElement('div');
-        trackerContainer.id = 'egg-tracker';
-        trackerContainer.style.cssText = 'margin-top: 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; font-size: 9px; text-align: center;';
-
         container.appendChild(header);
         container.appendChild(routeControls);
         container.appendChild(progressContainer);
         container.appendChild(navBtn);
         container.appendChild(footer);
-        container.appendChild(trackerContainer);
 
         const firstChild = sidebar.firstChild;
         if (firstChild) sidebar.insertBefore(container, firstChild);
@@ -356,19 +347,6 @@
         const bar = document.getElementById('egg-progress-bar');
         if (bar) bar.style.width = `${(getNavIndex() / route.length) * 100}%`;
 
-        const tracker = document.getElementById('egg-tracker');
-        if (tracker) {
-            tracker.innerHTML = '';
-            const foundEggs = getFoundEggs();
-            Object.values(EGG_COLORS).forEach(col => {
-                const el = document.createElement('div');
-                const found = foundEggs[col];
-                el.style.cssText = `padding: 3px; border-radius: 3px; background: ${found ? '#2d4d2d' : '#222'}; color: ${found ? '#bada55' : '#555'}; border: 1px solid ${found ? '#4caf50' : '#333'};`;
-                el.innerText = col;
-                tracker.appendChild(el);
-            });
-        }
-
         const shuffleBtn = document.getElementById('egg-shuffle-btn');
         if (shuffleBtn) {
             const isShuffled = route[0] !== NAV_PAGES[0];
@@ -409,14 +387,6 @@
     function setEnabled(val) { GM_setValue(STORAGE_KEY_ENABLED, val); }
     function getRoute() { return GM_getValue(STORAGE_KEY_ROUTE, NAV_PAGES); }
     function setRoute(route) { GM_setValue(STORAGE_KEY_ROUTE, route); }
-    function getFoundEggs() { return JSON.parse(GM_getValue(STORAGE_KEY_FOUND_EGGS, '{}')); }
-    function addFoundEgg(color) { 
-        if(!color) return;
-        const eggs = getFoundEggs(); 
-        eggs[color] = true; 
-        GM_setValue(STORAGE_KEY_FOUND_EGGS, JSON.stringify(eggs)); 
-        updateNavUI(); 
-    }
 
     // --- KEYBOARD SHORTCUTS ---
     function handleKeydown(e) {
