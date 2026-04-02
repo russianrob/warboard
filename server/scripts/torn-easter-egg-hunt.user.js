@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Easter Egg Hunter 2026
 // @namespace    torn.easter.egg.hunter
-// @version      1.2.0
+// @version      1.2.1
 // @description  Ultimate Detection & Navigation for Torn Easter Eggs. Detects eggs in the root container, highlights them, and provides a 300+ page navigation tool with keyboard shortcuts.
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -45,6 +45,7 @@
     const STORAGE_KEY_ENABLED = 'torn_egg_hunter_enabled';
     const STORAGE_KEY_ROUTE = 'torn_egg_route';
     const STORAGE_KEY_FOUND_EGGS = 'torn_egg_found_dict';
+    const STORAGE_KEY_MINIMIZED = 'torn_egg_minimized';
 
     // --- AUDIO HELPER ---
     function playBeep() {
@@ -195,8 +196,11 @@
 
         const header = document.createElement('div');
         header.style.cssText = 'font-weight: bold; color: gold; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center;';
-        header.innerHTML = '<span>🥚 Egg Hunter v1.2.0</span>';
+        header.innerHTML = '<span>🥚 Egg Hunter v1.2.1</span>';
         
+        const headerControls = document.createElement('div');
+        headerControls.style.cssText = 'display: flex; align-items: center;';
+
         const toggleBtn = document.createElement('span');
         toggleBtn.id = 'egg-hunter-toggle';
         toggleBtn.style.cssText = 'cursor: pointer; font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: bold;';
@@ -206,7 +210,21 @@
             updateToggleStyle(toggleBtn);
             if (getEnabled()) highlightEggs();
         };
-        header.appendChild(toggleBtn);
+        headerControls.appendChild(toggleBtn);
+
+        const minimizeBtn = document.createElement('span');
+        minimizeBtn.innerText = '✖';
+        minimizeBtn.title = 'Minimize Hunter';
+        minimizeBtn.style.cssText = 'cursor: pointer; font-size: 14px; margin-left: 8px; color: #aaa; transition: color 0.2s; line-height: 1;';
+        minimizeBtn.onmouseover = () => minimizeBtn.style.color = '#fff';
+        minimizeBtn.onmouseout = () => minimizeBtn.style.color = '#aaa';
+        minimizeBtn.onclick = () => {
+            GM_setValue(STORAGE_KEY_MINIMIZED, true);
+            updateVisibility();
+        };
+        headerControls.appendChild(minimizeBtn);
+
+        header.appendChild(headerControls);
 
         const routeControls = document.createElement('div');
         routeControls.style.cssText = 'display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 10px;';
@@ -274,7 +292,39 @@
         if (firstChild) sidebar.insertBefore(container, firstChild);
         else sidebar.appendChild(container);
 
+        // Setup Floating Minimized Egg Icon
+        let miniEgg = document.getElementById('egg-hunter-minimized');
+        if (!miniEgg) {
+            miniEgg = document.createElement('div');
+            miniEgg.id = 'egg-hunter-minimized';
+            miniEgg.innerHTML = '🥚';
+            miniEgg.style.cssText = `
+                position: fixed; bottom: 20px; right: 20px; font-size: 24px;
+                cursor: pointer; z-index: 2147483647; background: rgba(0,0,0,0.8);
+                border: 2px solid gold; border-radius: 50%; width: 45px; height: 45px;
+                display: none; align-items: center; justify-content: center;
+                box-shadow: 0 0 10px rgba(255, 215, 0, 0.5); transition: transform 0.2s;
+            `;
+            miniEgg.title = "Restore Egg Hunter UI";
+            miniEgg.onmouseover = () => miniEgg.style.transform = 'scale(1.1)';
+            miniEgg.onmouseout = () => miniEgg.style.transform = 'scale(1)';
+            miniEgg.onclick = () => {
+                GM_setValue(STORAGE_KEY_MINIMIZED, false);
+                updateVisibility();
+            };
+            document.body.appendChild(miniEgg);
+        }
+
+        updateVisibility();
         updateNavUI();
+    }
+
+    function updateVisibility() {
+        const isMin = GM_getValue(STORAGE_KEY_MINIMIZED, false);
+        const container = document.getElementById('egg-hunter-container');
+        const miniEgg = document.getElementById('egg-hunter-minimized');
+        if (container) container.style.display = isMin ? 'none' : 'block';
+        if (miniEgg) miniEgg.style.display = isMin ? 'flex' : 'none';
     }
 
     function navigate(direction) {
