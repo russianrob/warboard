@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Torn Profile Link Formatter
 // @namespace GNSC4 [268863]
-// @version 3.6.6
+// @version 3.6.7
 // @description Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author RussianRob
 // @match https://www.torn.com/profiles.php?XID=*
@@ -19,6 +19,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.7 - Relax profile element requirements to ensure UI injects on PDA and desktop
 // v3.6.6 - Fix profile page injection by using more robust attribute selectors (brackets)
 // v3.6.5 - Anchor copy progress to faction header instead of floating overlay
 // v3.6.4 - Remove level from faction copy output
@@ -84,11 +85,14 @@ GM_addStyle(`
 `);
 
 function initProfilePage() {
-const nameElement = document.querySelector('h4[class*="name_"]');
-const infoTable = document.querySelector('div[class*="basicInformation"] ul[class*="infoTable"]');
+const nameElement = document.querySelector('h4[class*="name_"], .profile-wrapper h4, [class*="profileWrapper"] h4[class*="name_"], #skip-to-content');
+const infoTable = document.querySelector('div[class*="basicInformation"] ul[class*="infoTable"], .basic-information .info-table, [class*="infoTable"], [class*="basicInformation"]');
 const alreadyInjected = document.querySelector('.gnsc-copy-container');
-if (nameElement && infoTable && infoTable.children.length > 5 && !alreadyInjected) {
-mainProfile(nameElement, infoTable);
+
+if (nameElement && !alreadyInjected) {
+// Make sure we have the actual name element if #skip-to-content was found
+const actualNameEl = nameElement.id === 'skip-to-content' ? document.querySelector('h4[class*="name_"], .profile-wrapper h4') || nameElement : nameElement;
+mainProfile(actualNameEl, infoTable);
 return true;
 }
 return false;
@@ -170,22 +174,26 @@ let factionLinkEl = null;
 let companyLinkEl = null;
 let activityStatus = 'Offline';
 
-const infoListItems = infoTable.querySelectorAll('li');
+if (infoTable) {
+const infoListItems = infoTable.querySelectorAll('li, div[class*="infoRow_"]');
 infoListItems.forEach(item => {
-const titleEl = item.querySelector('[class*="userInformationSection"] [class*="bold"]');
+const titleEl = item.querySelector('[class*="userInformationSection"] [class*="bold"], [class*="title_"]');
 if (!titleEl) return;
 const title = titleEl.textContent.trim();
 if (title === 'Faction') factionLinkEl = item.querySelector('a');
 if (title === 'Job') companyLinkEl = item.querySelector('a');
 });
-
-const statusIconEl = document.querySelector('li[id^="icon1-profile-"], li[id^="icon2-profile-"], li[id^="icon62-profile-"]');
-if (statusIconEl) {
-if (statusIconEl.className.includes('-Online')) activityStatus = 'Online';
-else if (statusIconEl.className.includes('-Away')) activityStatus = 'Idle';
 }
 
-const statusDescEl = document.querySelector('[class*="profileStatus"][class*="hospital"] [class*="mainDesc"]');
+const statusIconEl = document.querySelector('li[id^="icon1-profile-"], li[id^="icon2-profile-"], li[id^="icon62-profile-"], [class*="userStatusWrap_"] svg, [class*="statusIcon_"]');
+if (statusIconEl) {
+const cls = statusIconEl.className.toString();
+const fill = statusIconEl.getAttribute ? statusIconEl.getAttribute('fill') || '' : '';
+if (cls.includes('-Online') || fill.includes('online')) activityStatus = 'Online';
+else if (cls.includes('-Away') || cls.includes('idle') || fill.includes('idle')) activityStatus = 'Idle';
+}
+
+const statusDescEl = document.querySelector('[class*="profileStatus"][class*="hospital"] [class*="mainDesc"], .profile-status.hospital .main-desc');
 const isInHospital = !!statusDescEl;
 const hospitalTimeStr = isInHospital ? statusDescEl.textContent.trim().replace(/\s+/g, ' ') : null;
 
