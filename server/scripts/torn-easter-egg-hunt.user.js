@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Easter Egg Hunter 2026
 // @namespace    torn.easter.egg.hunter
-// @version      1.1.1
+// @version      1.1.2
 // @description  Ultimate Detection & Navigation for Torn Easter Eggs. Detects eggs in the root container, highlights them, and provides a 200+ page navigation tool with keyboard shortcuts.
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -19,15 +19,15 @@
     // --- CONFIGURATION ---
     const EGG_IDS = [618, 619, 620, 621, 622, 623, 624, 625, 626]; // IDs for Green, Red, Yellow, White, Black, Blue, Brown, Purple, Gold
     const NAV_PAGES = [
-        "index.php", "home.php", "items.php", "properties.php", "education.php", "gym.php", "crimes.php", "missions.php", "newspaper.php", "jail.php", "hospital.php", "casino.php", "forums.php", "city.php", "job.php", "bounties.php", "halloffame.php", "factions.php", "points.php", "trade.php", "stockmarket.php", "museum.php", "travelagency.php", "raceway.php", "page.php?sid=map",
+        "index.php", "home.php", "item.php", "properties.php", "education.php", "gym.php", "crimes.php", "missions.php", "newspaper.php", "jailview.php", "hospitalview.php", "casino.php", "forums.php", "city.php", "job.php", "bounties.php", "halloffame.php", "factions.php", "points.php", "trade.php", "stockexchange.php", "museum.php", "travelagency.php", "raceway.php", "page.php?sid=map",
+        "imarket.php", "bazaar.php#/p=main", "displaycase.php", "pitems.php", "awards.php", "friendlist.php", "enemylist.php", "preferences.php", "personalstats.php",
         "profiles.php?XID=1", "profiles.php?XID=3", "profiles.php?XID=4", "profiles.php?XID=7", "profiles.php?XID=8", "profiles.php?XID=9", "profiles.php?XID=10", "profiles.php?XID=15", "profiles.php?XID=17", "profiles.php?XID=19", "profiles.php?XID=20", "profiles.php?XID=21",
         "loader.php?sid=slots", "loader.php?sid=roulette", "loader.php?sid=blackjack", "loader.php?sid=poker", "loader.php?sid=bookie", "loader.php?sid=lottery", "loader.php?sid=keno", "loader.php?sid=highlow", "loader.php?sid=craps",
         "shops.php?step=bitsnbobs", "shops.php?step=bigals", "shops.php?step=pharmacy", "shops.php?step=jewelry", "shops.php?step=sweetshop", "shops.php?step=clothing", "shops.php?step=hardware", "shops.php?step=superstore", "shops.php?step=postoffice", "shops.php?step=cyberforce", "shops.php?step=nikeh", "shops.php?step=pawnshop",
         "crimes.php#/searchforcash", "crimes.php#/bootlegging", "crimes.php#/graffiti", "crimes.php#/shoplifting", "crimes.php#/burglary", "crimes.php#/hustling", "crimes.php#/pickpocketing", "crimes.php#/cracking",
         "factions.php?step=your#/tab=armoury", "factions.php?step=your#/tab=crimes", "factions.php?step=your#/tab=wars", "factions.php?step=your#/tab=controls",
-        "forums.php?p=threads&f=1", "forums.php?p=threads&f=2", "forums.php?p=threads&f=3", "forums.php?p=threads&f=9", "forums.php?p=threads&f=10",
+        "forums.php#/p=threads&f=1", "forums.php#/p=threads&f=2", "forums.php#/p=threads&f=3", "forums.php#/p=threads&f=9", "forums.php#/p=threads&f=10",
         "staff.php", "rules.php", "donates.php", "halloffame.php", "competition.php"
-        // Expanded to ~70 core targets; user can easily add more
     ];
 
     const STORAGE_KEY_NAV_INDEX = 'torn_egg_nav_index';
@@ -142,7 +142,7 @@
 
         const header = document.createElement('div');
         header.style.cssText = 'font-weight: bold; color: gold; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;';
-        header.innerHTML = '<span>🥚 Egg Hunter v1.1</span>';
+        header.innerHTML = '<span>🥚 Egg Hunter v1.1.2</span>';
         
         const toggleBtn = document.createElement('span');
         toggleBtn.id = 'egg-hunter-toggle';
@@ -206,10 +206,8 @@
         let idx = getNavIndex(); // Current 1-based index (page to visit next)
         
         if (direction > 0) {
-            // Next: if we are at the end, wrap to the beginning
             if (idx >= NAV_PAGES.length) idx = 0;
         } else {
-            // Previous: go back two steps from the 'next' pointer
             idx -= 2;
             if (idx < 0) idx = NAV_PAGES.length + idx;
         }
