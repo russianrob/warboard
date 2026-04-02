@@ -89,6 +89,9 @@
 
   // itemID -> { armoryID, qty, armoryType }
   const armoryCache = new Map();
+  let lastRefreshTime = 0;
+  const REFRESH_COOLDOWN_MS = 10000; // 10 seconds
+
   let preparedArmoryID = null;
   let pendingArmoryItemID = null;
 
@@ -317,7 +320,12 @@
     return results.flat();
   };
 
-  const refreshArmoryCache = async () => {
+  const refreshArmoryCache = async (force = false) => {
+    const now = Date.now();
+    if (!force && armoryCache.size > 0 && (now - lastRefreshTime < REFRESH_COOLDOWN_MS)) {
+      return; // Use cache if fresh
+    }
+
     armoryCache.clear();
     const items = await fetchAllArmoryItems();
     for (const entry of items) {
@@ -329,12 +337,18 @@
         });
       }
     }
+    lastRefreshTime = Date.now();
   };
 
   const prepareArmouryForItem = async (itemID) => {
-    // Always refresh to get the latest stock — avoids stale cache issues
-    // that required pressing the Loan button twice
-    await refreshArmoryCache();
+    // Only force refresh if not in cache
+    if (!armoryCache.has(itemID)) {
+      await refreshArmoryCache(true);
+    } else {
+      // Background check if it's potentially stale, but don't block
+      await refreshArmoryCache(false);
+    }
+
     const entry = armoryCache.get(itemID);
     if (!entry || entry.qty <= 0) return null;
     preparedArmoryID = entry.armoryID;
@@ -406,12 +420,10 @@
     });
     if (!res.ok) throw new Error('Loan request failed');
     const text = await res.text();
-    // Torn returns various responses — treat as success unless it clearly contains an error
-    const lower = text.toLowerCase();
-    if (lower.includes('error') || lower.includes('cannot') || lower.includes('not enough') || lower.includes('fail')) {
-      throw new Error('Loan rejected by server');
+    // Revert to strict success check
+    if (!text.includes('success')) {
+      throw new Error('Loan failed');
     }
-    // If we got an OK response without error keywords, treat as success
   };
 
   const loanPreparedItem = async ({ userID, userName }) => {
