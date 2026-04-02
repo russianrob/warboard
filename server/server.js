@@ -293,7 +293,7 @@ setTimeout(detectNewWars, 10000);
 warDetectTimer = setInterval(detectNewWars, WAR_DETECT_INTERVAL_NORMAL);
 console.log('[war-detect] Auto-detection scheduled (5 min normal, 1 min during Tuesday 11:45-12:30 UTC)');
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, '127.0.0.1', () => {
   console.log(`[server] FactionOps server listening on port ${PORT}`);
   console.log(`[server] Landing page: http://localhost:${PORT}`);
   console.log(`[server] Script download: http://localhost:${PORT}/download/factionops.user.js`);
