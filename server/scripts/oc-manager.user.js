@@ -159,7 +159,9 @@
     const missing = [];
     const crimes = Array.isArray(data?.crimes) ? data.crimes : Object.values(data?.crimes || {});
     crimes.forEach(crime => {
+      if (!crime) return;
       crime.slots?.forEach(slot => {
+        if (!slot) return;
         if (slot.item_requirement && !slot.item_requirement.is_available && slot.user?.id && !BLACKLISTED_ITEM_IDS.has(Number(slot.item_requirement.id))) {
           missing.push({
             crimeName: crime.name,
@@ -182,7 +184,9 @@
     const neededByUser = new Map();
     const crimes = Array.isArray(data?.crimes) ? data.crimes : Object.values(data?.crimes || {});
     crimes.forEach(crime => {
+      if (!crime) return;
       crime.slots?.forEach(slot => {
+        if (!slot) return;
         if (slot.item_requirement && slot.user?.id) {
           const uid = String(slot.user.id);
           const iid = Number(slot.item_requirement.id);
