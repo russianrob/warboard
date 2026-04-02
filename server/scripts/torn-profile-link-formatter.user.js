@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.11
+// @version      3.6.12
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -19,6 +19,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.12 - Fix progress bar visibility (absolute positioning) and delay hiding so 100% state is visible
 // v3.6.11 - Add visual progress bar to faction copy and improve error handling for individual members
 // v3.6.10 - Make profile injection completely bulletproof against DOM updates by falling back to #skip-to-content and document.title
 // v3.6.9  - Update profile name DOM selector to support Torn's new HTML layout
@@ -843,11 +844,12 @@
             button.textContent = `0/${totalMembers}`;
 
             // --- Inject Progress Bar ---
+            button.parentNode.style.position = 'relative';
             let progressBarContainer = button.parentNode.querySelector('.gnsc-progress-container');
             if (!progressBarContainer) {
                 progressBarContainer = document.createElement('div');
                 progressBarContainer.className = 'gnsc-progress-container';
-                progressBarContainer.style.cssText = 'width: 100px; height: 8px; background-color: rgba(50,50,50,0.8); border: 1px solid #555; border-radius: 4px; display: inline-block; vertical-align: middle; margin-left: 8px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);';
+                progressBarContainer.style.cssText = 'width: 100px; height: 8px; background-color: rgba(50,50,50,0.8); border: 1px solid #555; border-radius: 4px; position: absolute; margin-top: 25px; margin-left: 8px; z-index: 9999; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);';
                 
                 const progressBar = document.createElement('div');
                 progressBar.className = 'gnsc-progress-bar';
@@ -856,7 +858,7 @@
                 progressBarContainer.appendChild(progressBar);
                 button.parentNode.insertBefore(progressBarContainer, button.nextSibling);
             }
-            progressBarContainer.style.display = 'inline-block';
+            progressBarContainer.style.display = 'block';
             const progressBar = progressBarContainer.querySelector('.gnsc-progress-bar');
             progressBar.style.width = '0%';
             // ---------------------------
@@ -917,8 +919,10 @@
                 await new Promise(r => setTimeout(r, 0));
             }
             
-            // Hide progress bar on completion
-            progressBarContainer.style.display = 'none';
+            // Hide progress bar on completion after a delay so it stays visible at 100%
+            setTimeout(() => {
+                if (progressBarContainer) progressBarContainer.style.display = 'none';
+            }, 2500);
 
             if (!lines.length) {
                 if (debug) console.error('GNSC faction copy: no member rows parsed for side selector', sideSelector, 'targetFactionId', targetFactionId);
