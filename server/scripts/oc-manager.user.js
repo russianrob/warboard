@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Manager
 // @namespace    https://torn.com
-// @version      2.3.15-pda
+// @version      2.3.16-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern UI, Dark/Light Mode, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.3.16-pda - Feat: Add tab persistence (remembers last tab used)
 // v2.3.15-pda - Fix: update Payout link hash separator from / to & to ensure tab switching in OC 2.0
 // v2.3.14-pda - Fix: update Payout link to camelCase subTab=completed and forward slash (fixes OC 2.0 navigation)
 // v2.3.13-pda - Fix: Payouts detection — change cat=successful to cat=completed (Modern OC 2.0 compatible), update links to subtab=completed
@@ -543,7 +544,8 @@
       panel.style.visibility = 'visible'; 
       panel.style.transform = 'translateY(0) scale(1)'; 
       isOpen = true; 
-      loadTab(getTabFromHash() || 'missing'); 
+      const lastTab = storage.get('OCLM_LAST_TAB');
+      loadTab(getTabFromHash() || lastTab || 'missing'); 
     };
     const closePanel = () => { panel.style.opacity = '0'; panel.style.transform = 'translateY(10px) scale(0.98)'; setTimeout(() => { if (!isOpen) panel.style.visibility = 'hidden'; }, 200); isOpen = false; };
 
@@ -553,6 +555,7 @@
 
     const loadTab = (tab) => {
       panel.querySelectorAll('.oc-tab').forEach(t => { t.classList.toggle('active', t.dataset.tab === tab); });
+      storage.set('OCLM_LAST_TAB', tab);
       if (tab === 'missing') loadMissingTab();
       else if (tab === 'unused') loadUnusedTab();
       else if (tab === 'payouts') loadPayoutsTab();
