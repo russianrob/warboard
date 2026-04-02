@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Easter Egg Hunter 2026
 // @namespace    torn.easter.egg.hunter
-// @version      1.1.5
+// @version      1.1.6
 // @description  Ultimate Detection & Navigation for Torn Easter Eggs. Detects eggs in the root container, highlights them, and provides a 300+ page navigation tool with keyboard shortcuts.
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -55,15 +55,22 @@
         // 2. Detection via Image Scan (Fallback/Safety)
         const allImages = document.getElementsByTagName('img');
         for (let img of allImages) {
-            if (img.width < 20 || img.height < 20 || img.closest('[class*="filter"], [class*="category"]')) continue;
+            // Ignore tiny UI icons, large banners, and images inside specific UI/Calendar containers
+            if (
+                img.width < 20 ||
+                img.width > 150 ||
+                img.height < 20 ||
+                img.closest('[class*="filter"], [class*="category"], [class*="calendar"], [class*="title-black"]')
+            ) {
+                continue;
+            }
 
-            const isEgg = EGG_IDS.some(id => img.src.includes(`/items/${id}/`)) || 
-                        img.src.includes('easter_egg') || 
-                        img.src.includes('easter-egg');
-            
+            const isEgg = EGG_IDS.some(id => img.src.includes(`/items/${id}/`)) ||
+                          img.src.includes('easter_egg') ||
+                          img.src.includes('easter-egg');
+
             if (isEgg) processEgg(img);
-        }
-    }
+        }    }
 
     function processEgg(img) {
         if (img.dataset.foundByHunter) return;
