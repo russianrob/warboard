@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Manager
 // @namespace    https://torn.com
-// @version      2.3.22-pda
+// @version      2.3.23-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern UI, Dark/Light Mode, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.3.23-pda - Fix: Add null/undefined checks to crime processing loops to prevent TypeError
 // v2.3.22-pda - Fix: Better tab persistence logic in openPanel
 // v2.3.21-pda - Fix: Robustness check for API responses in getUnpaidCompletedCrimes
 // v2.3.20-pda - Debug: Add logging to track tab persistence issues
