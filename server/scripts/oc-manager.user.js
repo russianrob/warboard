@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Manager
 // @namespace    https://torn.com
-// @version      2.3.16-pda
+// @version      2.3.17-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern UI, Dark/Light Mode, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,8 +11,8 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.3.17-pda - Bump version to force PDA update
 // v2.3.16-pda - Feat: Add tab persistence (remembers last tab used)
-// v2.3.15-pda - Fix: update Payout link hash separator from / to & to ensure tab switching in OC 2.0
 // v2.3.14-pda - Fix: update Payout link to camelCase subTab=completed and forward slash (fixes OC 2.0 navigation)
 // v2.3.13-pda - Fix: Payouts detection — change cat=successful to cat=completed (Modern OC 2.0 compatible), update links to subtab=completed
 // v2.3.12-pda - Fix: update Payout link to subTab=completed (Modern OC 2.0 UI compatible)
