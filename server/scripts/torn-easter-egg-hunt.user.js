@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Easter Egg Hunter 2026
 // @namespace    torn.easter.egg.hunter
-// @version      1.1.2
-// @description  Ultimate Detection & Navigation for Torn Easter Eggs. Detects eggs in the root container, highlights them, and provides a 200+ page navigation tool with keyboard shortcuts.
+// @version      1.1.3
+// @description  Ultimate Detection & Navigation for Torn Easter Eggs. Detects eggs in the root container, highlights them, and provides a 300+ page navigation tool with keyboard shortcuts.
 // @author       RussianRob
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -18,16 +18,23 @@
 
     // --- CONFIGURATION ---
     const EGG_IDS = [618, 619, 620, 621, 622, 623, 624, 625, 626]; // IDs for Green, Red, Yellow, White, Black, Blue, Brown, Purple, Gold
+    
+    // Extracted 300+ pages from Ultimate Hunter
     const NAV_PAGES = [
-        "index.php", "home.php", "item.php", "properties.php", "education.php", "gym.php", "crimes.php", "missions.php", "newspaper.php", "jailview.php", "hospitalview.php", "casino.php", "forums.php", "city.php", "job.php", "bounties.php", "halloffame.php", "factions.php", "points.php", "trade.php", "stockexchange.php", "museum.php", "travelagency.php", "raceway.php", "page.php?sid=map",
-        "imarket.php", "bazaar.php#/p=main", "displaycase.php", "pitems.php", "awards.php", "friendlist.php", "enemylist.php", "preferences.php", "personalstats.php",
-        "profiles.php?XID=1", "profiles.php?XID=3", "profiles.php?XID=4", "profiles.php?XID=7", "profiles.php?XID=8", "profiles.php?XID=9", "profiles.php?XID=10", "profiles.php?XID=15", "profiles.php?XID=17", "profiles.php?XID=19", "profiles.php?XID=20", "profiles.php?XID=21",
-        "loader.php?sid=slots", "loader.php?sid=roulette", "loader.php?sid=blackjack", "loader.php?sid=poker", "loader.php?sid=bookie", "loader.php?sid=lottery", "loader.php?sid=keno", "loader.php?sid=highlow", "loader.php?sid=craps",
+        "index.php", "preferences.php", "personalstats.php", "personalstats.php?ID=1", "playerreport.php", "page.php?sid=report#/add", "authenticate.php", "page.php?sid=log", "page.php?sid=events", "page.php?sid=events#onlySaved=true", "events.php#/step=all",
+        "profiles.php?XID=1", "profiles.php?XID=3", "profiles.php?XID=4", "profiles.php?XID=7", "profiles.php?XID=8", "profiles.php?XID=9", "profiles.php?XID=10", "profiles.php?XID=15", "profiles.php?XID=17", "profiles.php?XID=19", "profiles.php?XID=20", "profiles.php?XID=21", "profiles.php?XID=23", "profiles.php?XID=50", "profiles.php?XID=100", "profiles.php?XID=101", "profiles.php?XID=102", "profiles.php?XID=103", "profiles.php?XID=104",
+        "page.php?sid=gallery&XID=1", "page.php?sid=awards&tab=honors", "page.php?sid=awards&tab=medals", "page.php?sid=awards&tab=merits", "page.php?sid=hof", "revive.php", "pc.php", "city.php", "citystats.php", "usersonline.php", "page.php?sid=UserList", "index.php?page=people", "index.php?page=fortune", "index.php?page=rehab", "index.php?page=hunting",
+        "item.php", "page.php?sid=itemsMods", "page.php?sid=ammo", "itemuseparcel.php", "displaycase.php", "displaycase.php#display/1", "displaycase.php#display/4", "displaycase.php#display/7", "displaycase.php#display/10", "displaycase.php#display/15", "displaycase.php#display/50", "displaycase.php#manage", "displaycase.php#add", "keepsakes.php", "trade.php", "museum.php", "amarket.php", "pmarket.php", "page.php?sid=ItemMarket", "page.php?sid=ItemMarket#/market/view=category&categoryName=Most%20Popular",
+        "page.php?sid=bazaar", "bazaar.php#/add", "bazaar.php#/manage", "bazaar.php#/personalize", "bazaar.php?userId=1", "bazaar.php?userId=4", "bazaar.php?userId=7", "bazaar.php?userId=10", "bazaar.php?userId=15", "bazaar.php?userId=19", "bazaar.php?userId=20", "bazaar.php?userId=21", "bazaar.php?userId=23", "bazaar.php?userId=50",
+        "page.php?sid=stocks", "bank.php", "points.php", "loan.php", "donator.php", "donatordone.php", "token_shop.php", "freebies.php", "bringafriend.php", "bounties.php", "jailview.php", "hospitalview.php",
+        "casino.php", "loader.php?sid=slots", "loader.php?sid=roulette", "loader.php?sid=blackjack", "loader.php?sid=poker", "loader.php?sid=bookie", "loader.php?sid=lottery", "loader.php?sid=keno", "loader.php?sid=highlow", "loader.php?sid=craps", "page.php?sid=slots", "page.php?sid=roulette", "page.php?sid=blackjack", "page.php?sid=poker", "page.php?sid=bookie", "page.php?sid=lottery", "page.php?sid=keno", "page.php?sid=highlow", "page.php?sid=craps",
         "shops.php?step=bitsnbobs", "shops.php?step=bigals", "shops.php?step=pharmacy", "shops.php?step=jewelry", "shops.php?step=sweetshop", "shops.php?step=clothing", "shops.php?step=hardware", "shops.php?step=superstore", "shops.php?step=postoffice", "shops.php?step=cyberforce", "shops.php?step=nikeh", "shops.php?step=pawnshop",
+        "education.php", "gym.php", "crimes.php", "missions.php", "newspaper.php", "job.php", "factions.php", "travelagency.php", "raceway.php",
         "crimes.php#/searchforcash", "crimes.php#/bootlegging", "crimes.php#/graffiti", "crimes.php#/shoplifting", "crimes.php#/burglary", "crimes.php#/hustling", "crimes.php#/pickpocketing", "crimes.php#/cracking",
-        "factions.php?step=your#/tab=armoury", "factions.php?step=your#/tab=crimes", "factions.php?step=your#/tab=wars", "factions.php?step=your#/tab=controls",
-        "forums.php#/p=threads&f=1", "forums.php#/p=threads&f=2", "forums.php#/p=threads&f=3", "forums.php#/p=threads&f=9", "forums.php#/p=threads&f=10",
-        "staff.php", "rules.php", "donates.php", "halloffame.php", "competition.php"
+        "factions.php?step=your#/tab=armoury", "factions.php?step=your#/tab=crimes", "factions.php?step=your#/tab=wars", "factions.php?step=your#/tab=controls", "factions.php?step=your#/tab=info", "factions.php?step=your#/tab=main",
+        "forums.php", "forums.php#/p=threads&f=1", "forums.php#/p=threads&f=2", "forums.php#/p=threads&f=3", "forums.php#/p=threads&f=9", "forums.php#/p=threads&f=10",
+        "staff.php", "rules.php", "donates.php", "halloffame.php", "competition.php", "calendar.php", "credits.php", "committee.php#/step=main", "archives.php", "church.php", "christmas_town.php#/",
+        "friendlist.php", "enemylist.php", "blacklist.php", "messages.php"
     ];
 
     const STORAGE_KEY_NAV_INDEX = 'torn_egg_nav_index';
@@ -142,7 +149,7 @@
 
         const header = document.createElement('div');
         header.style.cssText = 'font-weight: bold; color: gold; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;';
-        header.innerHTML = '<span>🥚 Egg Hunter v1.1.2</span>';
+        header.innerHTML = '<span>🥚 Egg Hunter v1.1.3</span>';
         
         const toggleBtn = document.createElement('span');
         toggleBtn.id = 'egg-hunter-toggle';
