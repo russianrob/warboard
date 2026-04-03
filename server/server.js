@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 
 import routes, { setIO } from "./routes.js";
+import "./war-scanner.js";
 import { socketAuth } from "./auth.js";
 import { registerSocketHandlers } from "./socket-handlers.js";
 import { startChainMonitor, stopAll as stopAllChainMonitors } from "./chain-monitor.js";
