@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.4.3
+// @version      4.4.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -176,7 +176,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.4.3',
+        VERSION: '4.4.4',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -5698,6 +5698,7 @@ body.wb-chain-active {
                         <span class="fo-war-timer-value" id="fo-war-timer-value">--:--</span>
                         <div class="fo-war-timer-detail" id="fo-war-timer-detail"></div>
                     </div>
+                    <button class="fo-settings-btn" id="fo-enemy-heatmap-btn" title="Enemy Activity Heatmap">&#x1F4C8;</button>
                     <button class="fo-settings-btn" id="fo-scout-btn" title="War Analysis">&#x1F50D;</button>
                     <button class="fo-settings-btn" id="fo-postwar-btn" title="Post-War Report">&#x1F4CB;</button>
                     <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.ourFactionOnline ? state.ourFactionOnline.online : state.onlinePlayers.length} us</span> · <span id="fo-enemy-online-count">0 enemy</span></div>
@@ -5758,7 +5759,16 @@ body.wb-chain-active {
         if (heatmapHeaderBtn) {
             heatmapHeaderBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                toggleHeatmapPanel();
+                toggleHeatmapPanel(state.myFactionId, state.myFactionName);
+            });
+        }
+
+        // Wire up enemy heatmap button in overlay header
+        const enemyHeatmapBtn = document.getElementById('fo-enemy-heatmap-btn');
+        if (enemyHeatmapBtn) {
+            enemyHeatmapBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleHeatmapPanel(state.enemyFactionId, state.enemyFactionName);
             });
         }
 
@@ -8448,9 +8458,10 @@ body.wb-chain-active {
     const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
     /** Fetch heatmap data from the server. Returns the heatmap object or {}. */
-    async function fetchHeatmapData() {
+    async function fetchHeatmapData(factionId = null) {
         try {
-            const url = `${CONFIG.SERVER_URL}/api/heatmap`;
+            const qs = factionId ? `?factionId=${encodeURIComponent(factionId)}` : '';
+            const url = `${CONFIG.SERVER_URL}/api/heatmap${qs}`;
             const res = await new Promise((resolve, reject) => {
                 httpRequest({
                     method: 'GET',
@@ -8516,24 +8527,26 @@ body.wb-chain-active {
         btn.textContent = '\uD83D\uDCCA';
         btn.title = 'Member Activity Heatmap';
         btn.style.display = 'block';
-        btn.addEventListener('click', toggleHeatmapPanel);
+        btn.addEventListener('click', () => toggleHeatmapPanel());
         document.body.appendChild(btn);
     }
 
-    function toggleHeatmapPanel() {
+    function toggleHeatmapPanel(factionId = null, factionName = null) {
         const existing = document.getElementById('wb-heatmap-panel');
         if (existing) {
+            const currentId = existing.dataset.factionId || '';
+            const targetId = factionId ? String(factionId) : '';
             existing.remove();
-            return;
+            if (currentId === targetId) return;
         }
-        renderHeatmapPanel();
+        renderHeatmapPanel(factionId, factionName);
     }
 
-    async function renderHeatmapPanel() {
+    async function renderHeatmapPanel(factionId = null, factionName = null) {
         const existing = document.getElementById('wb-heatmap-panel');
         if (existing) existing.remove();
 
-        const data = await fetchHeatmapData(); // Already in UTC = TCT
+        const data = await fetchHeatmapData(factionId); // Already in UTC = TCT
 
         // Find max average for color scaling
         let maxAvg = 0;
@@ -8552,6 +8565,7 @@ body.wb-chain-active {
         const panel = document.createElement('div');
         panel.id = 'wb-heatmap-panel';
         panel.className = 'wb-heatmap-panel';
+        if (factionId) panel.dataset.factionId = factionId;
 
         // Restore saved position
         const savedPos = GM_getValue('factionops_heatmap_pos', null);
@@ -8566,7 +8580,8 @@ body.wb-chain-active {
         // Header
         const header = document.createElement('div');
         header.className = 'wb-heatmap-header';
-        header.innerHTML = '<span>Member Activity Heatmap <span style="font-size:10px;opacity:0.5;">(TCT)</span></span>';
+        const title = factionName ? `Activity: ${factionName}` : 'Member Activity Heatmap';
+        header.innerHTML = `<span>${title} <span style="font-size:10px;opacity:0.5;">(TCT)</span></span>`;
         const closeBtn = document.createElement('button');
         closeBtn.textContent = '\u00D7';
         closeBtn.className = 'wb-heatmap-close';
@@ -8597,6 +8612,14 @@ body.wb-chain-active {
                 }));
             }
         });
+
+        const grid = document.createElement('div');
+        grid.className = 'wb-heatmap-grid';
+
+        // ... rest of the rendering logic
+        // For brevity in replace, I'll ensure I match enough of the existing code
+        // and only replace the parts that change. Actually, since I need to pass
+        // factionId/Name back in to refresh/reset, I'll replace more.
 
         if (totalSamples === 0) {
             const msg = document.createElement('div');
@@ -8650,23 +8673,31 @@ body.wb-chain-active {
         const footer = document.createElement('div');
         footer.className = 'wb-heatmap-footer';
         footer.innerHTML = `<span style="font-size:11px;opacity:0.6;">Based on ${totalSamples} total samples</span>`;
+        
+        // Only show reset if viewing our own faction heatmap
+        const isOwnFaction = !factionId || String(factionId) === String(state.myFactionId);
+        
         const resetBtn = document.createElement('button');
-        resetBtn.className = 'wb-btn wb-btn-sm wb-btn-danger';
-        resetBtn.textContent = 'Reset Data';
-        resetBtn.addEventListener('click', async () => {
-            await resetServerHeatmap();
-            panel.remove();
-            renderHeatmapPanel();
-        });
+        if (isOwnFaction) {
+            resetBtn.className = 'wb-btn wb-btn-sm wb-btn-danger';
+            resetBtn.textContent = 'Reset Data';
+            resetBtn.addEventListener('click', async () => {
+                if (!confirm('Are you sure you want to permanently reset all heatmap data?')) return;
+                await resetServerHeatmap();
+                panel.remove();
+                renderHeatmapPanel(factionId, factionName);
+            });
+        }
+
         const refreshBtn = document.createElement('button');
         refreshBtn.className = 'wb-btn wb-btn-sm';
         refreshBtn.textContent = 'Refresh';
         refreshBtn.addEventListener('click', () => {
             panel.remove();
-            renderHeatmapPanel();
+            renderHeatmapPanel(factionId, factionName);
         });
         footer.appendChild(refreshBtn);
-        footer.appendChild(resetBtn);
+        if (isOwnFaction) footer.appendChild(resetBtn);
         panel.appendChild(footer);
 
         document.body.appendChild(panel);

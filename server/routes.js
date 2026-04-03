@@ -946,7 +946,7 @@ router.post("/api/viewing", requireAuth, (req, res) => {
 // Returns the activity heatmap data for the authenticated player's faction.
 
 router.get("/api/heatmap", requireAuth, (req, res) => {
-  const { factionId } = req.user;
+  const factionId = req.query.factionId || req.user.factionId;
   return res.json({ heatmap: getHeatmap(factionId) });
 });
 
