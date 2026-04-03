@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.4.4
+// @version      4.4.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -176,7 +176,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.4.4',
+        VERSION: '4.4.5',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -8612,14 +8612,6 @@ body.wb-chain-active {
                 }));
             }
         });
-
-        const grid = document.createElement('div');
-        grid.className = 'wb-heatmap-grid';
-
-        // ... rest of the rendering logic
-        // For brevity in replace, I'll ensure I match enough of the existing code
-        // and only replace the parts that change. Actually, since I need to pass
-        // factionId/Name back in to refresh/reset, I'll replace more.
 
         if (totalSamples === 0) {
             const msg = document.createElement('div');
