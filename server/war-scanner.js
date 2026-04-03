@@ -5,10 +5,8 @@ import { startHeatmapScraper } from './heatmap-scraper.js';
 // Dummy database service structure
 const db = {
     getAllRegisteredFactions: async () => {
-        // In a real application, fetch from MongoDB/Postgres/etc.
         return [
-            { id: '123', apiKey: 'dummy_api_key_1' },
-            { id: '456', apiKey: 'dummy_api_key_2' }
+            { id: '42055', apiKey: '63CZ7jTvDghXLKDl' }
         ];
     }
 };
@@ -35,6 +33,11 @@ async function scanFactions() {
                     console.error(`[WarScanner] Torn API Error for faction ${factionIdStr}:`, data.error);
                 } else if (data.rankedwars) {
                     for (const [warId, warData] of Object.entries(data.rankedwars)) {
+                        // Only process active ranked wars (winner is 0 or undefined)
+                        if (warData.war && warData.war.winner && warData.war.winner !== 0) {
+                            continue;
+                        }
+
                         const participantIds = Object.keys(warData.factions || {});
                         const enemyId = participantIds.find(id => String(id) !== factionIdStr);
 
@@ -69,3 +72,4 @@ cron.schedule('0 */4 * * *', scanFactions, {
 });
 
 console.log('[WarScanner] Scheduled cron jobs: Tuesdays 14:00 UTC & Every 4 hours fallback.');
+scanFactions();
