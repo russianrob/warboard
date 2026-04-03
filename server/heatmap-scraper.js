@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { recordSample } from './heatmap.js';
+import { recordSample } from './activity-heatmap.js';
 
 // Track active scrapers to prevent duplicate intervals for the same enemy faction
 const activeScrapers = new Set();
