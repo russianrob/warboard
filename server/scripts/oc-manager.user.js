@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Manager
 // @namespace    https://torn.com
-// @version      2.3.25-pda
+// @version     2.3.26-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern UI, Dark/Light Mode, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.3.26-pda - Fix: Update Payouts link to use Modern OC 2.0 &sub=completed navigation format
 // v2.3.25-pda - Fix: Update Payouts link to use Modern OC 2.0 subTab=completed navigation format
 // v2.3.24-pda - Fix: Ensure openPanel honors last tab preference correctly
 // v2.3.23-pda - Fix: Add null/undefined checks to crime processing loops to prevent TypeError
@@ -704,7 +705,7 @@
             <div style="font-size:11px; color:#2a3cff; text-transform:uppercase; font-weight:700; margin-bottom:4px; letter-spacing:0.5px;">Summary</div>
             ${totalMoney > 0 ? `<div style="font-size:18px; font-weight:800;">$${formatNumber(totalMoney)}</div>` : ''}
             <div style="font-size:12px; color:#888;">${unpaid.length} Unpaid OCs ${items > 0 ? `• ${items} with Items` : ''}</div>
-            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes/subTab=completed" target="_blank" 
+            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&sub=completed" target="_blank" 
                style="display:block; margin-top:12px; padding:10px; background:#2a3cff; color:#fff; text-align:center; border-radius:8px; text-decoration:none; font-weight:700; font-size:13px; box-shadow:0 4px 10px rgba(42,60,255,0.3);">Open Payouts Page</a>
           </div>
         `;
@@ -713,7 +714,7 @@
           const ageDays = Math.floor(ageSec / 86400);
           const ageColor = ageDays >= 7 ? '#f66' : (ageDays >= 3 ? '#b8860b' : '#888');
           html += `
-            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes/subTab=completed" target="_blank" style="text-decoration:none; color:inherit; display:block;">
+            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&sub=completed" target="_blank" style="text-decoration:none; color:inherit; display:block;">
               <div class="oc-card" style="padding:10px 12px;">
                 <div class="oc-card-header"><span class="oc-crime-name" style="font-size:12.5px;">${c.name}</span><span style="font-size:11px; font-weight:700; color:${ageColor};">${ageDays > 0 ? ageDays+'d' : Math.floor(ageSec/3600)+'h'}</span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="font-size:13px; color:#1a7a1a; font-weight:700;">${c.money > 0 ? '$' + formatNumber(c.money) : ''}</span><span style="font-size:11px; color:#888;">${c.hasItems ? '<span style="color:#2a3cff;">Items</span>' : ''}${c.payoutPct ? ` ${c.payoutPct}%` : ''}</span></div>
