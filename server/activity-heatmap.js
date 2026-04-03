@@ -39,8 +39,8 @@ function ensureDataDir() {
  * @param {string} factionId
  * @param {number} onlineCount – number of members currently online/idle
  */
-export function recordSample(factionId, onlineCount) {
-  if (!factionId || typeof onlineCount !== "number") return;
+export function recordSample(factionId, activeCount, totalMembers = 0) {
+  if (!factionId || typeof activeCount !== "number") return;
 
   let map = heatmaps.get(factionId);
   if (!map) {
@@ -58,11 +58,12 @@ export function recordSample(factionId, onlineCount) {
   const hourKey = String(hour);
 
   if (!map[dayKey]) map[dayKey] = {};
-  if (!map[dayKey][hourKey]) map[dayKey][hourKey] = { total: 0, samples: 0 };
+  if (!map[dayKey][hourKey]) map[dayKey][hourKey] = { total: 0, samples: 0, membersTotal: 0 };
 
   const bucket = map[dayKey][hourKey];
-  if (bucket.samples < 1000) {
-    bucket.total += onlineCount;
+  if (bucket.samples < 5000) {
+    bucket.total += activeCount;
+    bucket.membersTotal = (bucket.membersTotal || 0) + totalMembers;
     bucket.samples += 1;
   }
 

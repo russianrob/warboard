@@ -114,7 +114,7 @@ export function startWarStatusMonitor(io, warId) {
           (m) => m.activity === "idle",
         ).length;
         const ourTotal = Object.keys(ourMembers).length;
-        recordSample(war.factionId, ourOnline + ourIdle);
+        recordSample(war.factionId, ourOnline + ourIdle, ourTotal);
         // Store on war for poll response
         war.ourFactionOnline = { online: ourOnline, idle: ourIdle, total: ourTotal };
 

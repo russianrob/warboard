@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.4.5
+// @version      4.4.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -176,7 +176,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.4.5',
+        VERSION: '4.4.6',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -8548,16 +8548,24 @@ body.wb-chain-active {
 
         const data = await fetchHeatmapData(factionId); // Already in UTC = TCT
 
-        // Find max average for color scaling
-        let maxAvg = 0;
+        // Find max average percentage for color scaling
+        let maxPct = 0;
         let totalSamples = 0;
         for (let d = 0; d < 7; d++) {
             for (let h = 0; h < 24; h++) {
-                const bucket = (data[d] && data[d][h]) || { total: 0, samples: 0 };
+                const bucket = (data[d] && data[d][h]) || { total: 0, samples: 0, membersTotal: 0 };
                 totalSamples += bucket.samples;
                 if (bucket.samples > 0) {
-                    const avg = bucket.total / bucket.samples;
-                    if (avg > maxAvg) maxAvg = avg;
+                    // Use stored membersTotal if available, fallback to 1 to avoid div by zero
+                    const membersTotal = bucket.membersTotal || 0;
+                    if (membersTotal > 0) {
+                        const pct = (bucket.total / membersTotal) * 100;
+                        if (pct > maxPct) maxPct = pct;
+                    } else {
+                        // Compatibility for old data: use raw count for maxAvg (we'll handle scaling below)
+                        const avg = bucket.total / bucket.samples;
+                        if (avg > maxPct) maxPct = avg;
+                    }
                 }
             }
         }
@@ -8650,12 +8658,32 @@ body.wb-chain-active {
             for (let h = 0; h < 24; h++) {
                 const cell = document.createElement('div');
                 cell.className = 'wb-heatmap-cell';
-                const bucket = (data[d] && data[d][h]) || { total: 0, samples: 0 };
+                const bucket = (data[d] && data[d][h]) || { total: 0, samples: 0, membersTotal: 0 };
+                
                 const avg = bucket.samples > 0 ? bucket.total / bucket.samples : 0;
-                const intensity = maxAvg > 0 ? avg / maxAvg : 0;
+                const avgMembers = (bucket.membersTotal && bucket.samples > 0) ? bucket.membersTotal / bucket.samples : 0;
+                const pct = avgMembers > 0 ? (avg / avgMembers) * 100 : 0;
+                
+                // Color intensity logic: scale based on percentage relative to maxPct
+                // If no member data (old records), fallback to raw count intensity
+                let intensity = 0;
+                if (avgMembers > 0) {
+                    intensity = maxPct > 0 ? pct / maxPct : 0;
+                } else {
+                    intensity = maxPct > 0 ? avg / maxPct : 0;
+                }
+
                 cell.style.backgroundColor = `rgba(0, 184, 148, ${(intensity * 0.9 + 0.1).toFixed(2)})`;
                 if (bucket.samples === 0) cell.style.backgroundColor = 'rgba(255,255,255,0.05)';
-                cell.title = `${DAY_LABELS[d]} ${String(h).padStart(2, '0')}:00 TCT \u2014 Avg ${avg.toFixed(1)} members online (${bucket.samples} samples)`;
+                
+                let tooltip = `${DAY_LABELS[d]} ${String(h).padStart(2, '0')}:00 TCT\n`;
+                tooltip += `Avg Active: ${avg.toFixed(1)}`;
+                if (avgMembers > 0) {
+                    tooltip += ` / ${Math.round(avgMembers)} (${pct.toFixed(1)}%)`;
+                }
+                tooltip += `\nTotal Samples: ${bucket.samples}`;
+                
+                cell.title = tooltip;
                 grid.appendChild(cell);
             }
         }
