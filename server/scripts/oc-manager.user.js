@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Manager
 // @namespace    https://torn.com
-// @version     2.3.26-pda
+// @version     2.3.27-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern UI, Dark/Light Mode, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.3.27-pda - Fix: Auto-switch to 'Completed' tab on Faction Crimes page via navigation listener
 // v2.3.26-pda - Fix: Update Payouts link to use Modern OC 2.0 &sub=completed navigation format
 // v2.3.25-pda - Fix: Update Payouts link to use Modern OC 2.0 subTab=completed navigation format
 // v2.3.24-pda - Fix: Ensure openPanel honors last tab preference correctly
