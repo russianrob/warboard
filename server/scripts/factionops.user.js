@@ -2452,6 +2452,7 @@ body.wb-chain-active {
         warEta: null,     // { etaTimestamp, hoursRemaining, currentTarget, calculatedAt } from server
         warEnded: false,
         warResult: null,  // 'victory' | 'defeat' | 'draw'
+        warPercentage: null,
 
         // Strategy recommendation from server
         strategy: null,   // { recommendation, confidence, reasons, timing, enemyPeak, enemyDead, currentPhase }
@@ -3234,6 +3235,18 @@ body.wb-chain-active {
 
         // After first data load, enable call toasts for subsequent updates
         hasReceivedInitialData = true;
+
+        // Broadcast state to other tabs if we're the active tab
+        if (!document.hidden) {
+            broadcastStateChange({
+                type: 'state_update',
+                warScores: data.warScores,
+                warEta: data.warEta,
+                chainData: data.chainData,
+                strategy: data.strategy,
+                enemyActivityByHour: data.enemyActivityByHour,
+            });
+        }
     }
 
     /**
@@ -4389,6 +4402,10 @@ body.wb-chain-active {
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
             updateChainBar();
+            // Immediately refresh war stats and poll server when tab becomes visible
+            if (typeof updateWarTimer === 'function') updateWarTimer();
+            if (typeof updateWarTimerDisplay === 'function') updateWarTimerDisplay();
+            pollOnce();
         }
     });
 
@@ -5430,6 +5447,190 @@ body.wb-chain-active {
     // Track whether we're using DOM-based chain reading (no API calls)
     let usingChainDOM = false;
 
+    // =========================================================================
+    // SECTION 11B: WAR STATS & TIMER
+    // =========================================================================
+
+    let warTargetNotifiedThisSession = false;
+    let warTimerEtaMs = null;
+    let warTimerLastCalc = null;
+
+    function warTimerDetailRow(label, val) {
+        return '<div class="fo-war-timer-detail-row">'
+            + '<span class="fo-war-timer-detail-label">' + label + '</span>'
+            + '<span class="fo-war-timer-detail-val">' + val + '</span>'
+            + '</div>';
+    }
+
+    function updateWarTimer() {
+        if (state.warEnded) return;
+        const warTimerEl = document.getElementById('fo-war-timer');
+        const warTimerValue = document.getElementById('fo-war-timer-value');
+        const warTimerDetail = document.getElementById('fo-war-timer-detail');
+        if (!warTimerEl || !warTimerValue) return;
+
+        // ── Read timer + score from DOM ──
+        const timerEl = document.querySelector('[class*="timer_"]');
+        const targetBox = document.querySelector('[class*="target_"]');
+        let lead = null, currentTarget = null, elapsedStr = null, totalElapsedHours = null;
+        let myFactionScore = null, signedLead = null;
+        let timerDays = 0, timerHours = 0, timerMinutes = 0;
+
+        if (timerEl) {
+            const text = timerEl.textContent.trim().replace(/[^\d:]/g, '');
+            if (text) {
+                const timeParts = text.split(':');
+                if (timeParts.length >= 3) {
+                    if (timeParts.length >= 4) {
+                        timerDays = parseInt(timeParts[0]) || 0;
+                        timerHours = parseInt(timeParts[1]) || 0;
+                        timerMinutes = parseInt(timeParts[2]) || 0;
+                    } else {
+                        const hh = parseInt(timeParts[0]) || 0;
+                        timerDays = Math.floor(hh / 24);
+                        timerHours = hh % 24;
+                        timerMinutes = parseInt(timeParts[1]) || 0;
+                    }
+                    totalElapsedHours = (timerDays * 24) + timerHours + (timerMinutes / 60);
+                    elapsedStr = timerDays > 0 ? timerDays + 'd ' + timerHours + 'h ' + timerMinutes + 'm' : timerHours + 'h ' + timerMinutes + 'm';
+                }
+            }
+        }
+        if (targetBox) {
+            let match;
+            try { match = targetBox.innerText.match(/(\d[\d,]*)\s*\/\s*(\d[\d,]*)/); } catch(e) { match = null; }
+            if (match) {
+                lead = parseInt(match[1].replace(/,/g, ''));
+                currentTarget = parseInt(match[2].replace(/,/g, ''));
+            }
+        }
+
+        if (state.warScores) {
+            myFactionScore = state.warScores.myScore || null;
+            if (state.warScores.myScore != null && state.warScores.enemyScore != null) {
+                signedLead = state.warScores.myScore - state.warScores.enemyScore;
+            }
+        }
+
+        // War percentage calculation & broadcast
+        let currentPct = null;
+
+        if (lead === 0 && currentTarget !== null && currentTarget > 0 && totalElapsedHours !== null) {
+            const display = timerDays > 0 ? `${timerDays}d ${timerHours}h ${timerMinutes}m`
+                : timerHours > 0 ? `${timerHours}h ${timerMinutes}m`
+                : `${timerMinutes}m`;
+            warTimerEl.className = 'fo-war-timer waiting';
+            warTimerValue.textContent = display;
+            if (warTimerDetail) warTimerDetail.innerHTML =
+                warTimerDetailRow('Status', 'War not started')
+                + warTimerDetailRow('Starts in', display)
+                + warTimerDetailRow('Target', currentTarget.toLocaleString());
+        } else if (state.warTarget && state.warTarget.value) {
+            const goal = state.warTarget.value;
+            const score = myFactionScore !== null ? myFactionScore : lead;
+            if (score !== null) {
+                const remaining = goal - score;
+                const pct = Math.min(100, Math.round((score / goal) * 100));
+                currentPct = pct;
+                if (remaining <= 0) {
+                    if (!warTargetNotifiedThisSession) {
+                        warTargetNotifiedThisSession = true;
+                        postAction('/api/war-target-reached', { warId: deriveWarId(), lead: score }).catch(() => {});
+                        firePdaNotification('war_target', '\uD83C\uDFAF War Target Reached!', `Faction hit ${score.toLocaleString()} / ${goal.toLocaleString()} respect \u2014 hold the line!`);
+                    }
+                    if (totalElapsedHours !== null && totalElapsedHours > 24 && currentTarget !== null) {
+                        const dropHrs = Math.floor(totalElapsedHours - 24);
+                        const origTarget = currentTarget / (1 - (dropHrs * 0.01));
+                        const dropPerHr = origTarget * 0.01;
+                        const gap = currentTarget - score;
+                        const hrsLeft = gap / dropPerHr;
+                        if (hrsLeft <= 0) {
+                            warTimerEl.className = 'fo-war-timer safe';
+                            warTimerValue.textContent = '\u2713 WON';
+                        } else {
+                            warTimerEtaMs = Date.now() + (hrsLeft * 3600000);
+                            warTimerLastCalc = Date.now();
+                            const tMin = Math.floor(hrsLeft * 60);
+                            const h = Math.floor(tMin / 60).toString().padStart(2, '0');
+                            const m = (tMin % 60).toString().padStart(2, '0');
+                            const urg = hrsLeft <= 2 ? 'danger' : hrsLeft <= 6 ? 'warning' : 'safe';
+                            warTimerEl.className = 'fo-war-timer ' + urg;
+                            warTimerValue.textContent = h + ':' + m;
+                        }
+                    } else {
+                        warTimerEl.className = 'fo-war-timer safe';
+                        warTimerValue.textContent = '\u2713 ' + pct + '%';
+                    }
+                } else {
+                    const urgency = pct >= 80 ? 'safe' : pct >= 50 ? 'warning' : 'danger';
+                    warTimerEl.className = 'fo-war-timer ' + urgency;
+                    warTimerValue.textContent = pct + '%';
+                }
+            }
+        } else if (totalElapsedHours !== null && totalElapsedHours > 24 && lead !== null && currentTarget !== null) {
+            const dropHours = Math.floor(totalElapsedHours - 24);
+            const originalTarget = currentTarget / (1 - (dropHours * 0.01));
+            const DROP_PER_HOUR = originalTarget * 0.01;
+            const gap = currentTarget - lead;
+            const hoursRemaining = gap / DROP_PER_HOUR;
+            warTimerEtaMs = Date.now() + (hoursRemaining * 3600000);
+            warTimerLastCalc = Date.now();
+            if (hoursRemaining <= 0) {
+                warTimerEl.className = 'fo-war-timer safe';
+                warTimerValue.textContent = 'WON';
+            } else {
+                const totalMin = Math.floor(hoursRemaining * 60);
+                const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
+                const mm = (totalMin % 60).toString().padStart(2, '0');
+                const urgency = hoursRemaining <= 2 ? 'danger' : hoursRemaining <= 6 ? 'warning' : 'safe';
+                warTimerEl.className = 'fo-war-timer ' + urgency;
+                warTimerValue.textContent = hh + ':' + mm;
+            }
+        }
+
+        // Push new percentage to other tabs if we're active
+        if (currentPct !== null && !document.hidden && state.warPercentage !== currentPct) {
+            state.warPercentage = currentPct;
+            broadcastStateChange({ type: 'war_update', pct: currentPct });
+        }
+    }
+
+    function updateWarTimerDisplay() {
+        if (state.warEnded) return;
+        const warTimerEl = document.getElementById('fo-war-timer');
+        const warTimerValue = document.getElementById('fo-war-timer-value');
+        if (!warTimerEl || !warTimerValue) return;
+
+        const eta = state.warEta;
+        const etaMs = eta?.etaTimestamp || warTimerEtaMs;
+        if (!etaMs) return;
+
+        const msLeft = Math.max(0, etaMs - Date.now());
+        const totalSec = Math.floor(msLeft / 1000);
+        if (eta?.preDropPhase) {
+            warTimerEl.className = 'fo-war-timer waiting';
+            warTimerValue.textContent = 'Pre-24h';
+            return;
+        }
+        if (totalSec <= 0) {
+            warTimerEl.className = 'fo-war-timer safe';
+            warTimerValue.textContent = 'WON';
+            return;
+        }
+
+        const hrs = Math.floor(totalSec / 3600);
+        const mins = Math.floor((totalSec % 3600) / 60);
+        const secs = totalSec % 60;
+        if (hrs > 0) {
+            warTimerValue.textContent = hrs.toString().padStart(2, '0') + ':' + mins.toString().padStart(2, '0');
+        } else {
+            warTimerValue.textContent = mins + 'm ' + secs.toString().padStart(2, '0') + 's';
+        }
+        const hrsLeft = totalSec / 3600;
+        const urg = hrsLeft <= 2 ? 'danger' : hrsLeft <= 6 ? 'warning' : 'safe';
+        warTimerEl.className = 'fo-war-timer ' + urg;
+    }
+
     function initWarOverlay() {
         startChainTimer();
         // Chain data source will be decided after overlay is built
@@ -5595,273 +5796,23 @@ body.wb-chain-active {
         if (heatmapFab) heatmapFab.style.display = 'none';
 
         // ── Ranked War Timer ───────────────────────────────────────────
-        let warTargetNotifiedThisSession = false; // prevent duplicate calls within a session
         const warTimerEl = document.getElementById('fo-war-timer');
-        const warTimerValue = document.getElementById('fo-war-timer-value');
         const warTimerDetail = document.getElementById('fo-war-timer-detail');
-        if (warTimerEl) {
+        if (warTimerEl && warTimerDetail) {
             // Click toggles the detail popup
             warTimerEl.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (warTimerDetail) warTimerDetail.classList.toggle('open');
+                warTimerDetail.classList.toggle('open');
             });
             // Close detail popup when clicking anywhere else
             document.addEventListener('click', () => {
-                if (warTimerDetail) warTimerDetail.classList.remove('open');
+                warTimerDetail.classList.remove('open');
             });
+        }
 
-            function warTimerDetailRow(label, val) {
-                return '<div class="fo-war-timer-detail-row">'
-                    + '<span class="fo-war-timer-detail-label">' + label + '</span>'
-                    + '<span class="fo-war-timer-detail-val">' + val + '</span>'
-                    + '</div>';
-            }
-
-            function updateWarTimer() {
-                if (state.warEnded) return; // don't overwrite war-ended display
-                // ── Read timer + score from DOM ──
-                const timerEl = document.querySelector('[class*="timer_"]');
-                const targetBox = document.querySelector('[class*="target_"]');
-                let lead = null, currentTarget = null, elapsedStr = null, totalElapsedHours = null;
-                let myFactionScore = null, signedLead = null;
-                let timerDays = 0, timerHours = 0, timerMinutes = 0;
-
-                if (timerEl) {
-                    const text = timerEl.textContent.trim().replace(/[^\d:]/g, '');
-                    if (text) {
-                        const timeParts = text.split(':');
-                        if (timeParts.length >= 3) {
-                            if (timeParts.length >= 4) {
-                                // Format: DD:HH:MM:SS
-                                timerDays = parseInt(timeParts[0]) || 0;
-                                timerHours = parseInt(timeParts[1]) || 0;
-                                timerMinutes = parseInt(timeParts[2]) || 0;
-                            } else {
-                                // Format: HH:MM:SS
-                                const hh = parseInt(timeParts[0]) || 0;
-                                timerDays = Math.floor(hh / 24);
-                                timerHours = hh % 24;
-                                timerMinutes = parseInt(timeParts[1]) || 0;
-                            }
-                            totalElapsedHours = (timerDays * 24) + timerHours + (timerMinutes / 60);
-                            elapsedStr = timerDays > 0 ? timerDays + 'd ' + timerHours + 'h ' + timerMinutes + 'm' : timerHours + 'h ' + timerMinutes + 'm';
-                        }
-                    }
-                }
-                if (targetBox) {
-                    let match;
-                    try { match = targetBox.innerText.match(/(\d[\d,]*)\s*\/\s*(\d[\d,]*)/); } catch(e) { match = null; }
-                    if (match) {
-                        lead = parseInt(match[1].replace(/,/g, ''));
-                        currentTarget = parseInt(match[2].replace(/,/g, ''));
-                    }
-                }
-
-                // Read own faction's total score from server-reported war data
-                // (comes from Torn API via fetchRankedWar, no DOM scraping needed)
-                if (state.warScores) {
-                    myFactionScore = state.warScores.myScore || null;
-                    if (state.warScores.myScore != null && state.warScores.enemyScore != null) {
-                        signedLead = state.warScores.myScore - state.warScores.enemyScore;
-                    }
-                }
-
-                // ── Pre-war countdown: both scores are 0 → war hasn't started ──
-                // When war hasn't begun, Torn shows 0/target and a countdown timer.
-                // The timer is time UNTIL start (not elapsed). lead=0 is the key signal.
-                if (lead === 0 && currentTarget !== null && currentTarget > 0 && totalElapsedHours !== null) {
-                    const display = timerDays > 0 ? `${timerDays}d ${timerHours}h ${timerMinutes}m`
-                        : timerHours > 0 ? `${timerHours}h ${timerMinutes}m`
-                        : `${timerMinutes}m`;
-                    warTimerEl.className = 'fo-war-timer waiting';
-                    warTimerValue.textContent = display;
-                    if (warTimerDetail) warTimerDetail.innerHTML =
-                        warTimerDetailRow('Status', 'War not started')
-                        + warTimerDetailRow('Starts in', display)
-                        + warTimerDetailRow('Target', currentTarget.toLocaleString());
-                    return;
-                }
-
-                // ── Custom war target mode ──
-                if (state.warTarget && state.warTarget.value) {
-                    const goal = state.warTarget.value;
-                    // Use own faction's total score for termed wars; fall back to lead if unavailable
-                    const score = myFactionScore !== null ? myFactionScore : lead;
-                    if (score !== null) {
-                        const remaining = goal - score;
-                        const pct = Math.min(100, Math.round((score / goal) * 100));
-                        if (remaining <= 0) {
-                            // Fire push notification once
-                            if (!warTargetNotifiedThisSession) {
-                                warTargetNotifiedThisSession = true;
-                                postAction('/api/war-target-reached', { warId: deriveWarId(), lead: score }).catch(() => {});
-                                firePdaNotification('war_target',
-                                    '\uD83C\uDFAF War Target Reached!',
-                                    `Faction hit ${score.toLocaleString()} / ${goal.toLocaleString()} respect \u2014 hold the line!`);
-                            }
-                            // Goal reached — switch to war-end countdown
-                            if (totalElapsedHours !== null && totalElapsedHours > 24 && currentTarget !== null) {
-                                const dropHrs = Math.floor(totalElapsedHours - 24);
-                                const origTarget = currentTarget / (1 - (dropHrs * 0.01));
-                                const dropPerHr = origTarget * 0.01;
-                                const gap = currentTarget - score;
-                                const hrsLeft = gap / dropPerHr;
-                                if (hrsLeft <= 0) {
-                                    warTimerEl.className = 'fo-war-timer safe';
-                                    warTimerValue.textContent = '\u2713 WON';
-                                    if (warTimerDetail) warTimerDetail.innerHTML =
-                                        warTimerDetailRow('Status', 'War won!')
-                                        + warTimerDetailRow('Goal', goal.toLocaleString() + ' \u2713')
-                                        + warTimerDetailRow('Our score', score.toLocaleString())
-                                        + warTimerDetailRow('Lead', signedLead !== null ? (signedLead >= 0 ? '+' : '') + signedLead.toLocaleString() : (lead !== null ? lead.toLocaleString() : '—'))
-                                        + warTimerDetailRow('War target', currentTarget.toLocaleString())
-                                        + warTimerDetailRow('Elapsed', elapsedStr);
-                                } else {
-                                    warTimerEtaMs = Date.now() + (hrsLeft * 3600000);
-                                    warTimerLastCalc = Date.now();
-                                    const tMin = Math.floor(hrsLeft * 60);
-                                    const h = Math.floor(tMin / 60).toString().padStart(2, '0');
-                                    const m = (tMin % 60).toString().padStart(2, '0');
-                                    const urg = hrsLeft <= 2 ? 'danger' : hrsLeft <= 6 ? 'warning' : 'safe';
-                                    warTimerEl.className = 'fo-war-timer ' + urg;
-                                    warTimerValue.textContent = h + ':' + m;
-                                    if (warTimerDetail) warTimerDetail.innerHTML =
-                                        warTimerDetailRow('Goal', goal.toLocaleString() + ' \u2713')
-                                        + warTimerDetailRow('War ends in', h + ':' + m)
-                                        + warTimerDetailRow('Our score', score.toLocaleString())
-                                        + warTimerDetailRow('Lead', signedLead !== null ? (signedLead >= 0 ? '+' : '') + signedLead.toLocaleString() : (lead !== null ? lead.toLocaleString() : '—'))
-                                        + warTimerDetailRow('War target', currentTarget.toLocaleString())
-                                        + warTimerDetailRow('Drop/hour', '~' + Math.round(dropPerHr).toLocaleString())
-                                        + warTimerDetailRow('Elapsed', elapsedStr);
-                                }
-                            } else {
-                                warTimerEl.className = 'fo-war-timer safe';
-                                warTimerValue.textContent = '\u2713 ' + pct + '%';
-                                if (warTimerDetail) warTimerDetail.innerHTML =
-                                    warTimerDetailRow('Status', 'Goal reached!')
-                                    + warTimerDetailRow('Goal', goal.toLocaleString())
-                                    + warTimerDetailRow('Our score', score.toLocaleString())
-                                    + (elapsedStr ? warTimerDetailRow('Elapsed', elapsedStr) : '');
-                            }
-                        } else {
-                            const urgency = pct >= 80 ? 'safe' : pct >= 50 ? 'warning' : 'danger';
-                            warTimerEl.className = 'fo-war-timer ' + urgency;
-                            warTimerValue.textContent = pct + '%';
-                            if (warTimerDetail) warTimerDetail.innerHTML =
-                                warTimerDetailRow('Goal', goal.toLocaleString())
-                                + warTimerDetailRow('Current', score.toLocaleString())
-                                + warTimerDetailRow('Remaining', remaining.toLocaleString())
-                                + warTimerDetailRow('Progress', pct + '%')
-                                + (elapsedStr ? warTimerDetailRow('Elapsed', elapsedStr) : '')
-                                + (signedLead !== null ? warTimerDetailRow('Lead', (signedLead >= 0 ? '+' : '') + signedLead.toLocaleString()) : lead !== null ? warTimerDetailRow('Lead', lead.toLocaleString()) : '')
-                                + (currentTarget !== null ? warTimerDetailRow('War target', currentTarget.toLocaleString()) : '');
-                        }
-                    } else {
-                        warTimerEl.className = 'fo-war-timer waiting';
-                        warTimerValue.textContent = 'Goal: ' + goal.toLocaleString();
-                        if (warTimerDetail) warTimerDetail.innerHTML =
-                            warTimerDetailRow('Goal', goal.toLocaleString())
-                            + warTimerDetailRow('Status', 'Waiting for war data');
-                    }
-                    return;
-                }
-
-                // ── Ranked war drop-timer mode (no custom target) ──
-                if (totalElapsedHours === null) {
-                    warTimerEl.className = 'fo-war-timer waiting';
-                    warTimerValue.textContent = 'N/A';
-                    if (warTimerDetail) warTimerDetail.innerHTML = warTimerDetailRow('Status', 'War timer not found on page');
-                    return;
-                }
-                if (totalElapsedHours <= 24) {
-                    warTimerEl.className = 'fo-war-timer waiting';
-                    warTimerValue.textContent = 'Pre-24h';
-                    if (warTimerDetail) warTimerDetail.innerHTML =
-                        warTimerDetailRow('Status', 'Waiting for 24h mark')
-                        + warTimerDetailRow('Elapsed', elapsedStr)
-                        + warTimerDetailRow('Drop starts', 'After 24h elapsed');
-                    return;
-                }
-                if (lead === null || currentTarget === null) {
-                    warTimerEl.className = 'fo-war-timer waiting';
-                    warTimerValue.textContent = elapsedStr;
-                    if (warTimerDetail) warTimerDetail.innerHTML =
-                        warTimerDetailRow('Elapsed', elapsedStr)
-                        + warTimerDetailRow('Status', 'Score data not available');
-                    return;
-                }
-                const dropHours = Math.floor(totalElapsedHours - 24);
-                const originalTarget = currentTarget / (1 - (dropHours * 0.01));
-                const DROP_PER_HOUR = originalTarget * 0.01;
-                const gap = currentTarget - lead;
-                const hoursRemaining = gap / DROP_PER_HOUR;
-                warTimerEtaMs = Date.now() + (hoursRemaining * 3600000);
-                warTimerLastCalc = Date.now();
-                if (hoursRemaining <= 0) {
-                    warTimerEl.className = 'fo-war-timer safe';
-                    warTimerValue.textContent = 'WON';
-                    if (warTimerDetail) warTimerDetail.innerHTML =
-                        warTimerDetailRow('Status', 'Target reached!')
-                        + warTimerDetailRow('Lead', signedLead !== null ? (signedLead >= 0 ? '+' : '') + signedLead.toLocaleString() : lead.toLocaleString())
-                        + warTimerDetailRow('Target', currentTarget.toLocaleString())
-                        + warTimerDetailRow('Elapsed', elapsedStr);
-                    return;
-                }
-                const totalMin = Math.floor(hoursRemaining * 60);
-                const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
-                const mm = (totalMin % 60).toString().padStart(2, '0');
-                const urgency = hoursRemaining <= 2 ? 'danger' : hoursRemaining <= 6 ? 'warning' : 'safe';
-                warTimerEl.className = 'fo-war-timer ' + urgency;
-                warTimerValue.textContent = hh + ':' + mm;
-                if (warTimerDetail) warTimerDetail.innerHTML =
-                    warTimerDetailRow('Time remaining', hh + ':' + mm)
-                    + warTimerDetailRow('Lead', signedLead !== null ? (signedLead >= 0 ? '+' : '') + signedLead.toLocaleString() : lead.toLocaleString())
-                    + warTimerDetailRow('Current target', currentTarget.toLocaleString())
-                    + warTimerDetailRow('Original target', '~' + Math.round(originalTarget).toLocaleString())
-                    + warTimerDetailRow('Drop/hour', '~' + Math.round(DROP_PER_HOUR).toLocaleString())
-                    + warTimerDetailRow('Lead gap', gap.toLocaleString())
-                    + warTimerDetailRow('Elapsed', elapsedStr);
-            }
-            // Use server-side ETA for consistent countdown across all clients
-            function updateWarTimerDisplay() {
-                // If war ended, don't overwrite the result
-                if (state.warEnded) return;
-                // Prefer server ETA, fall back to client-calculated
-                const eta = state.warEta;
-                const etaMs = eta?.etaTimestamp || warTimerEtaMs;
-                if (!etaMs) return;
-                const msLeft = Math.max(0, etaMs - Date.now());
-                const totalSec = Math.floor(msLeft / 1000);
-                const hrs = Math.floor(totalSec / 3600);
-                const mins = Math.floor((totalSec % 3600) / 60);
-                const secs = totalSec % 60;
-                if (eta?.preDropPhase) {
-                    warTimerEl.className = 'fo-war-timer waiting';
-                    warTimerValue.textContent = 'Pre-24h';
-                    return;
-                }
-                if (totalSec <= 0) {
-                    warTimerEl.className = 'fo-war-timer safe';
-                    warTimerValue.textContent = 'WON';
-                    return;
-                }
-                if (hrs > 0) {
-                    warTimerValue.textContent = hrs.toString().padStart(2, '0') + ':' + mins.toString().padStart(2, '0');
-                } else {
-                    warTimerValue.textContent = mins + 'm ' + secs.toString().padStart(2, '0') + 's';
-                }
-                const hrsLeft = totalSec / 3600;
-                const urg = hrsLeft <= 2 ? 'danger' : hrsLeft <= 6 ? 'warning' : 'safe';
-                warTimerEl.className = 'fo-war-timer ' + urg;
-            }
-
-            // Client-side fallback ETA (used if server hasn't sent one yet)
-            let warTimerEtaMs = null;
-
-            // Recalculate client-side ETA from DOM every 30s (fallback only)
+        if (typeof updateWarTimer === 'function') {
             updateWarTimer();
             setInterval(updateWarTimer, 30000);
-            // Tick down the display every second
             setInterval(updateWarTimerDisplay, 1000);
         }
 
@@ -7398,8 +7349,14 @@ body.wb-chain-active {
                         if (msg.calls) state.calls = { ...state.calls, ...msg.calls };
                         if (msg.priorities) state.priorities = { ...state.priorities, ...msg.priorities };
                         if (msg.statuses) mergeStatusesMonotonic(msg.statuses);
-                        if (msg.chain) {
-                            const { timeout, cooldown, ...rest } = msg.chain;
+                        if (msg.warScores) state.warScores = msg.warScores;
+                        if (msg.warEta) state.warEta = msg.warEta;
+                        if (msg.strategy) state.strategy = msg.strategy;
+                        if (msg.enemyActivityByHour) state.enemyActivityByHour = msg.enemyActivityByHour;
+                        
+                        if (msg.chain || msg.chainData) {
+                            const c = msg.chain || msg.chainData;
+                            const { timeout, cooldown, ...rest } = c;
                             Object.assign(state.chain, rest);
                             if (timeout != null) {
                                 setChainTimeout(timeout);
@@ -7412,9 +7369,18 @@ body.wb-chain-active {
                         }
                         refreshAllRows();
                         updateChainBar();
+                        if (typeof updateWarTimer === 'function') updateWarTimer();
+                        if (typeof updateWarTimerDisplay === 'function') updateWarTimerDisplay();
                         break;
                     case 'call_update':
                         if (msg.targetId) updateTargetRow(msg.targetId);
+                        break;
+                    case 'war_update':
+                        if (msg.pct !== undefined) {
+                            state.warPercentage = msg.pct;
+                            const val = document.getElementById('fo-war-timer-value');
+                            if (val) val.textContent = msg.pct + '%';
+                        }
                         break;
                 }
             };
