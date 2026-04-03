@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Manager
 // @namespace    https://torn.com
-// @version     2.3.27-pda
+// @version      2.3.10-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern UI, Dark/Light Mode, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,20 +11,6 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v2.3.27-pda - Fix: Auto-switch to 'Completed' tab on Faction Crimes page via navigation listener
-// v2.3.26-pda - Fix: Update Payouts link to use Modern OC 2.0 &sub=completed navigation format
-// v2.3.25-pda - Fix: Update Payouts link to use Modern OC 2.0 subTab=completed navigation format
-// v2.3.24-pda - Fix: Ensure openPanel honors last tab preference correctly
-// v2.3.23-pda - Fix: Add null/undefined checks to crime processing loops to prevent TypeError
-// v2.3.22-pda - Fix: Better tab persistence logic in openPanel
-// v2.3.21-pda - Fix: Robustness check for API responses in getUnpaidCompletedCrimes
-// v2.3.20-pda - Debug: Add logging to track tab persistence issues
-// v2.3.19-pda - Fix: properly prioritize persistent last-used tab in openPanel
-// v2.3.18-pda - Fix: prevent hashchange from overriding manually set tabs
-// v2.3.14-pda - Fix: update Payout link to camelCase subTab=completed and forward slash (fixes OC 2.0 navigation)
-// v2.3.13-pda - Fix: Payouts detection — change cat=successful to cat=completed (Modern OC 2.0 compatible), update links to subtab=completed
-// v2.3.12-pda - Fix: update Payout link to subTab=completed (Modern OC 2.0 UI compatible)
-// v2.3.11-pda - Fix: update Payout link to subtab=completed (Modern OC 2.0 UI compatible)
 // v2.3.10-pda - Fix: fetch both 'armor' and 'armour' categories to bypass Torn API spelling inconsistencies
 // v2.3.9-pda - Bump version for PDA cache clearing
 // v2.3.8-pda - Fix: deduplicate armory items during pagination to prevent infinite loop of the same page
@@ -144,23 +130,6 @@
     return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   };
 
-  const navigateToCompleted = () => {
-    if (window.location.hash.includes('sub=completed')) {
-      const checkTabs = setInterval(() => {
-        const factionContent = document.querySelector('.faction-crimes-wrap') || document.body;
-        const buttons = Array.from(factionContent.querySelectorAll('button'));
-        const completedTab = buttons.find(btn => btn.textContent.trim() === 'Completed');
-        if (completedTab) {
-          completedTab.click();
-          clearInterval(checkTabs);
-        }
-      }, 500);
-      setTimeout(() => clearInterval(checkTabs), 10000);
-    }
-  };
-  navigateToCompleted();
-  window.addEventListener('hashchange', navigateToCompleted);
-
   // ------------------- API Helpers -------------------
   const loadMembers = async () => {
     if (membersLoaded) return;
@@ -181,9 +150,7 @@
     const missing = [];
     const crimes = Array.isArray(data?.crimes) ? data.crimes : Object.values(data?.crimes || {});
     crimes.forEach(crime => {
-      if (!crime) return;
       crime.slots?.forEach(slot => {
-        if (!slot) return;
         if (slot.item_requirement && !slot.item_requirement.is_available && slot.user?.id && !BLACKLISTED_ITEM_IDS.has(Number(slot.item_requirement.id))) {
           missing.push({
             crimeName: crime.name,
@@ -206,9 +173,7 @@
     const neededByUser = new Map();
     const crimes = Array.isArray(data?.crimes) ? data.crimes : Object.values(data?.crimes || {});
     crimes.forEach(crime => {
-      if (!crime) return;
       crime.slots?.forEach(slot => {
-        if (!slot) return;
         if (slot.item_requirement && slot.user?.id) {
           const uid = String(slot.user.id);
           const iid = Number(slot.item_requirement.id);
@@ -224,14 +189,13 @@
     const key = requireApiKeyOrThrow();
     const now = Math.floor(Date.now() / 1000);
     const thirtyDaysAgo = now - (30 * 24 * 60 * 60);
-    const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=completed&filter=executed_at&from=${thirtyDaysAgo}&to=${now}&sort=DESC&limit=100&key=${key}`);
+    const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=successful&filter=executed_at&from=${thirtyDaysAgo}&to=${now}&sort=DESC&limit=100&key=${key}`);
     if (!res.ok) throw new Error('Failed to load completed crimes');
     const data = await res.json();
     if (data?.error) throw new Error(`API error: ${data.error.error || JSON.stringify(data.error)}`);
     const crimes = Array.isArray(data?.crimes) ? data.crimes : (data?.crimes && typeof data.crimes === 'object' ? Object.values(data.crimes) : []);
     const unpaid = [];
     for (const c of crimes) {
-      if (!c) continue;
       const paidAt = c?.rewards?.payout?.paid_at;
       if (paidAt) continue;
       const money = Number(c?.rewards?.money || 0);
@@ -539,22 +503,11 @@
         <button class="oc-tab" style="max-width:36px;" data-tab="settings">⚙</button>
       </div>
       <div id="oc-content"></div>
-      <div class="oc-status-bar"><span>v2.3.25-pda</span><span>API: ${apiStatusShort}</span></div>
+      <div class="oc-status-bar"><span>v2.3.10-pda</span><span>API: ${apiStatusShort}</span></div>
     `;
 
     document.body.appendChild(button);
     document.body.appendChild(panel);
-
-    const getTabFromHash = () => {
-      const h = window.location.hash;
-      if (h.includes('tab=crimes')) {
-        if (h.includes('completed')) return 'payouts';
-        if (h.includes('planning') || h.includes('available')) return 'missing';
-        return 'missing';
-      }
-      if (h.includes('tab=armoury')) return 'unused';
-      return null;
-    };
 
     let isOpen = false;
     const positionPanel = () => {
@@ -568,42 +521,14 @@
       panel.style.left = left + 'px'; panel.style.top = top + 'px';
     };
 
-    const openPanel = () => { 
-      positionPanel(); 
-      panel.style.opacity = '1'; 
-      panel.style.visibility = 'visible'; 
-      panel.style.transform = 'translateY(0) scale(1)'; 
-      isOpen = true; 
-      
-      const lastTab = storage.get('OCLM_LAST_TAB', 'missing');
-      const hashTab = getTabFromHash();
-      
-      // If a tab is explicitly requested by the hash, use it. Otherwise, default to the last saved tab.
-      let targetTab = lastTab;
-      if (hashTab) {
-        targetTab = hashTab;
-      }
-      
-      console.log('[OCLM] Debug: openPanel logic targetTab:', targetTab, 'hashTab:', hashTab, 'lastTab:', lastTab);
-      loadTab(targetTab); 
-    };
+    const openPanel = () => { positionPanel(); panel.style.opacity = '1'; panel.style.visibility = 'visible'; panel.style.transform = 'translateY(0) scale(1)'; isOpen = true; loadTab('missing'); };
     const closePanel = () => { panel.style.opacity = '0'; panel.style.transform = 'translateY(10px) scale(0.98)'; setTimeout(() => { if (!isOpen) panel.style.visibility = 'hidden'; }, 200); isOpen = false; };
 
     button.addEventListener('click', () => { if (!wasDragged) { isOpen ? closePanel() : openPanel(); } });
     panel.querySelector('.oc-close').onclick = closePanel;
-    window.addEventListener('hashchange', () => { 
-      if (isOpen) { 
-        const t = getTabFromHash(); 
-        console.log('[OCLM] Debug: hashchange detected. Tab from hash:', t);
-        if (t && t !== 'missing') loadTab(t); 
-      } 
-    });
 
     const loadTab = (tab) => {
-      console.log('[OCLM] Debug: loadTab called with:', tab);
       panel.querySelectorAll('.oc-tab').forEach(t => { t.classList.toggle('active', t.dataset.tab === tab); });
-      storage.set('OCLM_LAST_TAB', tab);
-      console.log('[OCLM] Debug: storage set OCLM_LAST_TAB to:', tab);
       if (tab === 'missing') loadMissingTab();
       else if (tab === 'unused') loadUnusedTab();
       else if (tab === 'payouts') loadPayoutsTab();
@@ -723,7 +648,7 @@
             <div style="font-size:11px; color:#2a3cff; text-transform:uppercase; font-weight:700; margin-bottom:4px; letter-spacing:0.5px;">Summary</div>
             ${totalMoney > 0 ? `<div style="font-size:18px; font-weight:800;">$${formatNumber(totalMoney)}</div>` : ''}
             <div style="font-size:12px; color:#888;">${unpaid.length} Unpaid OCs ${items > 0 ? `• ${items} with Items` : ''}</div>
-            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&sub=completed" target="_blank" 
+            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&subTab=completed" target="_blank" 
                style="display:block; margin-top:12px; padding:10px; background:#2a3cff; color:#fff; text-align:center; border-radius:8px; text-decoration:none; font-weight:700; font-size:13px; box-shadow:0 4px 10px rgba(42,60,255,0.3);">Open Payouts Page</a>
           </div>
         `;
@@ -732,7 +657,7 @@
           const ageDays = Math.floor(ageSec / 86400);
           const ageColor = ageDays >= 7 ? '#f66' : (ageDays >= 3 ? '#b8860b' : '#888');
           html += `
-            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&sub=completed" target="_blank" style="text-decoration:none; color:inherit; display:block;">
+            <a href="https://www.torn.com/factions.php?step=your#/tab=crimes&subTab=completed" target="_blank" style="text-decoration:none; color:inherit; display:block;">
               <div class="oc-card" style="padding:10px 12px;">
                 <div class="oc-card-header"><span class="oc-crime-name" style="font-size:12.5px;">${c.name}</span><span style="font-size:11px; font-weight:700; color:${ageColor};">${ageDays > 0 ? ageDays+'d' : Math.floor(ageSec/3600)+'h'}</span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="font-size:13px; color:#1a7a1a; font-weight:700;">${c.money > 0 ? '$' + formatNumber(c.money) : ''}</span><span style="font-size:11px; color:#888;">${c.hasItems ? '<span style="color:#2a3cff;">Items</span>' : ''}${c.payoutPct ? ` ${c.payoutPct}%` : ''}</span></div>
