@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.4.6
+// @version      4.4.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -176,7 +176,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.4.6',
+        VERSION: '4.4.7',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -8688,6 +8688,27 @@ body.wb-chain-active {
             }
         }
         panel.appendChild(grid);
+
+        // Legend
+        const legend = document.createElement('div');
+        legend.style.cssText = 'display: flex; align-items: center; justify-content: center; gap: 16px; padding: 10px 16px 2px; font-size: 11px; color: var(--wb-text-muted); border-top: 1px solid rgba(255,255,255,0.05); margin-top: 8px;';
+        legend.innerHTML = `
+            <div style="display:flex; align-items:center; gap:4px;">
+                <div style="width:10px;height:10px;background:rgba(255,255,255,0.05);border-radius:2px;"></div>
+                <span>No Data</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+                <span>Low</span>
+                <div style="display:flex; gap:2px;">
+                    <div style="width:10px;height:10px;background:rgba(0,184,148,0.1);border-radius:2px;"></div>
+                    <div style="width:10px;height:10px;background:rgba(0,184,148,0.4);border-radius:2px;"></div>
+                    <div style="width:10px;height:10px;background:rgba(0,184,148,0.7);border-radius:2px;"></div>
+                    <div style="width:10px;height:10px;background:rgba(0,184,148,1.0);border-radius:2px;"></div>
+                </div>
+                <span>Peak Activity</span>
+            </div>
+        `;
+        panel.appendChild(legend);
 
         // Footer
         const footer = document.createElement('div');
