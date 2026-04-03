@@ -143,6 +143,23 @@
     return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   };
 
+  const navigateToCompleted = () => {
+    if (window.location.hash.includes('sub=completed')) {
+      const checkTabs = setInterval(() => {
+        const factionContent = document.querySelector('.faction-crimes-wrap') || document.body;
+        const buttons = Array.from(factionContent.querySelectorAll('button'));
+        const completedTab = buttons.find(btn => btn.textContent.trim() === 'Completed');
+        if (completedTab) {
+          completedTab.click();
+          clearInterval(checkTabs);
+        }
+      }, 500);
+      setTimeout(() => clearInterval(checkTabs), 10000);
+    }
+  };
+  navigateToCompleted();
+  window.addEventListener('hashchange', navigateToCompleted);
+
   // ------------------- API Helpers -------------------
   const loadMembers = async () => {
     if (membersLoaded) return;
