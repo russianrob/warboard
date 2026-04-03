@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.4.7
+// @version      4.4.8
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -176,7 +176,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.4.7',
+        VERSION: '4.4.8',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -8691,21 +8691,34 @@ body.wb-chain-active {
 
         // Legend
         const legend = document.createElement('div');
-        legend.style.cssText = 'display: flex; align-items: center; justify-content: center; gap: 16px; padding: 10px 16px 2px; font-size: 11px; color: var(--wb-text-muted); border-top: 1px solid rgba(255,255,255,0.05); margin-top: 8px;';
+        legend.style.cssText = 'display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px; padding: 10px 16px 2px; font-size: 11px; color: var(--wb-text-muted); border-top: 1px solid rgba(255,255,255,0.05); margin-top: 8px;';
+        
+        const p33 = (maxPct * 0.33).toFixed(0);
+        const p66 = (maxPct * 0.66).toFixed(0);
+        const p100 = maxPct.toFixed(0);
+
         legend.innerHTML = `
             <div style="display:flex; align-items:center; gap:4px;">
                 <div style="width:10px;height:10px;background:rgba(255,255,255,0.05);border-radius:2px;"></div>
-                <span>No Data</span>
+                <span>No Data / 0%</span>
             </div>
-            <div style="display:flex; align-items:center; gap:6px;">
-                <span>Low</span>
-                <div style="display:flex; gap:2px;">
+            <div style="display:flex; align-items:center; gap:12px; margin-left: 8px;">
+                <div style="display:flex; align-items:center; gap:4px;">
                     <div style="width:10px;height:10px;background:rgba(0,184,148,0.1);border-radius:2px;"></div>
-                    <div style="width:10px;height:10px;background:rgba(0,184,148,0.4);border-radius:2px;"></div>
-                    <div style="width:10px;height:10px;background:rgba(0,184,148,0.7);border-radius:2px;"></div>
-                    <div style="width:10px;height:10px;background:rgba(0,184,148,1.0);border-radius:2px;"></div>
+                    <span>&gt;0%</span>
                 </div>
-                <span>Peak Activity</span>
+                <div style="display:flex; align-items:center; gap:4px;">
+                    <div style="width:10px;height:10px;background:rgba(0,184,148,0.4);border-radius:2px;"></div>
+                    <span>~${p33}%</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:4px;">
+                    <div style="width:10px;height:10px;background:rgba(0,184,148,0.7);border-radius:2px;"></div>
+                    <span>~${p66}%</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:4px;">
+                    <div style="width:10px;height:10px;background:rgba(0,184,148,1.0);border-radius:2px;"></div>
+                    <span>${p100}%+</span>
+                </div>
             </div>
         `;
         panel.appendChild(legend);
