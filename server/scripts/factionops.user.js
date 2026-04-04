@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.8
+// @version      4.5.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.9   - Critical Math Fix: Resolved issue where ETA inflated to 1h29m+ by correctly identifying that Torn API sends the original target (not decayed) while Torn UI sends a discrete decayed target
 // v4.5.8   - Revert to continuous decay math (Torn API actually drops smoothly in the background, not discretely) with a proper float-rounding fix to prevent oscillation
 // v4.5.7   - Fix: Timer jitter/oscillation (59m -> 01:01) caused by calculating continuous decay relative to now() instead of absolute discrete hourly drops
 // v4.5.6   - Fix: War timer saying "01:00" due to Torn UI displaying "days" which broke the time split array (calculated as 200+ hours instead of 50h)
@@ -5612,8 +5613,9 @@ body.wb-chain-active {
                     if (totalElapsedHours !== null && currentTarget !== null) {
                         let exactWinHour = 0;
                         if (totalElapsedHours > 24) {
-                            const exactDropFactor = Math.max(0.01, 1 - ((totalElapsedHours - 24) * 0.01));
-                            const origTarget = Math.round(currentTarget / exactDropFactor);
+                            const dropHours = Math.floor(totalElapsedHours - 24);
+                            const uiDropFactor = Math.max(0.01, 1 - (dropHours * 0.01));
+                            const origTarget = Math.round(currentTarget / uiDropFactor);
                             const dropPerHr = origTarget * 0.01;
                             const totalGap = Math.max(0, origTarget - score);
                             exactWinHour = 24 + (totalGap / dropPerHr);
@@ -5652,10 +5654,14 @@ body.wb-chain-active {
                 }
             }
         } else if (totalElapsedHours !== null && totalElapsedHours > 24 && effectiveScore !== null && currentTarget !== null) {
-            const exactDropFactor = Math.max(0.01, 1 - ((totalElapsedHours - 24) * 0.01));
-            const originalTarget = Math.round(currentTarget / exactDropFactor);
+            // Torn UI displays a discrete target that drops exactly on the hour.
+            // We MUST use floor to correctly reverse-engineer the original target from the UI.
+            const dropHours = Math.floor(totalElapsedHours - 24);
+            const uiDropFactor = Math.max(0.01, 1 - (dropHours * 0.01));
+            const originalTarget = Math.round(currentTarget / uiDropFactor);
             const DROP_PER_HOUR = originalTarget * 0.01;
             
+            // Now use pure continuous math to find the exact ETA
             const totalGap = Math.max(0, originalTarget - effectiveScore);
             const exactWinHour = 24 + (totalGap / DROP_PER_HOUR);
             
