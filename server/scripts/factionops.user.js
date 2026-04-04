@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.4.8
+// @version      4.5.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,9 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.3   - Feature: Auto-clear custom war target once reached (switches to standard war timer)
+// v4.5.2   - Feature: Switch to exact war decay timer once custom target reaches 100% (even before 24h)
+// v4.5.1   - Fix: Prevent War Target Reached notifications from repeating continuously on page reloads
 // v3.16.2  - Add SSE (EventSource) test button in PDA settings to probe real-time support
 // v3.16.1  - Show RT/Poll connection badge for all users (was admin-only)
 // v3.16.0  - Multi-hit deal calls: long-press/right-click Call button for 15-min reserved deal call
@@ -3844,6 +3847,14 @@ body.wb-chain-active {
                 <button class="wb-btn wb-btn-sm wb-btn-danger" id="wb-btn-remove-faction-key">Remove</button>
             </div>
 
+            ${state.myPlayerId === '137558' ? `
+            <hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:14px 0;">
+            <div style="margin-bottom:14px;">
+                <label>Admin Tools</label>
+                <button class="wb-btn wb-btn-sm" id="wb-btn-view-logs" style="width:100%;">View PM2 Server Logs</button>
+            </div>
+            ` : ''}
+
             <div class="wb-settings-actions">
                 <button class="wb-btn wb-btn-danger" id="wb-btn-disconnect">Disconnect</button>
                 <button class="wb-btn" id="wb-btn-save">Save &amp; Connect</button>
@@ -4076,6 +4087,46 @@ body.wb-chain-active {
             const savedRow = document.getElementById('wb-faction-key-saved-row');
             if (inputRow) inputRow.style.display = 'flex';
             if (savedRow) savedRow.style.display = 'none';
+        }
+
+        const viewLogsBtn = document.getElementById('wb-btn-view-logs');
+        if (viewLogsBtn) {
+            viewLogsBtn.addEventListener('click', async () => {
+                viewLogsBtn.textContent = 'Loading...';
+                viewLogsBtn.disabled = true;
+                try {
+                    const resp = await getAction('/api/admin/pm2-logs');
+                    if (resp && resp.ok !== false) {
+                        const logsModal = document.createElement('div');
+                        logsModal.className = 'wb-settings-modal';
+                        logsModal.style.width = '800px';
+                        logsModal.style.maxWidth = '95vw';
+                        logsModal.innerHTML = `
+                            <h2>PM2 Server Logs</h2>
+                            <label>Out Log</label>
+                            <pre style="background:#111;color:#0f0;padding:10px;border-radius:4px;overflow-x:auto;max-height:300px;font-size:11px;margin-bottom:14px;">${escapeHtml(resp.out || 'Empty')}</pre>
+                            <label>Error Log</label>
+                            <pre style="background:#111;color:#f00;padding:10px;border-radius:4px;overflow-x:auto;max-height:300px;font-size:11px;margin-bottom:14px;">${escapeHtml(resp.err || 'Empty')}</pre>
+                            <button class="wb-btn" id="wb-btn-close-logs">Close</button>
+                        `;
+                        const overlay2 = document.createElement('div');
+                        overlay2.className = 'wb-settings-overlay';
+                        overlay2.style.zIndex = '1000001'; // Above settings modal
+                        overlay2.appendChild(logsModal);
+                        document.body.appendChild(overlay2);
+                        document.getElementById('wb-btn-close-logs').addEventListener('click', () => {
+                            document.body.removeChild(overlay2);
+                        });
+                    } else {
+                        alert('Failed to fetch logs: ' + (resp.error || 'Unknown error'));
+                    }
+                } catch (e) {
+                    alert('Error: ' + e.message);
+                } finally {
+                    viewLogsBtn.textContent = 'View PM2 Server Logs';
+                    viewLogsBtn.disabled = false;
+                }
+            });
         }
 
         document.getElementById('wb-btn-disconnect').addEventListener('click', () => {
@@ -5533,17 +5584,36 @@ body.wb-chain-active {
                 const pct = Math.min(100, Math.round((score / goal) * 100));
                 currentPct = pct;
                 if (remaining <= 0) {
+                    const notifiedKey = 'fo_notified_' + deriveWarId() + '_' + goal;
                     if (!warTargetNotifiedThisSession) {
                         warTargetNotifiedThisSession = true;
-                        postAction('/api/war-target-reached', { warId: deriveWarId(), lead: score }).catch(() => {});
-                        firePdaNotification('war_target', '\uD83C\uDFAF War Target Reached!', `Faction hit ${score.toLocaleString()} / ${goal.toLocaleString()} respect \u2014 hold the line!`);
+                        if (GM_getValue(notifiedKey, false) !== true) {
+                            GM_setValue(notifiedKey, true);
+                            postAction('/api/war-target-reached', { warId: deriveWarId(), lead: score }).catch(() => {});
+                            firePdaNotification('war_target', '\uD83C\uDFAF War Target Reached!', `Faction hit ${score.toLocaleString()} / ${goal.toLocaleString()} respect \u2014 hold the line!`);
+
+                            // Auto-clear custom target so it switches to the standard war decay timer
+                            log('War target reached. Auto-clearing custom target.');
+                            postAction('/api/set-war-target', { warId: deriveWarId(), value: null }).catch(() => {});
+                            state.warTarget = null;
+                        }
                     }
-                    if (totalElapsedHours !== null && totalElapsedHours > 24 && currentTarget !== null) {
-                        const dropHrs = Math.floor(totalElapsedHours - 24);
-                        const origTarget = currentTarget / (1 - (dropHrs * 0.01));
-                        const dropPerHr = origTarget * 0.01;
-                        const gap = currentTarget - score;
-                        const hrsLeft = gap / dropPerHr;
+                    if (totalElapsedHours !== null && currentTarget !== null) {
+                        let hrsLeft = 0;
+                        if (totalElapsedHours > 24) {
+                            const dropHrs = Math.floor(totalElapsedHours - 24);
+                            const origTarget = currentTarget / (1 - (dropHrs * 0.01));
+                            const dropPerHr = origTarget * 0.01;
+                            const gap = currentTarget - score;
+                            hrsLeft = gap / dropPerHr;
+                        } else {
+                            const origTarget = currentTarget;
+                            const dropPerHr = origTarget * 0.01;
+                            const gap = currentTarget - score;
+                            const hrsToDrop = gap / dropPerHr;
+                            hrsLeft = (24 - totalElapsedHours) + hrsToDrop;
+                        }
+
                         if (hrsLeft <= 0) {
                             warTimerEl.className = 'fo-war-timer safe';
                             warTimerValue.textContent = '\u2713 WON';
