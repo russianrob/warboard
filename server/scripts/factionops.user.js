@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.3
+// @version      4.5.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.4   - Fix: War timer accuracy — scoped DOM selectors to avoid picking up unrelated timers (e.g. hospital/chain)
 // v4.5.3   - Feature: Auto-clear custom war target once reached (switches to standard war timer)
 // v4.5.2   - Feature: Switch to exact war decay timer once custom target reaches 100% (even before 24h)
 // v4.5.1   - Fix: Prevent War Target Reached notifications from repeating continuously on page reloads
@@ -5520,9 +5521,11 @@ body.wb-chain-active {
         const warTimerDetail = document.getElementById('fo-war-timer-detail');
         if (!warTimerEl || !warTimerValue) return;
 
-        // ── Read timer + score from DOM ──
-        const timerEl = document.querySelector('[class*="timer_"]');
-        const targetBox = document.querySelector('[class*="target_"]');
+        // ── Read timer + score from DOM (scoped to Ranked War container) ──
+        const warHeader = document.querySelector('[class*="rankedWar"]');
+        const timerEl = warHeader ? warHeader.querySelector('[class*="timer_"]') : null;
+        const targetBox = warHeader ? warHeader.querySelector('[class*="target_"]') : null;
+
         let lead = null, currentTarget = null, elapsedStr = null, totalElapsedHours = null;
         let myFactionScore = null, signedLead = null;
         let timerDays = 0, timerHours = 0, timerMinutes = 0;
@@ -5563,10 +5566,16 @@ body.wb-chain-active {
             }
         }
 
+        // Prefer server score if available and we're on the war page
+        const effectiveScore = (myFactionScore !== null) ? myFactionScore : lead;
+
         // War percentage calculation & broadcast
         let currentPct = null;
 
-        if (lead === 0 && currentTarget !== null && currentTarget > 0 && totalElapsedHours !== null) {
+        // "Waiting" state only if score is 0 AND we're in the first 24h (approx)
+        // or if explicitly "starts in" text is found (not implemented here yet).
+        // If lead is 0 but elapsed > 24h, it's a decay war with 0 score.
+        if (lead === 0 && currentTarget !== null && currentTarget > 0 && totalElapsedHours !== null && totalElapsedHours < 2) {
             const display = timerDays > 0 ? `${timerDays}d ${timerHours}h ${timerMinutes}m`
                 : timerHours > 0 ? `${timerHours}h ${timerMinutes}m`
                 : `${timerMinutes}m`;
@@ -5578,7 +5587,7 @@ body.wb-chain-active {
                 + warTimerDetailRow('Target', currentTarget.toLocaleString());
         } else if (state.warTarget && state.warTarget.value) {
             const goal = state.warTarget.value;
-            const score = myFactionScore !== null ? myFactionScore : lead;
+            const score = effectiveScore;
             if (score !== null) {
                 const remaining = goal - score;
                 const pct = Math.min(100, Math.round((score / goal) * 100));
@@ -5590,7 +5599,7 @@ body.wb-chain-active {
                         if (GM_getValue(notifiedKey, false) !== true) {
                             GM_setValue(notifiedKey, true);
                             postAction('/api/war-target-reached', { warId: deriveWarId(), lead: score }).catch(() => {});
-                            firePdaNotification('war_target', '\uD83C\uDFAF War Target Reached!', `Faction hit ${score.toLocaleString()} / ${goal.toLocaleString()} respect \u2014 hold the line!`);
+                            firePdaNotification('war_target', '🎯 War Target Reached!', `Faction hit ${score.toLocaleString()} / ${goal.toLocaleString()} respect — hold the line!`);
 
                             // Auto-clear custom target so it switches to the standard war decay timer
                             log('War target reached. Auto-clearing custom target.');
@@ -5616,7 +5625,7 @@ body.wb-chain-active {
 
                         if (hrsLeft <= 0) {
                             warTimerEl.className = 'fo-war-timer safe';
-                            warTimerValue.textContent = '\u2713 WON';
+                            warTimerValue.textContent = '✓ WON';
                         } else {
                             warTimerEtaMs = Date.now() + (hrsLeft * 3600000);
                             warTimerLastCalc = Date.now();
@@ -5629,7 +5638,7 @@ body.wb-chain-active {
                         }
                     } else {
                         warTimerEl.className = 'fo-war-timer safe';
-                        warTimerValue.textContent = '\u2713 ' + pct + '%';
+                        warTimerValue.textContent = '✓ ' + pct + '%';
                     }
                 } else {
                     const urgency = pct >= 80 ? 'safe' : pct >= 50 ? 'warning' : 'danger';
@@ -5637,11 +5646,11 @@ body.wb-chain-active {
                     warTimerValue.textContent = pct + '%';
                 }
             }
-        } else if (totalElapsedHours !== null && totalElapsedHours > 24 && lead !== null && currentTarget !== null) {
+        } else if (totalElapsedHours !== null && totalElapsedHours > 24 && effectiveScore !== null && currentTarget !== null) {
             const dropHours = Math.floor(totalElapsedHours - 24);
             const originalTarget = currentTarget / (1 - (dropHours * 0.01));
             const DROP_PER_HOUR = originalTarget * 0.01;
-            const gap = currentTarget - lead;
+            const gap = currentTarget - effectiveScore;
             const hoursRemaining = gap / DROP_PER_HOUR;
             warTimerEtaMs = Date.now() + (hoursRemaining * 3600000);
             warTimerLastCalc = Date.now();
