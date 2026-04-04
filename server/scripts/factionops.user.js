@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.7
+// @version      4.5.8
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.8   - Revert to continuous decay math (Torn API actually drops smoothly in the background, not discretely) with a proper float-rounding fix to prevent oscillation
 // v4.5.7   - Fix: Timer jitter/oscillation (59m -> 01:01) caused by calculating continuous decay relative to now() instead of absolute discrete hourly drops
 // v4.5.6   - Fix: War timer saying "01:00" due to Torn UI displaying "days" which broke the time split array (calculated as 200+ hours instead of 50h)
 // v4.5.5   - Fix: War timer saying "WON" prematurely due to locale-specific number formatting (dots/spaces) and long-war decay math issues (>124h)
@@ -5609,25 +5610,22 @@ body.wb-chain-active {
                         }
                     }
                     if (totalElapsedHours !== null && currentTarget !== null) {
-                        let winHour = 0;
+                        let exactWinHour = 0;
                         if (totalElapsedHours > 24) {
-                            const dropHrs = Math.floor(totalElapsedHours - 24);
-                            const safeDropFactor = Math.max(0.01, 1 - (dropHrs * 0.01));
-                            const origTarget = currentTarget / safeDropFactor;
+                            const exactDropFactor = Math.max(0.01, 1 - ((totalElapsedHours - 24) * 0.01));
+                            const origTarget = Math.round(currentTarget / exactDropFactor);
                             const dropPerHr = origTarget * 0.01;
                             const totalGap = Math.max(0, origTarget - score);
-                            const dropsNeeded = Math.ceil(totalGap / dropPerHr);
-                            winHour = 24 + dropsNeeded;
+                            exactWinHour = 24 + (totalGap / dropPerHr);
                         } else {
                             const origTarget = currentTarget;
                             const dropPerHr = origTarget * 0.01;
                             const totalGap = Math.max(0, origTarget - score);
-                            const dropsNeeded = Math.ceil(totalGap / dropPerHr);
-                            winHour = 24 + dropsNeeded;
+                            exactWinHour = 24 + (totalGap / dropPerHr);
                         }
 
                         const approximateWarStartMs = Date.now() - (totalElapsedHours * 3600000);
-                        warTimerEtaMs = approximateWarStartMs + (winHour * 3600000);
+                        warTimerEtaMs = approximateWarStartMs + (exactWinHour * 3600000);
                         warTimerLastCalc = Date.now();
                         const msRemaining = warTimerEtaMs - Date.now();
                         let hrsLeft = Math.max(0, msRemaining / 3600000);
@@ -5654,17 +5652,15 @@ body.wb-chain-active {
                 }
             }
         } else if (totalElapsedHours !== null && totalElapsedHours > 24 && effectiveScore !== null && currentTarget !== null) {
-            const dropHours = Math.floor(totalElapsedHours - 24);
-            const safeDropFactor = Math.max(0.01, 1 - (dropHours * 0.01));
-            const originalTarget = currentTarget / safeDropFactor;
+            const exactDropFactor = Math.max(0.01, 1 - ((totalElapsedHours - 24) * 0.01));
+            const originalTarget = Math.round(currentTarget / exactDropFactor);
             const DROP_PER_HOUR = originalTarget * 0.01;
             
             const totalGap = Math.max(0, originalTarget - effectiveScore);
-            const dropsNeeded = Math.ceil(totalGap / DROP_PER_HOUR);
-            const winHour = 24 + dropsNeeded;
+            const exactWinHour = 24 + (totalGap / DROP_PER_HOUR);
             
             const approximateWarStartMs = Date.now() - (totalElapsedHours * 3600000);
-            warTimerEtaMs = approximateWarStartMs + (winHour * 3600000);
+            warTimerEtaMs = approximateWarStartMs + (exactWinHour * 3600000);
             warTimerLastCalc = Date.now();
             
             const msRemaining = warTimerEtaMs - Date.now();
