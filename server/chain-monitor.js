@@ -162,29 +162,16 @@ export function startChainMonitor(io, warId) {
               if (totalElapsedHours > 24) {
                 const dropHours = Math.floor(totalElapsedHours - 24);
                 
-                // Server API gives the ORIGINAL target.
-                const originalTarget = rw.warTarget;
-                
-                // Calculate what the target is RIGHT NOW in the UI
-                const currentDecayedTarget = Math.round(originalTarget * (1 - (dropHours * 0.01)));
-                
+                const originalTarget = rw.warTarget / (1 - (dropHours * 0.01));
                 const DROP_PER_HOUR = originalTarget * 0.01;
                 const lead = Math.max(rw.myScore, rw.enemyScore);
-                
-                // Calculate the gap from the CURRENT UI TARGET
-                const gap = currentDecayedTarget - lead;
+                const gap = rw.warTarget - lead;
                 const hoursRemainingFloat = gap / DROP_PER_HOUR;
                 
-                // If the gap is less than 0, we actually HAVE won!
-                // But wait, what if myScore isn't the lead?
-                // myScore is just ONE faction's score. The gap is based on the LEAD.
-                // If hoursRemainingFloat is negative, it means LEAD > TARGET.
-                // It should only say WON if MY faction is the lead.
-                
                 war.warEta = {
-                  etaTimestamp: hoursRemainingFloat > 0 ? Math.floor(Date.now() + (hoursRemainingFloat * 3600000)) : Date.now(),
+                  etaTimestamp: Math.floor(Date.now() + (hoursRemainingFloat * 3600000)),
                   hoursRemaining: hoursRemainingFloat,
-                  currentTarget: currentDecayedTarget,
+                  currentTarget: rw.warTarget,
                   calculatedAt: Date.now(),
                 };
               } else {
