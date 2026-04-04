@@ -154,23 +154,26 @@ export function startChainMonitor(io, warId) {
             const warStart = rw.warStart || war.warStart || 0;
             if (warStart) war.warStart = warStart;
             
-            // The Torn API target (rw.warTarget) is the CURRENT decayed target, not the original target.
+            // Calculate ETA based on continuous decay mechanics.
             if (warStart && rw.warTarget && rw.myScore != null) {
               const nowSec = Math.floor(Date.now() / 1000);
               const elapsedHrs = (nowSec - warStart) / 3600;
               if (elapsedHrs > 24) {
-                const dropHrs = Math.floor(elapsedHrs - 24);
-                const safeDropFactor = Math.max(0.01, 1 - dropHrs * 0.01);
-                // Calculate original target to find the 1% drop rate
-                const warOrigTarget = Math.round(rw.warTarget / safeDropFactor);
+                // The API target (rw.warTarget) decays over time!
+                // We MUST reverse-engineer the original target to calculate the exact win hour.
+                const dropHours = Math.floor(elapsedHrs - 24);
+                const uiDropFactor = Math.max(0.01, 1 - (dropHours * 0.01));
+                const warOrigTarget = Math.round(rw.warTarget / uiDropFactor);
                 const dropPerHour = warOrigTarget * 0.01;
-                // Use lead (higher score) for gap calculation
+                
                 const lead = Math.max(rw.myScore, rw.enemyScore);
-                const gap = Math.max(0, rw.warTarget - lead);
-                const hrsRemaining = dropPerHour > 0 ? gap / dropPerHour : 0;
+                const totalGap = Math.max(0, warOrigTarget - lead);
+                const exactWinHour = 24 + (totalGap / dropPerHour);
+                const winTimestampSec = warStart + (exactWinHour * 3600);
+                
                 war.warEta = {
-                  etaTimestamp: Math.floor(Date.now() + (hrsRemaining * 3600000)),
-                  hoursRemaining: Math.round(hrsRemaining * 100) / 100,
+                  etaTimestamp: Math.floor(winTimestampSec * 1000),
+                  hoursRemaining: Math.max(0, exactWinHour - elapsedHrs),
                   currentTarget: rw.warTarget,
                   calculatedAt: Date.now(),
                 };
