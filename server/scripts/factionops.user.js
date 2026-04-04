@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.6
+// @version      4.5.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.7   - Fix: Timer jitter/oscillation (59m -> 01:01) caused by calculating continuous decay relative to now() instead of absolute discrete hourly drops
 // v4.5.6   - Fix: War timer saying "01:00" due to Torn UI displaying "days" which broke the time split array (calculated as 200+ hours instead of 50h)
 // v4.5.5   - Fix: War timer saying "WON" prematurely due to locale-specific number formatting (dots/spaces) and long-war decay math issues (>124h)
 // v4.5.4   - Fix: War timer accuracy — scoped DOM selectors to avoid picking up unrelated timers (e.g. hospital/chain)
@@ -5608,28 +5609,33 @@ body.wb-chain-active {
                         }
                     }
                     if (totalElapsedHours !== null && currentTarget !== null) {
-                        let hrsLeft = 0;
+                        let winHour = 0;
                         if (totalElapsedHours > 24) {
                             const dropHrs = Math.floor(totalElapsedHours - 24);
                             const safeDropFactor = Math.max(0.01, 1 - (dropHrs * 0.01));
                             const origTarget = currentTarget / safeDropFactor;
                             const dropPerHr = origTarget * 0.01;
-                            const gap = currentTarget - score;
-                            hrsLeft = Math.max(0, gap / dropPerHr);
+                            const totalGap = Math.max(0, origTarget - score);
+                            const dropsNeeded = Math.ceil(totalGap / dropPerHr);
+                            winHour = 24 + dropsNeeded;
                         } else {
                             const origTarget = currentTarget;
                             const dropPerHr = origTarget * 0.01;
-                            const gap = currentTarget - score;
-                            const hrsToDrop = gap / dropPerHr;
-                            hrsLeft = (24 - totalElapsedHours) + hrsToDrop;
+                            const totalGap = Math.max(0, origTarget - score);
+                            const dropsNeeded = Math.ceil(totalGap / dropPerHr);
+                            winHour = 24 + dropsNeeded;
                         }
+
+                        const approximateWarStartMs = Date.now() - (totalElapsedHours * 3600000);
+                        warTimerEtaMs = approximateWarStartMs + (winHour * 3600000);
+                        warTimerLastCalc = Date.now();
+                        const msRemaining = warTimerEtaMs - Date.now();
+                        let hrsLeft = Math.max(0, msRemaining / 3600000);
 
                         if (score >= currentTarget || hrsLeft <= 0) {
                             warTimerEl.className = 'fo-war-timer safe';
                             warTimerValue.textContent = '✓ WON';
                         } else {
-                            warTimerEtaMs = Date.now() + (hrsLeft * 3600000);
-                            warTimerLastCalc = Date.now();
                             const tMin = Math.floor(hrsLeft * 60);
                             const h = Math.floor(tMin / 60).toString().padStart(2, '0');
                             const m = (tMin % 60).toString().padStart(2, '0');
@@ -5652,11 +5658,19 @@ body.wb-chain-active {
             const safeDropFactor = Math.max(0.01, 1 - (dropHours * 0.01));
             const originalTarget = currentTarget / safeDropFactor;
             const DROP_PER_HOUR = originalTarget * 0.01;
-            const gap = currentTarget - effectiveScore;
-            const hoursRemaining = Math.max(0, gap / DROP_PER_HOUR);
-            warTimerEtaMs = Date.now() + (hoursRemaining * 3600000);
+            
+            const totalGap = Math.max(0, originalTarget - effectiveScore);
+            const dropsNeeded = Math.ceil(totalGap / DROP_PER_HOUR);
+            const winHour = 24 + dropsNeeded;
+            
+            const approximateWarStartMs = Date.now() - (totalElapsedHours * 3600000);
+            warTimerEtaMs = approximateWarStartMs + (winHour * 3600000);
             warTimerLastCalc = Date.now();
-            if (effectiveScore >= currentTarget || (hoursRemaining <= 0 && gap <= 0)) {
+            
+            const msRemaining = warTimerEtaMs - Date.now();
+            const hoursRemaining = Math.max(0, msRemaining / 3600000);
+
+            if (effectiveScore >= currentTarget || (hoursRemaining <= 0 && totalGap <= 0)) {
                 warTimerEl.className = 'fo-war-timer safe';
                 warTimerValue.textContent = 'WON';
             } else {
