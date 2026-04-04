@@ -105,6 +105,8 @@
   let lastRefreshTime = 0;
   const REFRESH_COOLDOWN_MS = 10000; 
 
+  const recentlyLoaned = new Map(); // Map<string (UID), Set<number (IID)>>
+
   let preparedArmoryID = null;
   let pendingArmoryItemID = null;
 
@@ -315,6 +317,10 @@
     if (!res.ok) throw new Error('Retrieve request failed');
     const text = await res.text();
     if (!text.includes('success')) throw new Error('Retrieve failed');
+    
+    // Remove from local assignment track on successful retrieval
+    const uid = String(userID);
+    if (recentlyLoaned.has(uid)) { recentlyLoaned.get(uid).delete(itemID); if (recentlyLoaned.get(uid).size === 0) recentlyLoaned.delete(uid); }
   };
 
   const loanItem = async ({ armoryID, itemID, userID, userName }) => {
@@ -334,9 +340,16 @@
 
   const loanPreparedItem = async ({ userID, userName }) => {
     if (!preparedArmoryID || pendingArmoryItemID === null) throw new Error('Armoury not prepared');
+    const itemID = pendingArmoryItemID;
     await loanItem({ armoryID: preparedArmoryID, itemID: pendingArmoryItemID, userID, userName });
     const entry = armoryCache.get(pendingArmoryItemID);
     if (entry) { entry.qty -= 1; if (entry.qty <= 0) armoryCache.delete(pendingArmoryItemID); }
+    
+    // Add to local assignment track to bypass API cache/lag
+    const uid = String(userID);
+    if (!recentlyLoaned.has(uid)) recentlyLoaned.set(uid, new Set());
+    recentlyLoaned.get(uid).add(itemID);
+
     preparedArmoryID = null; pendingArmoryItemID = null;
   };
 
@@ -542,7 +555,7 @@
       content.innerHTML = '<div style="text-align:center;color:#666;padding:40px;font-size:13px;">Loading OC data…</div>';
       try {
         await loadMembers();
-        const missing = await getMissingOCItems();
+        const missing = (await getMissingOCItems()).filter(m => !recentlyLoaned.get(String(m.userID))?.has(m.itemID));
         if (!missing.length) { content.innerHTML = '<div style="text-align:center;color:#4a4;padding:40px;font-size:14px;font-weight:600;">All OC items allocated ✓</div>'; return; }
         await resolveItemNames(missing.map(m => m.itemID));
         let html = '';
@@ -588,6 +601,13 @@
       try {
         await loadMembers();
         const [armoryItems, neededByUser] = await Promise.all([fetchAllArmoryItems(), getAllOCItemRequirements()]);
+        
+        // Merge recently loaned items to avoid showing them as unused due to API lag
+        recentlyLoaned.forEach((items, uid) => {
+          if (!neededByUser.has(uid)) neededByUser.set(uid, new Set());
+          items.forEach(iid => neededByUser.get(uid).add(iid));
+        });
+
         const unused = [];
         const OC_ARMOUR_ITEM_IDS = new Set([348, 643, 644]); // Hazmat Suit, Construction Helmet, Welding Helmet
         
