@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.4
+// @version      4.5.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.5   - Fix: War timer saying "WON" prematurely due to locale-specific number formatting (dots/spaces) and long-war decay math issues (>124h)
 // v4.5.4   - Fix: War timer accuracy — scoped DOM selectors to avoid picking up unrelated timers (e.g. hospital/chain)
 // v4.5.3   - Feature: Auto-clear custom war target once reached (switches to standard war timer)
 // v4.5.2   - Feature: Switch to exact war decay timer once custom target reaches 100% (even before 24h)
@@ -4621,10 +4622,10 @@ body.wb-chain-active {
         if (statsEl) {
             const text = statsEl.textContent.trim();
             // Extract numbers from "Chain: 1,234 / 100,000" or "1/10" etc.
-            const match = text.match(/(\d[\d,]*)\s*\/\s*(\d[\d,]*)/);
+            const match = text.match(/(\d[\d,.\s]*)\s*\/\s*(\d[\d,.\s]*)/);
             if (match) {
-                const current = parseInt(match[1].replace(/,/g, ''), 10);
-                const max = parseInt(match[2].replace(/,/g, ''), 10);
+                const current = parseInt(match[1].replace(/[^\d]/g, ''), 10);
+                const max = parseInt(match[2].replace(/[^\d]/g, ''), 10);
                 if (!isNaN(current) && current !== state.chain.current) {
                     state.chain.current = current;
                     changed = true;
@@ -5552,10 +5553,10 @@ body.wb-chain-active {
         }
         if (targetBox) {
             let match;
-            try { match = targetBox.innerText.match(/(\d[\d,]*)\s*\/\s*(\d[\d,]*)/); } catch(e) { match = null; }
+            try { match = targetBox.innerText.match(/(\d[\d,.\s]*)\s*\/\s*(\d[\d,.\s]*)/); } catch(e) { match = null; }
             if (match) {
-                lead = parseInt(match[1].replace(/,/g, ''));
-                currentTarget = parseInt(match[2].replace(/,/g, ''));
+                lead = parseInt(match[1].replace(/[^\d]/g, ''), 10);
+                currentTarget = parseInt(match[2].replace(/[^\d]/g, ''), 10);
             }
         }
 
@@ -5611,10 +5612,11 @@ body.wb-chain-active {
                         let hrsLeft = 0;
                         if (totalElapsedHours > 24) {
                             const dropHrs = Math.floor(totalElapsedHours - 24);
-                            const origTarget = currentTarget / (1 - (dropHrs * 0.01));
+                            const safeDropFactor = Math.max(0.01, 1 - (dropHrs * 0.01));
+                            const origTarget = currentTarget / safeDropFactor;
                             const dropPerHr = origTarget * 0.01;
                             const gap = currentTarget - score;
-                            hrsLeft = gap / dropPerHr;
+                            hrsLeft = Math.max(0, gap / dropPerHr);
                         } else {
                             const origTarget = currentTarget;
                             const dropPerHr = origTarget * 0.01;
@@ -5623,7 +5625,7 @@ body.wb-chain-active {
                             hrsLeft = (24 - totalElapsedHours) + hrsToDrop;
                         }
 
-                        if (hrsLeft <= 0) {
+                        if (score >= currentTarget || hrsLeft <= 0) {
                             warTimerEl.className = 'fo-war-timer safe';
                             warTimerValue.textContent = '✓ WON';
                         } else {
@@ -5648,13 +5650,14 @@ body.wb-chain-active {
             }
         } else if (totalElapsedHours !== null && totalElapsedHours > 24 && effectiveScore !== null && currentTarget !== null) {
             const dropHours = Math.floor(totalElapsedHours - 24);
-            const originalTarget = currentTarget / (1 - (dropHours * 0.01));
+            const safeDropFactor = Math.max(0.01, 1 - (dropHours * 0.01));
+            const originalTarget = currentTarget / safeDropFactor;
             const DROP_PER_HOUR = originalTarget * 0.01;
             const gap = currentTarget - effectiveScore;
-            const hoursRemaining = gap / DROP_PER_HOUR;
+            const hoursRemaining = Math.max(0, gap / DROP_PER_HOUR);
             warTimerEtaMs = Date.now() + (hoursRemaining * 3600000);
             warTimerLastCalc = Date.now();
-            if (hoursRemaining <= 0) {
+            if (effectiveScore >= currentTarget || (hoursRemaining <= 0 && gap <= 0)) {
                 warTimerEl.className = 'fo-war-timer safe';
                 warTimerValue.textContent = 'WON';
             } else {
