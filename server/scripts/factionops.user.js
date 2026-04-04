@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.5
+// @version      4.5.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.6   - Fix: War timer saying "01:00" due to Torn UI displaying "days" which broke the time split array (calculated as 200+ hours instead of 50h)
 // v4.5.5   - Fix: War timer saying "WON" prematurely due to locale-specific number formatting (dots/spaces) and long-war decay math issues (>124h)
 // v4.5.4   - Fix: War timer accuracy — scoped DOM selectors to avoid picking up unrelated timers (e.g. hospital/chain)
 // v4.5.3   - Feature: Auto-clear custom war target once reached (switches to standard war timer)
@@ -5532,23 +5533,21 @@ body.wb-chain-active {
         let timerDays = 0, timerHours = 0, timerMinutes = 0;
 
         if (timerEl) {
-            const text = timerEl.textContent.trim().replace(/[^\d:]/g, '');
-            if (text) {
-                const timeParts = text.split(':');
-                if (timeParts.length >= 3) {
-                    if (timeParts.length >= 4) {
-                        timerDays = parseInt(timeParts[0]) || 0;
-                        timerHours = parseInt(timeParts[1]) || 0;
-                        timerMinutes = parseInt(timeParts[2]) || 0;
-                    } else {
-                        const hh = parseInt(timeParts[0]) || 0;
-                        timerDays = Math.floor(hh / 24);
-                        timerHours = hh % 24;
-                        timerMinutes = parseInt(timeParts[1]) || 0;
-                    }
-                    totalElapsedHours = (timerDays * 24) + timerHours + (timerMinutes / 60);
-                    elapsedStr = timerDays > 0 ? timerDays + 'd ' + timerHours + 'h ' + timerMinutes + 'm' : timerHours + 'h ' + timerMinutes + 'm';
+            const text = timerEl.textContent.trim();
+            const timeParts = text.match(/\d+/g);
+            if (timeParts) {
+                if (timeParts.length >= 4) {
+                    timerDays = parseInt(timeParts[0], 10) || 0;
+                    timerHours = parseInt(timeParts[1], 10) || 0;
+                    timerMinutes = parseInt(timeParts[2], 10) || 0;
+                } else if (timeParts.length === 3) {
+                    const hh = parseInt(timeParts[0], 10) || 0;
+                    timerDays = Math.floor(hh / 24);
+                    timerHours = hh % 24;
+                    timerMinutes = parseInt(timeParts[1], 10) || 0;
                 }
+                totalElapsedHours = (timerDays * 24) + timerHours + (timerMinutes / 60);
+                elapsedStr = timerDays > 0 ? timerDays + 'd ' + timerHours + 'h ' + timerMinutes + 'm' : timerHours + 'h ' + timerMinutes + 'm';
             }
         }
         if (targetBox) {
