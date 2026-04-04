@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.10
+// @version      4.5.11
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.11  - Fix: Timer saying WON instead of LOST when the enemy reaches the target before you do.
 // v4.5.10  - Rewrote the fallback ETA logic completely from scratch to exactly match the flawless code from the Torn Ranked War Timer script, guaranteeing 100% ETA synchronization.
 // v4.5.9   - Critical Math Fix: Resolved issue where ETA inflated to 1h29m+ by correctly identifying that Torn API sends the original target (not decayed) while Torn UI sends a discrete decayed target
 // v4.5.8   - Revert to continuous decay math (Torn API actually drops smoothly in the background, not discretely) with a proper float-rounding fix to prevent oscillation
@@ -5655,15 +5656,23 @@ body.wb-chain-active {
             const dropHours = Math.floor(totalElapsedHours - 24);
             const originalTarget = currentTarget / (1 - (dropHours * 0.01));
             const DROP_PER_HOUR = originalTarget * 0.01;
-            const gap = currentTarget - effectiveScore;
+            
+            // Client fallback only has access to myFactionScore via DOM if signedLead isn't used
+            const leadScore = signedLead !== null ? Math.max(myFactionScore, myFactionScore - signedLead) : effectiveScore;
+            const gap = currentTarget - leadScore;
             const hoursRemainingFloat = gap / DROP_PER_HOUR;
             
             warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
             warTimerLastCalc = Date.now();
 
             if (hoursRemainingFloat <= 0) {
-                warTimerEl.className = 'fo-war-timer safe';
-                warTimerValue.textContent = 'WON';
+                if (signedLead !== null && signedLead < 0) {
+                    warTimerEl.className = 'fo-war-timer danger';
+                    warTimerValue.textContent = 'LOST';
+                } else {
+                    warTimerEl.className = 'fo-war-timer safe';
+                    warTimerValue.textContent = 'WON';
+                }
             } else {
                 const totalMin = Math.floor(hoursRemainingFloat * 60);
                 const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
@@ -5689,18 +5698,30 @@ body.wb-chain-active {
 
         const eta = state.warEta;
         const etaMs = eta?.etaTimestamp || warTimerEtaMs;
-        if (!etaMs) return;
+        if (!etaMs && !eta?.preDropPhase) return;
 
-        const msLeft = Math.max(0, etaMs - Date.now());
-        const totalSec = Math.floor(msLeft / 1000);
         if (eta?.preDropPhase) {
             warTimerEl.className = 'fo-war-timer waiting';
             warTimerValue.textContent = 'Pre-24h';
             return;
         }
+
+        const msLeft = etaMs - Date.now();
+        const totalSec = Math.floor(msLeft / 1000);
+        
+        // If the ETA is negative (or 0), someone reached the target.
         if (totalSec <= 0) {
-            warTimerEl.className = 'fo-war-timer safe';
-            warTimerValue.textContent = 'WON';
+            // Check who is winning
+            const myScore = state.warScores?.myScore || 0;
+            const enemyScore = state.warScores?.enemyScore || 0;
+            
+            if (myScore >= enemyScore) {
+                warTimerEl.className = 'fo-war-timer safe';
+                warTimerValue.textContent = 'WON';
+            } else {
+                warTimerEl.className = 'fo-war-timer danger';
+                warTimerValue.textContent = 'LOST';
+            }
             return;
         }
 
