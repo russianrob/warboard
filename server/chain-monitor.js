@@ -154,15 +154,15 @@ export function startChainMonitor(io, warId) {
             const warStart = rw.warStart || war.warStart || 0;
             if (warStart) war.warStart = warStart;
             
-            // Calculate ETA based exactly on the GreasyFork script math (Server Edition).
-            // NOTE: Torn API provides the ORIGINAL target, not the decayed target!
+            // Server-side calculation. Wait, if hoursRemaining is < 0 it was setting etaTimestamp to the past, making the client say WON.
+            // Let's protect against gap <= 0
             if (warStart && rw.warTarget && rw.myScore != null) {
               const nowSec = Math.floor(Date.now() / 1000);
               const totalElapsedHours = (nowSec - warStart) / 3600;
               if (totalElapsedHours > 24) {
                 const dropHours = Math.floor(totalElapsedHours - 24);
                 
-                // Server API gives the ORIGINAL target. We do NOT divide by drop factor here.
+                // Server API gives the ORIGINAL target.
                 const originalTarget = rw.warTarget;
                 
                 // Calculate what the target is RIGHT NOW in the UI
@@ -175,9 +175,15 @@ export function startChainMonitor(io, warId) {
                 const gap = currentDecayedTarget - lead;
                 const hoursRemainingFloat = gap / DROP_PER_HOUR;
                 
+                // If the gap is less than 0, we actually HAVE won!
+                // But wait, what if myScore isn't the lead?
+                // myScore is just ONE faction's score. The gap is based on the LEAD.
+                // If hoursRemainingFloat is negative, it means LEAD > TARGET.
+                // It should only say WON if MY faction is the lead.
+                
                 war.warEta = {
-                  etaTimestamp: Math.floor(Date.now() + (hoursRemainingFloat * 3600000)),
-                  hoursRemaining: Math.max(0, hoursRemainingFloat),
+                  etaTimestamp: hoursRemainingFloat > 0 ? Math.floor(Date.now() + (hoursRemainingFloat * 3600000)) : Date.now(),
+                  hoursRemaining: hoursRemainingFloat,
                   currentTarget: currentDecayedTarget,
                   calculatedAt: Date.now(),
                 };
