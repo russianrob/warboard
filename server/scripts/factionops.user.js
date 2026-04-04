@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.12
+// @version      4.5.13
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -5657,22 +5657,17 @@ body.wb-chain-active {
             const originalTarget = currentTarget / (1 - (dropHours * 0.01));
             const DROP_PER_HOUR = originalTarget * 0.01;
             
-            // Client fallback only has access to myFactionScore via DOM if signedLead isn't used
-            const leadScore = signedLead !== null ? Math.max(myFactionScore, myFactionScore - signedLead) : effectiveScore;
-            const gap = currentTarget - leadScore;
+            // GreasyFork script calculates ETA strictly based on YOUR score (the first number in the box)
+            // effectiveScore here is already our score (lead from the regex match[1])
+            const gap = currentTarget - effectiveScore;
             const hoursRemainingFloat = gap / DROP_PER_HOUR;
             
             warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
             warTimerLastCalc = Date.now();
 
             if (hoursRemainingFloat <= 0) {
-                if (signedLead !== null && signedLead < 0) {
-                    warTimerEl.className = 'fo-war-timer danger';
-                    warTimerValue.textContent = 'LOST';
-                } else {
-                    warTimerEl.className = 'fo-war-timer safe';
-                    warTimerValue.textContent = 'WON';
-                }
+                warTimerEl.className = 'fo-war-timer safe';
+                warTimerValue.textContent = 'WON';
             } else {
                 const totalMin = Math.floor(hoursRemainingFloat * 60);
                 const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
@@ -5706,22 +5701,13 @@ body.wb-chain-active {
             return;
         }
 
-        const msLeft = etaMs - Date.now();
+        const msLeft = Math.max(0, etaMs - Date.now());
         const totalSec = Math.floor(msLeft / 1000);
         
         // If the ETA is negative (or 0), someone reached the target.
         if (totalSec <= 0) {
-            // Check who is winning
-            const myScore = state.warScores?.myScore || 0;
-            const enemyScore = state.warScores?.enemyScore || 0;
-            
-            if (myScore >= enemyScore) {
-                warTimerEl.className = 'fo-war-timer safe';
-                warTimerValue.textContent = 'WON';
-            } else {
-                warTimerEl.className = 'fo-war-timer danger';
-                warTimerValue.textContent = 'LOST';
-            }
+            warTimerEl.className = 'fo-war-timer safe';
+            warTimerValue.textContent = 'WON';
             return;
         }
 
