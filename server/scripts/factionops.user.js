@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.22
+// @version      4.5.23
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.23  - Fix: Fixed "ERR: SCORE" bug on Torn PDA by bypassing the DOM entirely for the lead score and using the server state.
 // v4.5.22  - Fix: Fixed PDA text scanner failing by using textContent to read the hidden native Torn UI, plus improved regex extraction.
 // v4.5.21  - Fix: Added bulletproof raw-text scanner fallback to guarantee timer works on Torn PDA's mobile layout.
 // v4.5.20  - Feature: Added detailed stats to the Ranked War timer popup, displaying target score, lead score, score gap, and decay rate per hour.
@@ -5537,78 +5538,35 @@ body.wb-chain-active {
         const warTimerDetail = document.getElementById('fo-war-timer-detail');
         if (!warTimerEl || !warTimerValue) return;
 
-        // ── Read timer + score from DOM (Bulletproof Text Scanner) ──
+        // ── Read timer + score (PDA Ultimate Bypass) ──
         let lead = null, currentTarget = null, totalElapsedHours = null;
         let timerDays = 0, timerHours = 0, timerMinutes = 0;
 
-        const warHeader = document.querySelector('[class*="rankedWar"]') || document.querySelector('[class*="rankBox"]') || document.querySelector('.faction-war') || document.body;
-        const timerEl = warHeader.querySelector('[class*="timer_"]');
-        const targetBox = warHeader.querySelector('[class*="target_"]');
-
-        // 1. Try standard desktop React classes first
-        if (targetBox) {
-            const match = targetBox.innerText.match(/(\d[\d,.\s]*)\s*\/\s*(\d[\d,.\s]*)/);
-            if (match) {
-                lead = parseInt(match[1].replace(/[^\d]/g, ''), 10);
-                currentTarget = parseInt(match[2].replace(/[^\d]/g, ''), 10);
-            }
-        }
-        if (timerEl) {
-            const text = timerEl.textContent.trim();
-            const timeParts = text.match(/\d+/g);
-            if (timeParts) {
-                if (timeParts.length >= 4) {
-                    timerDays = parseInt(timeParts[0], 10) || 0;
-                    timerHours = parseInt(timeParts[1], 10) || 0;
-                    timerMinutes = parseInt(timeParts[2], 10) || 0;
-                } else if (timeParts.length === 3) {
-                    const hh = parseInt(timeParts[0], 10) || 0;
-                    timerDays = Math.floor(hh / 24);
-                    timerHours = hh % 24;
-                    timerMinutes = parseInt(timeParts[1], 10) || 0;
-                }
-            }
+        // 1. Get the lead score directly from FactionOps server state (bypasses DOM completely)
+        if (state.warScores) {
+            lead = Math.max(state.warScores.myScore || 0, state.warScores.enemyScore || 0);
         }
 
-        // 2. PDA Fallback: Scan the raw text of the hidden Torn page
-        if (lead === null || currentTarget === null || timerDays + timerHours + timerMinutes === 0) {
-            // Use textContent to read the hidden Torn UI behind the overlay
-            const hiddenContainer = document.querySelector('[data-fo-hidden="true"]') || document.body;
-            const allText = hiddenContainer.textContent || "";
-            
-            // Extract target: Look for "number / number" where right side is >= 1000
-            const targetMatch = allText.match(/([\d,]{1,})\s*\/\s*([\d,]{4,})/);
-            if (targetMatch) {
-                lead = parseInt(targetMatch[1].replace(/[^\d]/g, ''), 10);
-                currentTarget = parseInt(targetMatch[2].replace(/[^\d]/g, ''), 10);
-            }
+        // 2. Scan the raw text for the Target and Timer
+        const allText = document.documentElement.textContent || "";
 
-            // Extract elapsed time: Torn timers usually have 3 segments like "34:50:12" or "1 days 10:50:12"
-            const timeMatches = [...allText.matchAll(/(?:(\d+)\s*[a-zA-Z]+\s*)?(\d{1,3})\s*:\s*(\d{2})(?:\s*:\s*(\d{2}))?/g)];
-            for (let m of timeMatches) {
-                const p1 = parseInt(m[1]) || 0; // days
-                const p2 = parseInt(m[2]) || 0; // hours (or days)
-                const p3 = parseInt(m[3]) || 0; // mins (or hours)
-                const p4 = parseInt(m[4]) || 0; // secs (or mins)
-                
-                // Avoid catching the Energy bar (e.g. 222:02) or Chain timer (04:59)
-                // War elapsed time usually has 3 segments (H:M:S), or if 2 segments, hours > 5
-                if (m[4] || p2 > 5) {
-                    timerDays = p1; timerHours = p2; timerMinutes = p3;
-                    break;
-                }
-            }
+        // Extract Target: Look for typical Torn target formats (e.g. 5,000 to 100,000)
+        const targetMatch = allText.match(/[\d,]+\s*\/\s*([\d,]{4,})/);
+        if (targetMatch) {
+            currentTarget = parseInt(targetMatch[1].replace(/[^\d]/g, ''), 10);
+        } else if (state.warTarget && state.warTarget.value) {
+            // Fallback to FactionOps custom target if Torn hides the native one
+            currentTarget = parseInt(state.warTarget.value, 10);
         }
-        
-        // Debug Output: Show errors directly in the timer button if it still fails
-        if (!timerEl && !targetBox && document.getElementById('fo-war-timer-value')) {
-            if (lead === null || currentTarget === null) {
-                document.getElementById('fo-war-timer-value').textContent = "ERR: SCORE";
-                return; 
-            }
-            if (timerDays + timerHours + timerMinutes === 0) {
-                document.getElementById('fo-war-timer-value').textContent = "ERR: TIME";
-                return;
+
+        // Extract Elapsed Time: Looks for "WAR 34:50" or "1d 10:20:00"
+        const timeMatches = [...allText.matchAll(/(?:(\d+)\s*[dD]\s*)?(\d{1,3})\s*:\s*(\d{2})(?:\s*:\s*(\d{2}))?/g)];
+        for (let m of timeMatches) {
+            const p1 = parseInt(m[1]) || 0, p2 = parseInt(m[2]) || 0, p3 = parseInt(m[3]) || 0, p4 = parseInt(m[4]) || 0;
+            // Valid war timer is usually > 5 hours, or has 3 segments (H:M:S)
+            if (m[4] || p2 > 2) {
+                timerDays = p1; timerHours = p2; timerMinutes = p3;
+                break;
             }
         }
 
