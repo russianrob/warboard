@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.23
+// @version      4.5.24
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.24  - Fix: PDA text scanner now anchors the target search using the lead score to prevent greedy regex grabbing 10-digit IDs or stats.
 // v4.5.23  - Fix: Fixed "ERR: SCORE" bug on Torn PDA by bypassing the DOM entirely for the lead score and using the server state.
 // v4.5.22  - Fix: Fixed PDA text scanner failing by using textContent to read the hidden native Torn UI, plus improved regex extraction.
 // v4.5.21  - Fix: Added bulletproof raw-text scanner fallback to guarantee timer works on Torn PDA's mobile layout.
@@ -5550,12 +5551,23 @@ body.wb-chain-active {
         // 2. Scan the raw text for the Target and Timer
         const allText = document.documentElement.textContent || "";
 
-        // Extract Target: Look for typical Torn target formats (e.g. 5,000 to 100,000)
-        const targetMatch = allText.match(/[\d,]+\s*\/\s*([\d,]{4,})/);
+        // Extract Target: Anchor search using the server's lead score to ignore garbage data
+        let targetMatch = null;
+        if (lead !== null && lead > 0) {
+            const leadStr = lead.toLocaleString('en-US'); // e.g., "11,116"
+            // Look exactly for "11,116 / 15,000"
+            targetMatch = allText.match(new RegExp(leadStr + "\\s*\\/\\s*([\\d,]{4,7})(?!\\d)"));
+            if (!targetMatch) targetMatch = allText.match(new RegExp("([\\d,]{4,7})\\s*\\/\\s*" + leadStr + "(?!\\d)"));
+        }
+
+        // Strict fallback: Must be 4-6 digits max to kill 9-billion stat glitches
+        if (!targetMatch) {
+            targetMatch = allText.match(/[\d,]{2,6}\s*\/\s*([\d,]{4,6})(?!\d)/);
+        }
+
         if (targetMatch) {
             currentTarget = parseInt(targetMatch[1].replace(/[^\d]/g, ''), 10);
         } else if (state.warTarget && state.warTarget.value) {
-            // Fallback to FactionOps custom target if Torn hides the native one
             currentTarget = parseInt(state.warTarget.value, 10);
         }
 
