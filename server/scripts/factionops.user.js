@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.21
+// @version      4.5.22
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.22  - Fix: Fixed PDA text scanner failing by using textContent to read the hidden native Torn UI, plus improved regex extraction.
 // v4.5.21  - Fix: Added bulletproof raw-text scanner fallback to guarantee timer works on Torn PDA's mobile layout.
 // v4.5.20  - Feature: Added detailed stats to the Ranked War timer popup, displaying target score, lead score, score gap, and decay rate per hour.
 // v4.5.19  - Fix: Resolved CSS clipping issue that was hiding the Ranked War timer details popup.
@@ -5569,25 +5570,45 @@ body.wb-chain-active {
             }
         }
 
-        // 2. PDA Fallback: Scan the raw text of the entire page
+        // 2. PDA Fallback: Scan the raw text of the hidden Torn page
         if (lead === null || currentTarget === null || timerDays + timerHours + timerMinutes === 0) {
-            const allText = document.body.innerText || "";
+            // Use textContent to read the hidden Torn UI behind the overlay
+            const hiddenContainer = document.querySelector('[data-fo-hidden="true"]') || document.body;
+            const allText = hiddenContainer.textContent || "";
             
-            // Extract target: Must have a / with at least 4 digits on the right to avoid chain counters
-            const targetMatch = allText.match(/([\d,]{2,})\s*\/\s*([\d,]{4,})/);
+            // Extract target: Look for "number / number" where right side is >= 1000
+            const targetMatch = allText.match(/([\d,]{1,})\s*\/\s*([\d,]{4,})/);
             if (targetMatch) {
                 lead = parseInt(targetMatch[1].replace(/[^\d]/g, ''), 10);
                 currentTarget = parseInt(targetMatch[2].replace(/[^\d]/g, ''), 10);
             }
 
-            // Extract elapsed time: Looks for "1d 05:22:10" or "05:22:10"
-            const timeMatches = [...allText.matchAll(/(?:(\d+)\s*[dD]\s*)?(\d{1,2})\s*:\s*(\d{2})\s*:\s*(\d{2})/g)];
+            // Extract elapsed time: Torn timers usually have 3 segments like "34:50:12" or "1 days 10:50:12"
+            const timeMatches = [...allText.matchAll(/(?:(\d+)\s*[a-zA-Z]+\s*)?(\d{1,3})\s*:\s*(\d{2})(?:\s*:\s*(\d{2}))?/g)];
             for (let m of timeMatches) {
-                const d = parseInt(m[1]) || 0, h = parseInt(m[2]) || 0, min = parseInt(m[3]) || 0;
-                if (d > 0 || h > 0 || min > 0) {
-                    timerDays = d; timerHours = h; timerMinutes = min;
+                const p1 = parseInt(m[1]) || 0; // days
+                const p2 = parseInt(m[2]) || 0; // hours (or days)
+                const p3 = parseInt(m[3]) || 0; // mins (or hours)
+                const p4 = parseInt(m[4]) || 0; // secs (or mins)
+                
+                // Avoid catching the Energy bar (e.g. 222:02) or Chain timer (04:59)
+                // War elapsed time usually has 3 segments (H:M:S), or if 2 segments, hours > 5
+                if (m[4] || p2 > 5) {
+                    timerDays = p1; timerHours = p2; timerMinutes = p3;
                     break;
                 }
+            }
+        }
+        
+        // Debug Output: Show errors directly in the timer button if it still fails
+        if (!timerEl && !targetBox && document.getElementById('fo-war-timer-value')) {
+            if (lead === null || currentTarget === null) {
+                document.getElementById('fo-war-timer-value').textContent = "ERR: SCORE";
+                return; 
+            }
+            if (timerDays + timerHours + timerMinutes === 0) {
+                document.getElementById('fo-war-timer-value').textContent = "ERR: TIME";
+                return;
             }
         }
 
