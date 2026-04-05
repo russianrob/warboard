@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.24
+// @version      4.5.25
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.25  - Fix: PDA text scanner now strictly pulls the target score directly from the server's state.warEta to prevent fake target extraction.
 // v4.5.24  - Fix: PDA text scanner now anchors the target search using the lead score to prevent greedy regex grabbing 10-digit IDs or stats.
 // v4.5.23  - Fix: Fixed "ERR: SCORE" bug on Torn PDA by bypassing the DOM entirely for the lead score and using the server state.
 // v4.5.22  - Fix: Fixed PDA text scanner failing by using textContent to read the hidden native Torn UI, plus improved regex extraction.
@@ -5539,44 +5540,35 @@ body.wb-chain-active {
         const warTimerDetail = document.getElementById('fo-war-timer-detail');
         if (!warTimerEl || !warTimerValue) return;
 
-        // ── Read timer + score (PDA Ultimate Bypass) ──
+        // ── Read timer + score (Server Authority Bypass) ──
         let lead = null, currentTarget = null, totalElapsedHours = null;
         let timerDays = 0, timerHours = 0, timerMinutes = 0;
 
-        // 1. Get the lead score directly from FactionOps server state (bypasses DOM completely)
+        // 1. Get exact scores directly from the FactionOps server (100% accurate, ignores PDA UI)
         if (state.warScores) {
             lead = Math.max(state.warScores.myScore || 0, state.warScores.enemyScore || 0);
         }
-
-        // 2. Scan the raw text for the Target and Timer
-        const allText = document.documentElement.textContent || "";
-
-        // Extract Target: Anchor search using the server's lead score to ignore garbage data
-        let targetMatch = null;
-        if (lead !== null && lead > 0) {
-            const leadStr = lead.toLocaleString('en-US'); // e.g., "11,116"
-            // Look exactly for "11,116 / 15,000"
-            targetMatch = allText.match(new RegExp(leadStr + "\\s*\\/\\s*([\\d,]{4,7})(?!\\d)"));
-            if (!targetMatch) targetMatch = allText.match(new RegExp("([\\d,]{4,7})\\s*\\/\\s*" + leadStr + "(?!\\d)"));
-        }
-
-        // Strict fallback: Must be 4-6 digits max to kill 9-billion stat glitches
-        if (!targetMatch) {
-            targetMatch = allText.match(/[\d,]{2,6}\s*\/\s*([\d,]{4,6})(?!\d)/);
-        }
-
-        if (targetMatch) {
-            currentTarget = parseInt(targetMatch[1].replace(/[^\d]/g, ''), 10);
+        if (state.warEta && state.warEta.currentTarget) {
+            currentTarget = state.warEta.currentTarget;
         } else if (state.warTarget && state.warTarget.value) {
             currentTarget = parseInt(state.warTarget.value, 10);
         }
 
-        // Extract Elapsed Time: Looks for "WAR 34:50" or "1d 10:20:00"
-        const timeMatches = [...allText.matchAll(/(?:(\d+)\s*[dD]\s*)?(\d{1,3})\s*:\s*(\d{2})(?:\s*:\s*(\d{2}))?/g)];
+        // 2. Scan for elapsed time (and strict fallback for target)
+        const allText = document.documentElement.textContent || "";
+
+        if (currentTarget === null) {
+            // Absolute last resort: only grab target if it ends in "00" (e.g. 15,000) to ignore random stats
+            const strictMatch = allText.match(/[\d,]{1,6}\s*\/\s*([1-9][\d,]{1,3}00)(?!\d)/);
+            if (strictMatch) currentTarget = parseInt(strictMatch[1].replace(/[^\d]/g, ''), 10);
+        }
+
+        // Extract Elapsed Time: Looks for "WAR 32:49", "34:50:12", or "1d 10:20"
+        const timeMatches = [...allText.matchAll(/(?:WAR\s*)?(?:(\d+)\s*[dD]\s*)?(\d{1,3})\s*:\s*(\d{2})(?:\s*:\s*(\d{2}))?/gi)];
         for (let m of timeMatches) {
-            const p1 = parseInt(m[1]) || 0, p2 = parseInt(m[2]) || 0, p3 = parseInt(m[3]) || 0, p4 = parseInt(m[4]) || 0;
-            // Valid war timer is usually > 5 hours, or has 3 segments (H:M:S)
-            if (m[4] || p2 > 2) {
+            const p1 = parseInt(m[1]) || 0, p2 = parseInt(m[2]) || 0, p3 = parseInt(m[3]) || 0, p4 = m[4] ? parseInt(m[4]) : null;
+            // It's the war timer if it has 3 segments (H:M:S), includes days, or the word "WAR" was nearby
+            if (p4 !== null || p1 > 0 || p2 > 5 || m[0].toUpperCase().includes('WAR')) {
                 timerDays = p1; timerHours = p2; timerMinutes = p3;
                 break;
             }
