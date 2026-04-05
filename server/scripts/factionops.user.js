@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.15
+// @version      4.5.16
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.16  - Fix: Forced the UI to use the local pure-decay ETA calculation instead of falling back to server predictions.
 // v4.5.15  - Revert: Ranked War ETA now uses pure target decay against current lead (matching original Torn Ranked War Timer).
 // v4.5.14  - Fix: ETA calculation now includes our scoring momentum combined with target decay, predicting closing speed from hour 0 for both manual and ranked war targets.
 // v4.5.11  - Fix: Timer saying WON instead of LOST when the enemy reaches the target before you do.
@@ -5687,7 +5688,7 @@ body.wb-chain-active {
         if (!warTimerEl || !warTimerValue) return;
 
         const eta = state.warEta;
-        const etaMs = (eta && eta.etaTimestamp != null) ? eta.etaTimestamp : warTimerEtaMs;
+        const etaMs = warTimerEtaMs; // Forces the UI to use our local pure-decay math
         if (etaMs === null && !eta?.preDropPhase) return;
 
         if (eta?.preDropPhase) {
