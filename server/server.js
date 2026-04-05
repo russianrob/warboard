@@ -194,17 +194,29 @@ io.use(socketAuth);
 io.on("connection", (socket) => {
   console.log(`[ws] Socket connected: ${socket.id} (player: ${socket.user.playerName})`);
   
-  // Admin Broadcast Listener
+  // Admin/Leader Broadcast Listener
   socket.on('admin_broadcast', (data) => {
-      // Security Check: Lock this down to player ID 137558
-      const myPlayerId = '137558'; 
+      const adminId = '137558'; 
+      const pos = socket.user?.factionPosition || '';
+      const isLeader = pos === 'leader' || pos === 'co-leader' || pos === 'war leader' || pos === 'banker';
       
-      if (socket.user && String(socket.user.playerId) === myPlayerId) {
+      if (socket.user && String(socket.user.playerId) === adminId) {
+          // Global broadcast
           io.emit('global_toast', { 
               message: data.message, 
               type: data.type || 'info' 
           });
-          console.log(`[📣] Admin Broadcast sent: ${data.message}`);
+          console.log(`[📣] Global Admin Broadcast sent: ${data.message}`);
+      } else if (socket.user && isLeader) {
+          // Faction-only broadcast
+          const warId = `war_${socket.user.factionId}`;
+          const room = `war_${warId}`;
+          
+          io.to(room).emit('global_toast', { 
+              message: data.message, 
+              type: data.type || 'info' 
+          });
+          console.log(`[📣] Faction Broadcast sent by ${socket.user.playerName} to room ${room}: ${data.message}`);
       } else {
           console.log(`[⚠️] Blocked unauthorized broadcast attempt.`);
       }

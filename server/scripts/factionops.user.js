@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.29
+// @version      4.5.30
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.30  - Feature: Faction leaders and bankers can now broadcast messages to their faction directly from the war overlay.
 // v4.5.29  - Revert: Restored the exact PDA scanner logic from v4.5.22 after newer fixes caused false "LOST" reads during rapid target decay.
 // v4.5.28  - Fix: Fixed PDA scanner sometimes returning LOST prematurely when the server has not yet polled the decayed target.
 // v4.5.27  - Feature: Added Admin Broadcast feature allowing admin to send global toast notifications to all active tabs.
@@ -203,7 +204,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.4.8',
+        VERSION: '4.5.30',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2422,6 +2423,28 @@ body.wb-chain-active {
     font-size: 7px; color: var(--wb-text-muted); text-align: center;
     line-height: 1;
 }
+
+/* Broadcast entry bar */
+.fo-broadcast-entry-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 16px; background: var(--wb-bg-secondary);
+    border-bottom: 1px solid var(--wb-border);
+}
+.fo-broadcast-entry-bar input {
+    flex: 1; background: var(--wb-bg); border: 1px solid var(--wb-border);
+    color: var(--wb-text); padding: 5px 12px; border-radius: 4px; font-size: 13px;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+}
+.fo-broadcast-entry-bar button {
+    background: var(--wb-hospital-red); color: white; border: none;
+    padding: 5px 16px; border-radius: 4px; cursor: pointer;
+    font-size: 12px; font-weight: 700; text-transform: uppercase;
+    transition: all 0.2s ease;
+}
+.fo-broadcast-entry-bar button:hover {
+    filter: brightness(1.2); transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(214,48,49,0.3);
+}
 `;
         GM_addStyle(css);
         log('Styles injected');
@@ -3884,10 +3907,6 @@ body.wb-chain-active {
             <div style="margin-bottom:14px;">
                 <label>Admin Tools</label>
                 <button class="wb-btn wb-btn-sm" id="wb-btn-view-logs" style="width:100%;">View PM2 Server Logs</button>
-                <div style="display:flex; gap:6px; margin-top:8px;">
-                    <input type="text" id="wb-input-broadcast" placeholder="Broadcast message to faction..." style="margin-bottom:0; flex:1;">
-                    <button class="wb-btn wb-btn-sm wb-btn-danger" id="wb-btn-send-broadcast">Shout</button>
-                </div>
             </div>
             ` : ''}
 
@@ -4127,21 +4146,7 @@ body.wb-chain-active {
 
         const viewLogsBtn = document.getElementById('wb-btn-view-logs');
 
-        const broadcastBtn = document.getElementById('wb-btn-send-broadcast');
-        if (broadcastBtn) {
-            broadcastBtn.addEventListener('click', () => {
-                const msgInput = document.getElementById('wb-input-broadcast');
-                const msg = msgInput.value.trim();
-                
-                if (msg && realtimeSocket && realtimeSocket.connected) {
-                    realtimeSocket.emit('admin_broadcast', { message: msg, type: 'warning' });
-                    msgInput.value = '';
-                    showToast('Broadcast sent to all active tabs!', 'success');
-                } else if (!realtimeSocket || !realtimeSocket.connected) {
-                    showToast('You must be connected via RT (Socket.IO) to broadcast.', 'error');
-                }
-            });
-        }
+
         if (viewLogsBtn) {
             viewLogsBtn.addEventListener('click', async () => {
                 viewLogsBtn.textContent = 'Loading...';
@@ -5896,6 +5901,12 @@ body.wb-chain-active {
             </div>
             <div class="fo-next-up-bar" id="fo-next-up"></div>
             <div class="fo-strategy-bar hidden" id="fo-strategy-bar"></div>
+            ${isLeader() ? `
+            <div class="fo-broadcast-entry-bar">
+                <input type="text" id="fo-input-broadcast" placeholder="Broadcast message to faction..." maxlength="150">
+                <button id="fo-btn-send-broadcast">Shout</button>
+            </div>
+            ` : ''}
             <div class="fo-col-headers">
                 <div class="fo-col-header">Prior.</div>
                 <div class="fo-col-header">Target</div>
@@ -6014,6 +6025,30 @@ body.wb-chain-active {
             updateWarTimer();
             setInterval(updateWarTimer, 30000);
             setInterval(updateWarTimerDisplay, 1000);
+        }
+
+        // Wire up broadcast button in overlay (leader/banker only)
+        const shoutBtn = document.getElementById('fo-btn-send-broadcast');
+        if (shoutBtn) {
+            shoutBtn.addEventListener('click', () => {
+                const msgInput = document.getElementById('fo-input-broadcast');
+                const msg = msgInput.value.trim();
+                
+                if (msg && realtimeSocket && realtimeSocket.connected) {
+                    realtimeSocket.emit('admin_broadcast', { message: msg, type: 'warning' });
+                    msgInput.value = '';
+                    showToast('Broadcast sent to faction!', 'success');
+                } else if (!realtimeSocket || !realtimeSocket.connected) {
+                    showToast('You must be connected via RT (Socket.IO) to broadcast.', 'error');
+                }
+            });
+            // Also support Enter key
+            const msgInput = document.getElementById('fo-input-broadcast');
+            if (msgInput) {
+                msgInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') shoutBtn.click();
+                });
+            }
         }
 
         log('War overlay initialised');
