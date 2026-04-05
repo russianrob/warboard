@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.20
+// @version      4.5.21
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.21  - Fix: Added bulletproof raw-text scanner fallback to guarantee timer works on Torn PDA's mobile layout.
 // v4.5.20  - Feature: Added detailed stats to the Ranked War timer popup, displaying target score, lead score, score gap, and decay rate per hour.
 // v4.5.19  - Fix: Resolved CSS clipping issue that was hiding the Ranked War timer details popup.
 // v4.5.18  - Fix: Added heavy-duty text scanner fallback to successfully locate timer and target elements on Torn PDA's mobile layout.
@@ -5535,30 +5536,22 @@ body.wb-chain-active {
         const warTimerDetail = document.getElementById('fo-war-timer-detail');
         if (!warTimerEl || !warTimerValue) return;
 
-        // ── Read timer + score from DOM (PDA & Desktop Fallbacks) ──
-        const warHeader = document.querySelector('[class*="rankedWar"]') || document.querySelector('[class*="rankBox"]') || document.querySelector('.faction-war');
-        let timerEl = warHeader ? warHeader.querySelector('[class*="timer_"]') : document.querySelector('[class*="timer_"]');
-        let targetBox = warHeader ? warHeader.querySelector('[class*="target_"]') : document.querySelector('[class*="target_"]');
-
-        // PDA-specific fallback: scan the page for the exact text format if classes fail
-        if (!timerEl || !targetBox) {
-            const elements = document.querySelectorAll('div, span');
-            for (let el of elements) {
-                const txt = el.textContent.trim();
-                // Look for target format: "12,345 / 50,000"
-                if (!targetBox && /^[\d,]+\s*\/\s*[\d,]+$/.test(txt)) {
-                    targetBox = el;
-                }
-                // Look for timer format: "34:50:12" or "1d 10:20"
-                if (!timerEl && /^(?:\d+d\s*)?\d{1,2}:\d{2}(?::\d{2})?$/.test(txt) && el.children.length > 0) {
-                    timerEl = el;
-                }
-            }
-        }
-
+        // ── Read timer + score from DOM (Bulletproof Text Scanner) ──
         let lead = null, currentTarget = null, totalElapsedHours = null;
         let timerDays = 0, timerHours = 0, timerMinutes = 0;
 
+        const warHeader = document.querySelector('[class*="rankedWar"]') || document.querySelector('[class*="rankBox"]') || document.querySelector('.faction-war') || document.body;
+        const timerEl = warHeader.querySelector('[class*="timer_"]');
+        const targetBox = warHeader.querySelector('[class*="target_"]');
+
+        // 1. Try standard desktop React classes first
+        if (targetBox) {
+            const match = targetBox.innerText.match(/(\d[\d,.\s]*)\s*\/\s*(\d[\d,.\s]*)/);
+            if (match) {
+                lead = parseInt(match[1].replace(/[^\d]/g, ''), 10);
+                currentTarget = parseInt(match[2].replace(/[^\d]/g, ''), 10);
+            }
+        }
         if (timerEl) {
             const text = timerEl.textContent.trim();
             const timeParts = text.match(/\d+/g);
@@ -5573,17 +5566,32 @@ body.wb-chain-active {
                     timerHours = hh % 24;
                     timerMinutes = parseInt(timeParts[1], 10) || 0;
                 }
-                totalElapsedHours = (timerDays * 24) + timerHours + (timerMinutes / 60);
             }
         }
-        if (targetBox) {
-            let match;
-            try { match = targetBox.innerText.match(/(\d[\d,.\s]*)\s*\/\s*(\d[\d,.\s]*)/); } catch(e) { match = null; }
-            if (match) {
-                lead = parseInt(match[1].replace(/[^\d]/g, ''), 10);
-                currentTarget = parseInt(match[2].replace(/[^\d]/g, ''), 10);
+
+        // 2. PDA Fallback: Scan the raw text of the entire page
+        if (lead === null || currentTarget === null || timerDays + timerHours + timerMinutes === 0) {
+            const allText = document.body.innerText || "";
+            
+            // Extract target: Must have a / with at least 4 digits on the right to avoid chain counters
+            const targetMatch = allText.match(/([\d,]{2,})\s*\/\s*([\d,]{4,})/);
+            if (targetMatch) {
+                lead = parseInt(targetMatch[1].replace(/[^\d]/g, ''), 10);
+                currentTarget = parseInt(targetMatch[2].replace(/[^\d]/g, ''), 10);
+            }
+
+            // Extract elapsed time: Looks for "1d 05:22:10" or "05:22:10"
+            const timeMatches = [...allText.matchAll(/(?:(\d+)\s*[dD]\s*)?(\d{1,2})\s*:\s*(\d{2})\s*:\s*(\d{2})/g)];
+            for (let m of timeMatches) {
+                const d = parseInt(m[1]) || 0, h = parseInt(m[2]) || 0, min = parseInt(m[3]) || 0;
+                if (d > 0 || h > 0 || min > 0) {
+                    timerDays = d; timerHours = h; timerMinutes = min;
+                    break;
+                }
             }
         }
+
+        totalElapsedHours = (timerDays * 24) + timerHours + (timerMinutes / 60);
 
         const myFactionScore = (state.warScores && state.warScores.myScore != null) ? state.warScores.myScore : lead;
         const effectiveScore = myFactionScore;
