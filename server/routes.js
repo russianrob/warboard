@@ -7,6 +7,7 @@ import { readFileSync, existsSync } from "node:fs";
 import axios from "axios";
 import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.js";
 import * as store from "./store.js";
+import { getAllowedBroadcastRoles, updateFactionSettings } from "./store.js";
 import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBasic, fetchRankedWarReport, fetchFactionAttacks } from "./torn-api.js";
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { startChainMonitor } from "./chain-monitor.js";
@@ -612,6 +613,73 @@ router.post("/api/call", requireAuth, (req, res) => {
   push.notifyTargetCalled(warPlayers, warId, playerName, targetName || targetId, playerId);
 
   return res.json({ ok: true, call: callData });
+});
+
+// ── POST /api/broadcast ──────────────────────────────────────────────────
+// Faction Leaders/Bankers: Broadcast a message to their faction's war room.
+router.post("/api/broadcast", requireAuth, (req, res) => {
+// Update custom broadcast roles for the faction.
+router.post("/api/broadcast/roles", requireAuth, (req, res) => {
+  const { playerId, factionPosition, factionId } = req.user;
+  const { roles } = req.body ?? {};
+
+  if (!Array.isArray(roles)) {
+    return res.status(400).json({ error: "Roles must be an array of strings." });
+  }
+
+  const pos = (factionPosition || "").toLowerCase();
+  const isLeader = ["leader", "co-leader", "war leader"].includes(pos);
+  const isGlobalAdmin = (String(playerId) === '137558');
+
+  if (!isLeader && !isGlobalAdmin) {
+    return res.status(403).json({ error: "Only leaders and co-leaders can update broadcast roles." });
+  }
+
+  updateFactionSettings(factionId, { broadcastRoles: roles });
+  return res.json({ success: true, roles });
+});
+
+
+  const { playerId, playerName, factionPosition } = req.user;
+  const { message, type, warId } = req.body ?? {};
+
+  if (!warId) {
+    return res.status(400).json({ error: "warId is required for faction broadcasts." });
+  }
+
+  if (!message) {
+    return res.status(400).json({ error: "Message is required." });
+  }
+
+  // Check if it's the global admin (can broadcast anywhere)
+  const isGlobalAdmin = (String(playerId) === '137558');
+  
+  // Enforce leader/banker position (or custom faction roles)
+  const pos = (factionPosition || "").toLowerCase();
+  const allowedRoles = getAllowedBroadcastRoles(req.user.factionId);
+  const isLeader = allowedRoles.includes(pos);
+
+  if (!isLeader && !isGlobalAdmin) {
+    console.log(`[⚠️] Blocked unauthorized broadcast attempt from player ${playerId} (${playerName}) - Role: ${pos}`);
+    return res.status(403).json({ error: "Only leaders and bankers can broadcast to the faction." });
+  }
+
+  const payload = { 
+    message: message, 
+    type: type || 'info' 
+  };
+
+  // 1. Broadcast to Socket.IO clients in this war room
+  if (io) {
+    io.to(`war_${warId}`).emit('global_toast', payload);
+  }
+
+  // 2. Broadcast to SSE clients in this war room
+  broadcastSSE(warId, { type: 'global_toast', ...payload });
+
+  console.log(`[📣] Faction Broadcast sent to war ${warId} by ${playerName}: ${message}`);
+
+  return res.json({ success: true });
 });
 
 // ── POST /api/priority ──────────────────────────────────────────────────

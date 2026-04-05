@@ -39,6 +39,8 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.32  - Feature: Added UI in settings for faction leaders to configure custom broadcast roles.
+// v4.5.31  - Improvement: Migrated Faction Broadcast to use HTTP POST, enabling leaders to broadcast even on fallback SSE connections.
 // v4.5.30  - Feature: Faction leaders and bankers can now broadcast messages to their faction directly from the war overlay.
 // v4.5.29  - Revert: Restored the exact PDA scanner logic from v4.5.22 after newer fixes caused false "LOST" reads during rapid target decay.
 // v4.5.28  - Fix: Fixed PDA scanner sometimes returning LOST prematurely when the server has not yet polled the decayed target.
@@ -3484,7 +3486,14 @@ body.wb-chain-active {
                     if (!match) continue; // skip heartbeats and empty lines
                     try {
                         const data = JSON.parse(match[1]);
-                        applyServerData(data);
+                        if (data && data.type === 'global_toast') {
+                            showToast(`📣 ${data.message}`, data.type || 'info');
+                            if (typeof firePdaNotification === 'function') {
+                                firePdaNotification('admin_broadcast', 'FactionOps Broadcast', data.message);
+                            }
+                        } else {
+                            applyServerData(data);
+                        }
                     } catch (_) {}
                 }
             },
@@ -3845,6 +3854,15 @@ body.wb-chain-active {
                     <span class="wb-toggle-slider"></span>
                 </label>
             </div>
+
+            <div style="margin: 14px 0;">
+                <label for="wb-input-broadcast-roles">Custom Broadcast Roles (comma-separated)</label>
+                <div style="display:flex;gap:6px;">
+                    <input type="text" id="wb-input-broadcast-roles" placeholder="e.g. leader,co-leader,banker,warmaster" style="margin-bottom:0;flex:1;">
+                    <button class="wb-btn wb-btn-sm" id="wb-btn-save-roles">Save</button>
+                </div>
+                <div style="font-size:11px;opacity:0.6;margin-top:4px;">Define which faction positions can use the "Shout" feature.</div>
+            </div>
             <div style="font-size:11px;opacity:0.6;margin-bottom:14px;">
                 Keeps your Torn activity fresh while the warboard is open, so enemies can't tell you're idle.
             </div>
@@ -4083,6 +4101,22 @@ body.wb-chain-active {
                 showFactionKeySaved();
             }
         })();
+
+        document.getElementById('wb-btn-save-roles').addEventListener('click', async () => {
+            const rolesInput = document.getElementById('wb-input-broadcast-roles').value.trim();
+            const roles = rolesInput ? rolesInput.split(',').map(r => r.trim().toLowerCase()) : [];
+            
+            try {
+                const resp = await postAction('/api/broadcast/roles', { roles });
+                if (resp && resp.success) {
+                    showToast('Broadcast roles updated!', 'success');
+                } else {
+                    showToast(resp.error || 'Failed to update roles', 'error');
+                }
+            } catch (e) {
+                showToast('Failed to connect to server.', 'error');
+            }
+        });
 
         document.getElementById('wb-btn-save-faction-key').addEventListener('click', async () => {
             const statusEl = document.getElementById('wb-faction-key-status');
@@ -6034,12 +6068,33 @@ body.wb-chain-active {
                 const msgInput = document.getElementById('fo-input-broadcast');
                 const msg = msgInput.value.trim();
                 
-                if (msg && realtimeSocket && realtimeSocket.connected) {
-                    realtimeSocket.emit('admin_broadcast', { message: msg, type: 'warning' });
-                    msgInput.value = '';
-                    showToast('Broadcast sent to faction!', 'success');
-                } else if (!realtimeSocket || !realtimeSocket.connected) {
-                    showToast('You must be connected via RT (Socket.IO) to broadcast.', 'error');
+                if (msg) {
+                    const currentWarId = deriveWarId();
+                    if (!currentWarId) {
+                        showToast('Error: Could not determine war ID.', 'error');
+                        return;
+                    }
+                    fetch(`${CONFIG.SERVER_URL}/api/broadcast`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${state.jwtToken}`
+                        },
+                        body: JSON.stringify({ message: msg, type: 'warning', warId: currentWarId })
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            msgInput.value = '';
+                            showToast('Broadcast sent to faction!', 'success');
+                        } else {
+                            showToast(data.error || 'Failed to send broadcast.', 'error');
+                        }
+                    })
+                    .catch(e => {
+                        warn('Broadcast failed:', e.message);
+                        showToast('Failed to send broadcast (Server Error).', 'error');
+                    });
                 }
             });
             // Also support Enter key
