@@ -42,8 +42,9 @@ async function scanFactions() {
                         const enemyId = participantIds.find(id => String(id) !== factionIdStr);
 
                         if (enemyId) {
-                            console.log(`[WarScanner] Active Ranked War detected! WarID: ${warId}, EnemyID: ${enemyId}`);
-                            startHeatmapScraper(warId, enemyId, faction.apiKey);
+                            const enemyName = warData.factions[enemyId]?.name || 'Unknown';
+                            console.log(`[WarScanner] Active Ranked War detected! WarID: ${warId}, Enemy: ${enemyName} (${enemyId})`);
+                            startHeatmapScraper(warId, enemyId, faction.apiKey, enemyName);
                         }
                     }
                 }

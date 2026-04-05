@@ -216,12 +216,7 @@ async function pollPayments() {
  *  - OR factionId has an active (non-expired) subscription
  */
 export function isFactionAllowed(factionId) {
-  if (String(factionId) === OWNER_FACTION_ID) return true;
-
-  const sub = state.factions[String(factionId)];
-  if (!sub) return false;
-
-  return new Date(sub.expiresAt) > new Date();
+  return String(factionId) === OWNER_FACTION_ID;
 }
 
 /**
@@ -252,8 +247,7 @@ export function getOwnerFactionId() {
  * Get human-readable rejection message for unauthorized factions.
  */
 export function getSubscriptionRejectionMessage() {
-  const priceFormatted = SUBSCRIPTION_PRICE.toLocaleString();
-  return `Faction not subscribed. Send $${priceFormatted} to RussianRob [137558] to activate ${SUBSCRIPTION_DAYS}-day access.`;
+  return "Access denied. FactionOps is currently restricted to faction " + OWNER_FACTION_ID + ".";
 }
 
 /**

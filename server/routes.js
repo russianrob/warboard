@@ -3,6 +3,8 @@
  */
 
 import { Router } from "express";
+import { readFileSync, existsSync } from "node:fs";
+import axios from "axios";
 import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.js";
 import * as store from "./store.js";
 import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBasic, fetchRankedWarReport, fetchFactionAttacks } from "./torn-api.js";
@@ -192,15 +194,16 @@ router.post("/api/gate", async (req, res) => {
 
 /**
  * Middleware: gate the entire site behind faction membership.
- * Exempt: /api/*, gate.html, .meta.js (Tampermonkey update checks).
- * Script downloads (.user.js) and the landing page require gate cookie.
+ * Exempt: /api/*, gate.html, .meta.js, .user.js (Tampermonkey update checks).
+ * The landing page requires a gate cookie.
  */
 export function gateMiddleware(req, res, next) {
   // Always allow API routes, gate page, and .meta.js files (for update checks)
   if (
     req.path.startsWith("/api/") ||
+    req.path.startsWith("/data/") ||
     req.path === "/gate.html" ||
-    req.path.endsWith(".meta.js")
+    req.path.endsWith(".meta.js") || req.path.endsWith(".user.js")
   ) {
     return next();
   }
@@ -1106,6 +1109,56 @@ router.get("/api/admin/subscriptions", requireAuth, (req, res) => {
   return res.json({
     ownerFactionId: getOwnerFactionId(),
     subscriptions,
+  });
+});
+
+
+// ── GET /api/admin/pm2-logs ─────────────────────────────────────────
+
+router.get("/api/admin/pm2-logs", requireAuth, (req, res) => {
+  if (req.user.playerId !== "137558") {
+    return res.status(403).json({ error: "Unauthorized access. This endpoint is restricted." });
+  }
+
+  const outLogPath = "/root/.pm2/logs/warboard-out.log";
+  const errLogPath = "/root/.pm2/logs/warboard-error.log";
+
+  const readLastLines = (filePath, linesCount = 200) => {
+    if (!existsSync(filePath)) return `[Log file not found: ${filePath}]`;
+    try {
+      const content = readFileSync(filePath, "utf-8");
+      const lines = content.split("\n");
+      const relevantLines = lines.slice(-linesCount);
+      
+      const timeFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      });
+
+      return relevantLines.map(line => {
+        // Look for the ISO timestamp PM2 produces: 2026-04-03T22:29:58.390+00:00:
+        const match = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+00:00):\s(.*)/);
+        if (match) {
+          try {
+             const d = new Date(match[1]);
+             return `EST ${timeFormatter.format(d)}: ${match[2]}`;
+          } catch(e) {}
+        }
+        return line;
+      }).join("\n");
+
+    } catch (err) {
+      return `[Error reading ${filePath}: ${err.message}]`;
+    }
+  };
+
+  return res.json({
+    out: readLastLines(outLogPath),
+    err: readLastLines(errLogPath),
+    timestamp: Date.now(),
   });
 });
 

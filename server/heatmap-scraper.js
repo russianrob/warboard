@@ -9,18 +9,20 @@ const activeScrapers = new Set();
  * @param {string|number} warId - The ID of the ranked war.
  * @param {string|number} enemyId - The Torn faction ID of the enemy.
  * @param {string} apiKey - The Torn API key to use for the request.
+ * @param {string} [enemyName] - Optional faction name for better logging.
  * @returns {NodeJS.Timeout|null} The interval ID, or null if already running.
  */
-export function startHeatmapScraper(warId, enemyId, apiKey) {
+export function startHeatmapScraper(warId, enemyId, apiKey, enemyName = null) {
     const enemyIdStr = String(enemyId);
+    let currentName = enemyName;
 
     if (activeScrapers.has(enemyIdStr)) {
-        console.log(`[HeatmapScraper] Scraper already active for enemy faction ${enemyIdStr} (War: ${warId})`);
+        console.log(`[HeatmapScraper] Scraper already active for enemy faction ${currentName || enemyIdStr} (War: ${warId})`);
         return null;
     }
 
     activeScrapers.add(enemyIdStr);
-    console.log(`[HeatmapScraper] Starting activity scraper for war ${warId}, enemy ${enemyIdStr}`);
+    console.log(`[HeatmapScraper] Starting activity scraper for war ${warId}, enemy ${currentName || enemyIdStr}`);
 
     const scrape = async () => {
         try {
@@ -29,8 +31,13 @@ export function startHeatmapScraper(warId, enemyId, apiKey) {
             const data = response.data;
 
             if (data.error) {
-                console.error(`[HeatmapScraper] Torn API Error for faction ${enemyIdStr}:`, data.error);
+                console.error(`[HeatmapScraper] Torn API Error for faction ${currentName || enemyIdStr}:`, data.error);
                 return;
+            }
+
+            // Update name from API response if we didn't have one or if it changed
+            if (data.name) {
+                currentName = data.name;
             }
 
             let activeCount = 0;
@@ -46,10 +53,10 @@ export function startHeatmapScraper(warId, enemyId, apiKey) {
             }
 
             recordSample(enemyIdStr, activeCount);
-            console.log(`[HeatmapScraper] Recorded ${activeCount} active members for enemy faction ${enemyIdStr}`);
+            console.log(`[HeatmapScraper] Recorded ${activeCount} active members for enemy faction ${currentName} (${enemyIdStr})`);
 
         } catch (error) {
-            console.error(`[HeatmapScraper] Network/Request failed for faction ${enemyIdStr}:`, error.message);
+            console.error(`[HeatmapScraper] Network/Request failed for faction ${currentName || enemyIdStr}:`, error.message);
         }
     };
 

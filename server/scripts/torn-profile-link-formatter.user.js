@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.13
+// @version      3.6.15
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -19,6 +19,8 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.15 - Modernize Settings UI: updated to dark "glassmorphism" style to match OC Manager
+// v3.6.14 - Remove all button.title assignments to prevent tooltips getting stuck on mobile browsers (Torn PDA)
 // v3.6.13 - Move progress bar to fixed position toast to make it immune to React DOM updates
 // v3.6.12 - Fix progress bar visibility (absolute positioning) and delay hiding so 100% state is visible
 // v3.6.11 - Add visual progress bar to faction copy and improve error handling for individual members
@@ -62,24 +64,30 @@
 
     if (typeof GM_addStyle !== 'undefined') {
         GM_addStyle(`
-            .gnsc-copy-container { display: inline-flex; align-items: center; vertical-align: middle; gap: 5px; margin-left: 10px; }
-            .gnsc-btn { background-color: #333; color: #DDD; border: 1px solid #555; border-radius: 5px; padding: 3px 8px; text-decoration: none; font-size: 12px; line-height: 1.5; font-weight: bold; cursor: pointer; white-space: nowrap; }
-            .gnsc-btn:hover { background-color: #444; }
-            .gnsc-list-btn { margin-left: 5px; cursor: pointer; font-size: 14px; display: inline-block; vertical-align: middle; width: 18px; text-align: center; }
-            .gnsc-faction-copy-btn { margin-left: 8px; cursor: pointer; font-size: 14px; vertical-align: middle; }
-            .gnsc-settings-panel { display: none; position: absolute; background-color: #2c2c2c; border: 1px solid #555; border-radius: 5px; padding: 10px; z-index: 1000; top: 100%; left: 0; min-width: 220px; }
-            .gnsc-settings-panel div { margin-bottom: 5px; display: flex; align-items: center; }
-            .gnsc-settings-panel label { color: #DDD; flex-grow: 1; }
-            .gnsc-settings-panel input[type="checkbox"] { margin-left: 5px; }
-            .gnsc-settings-panel label.disabled { color: #888; }
+            .gnsc-copy-container { display: inline-flex; align-items: center; vertical-align: middle; gap: 6px; margin-left: 12px; }
+            .gnsc-btn { background: rgba(255, 255, 255, 0.05); color: #ddd; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 4px 10px; text-decoration: none; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; display: inline-flex; align-items: center; justify-content: center; height: 26px; }
+            .gnsc-btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; border-color: rgba(255, 255, 255, 0.2); }
+            .gnsc-list-btn { margin-left: 5px; cursor: pointer; font-size: 14px; display: inline-block; vertical-align: middle; width: 18px; text-align: center; opacity: 0.8; transition: opacity 0.2s; }
+            .gnsc-list-btn:hover { opacity: 1; }
+            .gnsc-faction-copy-btn { margin-left: 8px; cursor: pointer; font-size: 14px; vertical-align: middle; opacity: 0.8; transition: opacity 0.2s; }
+            .gnsc-faction-copy-btn:hover { opacity: 1; }
+            .gnsc-settings-panel { display: none; position: absolute; background: rgba(24, 24, 24, 0.98); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 16px; z-index: 1000; top: calc(100% + 8px); left: 0; min-width: 260px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6); backdrop-filter: blur(10px); color: #efefef; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+            .gnsc-settings-panel * { box-sizing: border-box; }
+            .gnsc-settings-panel-header { font-size: 14px; font-weight: 700; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); color: #fff; }
+            .gnsc-settings-panel div.setting-row { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+            .gnsc-settings-panel label { color: #ddd; cursor: pointer; flex: 1; user-select: none; }
+            .gnsc-settings-panel input[type="checkbox"] { margin-left: 10px; width: 16px; height: 16px; cursor: pointer; accent-color: #2a3cff; }
+            .gnsc-settings-panel label.disabled { color: #666; cursor: not-allowed; }
             .gnsc-settings-container { position: relative; }
             .buttons-list .gnsc-list-btn { padding: 4px; font-size: 16px; height: 34px; line-height: 26px; }
-            #gnsc-battlestats-format-wrapper { flex-direction: column; align-items: flex-start; margin-top: 8px; }
-            #gnsc-battlestats-format-wrapper label { margin-bottom: 4px; }
-            #gnsc-select-battlestats-format { background-color: #1e1e1e; border: 1px solid #555; color: #ddd; border-radius: 3px; padding: 2px 4px; width: 100%; }
-            #gnsc-apikey-wrapper { flex-direction: column; align-items: flex-start; margin-top: 8px; border-top: 1px solid #444; padding-top: 8px; }
-            #gnsc-apikey-wrapper label { margin-bottom: 4px; font-size: 11px; }
-            #gnsc-input-apikey { background-color: #1e1e1e; border: 1px solid #555; color: #ddd; border-radius: 3px; padding: 4px 6px; width: 100%; font-size: 11px; box-sizing: border-box; }
+            #gnsc-battlestats-format-wrapper { flex-direction: column; align-items: flex-start; margin-top: 12px; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); }
+            #gnsc-battlestats-format-wrapper label { margin-bottom: 6px; font-size: 12px; color: #bbb; }
+            #gnsc-select-battlestats-format { background-color: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: #ddd; border-radius: 6px; padding: 6px; width: 100%; font-size: 13px; outline: none; transition: border-color 0.2s; cursor: pointer; }
+            #gnsc-select-battlestats-format:focus { border-color: rgba(42, 60, 255, 0.5); }
+            #gnsc-apikey-wrapper { flex-direction: column; align-items: flex-start; margin-top: 16px; }
+            #gnsc-apikey-wrapper label { margin-bottom: 6px; font-size: 12px; color: #bbb; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+            #gnsc-input-apikey { background-color: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: #ddd; border-radius: 6px; padding: 8px 10px; width: 100%; font-size: 13px; box-sizing: border-box; outline: none; font-family: monospace; transition: border-color 0.2s; }
+            #gnsc-input-apikey:focus { border-color: #2a3cff; }
         `);
     }
 
@@ -122,7 +130,6 @@
                 const button = document.createElement('span');
                 button.className = 'gnsc-faction-copy-btn';
                 button.textContent = '📋';
-                button.title = 'Copy Faction Member List (BSP/FF cache)';
                 button.addEventListener('click', (e) =>
                     handleFactionCopyClick(e, button, nameDiv.classList.contains('left'))
                 );
@@ -146,7 +153,6 @@
                     const button = document.createElement('span');
                     button.className = 'gnsc-list-btn';
                     button.textContent = '📄';
-                    button.title = 'Copy Formatted Link';
                     button.addEventListener('click', (e) => handleListCopyClick(e, button, miniProfile));
                     buttonContainer.insertAdjacentElement('beforeend', button);
                 } else if (attempts >= maxAttempts) {
@@ -165,7 +171,6 @@
                 const button = document.createElement('span');
                 button.className = 'gnsc-list-btn';
                 button.textContent = '📄';
-                button.title = 'Copy Formatted Link';
                 button.addEventListener('click', (e) => handleListCopyClick(e, button, member));
                 nameLink.insertAdjacentElement('afterend', button);
             }
@@ -268,18 +273,24 @@
         panel.className = 'gnsc-settings-panel';
         const settings = loadSettings();
 
+        const header = document.createElement('div');
+        header.className = 'gnsc-settings-panel-header';
+        header.textContent = 'Link Formatter Settings';
+        panel.appendChild(header);
+
         const options = [
-            { key: 'attack',       label: 'Attack',                      available: true },
+            { key: 'attack',       label: 'Attack Link',                 available: true },
             { key: 'activity',     label: 'Activity Status',             available: true },
-            { key: 'faction',      label: 'Faction',                     available: !!userInfo.factionUrl },
-            { key: 'company',      label: 'Company',                     available: !!userInfo.companyUrl },
-            { key: 'timeRemaining',label: 'Time Remaining',              available: userInfo.isInHospital },
+            { key: 'faction',      label: 'Faction Link',                available: !!userInfo.factionUrl },
+            { key: 'company',      label: 'Company Link',                available: !!userInfo.companyUrl },
+            { key: 'timeRemaining',label: 'Hospital Time',               available: userInfo.isInHospital },
             { key: 'releaseTime',  label: 'Release Time (TCT)',          available: userInfo.isInHospital },
-            { key: 'battlestats',  label: 'Battle Stats / Stats (BSP/FF)',  available: true }
+            { key: 'battlestats',  label: 'Battle Stats (BSP/FF)',       available: true }
         ];
 
         options.forEach(option => {
             const wrapper = document.createElement('div');
+            wrapper.className = 'setting-row';
             const checkbox = document.createElement('input');
             const label = document.createElement('label');
 
@@ -309,7 +320,7 @@
 
         const formatLabel = document.createElement('label');
         formatLabel.htmlFor = 'gnsc-select-battlestats-format';
-        formatLabel.textContent = 'Stat Display Format (when spy/FF is available)';
+        formatLabel.textContent = 'Stat Display Format';
 
         const formatSelect = document.createElement('select');
         formatSelect.id = 'gnsc-select-battlestats-format';
@@ -331,12 +342,12 @@
 
         const apiKeyLabel = document.createElement('label');
         apiKeyLabel.htmlFor = 'gnsc-input-apikey';
-        apiKeyLabel.textContent = 'API Key';
+        apiKeyLabel.textContent = 'API Key (For Faction/Xanax)';
 
         const apiKeyInput = document.createElement('input');
         apiKeyInput.type = 'text';
         apiKeyInput.id = 'gnsc-input-apikey';
-        apiKeyInput.placeholder = 'Enter API key...';
+        apiKeyInput.placeholder = 'Paste Torn API Key...';
         apiKeyInput.value = getApiKey() || '';
         apiKeyInput.addEventListener('change', () => {
             const val = apiKeyInput.value.trim();
@@ -941,10 +952,8 @@
             if (!lines.length) {
                 if (debug) console.error('GNSC faction copy: no member rows parsed for side selector', sideSelector, 'targetFactionId', targetFactionId);
                 button.textContent = '❓';
-                button.title = 'No members parsed.';
                 setTimeout(() => {
                     button.textContent = '📋';
-                    button.title = 'Copy Faction Member List (BSP/FF cache)';
                 }, 2500);
                 return;
             }
@@ -954,11 +963,9 @@
             progressLabel.textContent = `✅ Copied ${totalMembers} members!`;
             if (button.isConnected) {
                 button.textContent = `✅ ${totalMembers}`;
-                button.title = 'Copied faction list with BSP/FF stats.';
                 setTimeout(() => {
                     if (button.isConnected) {
                         button.textContent = '📋';
-                        button.title = 'Copy Faction Member List (BSP/FF cache)';
                     }
                 }, 5000);
             }
@@ -967,11 +974,9 @@
             if (button && button.isConnected) button.textContent = '❌';
             const fixedPb = document.getElementById('gnsc-fixed-progress-container');
             if (fixedPb) fixedPb.style.display = 'none';
-            button.title = 'Error building faction list.';
             setTimeout(() => {
                 if (button && button.isConnected) {
                     button.textContent = '📋';
-                    button.title = 'Copy Faction Member List (BSP/FF cache)';
                 }
             }, 2500);
         }

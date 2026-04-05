@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 
-import routes, { setIO } from "./routes.js";
+import routes, { setIO, gateMiddleware } from "./routes.js";
 import "./war-scanner.js";
 import { socketAuth } from "./auth.js";
 import { registerSocketHandlers } from "./socket-handlers.js";
@@ -59,6 +59,9 @@ app.use(
 app.use(express.json({ limit: '5mb' }));
 
 // ── Landing page is public — gate is applied only to /scripts/*.user.js below ──
+
+// ── Landing page gate ───────────────────────────────────────────────────
+app.use(gateMiddleware);
 
 // ── Static files (landing page) ─────────────────────────────────────────
 app.use(express.static(join(__dirname, "public")));
@@ -270,6 +273,10 @@ async function detectNewWars() {
 
         const warId = `war_${factionId}`;
         const existing = store.getWar(warId);
+        if (existing && !existing.enemyFactionName && rw.enemyFactionName) {
+          existing.enemyFactionName = rw.enemyFactionName;
+          store.saveState();
+        }
 
         // If no existing war or the enemy changed, create/update
         if (!existing || !existing.enemyFactionId || existing.warEnded) {

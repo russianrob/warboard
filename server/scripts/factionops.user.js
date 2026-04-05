@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.13
+// @version      4.5.15
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,8 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.15  - Revert: Ranked War ETA now uses pure target decay against current lead (matching original Torn Ranked War Timer).
+// v4.5.14  - Fix: ETA calculation now includes our scoring momentum combined with target decay, predicting closing speed from hour 0 for both manual and ranked war targets.
 // v4.5.11  - Fix: Timer saying WON instead of LOST when the enemy reaches the target before you do.
 // v4.5.10  - Rewrote the fallback ETA logic completely from scratch to exactly match the flawless code from the Torn Ranked War Timer script, guaranteeing 100% ETA synchronization.
 // v4.5.9   - Critical Math Fix: Resolved issue where ETA inflated to 1h29m+ by correctly identifying that Torn API sends the original target (not decayed) while Torn UI sends a discrete decayed target
@@ -5533,8 +5535,7 @@ body.wb-chain-active {
         const timerEl = warHeader ? warHeader.querySelector('[class*="timer_"]') : null;
         const targetBox = warHeader ? warHeader.querySelector('[class*="target_"]') : null;
 
-        let lead = null, currentTarget = null, elapsedStr = null, totalElapsedHours = null;
-        let myFactionScore = null, signedLead = null;
+        let lead = null, currentTarget = null, totalElapsedHours = null;
         let timerDays = 0, timerHours = 0, timerMinutes = 0;
 
         if (timerEl) {
@@ -5552,7 +5553,6 @@ body.wb-chain-active {
                     timerMinutes = parseInt(timeParts[1], 10) || 0;
                 }
                 totalElapsedHours = (timerDays * 24) + timerHours + (timerMinutes / 60);
-                elapsedStr = timerDays > 0 ? timerDays + 'd ' + timerHours + 'h ' + timerMinutes + 'm' : timerHours + 'h ' + timerMinutes + 'm';
             }
         }
         if (targetBox) {
@@ -5564,23 +5564,16 @@ body.wb-chain-active {
             }
         }
 
-        if (state.warScores) {
-            myFactionScore = state.warScores.myScore || null;
-            if (state.warScores.myScore != null && state.warScores.enemyScore != null) {
-                signedLead = state.warScores.myScore - state.warScores.enemyScore;
-            }
-        }
+        const myFactionScore = (state.warScores && state.warScores.myScore != null) ? state.warScores.myScore : lead;
+        const effectiveScore = myFactionScore;
 
-        // Prefer server score if available and we're on the war page
-        const effectiveScore = (myFactionScore !== null) ? myFactionScore : lead;
+        if (effectiveScore === null || currentTarget === null || totalElapsedHours === null) return;
 
-        // War percentage calculation & broadcast
-        let currentPct = null;
+        // Calculate our scoring rate from the very start
+        const ourScoreRate = totalElapsedHours > 0 ? (effectiveScore / totalElapsedHours) : 0;
 
-        // "Waiting" state only if score is 0 AND we're in the first 24h (approx)
-        // or if explicitly "starts in" text is found (not implemented here yet).
-        // If lead is 0 but elapsed > 24h, it's a decay war with 0 score.
-        if (lead === 0 && currentTarget !== null && currentTarget > 0 && totalElapsedHours !== null && totalElapsedHours < 2) {
+        // "Waiting" state for new wars
+        if (lead === 0 && currentTarget > 0 && totalElapsedHours < 2) {
             const display = timerDays > 0 ? `${timerDays}d ${timerHours}h ${timerMinutes}m`
                 : timerHours > 0 ? `${timerHours}h ${timerMinutes}m`
                 : `${timerMinutes}m`;
@@ -5590,78 +5583,81 @@ body.wb-chain-active {
                 warTimerDetailRow('Status', 'War not started')
                 + warTimerDetailRow('Starts in', display)
                 + warTimerDetailRow('Target', currentTarget.toLocaleString());
-        } else if (state.warTarget && state.warTarget.value) {
-            const goal = state.warTarget.value;
-            const score = effectiveScore;
-            if (score !== null) {
-                const remaining = goal - score;
-                const pct = Math.min(100, Math.round((score / goal) * 100));
-                currentPct = pct;
-                if (remaining <= 0) {
-                    const notifiedKey = 'fo_notified_' + deriveWarId() + '_' + goal;
-                    if (!warTargetNotifiedThisSession) {
-                        warTargetNotifiedThisSession = true;
-                        if (GM_getValue(notifiedKey, false) !== true) {
-                            GM_setValue(notifiedKey, true);
-                            postAction('/api/war-target-reached', { warId: deriveWarId(), lead: score }).catch(() => {});
-                            firePdaNotification('war_target', '🎯 War Target Reached!', `Faction hit ${score.toLocaleString()} / ${goal.toLocaleString()} respect — hold the line!`);
+            return;
+        }
 
-                            // Auto-clear custom target so it switches to the standard war decay timer
-                            log('War target reached. Auto-clearing custom target.');
-                            postAction('/api/set-war-target', { warId: deriveWarId(), value: null }).catch(() => {});
-                            state.warTarget = null;
-                        }
-                    }
-                    if (totalElapsedHours !== null && currentTarget !== null) {
-                        let hoursRemainingFloat = 0;
-                        if (totalElapsedHours > 24) {
-                            const dropHours = Math.floor(totalElapsedHours - 24);
-                            const originalTarget = currentTarget / (1 - (dropHours * 0.01));
-                            const DROP_PER_HOUR = originalTarget * 0.01;
-                            const gap = currentTarget - score;
-                            hoursRemainingFloat = gap / DROP_PER_HOUR;
-                        } else {
-                            const originalTarget = currentTarget;
-                            const DROP_PER_HOUR = originalTarget * 0.01;
-                            const gap = currentTarget - score;
-                            const hrsToDrop = gap / DROP_PER_HOUR;
-                            hoursRemainingFloat = (24 - totalElapsedHours) + hrsToDrop;
-                        }
+        // Reverted ETA Logic: Pure decay against whoever is currently winning
+        const calculateHoursRemaining = (goal, isDecaying) => {
+            // 'lead' is the highest score extracted directly from Torn's UI
+            const scoreToUse = lead !== null ? lead : effectiveScore;
+            const currentGap = goal - scoreToUse;
+            if (currentGap <= 0) return 0;
 
-                        warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
-                        warTimerLastCalc = Date.now();
-
-                        if (hoursRemainingFloat <= 0) {
-                            warTimerEl.className = 'fo-war-timer safe';
-                            warTimerValue.textContent = '✓ WON';
-                        } else {
-                            const totalMin = Math.floor(hoursRemainingFloat * 60);
-                            const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
-                            const mm = (totalMin % 60).toString().padStart(2, '0');
-                            const urgency = hoursRemainingFloat <= 2 ? 'danger' : hoursRemainingFloat <= 6 ? 'warning' : 'safe';
-                            warTimerEl.className = 'fo-war-timer ' + urgency;
-                            warTimerValue.textContent = hh + ':' + mm;
-                        }
-                    } else {
-                        warTimerEl.className = 'fo-war-timer safe';
-                        warTimerValue.textContent = '✓ ' + pct + '%';
-                    }
-                } else {
-                    const urgency = pct >= 80 ? 'safe' : pct >= 50 ? 'warning' : 'danger';
-                    warTimerEl.className = 'fo-war-timer ' + urgency;
-                    warTimerValue.textContent = pct + '%';
-                }
-            }
-        } else if (totalElapsedHours !== null && totalElapsedHours > 24 && effectiveScore !== null && currentTarget !== null) {
-            const dropHours = Math.floor(totalElapsedHours - 24);
+            const dropHours = Math.max(0, Math.floor(totalElapsedHours - 24));
             const originalTarget = currentTarget / (1 - (dropHours * 0.01));
-            const DROP_PER_HOUR = originalTarget * 0.01;
-            
-            // GreasyFork script calculates ETA strictly based on YOUR score (the first number in the box)
-            // effectiveScore here is already our score (lead from the regex match[1])
-            const gap = currentTarget - effectiveScore;
-            const hoursRemainingFloat = gap / DROP_PER_HOUR;
-            
+            const DROP_PER_HOUR = isDecaying ? (originalTarget * 0.01) : 0;
+
+            if (totalElapsedHours >= 24) {
+                // Ignore our scoring momentum, just calculate pure decay to the lead score
+                const closingSpeed = DROP_PER_HOUR;
+                return closingSpeed > 0 ? (currentGap / closingSpeed) : 999;
+            } else {
+                // If under 24 hours, add the time until decay actually starts
+                const timeTo24h = 24 - totalElapsedHours;
+                return timeTo24h + (DROP_PER_HOUR > 0 ? (currentGap / DROP_PER_HOUR) : 999);
+            }
+        };
+
+        let currentPct = null;
+
+        if (state.warTarget && state.warTarget.value) {
+            const goal = state.warTarget.value;
+            const remaining = goal - effectiveScore;
+            const pct = Math.min(100, Math.round((effectiveScore / goal) * 100));
+            currentPct = pct;
+
+            if (remaining <= 0) {
+                // Custom goal reached, show prediction to actual Ranked War target
+                const notifiedKey = 'fo_notified_' + deriveWarId() + '_' + goal;
+                if (!warTargetNotifiedThisSession) {
+                    warTargetNotifiedThisSession = true;
+                    if (GM_getValue(notifiedKey, false) !== true) {
+                        GM_setValue(notifiedKey, true);
+                        postAction('/api/war-target-reached', { warId: deriveWarId(), lead: effectiveScore }).catch(() => {});
+                        firePdaNotification('war_target', '🎯 War Target Reached!', `Faction hit ${effectiveScore.toLocaleString()} / ${goal.toLocaleString()} respect — hold the line!`);
+                        postAction('/api/set-war-target', { warId: deriveWarId(), value: null }).catch(() => {});
+                        state.warTarget = null;
+                    }
+                }
+
+                const hoursRemainingFloat = calculateHoursRemaining(currentTarget, true);
+                warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
+                warTimerLastCalc = Date.now();
+
+                if (hoursRemainingFloat <= 0) {
+                    warTimerEl.className = 'fo-war-timer safe';
+                    warTimerValue.textContent = '✓ WON';
+                } else {
+                    const totalMin = Math.floor(hoursRemainingFloat * 60);
+                    const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
+                    const mm = (totalMin % 60).toString().padStart(2, '0');
+                    const urgency = hoursRemainingFloat <= 2 ? 'danger' : hoursRemainingFloat <= 6 ? 'warning' : 'safe';
+                    warTimerEl.className = 'fo-war-timer ' + urgency;
+                    warTimerValue.textContent = hh + ':' + mm;
+                }
+            } else {
+                // Custom goal NOT reached, show progress + prediction to goal
+                const hoursRemainingFloat = calculateHoursRemaining(goal, false);
+                const totalMin = Math.floor(hoursRemainingFloat * 60);
+                const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
+                const mm = (totalMin % 60).toString().padStart(2, '0');
+                const urgency = pct >= 80 ? 'safe' : pct >= 50 ? 'warning' : 'danger';
+                warTimerEl.className = 'fo-war-timer ' + urgency;
+                warTimerValue.textContent = pct + '% (' + hh + ':' + mm + ')';
+            }
+        } else {
+            // Main Ranked War Block (Target Decay + Our Rate)
+            const hoursRemainingFloat = calculateHoursRemaining(currentTarget, true);
             warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
             warTimerLastCalc = Date.now();
 
@@ -5678,7 +5674,6 @@ body.wb-chain-active {
             }
         }
 
-        // Push new percentage to other tabs if we're active
         if (currentPct !== null && !document.hidden && state.warPercentage !== currentPct) {
             state.warPercentage = currentPct;
             broadcastStateChange({ type: 'war_update', pct: currentPct });
