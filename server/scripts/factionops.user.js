@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.16
+// @version      4.5.17
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.17  - Fix: Updated DOM selectors in updateWarTimer to correctly identify and read Ranked War targets.
 // v4.5.16  - Fix: Forced the UI to use the local pure-decay ETA calculation instead of falling back to server predictions.
 // v4.5.15  - Revert: Ranked War ETA now uses pure target decay against current lead (matching original Torn Ranked War Timer).
 // v4.5.14  - Fix: ETA calculation now includes our scoring momentum combined with target decay, predicting closing speed from hour 0 for both manual and ranked war targets.
@@ -5531,10 +5532,10 @@ body.wb-chain-active {
         const warTimerDetail = document.getElementById('fo-war-timer-detail');
         if (!warTimerEl || !warTimerValue) return;
 
-        // ── Read timer + score from DOM (scoped to Ranked War container) ──
-        const warHeader = document.querySelector('[class*="rankedWar"]');
-        const timerEl = warHeader ? warHeader.querySelector('[class*="timer_"]') : null;
-        const targetBox = warHeader ? warHeader.querySelector('[class*="target_"]') : null;
+        // ── Read timer + score from DOM (updated selectors) ──
+        const warHeader = document.querySelector('[class*="rankedWar"]') || document.querySelector('[class*="rankBox"]');
+        const timerEl = warHeader ? warHeader.querySelector('[class*="timer_"]') : document.querySelector('[class*="timer_"]');
+        const targetBox = warHeader ? warHeader.querySelector('[class*="target_"]') : document.querySelector('[class*="target_"]');
 
         let lead = null, currentTarget = null, totalElapsedHours = null;
         let timerDays = 0, timerHours = 0, timerMinutes = 0;
