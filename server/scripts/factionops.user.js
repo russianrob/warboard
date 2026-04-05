@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.26
+// @version      4.5.27
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.27  - Feature: Added Admin Broadcast feature allowing admin to send global toast notifications to all active tabs.
 // v4.5.26  - Fix: Timer says "LOST" instead of "WON" if the enemy reaches the target first, and prevents the PDA scanner from grabbing crazy elapsed times (e.g. "15d" from a player profile) which caused the target decay math to crash.
 // v4.5.25  - Fix: PDA text scanner now strictly pulls the target score directly from the server's state.warEta to prevent fake target extraction.
 // v4.5.24  - Fix: PDA text scanner now anchors the target search using the lead score to prevent greedy regex grabbing 10-digit IDs or stats.
@@ -3344,6 +3345,14 @@ body.wb-chain-active {
             applyServerData(data);
         });
 
+        // Listen for Admin Broadcasts
+        realtimeSocket.on('global_toast', (data) => {
+            showToast(`📣 ${data.message}`, data.type);
+            if (typeof firePdaNotification === 'function') {
+                firePdaNotification('admin_broadcast', 'FactionOps Broadcast', data.message);
+            }
+        });
+
         // Also handle the initial state sent on join
         realtimeSocket.on('war_state', (data) => {
             applyServerData(data);
@@ -3873,6 +3882,10 @@ body.wb-chain-active {
             <div style="margin-bottom:14px;">
                 <label>Admin Tools</label>
                 <button class="wb-btn wb-btn-sm" id="wb-btn-view-logs" style="width:100%;">View PM2 Server Logs</button>
+                <div style="display:flex; gap:6px; margin-top:8px;">
+                    <input type="text" id="wb-input-broadcast" placeholder="Broadcast message to faction..." style="margin-bottom:0; flex:1;">
+                    <button class="wb-btn wb-btn-sm wb-btn-danger" id="wb-btn-send-broadcast">Shout</button>
+                </div>
             </div>
             ` : ''}
 
@@ -4111,6 +4124,22 @@ body.wb-chain-active {
         }
 
         const viewLogsBtn = document.getElementById('wb-btn-view-logs');
+
+        const broadcastBtn = document.getElementById('wb-btn-send-broadcast');
+        if (broadcastBtn) {
+            broadcastBtn.addEventListener('click', () => {
+                const msgInput = document.getElementById('wb-input-broadcast');
+                const msg = msgInput.value.trim();
+                
+                if (msg && realtimeSocket && realtimeSocket.connected) {
+                    realtimeSocket.emit('admin_broadcast', { message: msg, type: 'warning' });
+                    msgInput.value = '';
+                    showToast('Broadcast sent to all active tabs!', 'success');
+                } else if (!realtimeSocket || !realtimeSocket.connected) {
+                    showToast('You must be connected via RT (Socket.IO) to broadcast.', 'error');
+                }
+            });
+        }
         if (viewLogsBtn) {
             viewLogsBtn.addEventListener('click', async () => {
                 viewLogsBtn.textContent = 'Loading...';
