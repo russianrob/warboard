@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.18
+// @version      4.5.19
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.19  - Fix: Resolved CSS clipping issue that was hiding the Ranked War timer details popup.
 // v4.5.18  - Fix: Added heavy-duty text scanner fallback to successfully locate timer and target elements on Torn PDA's mobile layout.
 // v4.5.17  - Fix: Updated DOM selectors in updateWarTimer to correctly identify and read Ranked War targets.
 // v4.5.16  - Fix: Forced the UI to use the local pure-decay ETA calculation instead of falling back to server predictions.
@@ -1139,7 +1140,7 @@ body.wb-chain-active {
     gap: 6px;
     flex-shrink: 1;
     flex-wrap: nowrap;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .fo-online-badge {
