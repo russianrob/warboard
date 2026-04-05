@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.27
+// @version      4.5.28
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.28  - Fix: Fixed PDA scanner sometimes returning LOST prematurely when the server has not yet polled the decayed target.
 // v4.5.27  - Feature: Added Admin Broadcast feature allowing admin to send global toast notifications to all active tabs.
 // v4.5.26  - Fix: Timer says "LOST" instead of "WON" if the enemy reaches the target first, and prevents the PDA scanner from grabbing crazy elapsed times (e.g. "15d" from a player profile) which caused the target decay math to crash.
 // v4.5.25  - Fix: PDA text scanner now strictly pulls the target score directly from the server's state.warEta to prevent fake target extraction.
@@ -5588,9 +5589,22 @@ body.wb-chain-active {
         const allText = document.documentElement.textContent || "";
 
         if (currentTarget === null) {
-            // Absolute last resort: only grab target if it ends in "00" (e.g. 15,000) to ignore random stats
-            const strictMatch = allText.match(/[\d,]{1,6}\s*\/\s*([1-9][\d,]{1,3}00)(?!\d)/);
-            if (strictMatch) currentTarget = parseInt(strictMatch[1].replace(/[^\d]/g, ''), 10);
+            // Absolute last resort: anchor search using the server's lead score to ignore garbage data
+            let targetMatch = null;
+            if (lead !== null && lead > 0) {
+                const leadStr = lead.toLocaleString('en-US'); // e.g., "11,116"
+                targetMatch = allText.match(new RegExp(leadStr + "\\s*\\/\\s*([\\d,]{4,7})(?!\\d)"));
+                if (!targetMatch) targetMatch = allText.match(new RegExp("([\\d,]{4,7})\\s*\\/\\s*" + leadStr + "(?!\\d)"));
+            }
+
+            // Strict fallback: Must be 4-6 digits max to kill 9-billion stat glitches
+            if (!targetMatch) {
+                targetMatch = allText.match(/[\d,]{2,6}\s*\/\s*([\d,]{4,6})(?!\d)/);
+            }
+
+            if (targetMatch) {
+                currentTarget = parseInt(targetMatch[1].replace(/[^\d]/g, ''), 10);
+            }
         }
 
         // Extract Elapsed Time: Looks for "WAR 32:49", "34:50:12", or "1d 10:20"
