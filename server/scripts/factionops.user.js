@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.25
+// @version      4.5.26
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.26  - Fix: Timer says "LOST" instead of "WON" if the enemy reaches the target first, and prevents the PDA scanner from grabbing crazy elapsed times (e.g. "15d" from a player profile) which caused the target decay math to crash.
 // v4.5.25  - Fix: PDA text scanner now strictly pulls the target score directly from the server's state.warEta to prevent fake target extraction.
 // v4.5.24  - Fix: PDA text scanner now anchors the target search using the lead score to prevent greedy regex grabbing 10-digit IDs or stats.
 // v4.5.23  - Fix: Fixed "ERR: SCORE" bug on Torn PDA by bypassing the DOM entirely for the lead score and using the server state.
@@ -5567,6 +5568,10 @@ body.wb-chain-active {
         const timeMatches = [...allText.matchAll(/(?:WAR\s*)?(?:(\d+)\s*[dD]\s*)?(\d{1,3})\s*:\s*(\d{2})(?:\s*:\s*(\d{2}))?/gi)];
         for (let m of timeMatches) {
             const p1 = parseInt(m[1]) || 0, p2 = parseInt(m[2]) || 0, p3 = parseInt(m[3]) || 0, p4 = m[4] ? parseInt(m[4]) : null;
+            
+            // Reject fake times grabbed from profiles or stat panels (e.g., > 7 days or > 100 hours)
+            if (p1 > 7 || p2 > 100) continue;
+
             // It's the war timer if it has 3 segments (H:M:S), includes days, or the word "WAR" was nearby
             if (p4 !== null || p1 > 0 || p2 > 5 || m[0].toUpperCase().includes('WAR')) {
                 timerDays = p1; timerHours = p2; timerMinutes = p3;
@@ -5647,8 +5652,9 @@ body.wb-chain-active {
                 warTimerLastCalc = Date.now();
 
                 if (hoursRemainingFloat <= 0) {
-                    warTimerEl.className = 'fo-war-timer safe';
-                    warTimerValue.textContent = '✓ WON';
+                    const isLosing = state.warScores && (state.warScores.enemyScore > state.warScores.myScore);
+                    warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
+                    warTimerValue.textContent = isLosing ? '✗ LOST' : '✓ WON';
                 } else {
                     const totalMin = Math.floor(hoursRemainingFloat * 60);
                     const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
@@ -5674,8 +5680,9 @@ body.wb-chain-active {
             warTimerLastCalc = Date.now();
 
             if (hoursRemainingFloat <= 0) {
-                warTimerEl.className = 'fo-war-timer safe';
-                warTimerValue.textContent = 'WON';
+                const isLosing = state.warScores && (state.warScores.enemyScore > state.warScores.myScore);
+                warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
+                warTimerValue.textContent = isLosing ? 'LOST' : 'WON';
             } else {
                 const totalMin = Math.floor(hoursRemainingFloat * 60);
                 const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
@@ -5727,8 +5734,9 @@ body.wb-chain-active {
         
         // If the ETA is negative (or 0), someone reached the target.
         if (totalSec <= 0) {
-            warTimerEl.className = 'fo-war-timer safe';
-            warTimerValue.textContent = 'WON';
+            const isLosing = state.warScores && (state.warScores.enemyScore > state.warScores.myScore);
+            warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
+            warTimerValue.textContent = isLosing ? 'LOST' : 'WON';
             return;
         }
 
