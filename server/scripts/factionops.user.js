@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.19
+// @version      4.5.20
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,6 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.5.20  - Feature: Added detailed stats to the Ranked War timer popup, displaying target score, lead score, score gap, and decay rate per hour.
 // v4.5.19  - Fix: Resolved CSS clipping issue that was hiding the Ranked War timer details popup.
 // v4.5.18  - Fix: Added heavy-duty text scanner fallback to successfully locate timer and target elements on Torn PDA's mobile layout.
 // v4.5.17  - Fix: Updated DOM selectors in updateWarTimer to correctly identify and read Ranked War targets.
@@ -5691,6 +5692,20 @@ body.wb-chain-active {
                 const urgency = hoursRemainingFloat <= 2 ? 'danger' : hoursRemainingFloat <= 6 ? 'warning' : 'safe';
                 warTimerEl.className = 'fo-war-timer ' + urgency;
                 warTimerValue.textContent = hh + ':' + mm;
+            }
+
+            // Populate the detail popup box
+            if (warTimerDetail) {
+                const dropHrs = Math.max(0, Math.floor(totalElapsedHours - 24));
+                const origTarget = currentTarget / (1 - (dropHrs * 0.01));
+                const dropPerHr = origTarget * 0.01;
+                const gap = currentTarget - (lead !== null ? lead : effectiveScore);
+
+                warTimerDetail.innerHTML =
+                    warTimerDetailRow('Target Score', Math.round(currentTarget).toLocaleString()) +
+                    warTimerDetailRow('Lead Score', Math.round(lead !== null ? lead : effectiveScore).toLocaleString()) +
+                    warTimerDetailRow('Score Gap', Math.round(gap).toLocaleString()) +
+                    warTimerDetailRow('Target Decay/hr', Math.round(dropPerHr).toLocaleString());
             }
         }
 
