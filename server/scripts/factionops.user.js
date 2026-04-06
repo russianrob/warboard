@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.33
+// @version      4.6.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -206,7 +206,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.5.30',
+        VERSION: '4.6.0',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -3089,12 +3089,21 @@ body.wb-chain-active {
                     warn('Re-auth failed:', authErr.message);
                 }
             }
+        } finally {
+            // Schedule next poll only if still polling and NOT connected via SSE/Socket.IO
+            if (pollTimer && !sseConnected && !(realtimeSocket && realtimeSocket.connected)) {
+                scheduleNextPoll();
+            }
         }
     }
 
     /** Start the polling loop. */
     function startPolling() {
         if (pollTimer) return; // already running
+        if (sseConnected || (realtimeSocket && realtimeSocket.connected)) {
+            log('Skipping startPolling — real-time connection active');
+            return;
+        }
         if (!state.jwtToken) {
             warn('No JWT token — cannot start polling');
             state.connected = false;
@@ -3107,30 +3116,33 @@ body.wb-chain-active {
         updateConnectionUI();
         log('Starting adaptive poll loop (fast=' + POLL_FAST_MS + 'ms, idle=' + POLL_IDLE_MS + 'ms)');
 
+        // Initialize timer placeholder
+        pollTimer = true;
+
         // Immediate first poll
         pollOnce();
+    }
 
-        function scheduleNextPoll() {
-            const desired = isWarActive() ? POLL_FAST_MS : POLL_IDLE_MS;
-            if (desired !== currentPollInterval) {
-                log('Poll interval changed: ' + currentPollInterval + 'ms → ' + desired + 'ms');
-                currentPollInterval = desired;
-            }
-            const backoff = pollErrorCount > 0
-                ? Math.min(currentPollInterval * Math.pow(2, pollErrorCount), MAX_POLL_BACKOFF)
-                : currentPollInterval;
+    function scheduleNextPoll() {
+        if (!pollTimer || sseConnected || (realtimeSocket && realtimeSocket.connected)) return;
 
-            pollTimer = setTimeout(() => {
-                // Skip this tick if in backoff (simple jitter)
-                if (pollErrorCount > 0 && Math.random() > (currentPollInterval / backoff)) {
-                    scheduleNextPoll();
-                    return;
-                }
-                pollOnce();
-                scheduleNextPoll();
-            }, backoff);
+        const desired = isWarActive() ? POLL_FAST_MS : POLL_IDLE_MS;
+        if (desired !== currentPollInterval) {
+            log('Poll interval changed: ' + currentPollInterval + 'ms → ' + desired + 'ms');
+            currentPollInterval = desired;
         }
-        scheduleNextPoll();
+        const backoff = pollErrorCount > 0
+            ? Math.min(currentPollInterval * Math.pow(2, pollErrorCount), MAX_POLL_BACKOFF)
+            : currentPollInterval;
+
+        pollTimer = setTimeout(() => {
+            // Skip this tick if in backoff (simple jitter)
+            if (pollErrorCount > 0 && Math.random() > (currentPollInterval / backoff)) {
+                scheduleNextPoll();
+                return;
+            }
+            pollOnce();
+        }, backoff);
     }
 
     /** Stop the polling loop. keepState=true preserves connection state (used when Socket.IO takes over). */
