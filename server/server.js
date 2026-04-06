@@ -185,7 +185,11 @@ const httpServer = createServer(app);
 const io = new SocketIOServer(httpServer, {
   cors: {
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
+      // Allow requests with no origin (like mobile apps or some curl requests)
+      // or "null" origin (common in some sandbox/userscript environments)
+      if (!origin || origin === "null") {
+        return callback(null, true);
+      }
       if (/\.torn\.com$/.test(origin) || /tornwar\.com/.test(origin) || /^https?:\/\/localhost/.test(origin)) {
         return callback(null, true);
       }

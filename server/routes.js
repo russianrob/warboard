@@ -419,6 +419,13 @@ router.get("/api/stream", (req, res, next) => {
     clearInterval(keepAlive);
     clearInterval(heartbeat);
     removeSSEClient(warId, client);
+    
+    // Check if they have other active sessions before removing from store
+    const current = store.getPlayer(playerId);
+    if (current?.socketId === `sse_${playerId}`) {
+      store.removePlayerBySocket(`sse_${playerId}`);
+    }
+    
     console.log(`[sse] ${playerName} disconnected from stream`);
   });
 });

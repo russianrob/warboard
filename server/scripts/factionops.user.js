@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.6.3
+// @version      4.6.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
 // @downloadURL  https://tornwar.com/scripts/factionops.user.js
 // @updateURL    https://tornwar.com/scripts/factionops.meta.js
+// @require      https://cdn.socket.io/4.8.1/socket.io.min.js
 // @match        https://www.torn.com/factions.php?step=your*
 // @match        https://www.torn.com/factions.php?step=profile*
 // @match        https://www.torn.com/loader.php?sid=attack&user*
@@ -206,7 +207,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.6.3',
+        VERSION: '4.6.4',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2956,7 +2957,7 @@ body.wb-chain-active {
                     'Authorization': `Bearer ${state.jwtToken}`,
                 },
                 data: json,
-                timeout: 10000,
+                timeout: 20000,
                 onload(res) {
                     const data = safeParse(res.responseText);
                     if (res.status >= 200 && res.status < 300) resolve(data);
@@ -2999,7 +3000,7 @@ body.wb-chain-active {
                     'Content-Type': 'application/json',
                 },
                 data: '{}',
-                timeout: 10000,
+                timeout: 20000,
                 onload(res) {
                     const data = safeParse(res.responseText);
                     if (res.status >= 200 && res.status < 300) resolve(data);
@@ -3352,7 +3353,7 @@ body.wb-chain-active {
             reconnectionAttempts: Infinity,
             reconnectionDelay: 2000,
             reconnectionDelayMax: 30000,
-            timeout: 10000,
+            timeout: 20000,
         });
 
         realtimeSocket.on('connect', () => {
