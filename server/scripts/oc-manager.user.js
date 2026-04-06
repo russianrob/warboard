@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Manager
 // @namespace    https://torn.com
-// @version      2.3.11-pda
+// @version      2.3.12-pda
 // @description  Highlights over-loaned items, helps loan missing OC items (tools, drugs, medical, temporary, clothing, armor), tracks unpaid OC payouts (Modern UI, Dark/Light Mode, PDA compatible)
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-end
@@ -11,6 +11,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v2.3.12-pda - Fix: robust armory cache handling for unstacked items (e.g. Construction Helmet) returning "none in stock"
 // v2.3.11-pda - Fix: prevent recently loaned items from reappearing when switching tabs due to API lag
 // v2.3.10-pda - Fix: fetch both 'armor' and 'armour' categories to bypass Torn API spelling inconsistencies
 // v2.3.9-pda - Bump version for PDA cache clearing
