@@ -40,7 +40,6 @@ export const NOTIFICATION_TYPES = {
   chain_alert:     { label: "Chain Break Alerts",    description: "When chain timer drops below 30s",                  default: true  },
   hospital_pop:    { label: "Hospital Pops",         description: "When an enemy target leaves the hospital",          default: true  },
   bonus_imminent:  { label: "Bonus Milestones",      description: "When a bonus hit is 1–2 attacks away",              default: true  },
-  enemy_surge:     { label: "Enemy Online Surge",    description: "When multiple enemies come online at once",         default: true  },
   call_stolen:     { label: "Call Contested",        description: "When someone else views a target you called",       default: true  },
   war_target:      { label: "War Target Reached",    description: "When faction hits the custom war target",           default: true  },
 };
@@ -377,24 +376,6 @@ export async function notifyBonusImminent(warPlayers, warId, current, nextBonus)
       data: { type: "bonus", warId },
     },
     "bonus_imminent",
-  );
-}
-
-/**
- * Notify war room about an enemy online surge.
- */
-export async function notifyEnemySurge(warPlayers, warId, newOnlineCount, totalEnemies) {
-  const playerIds = warPlayers.map((p) => p.playerId || p.id);
-  await sendToPlayers(
-    playerIds.filter((id) => isSubscribed(id)),
-    {
-      title: "🚨 Enemy Online Surge",
-      body: `${newOnlineCount} enemies just came online (${totalEnemies} total)`,
-      tag: "enemy-surge",
-      icon: "/icon-192.png",
-      data: { type: "enemy-surge", warId },
-    },
-    "enemy_surge",
   );
 }
 

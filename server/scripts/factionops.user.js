@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.5
+// @version      4.8.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -40,6 +40,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.6   - Feature: Removed experimental "Enemy Surge" push notification (the heatmap natively tracks activity better now).
 // v4.8.5   - Feature: Rebuilt toast notification system with stacking, scaling duration, progress bars, and icons.
 // v4.5.33  - Feature: Added UI in settings for faction leaders to configure custom broadcast roles.
 // v4.5.31  - Improvement: Migrated Faction Broadcast to use HTTP POST, enabling leaders to broadcast even on fallback SSE connections.
@@ -306,7 +307,6 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
      *   200–299  chain_alert
      *   300–399  hospital_pop
      *   400–409  bonus_imminent
-     *   500–509  enemy_surge
      *   600–699  call_stolen
      *   800      war_target
      */
@@ -323,7 +323,6 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
             chain_alert:    [200, 299],
             hospital_pop:   [300, 399],
             bonus_imminent: [400, 409],
-            enemy_surge:    [500, 509],
             call_stolen:    [600, 699],
             war_target:     [800, 800],
         };

@@ -8,7 +8,6 @@
 import * as store from "./store.js";
 import { fetchFactionMembers } from "./torn-api.js";
 import { recordSample } from "./activity-heatmap.js";
-import { notifyEnemySurge } from "./push-notifications.js";
 import { evaluateStrategy, getEnemyActivityByHour } from "./strategy-engine.js";
 
 const POLL_INTERVAL_MS = 15_000; // 15 seconds
@@ -18,10 +17,7 @@ const MAX_BACKOFF_MS = 120_000;   // max 2 minutes between retries on failure
 const timeouts = new Map();
 /** Current backoff delay per warId (resets on success). */
 const backoffs = new Map();
-/** Previous enemy online count per warId — for surge detection. */
-const prevEnemyOnline = new Map();
 
-const SURGE_THRESHOLD = 3; // fire alert when ≥ 3 new enemies come online between polls
 const MAX_ACTIVITY_LOG = 5760; // 24 hours at 15s intervals
 
 // Legacy compat
@@ -71,19 +67,6 @@ export function startWarStatusMonitor(io, warId) {
         (m) => m.status?.state === "Okay" && m.activity === "online",
       ).length;
       const totalEnemies = Object.keys(freshStatuses).length;
-
-      // ── Enemy Online Surge Detection ──
-      try {
-        const prevCount = prevEnemyOnline.get(warId) ?? onlineNow; // first poll = no alert
-        const delta = onlineNow - prevCount;
-        prevEnemyOnline.set(warId, onlineNow);
-
-        if (delta >= SURGE_THRESHOLD) {
-          console.log(`[war-status] Enemy surge detected for war ${warId}: +${delta} (${onlineNow} online)`);
-          const warPlayers = store.getOnlinePlayersForWar(warId);
-          notifyEnemySurge(warPlayers, warId, delta, onlineNow).catch(() => {});
-        }
-      } catch (_) { /* non-critical */ }
 
       io.to(`war_${warId}`).emit("status_update", freshStatuses);
 
@@ -158,7 +141,6 @@ export function stopWarStatusMonitor(warId) {
     timeouts.delete(warId);
   }
   backoffs.delete(warId);
-  prevEnemyOnline.delete(warId);
   const id = intervals.get(warId);
   if (id) clearInterval(id);
   intervals.delete(warId);
@@ -175,7 +157,6 @@ export function stopAll() {
   }
   timeouts.clear();
   backoffs.clear();
-  prevEnemyOnline.clear();
   for (const [, id] of intervals) clearInterval(id);
   intervals.clear();
 }
