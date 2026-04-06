@@ -53,7 +53,10 @@ function broadcastSSE(warId, data) {
   if (!set || set.size === 0) return;
   const payload = `data: ${JSON.stringify(data)}\n\n`;
   for (const client of set) {
-    try { client.res.write(payload); } catch (_) { /* client gone */ }
+    try { 
+      client.res.write(payload); 
+      if (typeof client.res.flush === "function") client.res.flush();
+    } catch (_) { /* client gone */ }
   }
 }
 
