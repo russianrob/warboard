@@ -3465,6 +3465,9 @@ body.wb-chain-active {
             url: url,
             responseType: 'text',
             onprogress: (resp) => {
+                if (!resp || resp.responseText === undefined || resp.responseText === null) {
+                    return;
+                }
                 if (!sseConnected) {
                     sseConnected = true;
                     log('SSE stream connected');
