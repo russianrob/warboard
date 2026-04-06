@@ -24,6 +24,7 @@
 // v2.3.1-pda - Rename script and files to OC Manager
 // v2.3.0-pda - Add Light Mode toggle in settings; implemented CSS variables for theme support
 // v2.2.2-pda - Fix: UI lag (removed backdrop-filter), double-click toggle bug, and improved drag performance
+// v2.2.2-pda - Fix: robust armory cache handling for unstacked items (e.g. Construction Helmet) returning "none in stock"
 // v2.2.1-pda - Fix: corrupted template strings from previous update
 // v2.2.0-pda - Modern Dark UI overhaul: Glassmorphism, card-based layouts, and refined animations
 // v2.1.0-pda - Fix: robust retrieve button double-click prevention and better feedback
@@ -283,8 +284,20 @@
     armoryCache.clear();
     const items = await fetchAllArmoryItems();
     for (const entry of items) {
-      if (entry.user === false && entry.qty > 0) {
-        armoryCache.set(entry.itemID, { armoryID: entry.armoryID, qty: entry.qty, armoryCategory: entry.armoryCategory });
+      const isUnused = entry.user === false || entry.user === '' || entry.user === 0 || (entry.user && !entry.user.userID);
+      if (isUnused) {
+        const qty = entry.qty !== undefined ? Number(entry.qty) : (entry.quantity !== undefined ? Number(entry.quantity) : 1);
+        if (qty > 0) {
+          if (!armoryCache.has(entry.itemID)) {
+            armoryCache.set(entry.itemID, { armoryIDs: [entry.armoryID], qty: qty, armoryCategory: entry.armoryCategory });
+          } else {
+            const cached = armoryCache.get(entry.itemID);
+            cached.qty += qty;
+            if (!cached.armoryIDs.includes(entry.armoryID)) {
+                cached.armoryIDs.push(entry.armoryID);
+            }
+          }
+        }
       }
     }
     lastRefreshTime = Date.now();
@@ -294,10 +307,10 @@
     if (!armoryCache.has(itemID)) await refreshArmoryCache(true);
     else await refreshArmoryCache(false);
     const entry = armoryCache.get(itemID);
-    if (!entry || entry.qty <= 0) return null;
-    preparedArmoryID = entry.armoryID;
+    if (!entry || entry.qty <= 0 || !entry.armoryIDs || entry.armoryIDs.length === 0) return null;
+    preparedArmoryID = entry.armoryIDs[0];
     pendingArmoryItemID = itemID;
-    return entry.armoryID;
+    return preparedArmoryID;
   };
 
   const getPostTypeForItem = (itemID) => {
@@ -344,7 +357,13 @@
     const itemID = pendingArmoryItemID;
     await loanItem({ armoryID: preparedArmoryID, itemID: pendingArmoryItemID, userID, userName });
     const entry = armoryCache.get(pendingArmoryItemID);
-    if (entry) { entry.qty -= 1; if (entry.qty <= 0) armoryCache.delete(pendingArmoryItemID); }
+    if (entry) { 
+      entry.qty -= 1; 
+      entry.armoryIDs.shift();
+      if (entry.qty <= 0 || entry.armoryIDs.length === 0) {
+        armoryCache.delete(pendingArmoryItemID); 
+      }
+    }
     
     // Add to local assignment track to bypass API cache/lag
     const uid = String(userID);
