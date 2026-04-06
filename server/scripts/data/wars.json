@@ -389,7 +389,7 @@
         "level": 16,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86300461,
+        "until": 86300436,
         "lastAction": "282 days ago",
         "activity": "offline"
       },
@@ -704,7 +704,7 @@
         "level": 16,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86300461,
+        "until": 86300436,
         "lastAction": "110 days ago",
         "activity": "offline"
       },
@@ -758,7 +758,7 @@
         "level": 15,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86300461,
+        "until": 86300436,
         "lastAction": "89 days ago",
         "activity": "offline"
       },
@@ -803,7 +803,7 @@
         "level": 8,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86300461,
+        "until": 86300436,
         "lastAction": "40 days ago",
         "activity": "offline"
       },
@@ -839,7 +839,7 @@
         "level": 4,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86300461,
+        "until": 86300436,
         "lastAction": "26 days ago",
         "activity": "offline"
       }
@@ -853,18 +853,6 @@
     },
     "warTarget": null,
     "enemyActivityLog": [
-      {
-        "timestamp": 1775357708921,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
-      {
-        "timestamp": 1775357724204,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
       {
         "timestamp": 1775357739481,
         "online": 0,
@@ -35412,6 +35400,18 @@
         "online": 0,
         "idle": 9,
         "total": 93
+      },
+      {
+        "timestamp": 1775446749634,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775446764920,
+        "online": 0,
+        "idle": 9,
+        "total": 93
       }
     ],
     "strategy": {
@@ -35476,7 +35476,7 @@
     },
     "ourFactionOnline": {
       "online": 4,
-      "idle": 9,
+      "idle": 8,
       "total": 97
     },
     "enemyFactionName": "DarkHearts"
