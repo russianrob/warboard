@@ -42,18 +42,19 @@ export function startHeatmapScraper(warId, enemyId, apiKey, enemyName = null) {
 
             let activeCount = 0;
             const members = data.members || {};
+            const totalMembers = Object.keys(members).length;
 
             for (const member of Object.values(members)) {
                 if (member.last_action && member.last_action.status) {
-                    const status = member.last_action.status.toLowerCase();
-                    if (status === 'online' || status === 'idle') {
+                    const status = (member.last_action.status || "").toLowerCase();
+                    if (status === "online" || status === "idle") {
                         activeCount++;
                     }
                 }
             }
 
-            recordSample(enemyIdStr, activeCount);
-            console.log(`[HeatmapScraper] Recorded ${activeCount} active members for enemy faction ${currentName} (${enemyIdStr})`);
+            recordSample(enemyIdStr, activeCount, totalMembers);
+            console.log(`[HeatmapScraper] Recorded ${activeCount} active members for enemy faction ${currentName} (${enemyIdStr}) (Total: ${totalMembers})`);
 
         } catch (error) {
             console.error(`[HeatmapScraper] Network/Request failed for faction ${currentName || enemyIdStr}:`, error.message);
