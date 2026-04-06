@@ -12,7 +12,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "13 minutes ago",
+        "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "427122": {
@@ -21,7 +21,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "4 hours ago",
+        "lastAction": "6 hours ago",
         "activity": "offline"
       },
       "995642": {
@@ -30,7 +30,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "7 hours ago",
+        "lastAction": "9 hours ago",
         "activity": "offline"
       },
       "1184766": {
@@ -39,8 +39,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "10 hours ago",
-        "activity": "idle"
+        "lastAction": "4 minutes ago",
+        "activity": "offline"
       },
       "1742026": {
         "name": "SMoto",
@@ -48,8 +48,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "3 hours ago",
-        "activity": "idle"
+        "lastAction": "1 minute ago",
+        "activity": "online"
       },
       "1976422": {
         "name": "Krystm",
@@ -57,7 +57,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "2 hours ago",
+        "lastAction": "4 hours ago",
         "activity": "offline"
       },
       "1985713": {
@@ -66,7 +66,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "4 hours ago",
+        "lastAction": "20 minutes ago",
         "activity": "offline"
       },
       "2037705": {
@@ -84,7 +84,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "7 hours ago",
+        "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "2161801": {
@@ -93,7 +93,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "6 hours ago",
+        "lastAction": "8 hours ago",
         "activity": "offline"
       },
       "2222799": {
@@ -102,14 +102,14 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "9 minutes ago",
+        "lastAction": "2 hours ago",
         "activity": "offline"
       },
       "2240004": {
         "name": "Pastor_Quiboloy",
         "level": 49,
-        "status": "traveling",
-        "description": "Traveling to China",
+        "status": "abroad",
+        "description": "In China",
         "until": 0,
         "lastAction": "1 hour ago",
         "activity": "offline"
@@ -120,17 +120,17 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "3 hours ago",
+        "lastAction": "5 hours ago",
         "activity": "offline"
       },
       "2298570": {
         "name": "Depacon",
         "level": 37,
-        "status": "traveling",
-        "description": "Returning to Torn from United Kingdom",
+        "status": "okay",
+        "description": "Okay",
         "until": 0,
-        "lastAction": "21 minutes ago",
-        "activity": "offline"
+        "lastAction": "19 minutes ago",
+        "activity": "idle"
       },
       "2316988": {
         "name": "Xhex55",
@@ -138,7 +138,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "10 hours ago",
+        "lastAction": "12 hours ago",
         "activity": "offline"
       },
       "2335842": {
@@ -156,7 +156,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "3 hours ago",
+        "lastAction": "20 minutes ago",
         "activity": "offline"
       },
       "2352134": {
@@ -165,7 +165,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "18 hours ago",
+        "lastAction": "20 hours ago",
         "activity": "offline"
       },
       "2578478": {
@@ -174,8 +174,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "6 hours ago",
-        "activity": "offline"
+        "lastAction": "36 minutes ago",
+        "activity": "idle"
       },
       "2595471": {
         "name": "22Reflex",
@@ -183,8 +183,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "34 minutes ago",
-        "activity": "offline"
+        "lastAction": "1 minute ago",
+        "activity": "online"
       },
       "2596398": {
         "name": "MonsieurMD12",
@@ -192,7 +192,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "17 minutes ago",
+        "lastAction": "4 minutes ago",
         "activity": "offline"
       },
       "2625496": {
@@ -201,7 +201,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "15 hours ago",
+        "lastAction": "17 hours ago",
         "activity": "offline"
       },
       "2635377": {
@@ -210,7 +210,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "2 hours ago",
+        "lastAction": "8 minutes ago",
         "activity": "offline"
       },
       "2664544": {
@@ -219,7 +219,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "4 hours ago",
+        "lastAction": "6 hours ago",
         "activity": "offline"
       },
       "2686635": {
@@ -237,7 +237,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "2 hours ago",
+        "lastAction": "4 hours ago",
         "activity": "offline"
       },
       "2746623": {
@@ -246,7 +246,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 hour ago",
+        "lastAction": "3 hours ago",
         "activity": "idle"
       },
       "2753520": {
@@ -264,7 +264,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "3 hours ago",
+        "lastAction": "44 minutes ago",
         "activity": "idle"
       },
       "2790800": {
@@ -273,7 +273,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "32 minutes ago",
+        "lastAction": "2 hours ago",
         "activity": "offline"
       },
       "2803351": {
@@ -291,7 +291,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "53 minutes ago",
+        "lastAction": "1 hour ago",
         "activity": "idle"
       },
       "2851239": {
@@ -300,7 +300,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "11 hours ago",
+        "lastAction": "13 hours ago",
         "activity": "offline"
       },
       "2855542": {
@@ -327,7 +327,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "21 hours ago",
+        "lastAction": "23 hours ago",
         "activity": "offline"
       },
       "3078978": {
@@ -354,7 +354,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 hour ago",
+        "lastAction": "3 hours ago",
         "activity": "offline"
       },
       "3260050": {
@@ -369,19 +369,19 @@
       "3302947": {
         "name": "Jordii",
         "level": 50,
-        "status": "abroad",
-        "description": "In China",
+        "status": "traveling",
+        "description": "Returning to Torn from China",
         "until": 0,
-        "lastAction": "6 minutes ago",
+        "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "3336726": {
         "name": "Kanisk",
         "level": 22,
-        "status": "traveling",
-        "description": "Returning to Torn from UAE",
+        "status": "okay",
+        "description": "Okay",
         "until": 0,
-        "lastAction": "16 minutes ago",
+        "lastAction": "2 hours ago",
         "activity": "offline"
       },
       "3358933": {
@@ -389,7 +389,7 @@
         "level": 16,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86251560,
+        "until": 86244212,
         "lastAction": "283 days ago",
         "activity": "offline"
       },
@@ -399,17 +399,17 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "19 hours ago",
+        "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "3441372": {
         "name": "TsTEu",
         "level": 25,
-        "status": "okay",
-        "description": "Okay",
+        "status": "traveling",
+        "description": "Traveling to UAE",
         "until": 0,
-        "lastAction": "0 minutes ago",
-        "activity": "online"
+        "lastAction": "1 hour ago",
+        "activity": "offline"
       },
       "3457809": {
         "name": "BlackRaptor",
@@ -426,8 +426,8 @@
         "status": "traveling",
         "description": "Returning to Torn from UAE",
         "until": 0,
-        "lastAction": "2 minutes ago",
-        "activity": "idle"
+        "lastAction": "1 hour ago",
+        "activity": "offline"
       },
       "3496690": {
         "name": "Louisianatic",
@@ -435,7 +435,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "21 hours ago",
+        "lastAction": "23 hours ago",
         "activity": "offline"
       },
       "3501351": {
@@ -444,8 +444,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "0 minutes ago",
-        "activity": "online"
+        "lastAction": "1 hour ago",
+        "activity": "offline"
       },
       "3553256": {
         "name": "MyssBrooks",
@@ -453,16 +453,16 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "18 hours ago",
+        "lastAction": "20 hours ago",
         "activity": "offline"
       },
       "3589447": {
         "name": "Speelcraft",
         "level": 21,
-        "status": "traveling",
-        "description": "Traveling to China",
+        "status": "abroad",
+        "description": "In China",
         "until": 0,
-        "lastAction": "3 hours ago",
+        "lastAction": "5 hours ago",
         "activity": "offline"
       },
       "3618264": {
@@ -471,7 +471,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "12 minutes ago",
+        "lastAction": "6 minutes ago",
         "activity": "offline"
       },
       "3673557": {
@@ -480,14 +480,14 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 hour ago",
+        "lastAction": "3 hours ago",
         "activity": "offline"
       },
       "3680304": {
         "name": "CthulhuCurse",
         "level": 46,
         "status": "traveling",
-        "description": "Traveling to Argentina",
+        "description": "Returning to Torn from Argentina",
         "until": 0,
         "lastAction": "1 hour ago",
         "activity": "offline"
@@ -498,25 +498,25 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 hour ago",
-        "activity": "idle"
+        "lastAction": "35 minutes ago",
+        "activity": "offline"
       },
       "3722615": {
         "name": "Delegaia",
         "level": 45,
-        "status": "okay",
-        "description": "Okay",
+        "status": "abroad",
+        "description": "In Canada",
         "until": 0,
-        "lastAction": "1 hour ago",
-        "activity": "offline"
+        "lastAction": "37 minutes ago",
+        "activity": "idle"
       },
       "3763090": {
         "name": "Mbun",
         "level": 55,
-        "status": "traveling",
-        "description": "Traveling to Japan",
+        "status": "abroad",
+        "description": "In Japan",
         "until": 0,
-        "lastAction": "1 hour ago",
+        "lastAction": "3 hours ago",
         "activity": "offline"
       },
       "3787350": {
@@ -525,8 +525,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 hour ago",
-        "activity": "offline"
+        "lastAction": "0 minutes ago",
+        "activity": "online"
       },
       "3802452": {
         "name": "SophiaSnow",
@@ -534,16 +534,16 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "18 hours ago",
+        "lastAction": "20 hours ago",
         "activity": "offline"
       },
       "3819110": {
         "name": "Exkapaid",
         "level": 38,
-        "status": "traveling",
-        "description": "Returning to Torn from South Africa",
+        "status": "okay",
+        "description": "Okay",
         "until": 0,
-        "lastAction": "25 minutes ago",
+        "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "3839259": {
@@ -552,7 +552,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "4 hours ago",
+        "lastAction": "36 minutes ago",
         "activity": "offline"
       },
       "3843961": {
@@ -561,7 +561,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "47 minutes ago",
+        "lastAction": "2 hours ago",
         "activity": "offline"
       },
       "3846723": {
@@ -570,7 +570,7 @@
         "status": "traveling",
         "description": "Returning to Torn from South Africa",
         "until": 0,
-        "lastAction": "1 hour ago",
+        "lastAction": "28 minutes ago",
         "activity": "offline"
       },
       "3852897": {
@@ -579,7 +579,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "16 hours ago",
+        "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "3862031": {
@@ -588,16 +588,16 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "4 hours ago",
+        "lastAction": "6 hours ago",
         "activity": "offline"
       },
       "3862800": {
         "name": "The_Grungler",
         "level": 45,
         "status": "traveling",
-        "description": "Traveling to Hawaii",
+        "description": "Returning to Torn from Hawaii",
         "until": 0,
-        "lastAction": "31 minutes ago",
+        "lastAction": "13 minutes ago",
         "activity": "offline"
       },
       "3869018": {
@@ -615,7 +615,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "11 hours ago",
+        "lastAction": "13 hours ago",
         "activity": "offline"
       },
       "3872206": {
@@ -624,62 +624,62 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "18 hours ago",
+        "lastAction": "20 hours ago",
         "activity": "offline"
       },
       "3879142": {
         "name": "chief_rocka",
         "level": 52,
         "status": "traveling",
-        "description": "Traveling to Japan",
+        "description": "Returning to Torn from Japan",
         "until": 0,
-        "lastAction": "4 minutes ago",
+        "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "3881866": {
         "name": "GrimFury",
         "level": 40,
         "status": "traveling",
-        "description": "Traveling to Hawaii",
+        "description": "Returning to Torn from Hawaii",
         "until": 0,
-        "lastAction": "1 hour ago",
-        "activity": "offline"
+        "lastAction": "13 minutes ago",
+        "activity": "online"
       },
       "3891471": {
         "name": "Flegrea",
         "level": 51,
-        "status": "traveling",
-        "description": "Traveling to Hawaii",
+        "status": "okay",
+        "description": "Okay",
         "until": 0,
-        "lastAction": "1 hour ago",
-        "activity": "offline"
+        "lastAction": "7 minutes ago",
+        "activity": "idle"
       },
       "3907210": {
         "name": "RieMFS",
         "level": 22,
-        "status": "hospital",
-        "description": "In hospital for 4 mins ",
-        "until": 280,
-        "lastAction": "8 minutes ago",
+        "status": "okay",
+        "description": "Okay",
+        "until": 0,
+        "lastAction": "21 minutes ago",
         "activity": "offline"
       },
       "3924692": {
         "name": "DepressedWitch",
         "level": 33,
         "status": "traveling",
-        "description": "Traveling to China",
+        "description": "Returning to Torn from China",
         "until": 0,
         "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "3932640": {
         "name": "ninja_balls",
-        "level": 40,
+        "level": 41,
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "37 minutes ago",
-        "activity": "offline"
+        "lastAction": "0 minutes ago",
+        "activity": "online"
       },
       "3948710": {
         "name": "Lexiannmarie",
@@ -687,16 +687,16 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "13 hours ago",
+        "lastAction": "15 hours ago",
         "activity": "offline"
       },
       "3974908": {
         "name": "AK-67",
         "level": 28,
-        "status": "okay",
-        "description": "Okay",
+        "status": "traveling",
+        "description": "Traveling to Japan",
         "until": 0,
-        "lastAction": "11 minutes ago",
+        "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "3979973": {
@@ -704,7 +704,7 @@
         "level": 16,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86251560,
+        "until": 86244212,
         "lastAction": "111 days ago",
         "activity": "offline"
       },
@@ -714,8 +714,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "3 hours ago",
-        "activity": "offline"
+        "lastAction": "51 minutes ago",
+        "activity": "idle"
       },
       "3987497": {
         "name": "FellOmen",
@@ -723,7 +723,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "15 minutes ago",
+        "lastAction": "2 hours ago",
         "activity": "offline"
       },
       "4000591": {
@@ -732,7 +732,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 hour ago",
+        "lastAction": "23 minutes ago",
         "activity": "offline"
       },
       "4009573": {
@@ -741,7 +741,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "2 minutes ago",
+        "lastAction": "2 hours ago",
         "activity": "offline"
       },
       "4022212": {
@@ -758,36 +758,36 @@
         "level": 15,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86251560,
+        "until": 86244212,
         "lastAction": "89 days ago",
         "activity": "offline"
       },
       "4027968": {
         "name": "OtakBerkarat",
         "level": 30,
-        "status": "traveling",
-        "description": "Returning to Torn from UAE",
+        "status": "okay",
+        "description": "Okay",
         "until": 0,
-        "lastAction": "2 hours ago",
+        "lastAction": "4 hours ago",
         "activity": "offline"
       },
       "4028234": {
         "name": "Wealtherie",
         "level": 15,
-        "status": "traveling",
-        "description": "Traveling to Canada",
+        "status": "okay",
+        "description": "Okay",
         "until": 0,
-        "lastAction": "3 minutes ago",
+        "lastAction": "16 minutes ago",
         "activity": "offline"
       },
       "4030056": {
         "name": "Doc_Lobster",
         "level": 19,
         "status": "traveling",
-        "description": "Traveling to South Africa",
+        "description": "Returning to Torn from South Africa",
         "until": 0,
-        "lastAction": "1 minute ago",
-        "activity": "online"
+        "lastAction": "19 minutes ago",
+        "activity": "offline"
       },
       "4067231": {
         "name": "DinoMcFlurry3",
@@ -803,7 +803,7 @@
         "level": 8,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86251560,
+        "until": 86244212,
         "lastAction": "41 days ago",
         "activity": "offline"
       },
@@ -811,9 +811,9 @@
         "name": "Trepl",
         "level": 16,
         "status": "hospital",
-        "description": "In a Caymanian hospital for 7 mins ",
-        "until": 432,
-        "lastAction": "3 hours ago",
+        "description": "In a Caymanian hospital for 2 hrs 36 mins ",
+        "until": 9370,
+        "lastAction": "5 hours ago",
         "activity": "offline"
       },
       "4106405": {
@@ -831,15 +831,15 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 minute ago",
-        "activity": "online"
+        "lastAction": "17 minutes ago",
+        "activity": "offline"
       },
       "4161748": {
         "name": "_Ech0_",
         "level": 4,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86251560,
+        "until": 86244212,
         "lastAction": "27 days ago",
         "activity": "offline"
       }
@@ -853,2934 +853,6 @@
     },
     "warTarget": null,
     "enemyActivityLog": [
-      {
-        "timestamp": 1775406047000,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406062344,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406077625,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406092980,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406108261,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406123607,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406138966,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406154316,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406169611,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406184958,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406200258,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406215617,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406230921,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406246294,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406261578,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406276930,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406292227,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406307571,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406322863,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406338237,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406353534,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406368895,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406384221,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406399698,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406414981,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406430370,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406445783,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406461130,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406476413,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406491750,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406507092,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406522481,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406537770,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406553132,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406568520,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406583937,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406599221,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406614574,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406630047,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406645387,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406660681,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406676012,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406691302,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406706642,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406721939,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406737303,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406752578,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406767925,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406783212,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406798596,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406813908,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406829243,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406844529,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406859862,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406905392,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406920694,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406966194,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406981504,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775406996823,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407012131,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407027450,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407042758,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407088222,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407103584,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407149070,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407164554,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407179951,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407195366,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407210784,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407226085,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407241425,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407256710,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407272096,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407287415,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407302782,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407318201,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407333542,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407348841,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407364193,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407379516,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407394981,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407410322,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407425709,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407441008,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407456336,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407471620,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407486953,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407502254,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407517655,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407532996,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407548365,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407563659,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407578996,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407594289,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407609678,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407624971,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407640371,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407655661,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407670983,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407686272,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407701618,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407716906,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407732297,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407747628,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407763028,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407778380,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407793836,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407809247,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407824584,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407839946,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407855474,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407870895,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407886340,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407901624,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407916953,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407932234,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407947565,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407962869,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407978212,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775407993482,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408008821,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408024114,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408039456,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408054756,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408070314,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408085611,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408100996,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408116291,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408131641,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408146933,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408162274,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408177557,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408192903,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408208205,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408223561,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408238876,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408254239,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408269519,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408284867,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408300188,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408315526,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408330817,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408346219,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408361497,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408376855,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408392143,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408407548,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408422849,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408438256,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408453537,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408468886,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408484155,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408499634,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408514917,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408530253,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408545527,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408560931,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408576224,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408591632,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408606908,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408622254,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408637543,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408652886,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408668160,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408683540,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408698859,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408714190,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408729488,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408744824,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408760096,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408775439,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408790783,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408806138,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408821419,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408836782,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408852158,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408867556,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408882836,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408898340,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408913729,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408929091,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408944384,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408959737,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408975114,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775408990432,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409005714,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409021056,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409036338,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409051666,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409066946,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409082307,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409097603,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409112943,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409128234,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409143571,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409158839,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409174183,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409189473,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409204822,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409220092,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409235558,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409250841,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409266205,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409281476,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409296834,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409312132,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409327564,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409342874,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409358235,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409373589,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409389102,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409404410,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409419768,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409435109,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409450594,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409465935,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409481263,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409496574,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409511906,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409527190,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409542534,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409557833,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409573293,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409588651,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409603996,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409619300,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409634683,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409650119,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409665475,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409680812,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409696196,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409711505,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409726847,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409742146,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409757484,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409772780,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409788146,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409803443,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409818781,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409834085,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409849448,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409864739,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409880079,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409895557,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409910887,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409926166,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409941505,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409956798,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409972136,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775409987448,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410002925,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410018248,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410033585,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410048865,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410064194,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410079473,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410094846,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410110167,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410125617,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410140908,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410156238,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410171531,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410186883,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410202170,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410217515,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410232795,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410248200,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410263498,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410278860,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410294182,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410309525,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410324815,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410340226,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410355511,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410370847,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410386136,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410401493,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410416777,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410432124,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410447393,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410462724,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410478002,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410493341,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410508628,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410523966,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410539272,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410554696,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410569967,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410585312,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410600609,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410615958,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410631235,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410646612,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410661884,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410677238,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410692516,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410707858,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410723144,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410738482,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410753772,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410769133,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410784639,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410799978,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410815272,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410830694,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410845976,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410861324,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410876595,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410891941,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410907239,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410922571,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410937859,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410953341,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410968629,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410984024,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775410999416,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411014810,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411030098,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411045476,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411060765,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411076159,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411091456,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411106791,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411122424,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411137904,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411153198,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411168685,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411183984,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411199352,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411214634,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411229980,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411245271,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411260625,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411275913,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411291349,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411306664,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411321995,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411337282,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411352657,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411367946,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411383284,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411398570,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411413900,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411429214,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411444545,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411459824,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411475172,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411490668,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411506078,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411521372,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411536706,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411551992,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411567339,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411582652,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411597988,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411613289,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411628657,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411643953,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411659365,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411674714,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411690052,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411705405,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411720749,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411736072,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411751399,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411766696,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411782062,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411797357,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411812702,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411827993,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411843491,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411858796,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411874243,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411889535,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411904899,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411920196,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411935658,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411950945,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411966288,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411981696,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775411997023,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412012436,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412027847,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412043147,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412058503,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412073880,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412089257,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412104648,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412119989,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412135297,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412150657,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412165949,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412181272,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412196540,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412212110,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412227392,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412242715,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412258025,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412273361,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412288614,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412303983,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412319286,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412334711,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412349988,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412365313,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412380583,
-        "online": 0,
-        "idle": 12,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412395920,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412411175,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412426511,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412441783,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412457139,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412472414,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412487758,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412503145,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412518600,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412533873,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412549213,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412564486,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412579846,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412595129,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412610674,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412625958,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412641289,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412656556,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412671986,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412687368,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412702670,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412717913,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412733217,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412748481,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412763832,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412779226,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412794565,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412809824,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412825182,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412840448,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412855806,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412871116,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412886501,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412901775,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412917310,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412932582,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412947943,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412963193,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412978530,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775412993819,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413009232,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413024522,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413039876,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413055191,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413070711,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413085995,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413101316,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413116580,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413131915,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413147202,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413162555,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413177841,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413193144,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413208475,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413223879,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413239299,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413254621,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413269892,
-        "online": 0,
-        "idle": 11,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413285218,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413300518,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413315829,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413331093,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413346439,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413361750,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413377083,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413392456,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413407828,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413423117,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413438452,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413453723,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413469103,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413484367,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413499682,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413514946,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413530314,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413545591,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413560930,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413576222,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413591661,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413606911,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413622280,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775413637682,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
       {
         "timestamp": 1775413653008,
         "online": 0,
@@ -35412,16 +32484,2945 @@
         "online": 0,
         "idle": 8,
         "total": 93
+      },
+      {
+        "timestamp": 1775495656105,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495669991,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495685263,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495693838,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495709256,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495724552,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495739850,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495755236,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495760484,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495775844,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495791212,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495806507,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495821805,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495837135,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495850990,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495866279,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495881562,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495896844,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495912177,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495927462,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495941516,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495956821,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495972121,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775495987425,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496002710,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496018012,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496032004,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496047307,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496062589,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496077896,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496093188,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496108475,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496122488,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496137844,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496153143,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496168445,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496183755,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496199065,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496212971,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496228275,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496243564,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496258874,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496274178,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496289482,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496303522,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496318806,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496334184,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496349463,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496364755,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496380044,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496393952,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496409236,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496424553,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496439840,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496455180,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496470477,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496484484,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496499784,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496515083,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496530377,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496545660,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496560973,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496574961,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496590252,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496605677,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496621302,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496636687,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496652006,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496665465,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496680726,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496696009,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496711330,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496726612,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496741893,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496755998,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496771278,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496786580,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496801975,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496817266,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496832733,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496846444,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496861722,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496877002,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496892305,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496907624,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496922924,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496937020,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496952354,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496967666,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496983039,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775496998416,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497013727,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497027467,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497042772,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497058080,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497073382,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497088670,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497103985,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497118008,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497133352,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497148636,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497163920,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497179210,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497194492,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497208472,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497223772,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497239045,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497254331,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497269653,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497284938,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497298953,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497314251,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497329539,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497344822,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497360108,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497375588,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497389529,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497404829,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497420116,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497435540,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497450843,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497466119,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497480009,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497495507,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497510798,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497526250,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497541630,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497556913,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497570419,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497585731,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497601075,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497616368,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497631706,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497647033,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497661113,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497676407,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497691836,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497707197,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497722494,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497737772,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497751460,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497766782,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497782068,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497797347,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497812653,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497827969,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497841938,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497857237,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497872520,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497887799,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497903103,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497918418,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497932424,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497947723,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497962999,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497978280,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775497993567,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498008867,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498022988,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498038275,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498053608,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498068890,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498084239,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498099524,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498113458,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498128749,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498144033,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498159321,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498174602,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498189923,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498203982,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498219323,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498234722,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498250078,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498265382,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498280671,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498294431,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498309723,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498325017,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498340301,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498355582,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498370998,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498384943,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498400248,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498415554,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498430871,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498446212,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498461498,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498475502,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498490792,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498506120,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498521406,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498536723,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498552007,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498565937,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498581223,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498596523,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498611933,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498627286,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498642711,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498656509,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498671824,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498687106,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498702425,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498717731,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498733010,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498747016,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498762296,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498777693,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498793041,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498808360,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498823640,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498837467,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498852756,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498868124,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498883414,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498898694,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498913981,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498927960,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498943243,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498958553,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498973843,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775498989211,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499004588,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499018530,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499033834,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499049151,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499064435,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499079733,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499095042,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499108944,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499124289,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499139595,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499154878,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499170237,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499185611,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499199448,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499214752,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499230030,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499245352,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499260656,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499275939,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499289975,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499305265,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499320841,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499336476,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499351763,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499367214,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499380529,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499395830,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499411117,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499426394,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499441674,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499457053,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499470959,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499486236,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499501521,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499516836,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499532130,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499547440,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499561475,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499576756,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499592062,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499607346,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499622666,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499637956,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499651974,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499667264,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499682672,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499697951,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499713252,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499728707,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499742462,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499757742,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499773018,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499788331,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499803602,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499818894,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499833021,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499848308,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499863599,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499878902,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499894186,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499909479,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499923469,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499938746,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499954083,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499969409,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775499984718,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500000009,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500014009,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500029291,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500044571,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500059853,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500075161,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500090705,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500104589,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500119870,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500135400,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500150808,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500166204,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500181487,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500194944,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500210200,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500225540,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500240836,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500256182,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500271485,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500285566,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500300815,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500316208,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500331708,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500347281,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500362556,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500375972,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500391370,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500406759,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500422083,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500437366,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500452682,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500466440,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500481820,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500497099,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500512464,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500527716,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500543013,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500556939,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500572326,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500587581,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500602922,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500618174,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500633481,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500647431,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500662748,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500678025,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500693341,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500708598,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500723905,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500737980,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500753297,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500768641,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500783950,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500799280,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500814586,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500828487,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500843797,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500859051,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500874453,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500889728,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500905151,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500918947,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500934314,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500949583,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500964907,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500980163,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775500995582,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501009411,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501024714,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501039974,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501055346,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501070625,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501086076,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501099962,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501115351,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501130655,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501145978,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501161264,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501176594,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501190476,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501205784,
+        "online": 0,
+        "idle": 13,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501221045,
+        "online": 0,
+        "idle": 13,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501236364,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501251620,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501266927,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501280921,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501296228,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501311477,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501326925,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501342328,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501357695,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501371483,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501386787,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501402050,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501417392,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501432677,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501448024,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501461965,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501477305,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501492598,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501507918,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501523227,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501538765,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501552489,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501567794,
+        "online": 0,
+        "idle": 13,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501583052,
+        "online": 0,
+        "idle": 13,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501598376,
+        "online": 0,
+        "idle": 13,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501613635,
+        "online": 0,
+        "idle": 13,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501628964,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501642936,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501658262,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501673563,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501689056,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501704326,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501719642,
+        "online": 0,
+        "idle": 13,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501733449,
+        "online": 0,
+        "idle": 13,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501748755,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501764007,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501779407,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501794697,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501810001,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501823958,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501839298,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501854568,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501869870,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501885126,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501900468,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501914469,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501929788,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501945043,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501960368,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501975629,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775501990969,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502005224,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502020917,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502036257,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502051588,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502066943,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502082339,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502095448,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502110710,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502126083,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502141334,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502156643,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502171934,
+        "online": 0,
+        "idle": 12,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502186047,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502201383,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502216715,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502231965,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502247309,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502262617,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502278210,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502293458,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502308923,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502324244,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502339591,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502355014,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502368693,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502383957,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502399256,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502414536,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502429832,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502445111,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502459206,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502474509,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502489854,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502505157,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502520514,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502535848,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502549708,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502565012,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502580294,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502595739,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502611061,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502626362,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502640202,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502655654,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502670978,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502686284,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502701622,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502716952,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502730792,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502746072,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502761378,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502776651,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502791959,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502807304,
+        "online": 0,
+        "idle": 11,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502821216,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502836502,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502851784,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502867078,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502882367,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502897757,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502911938,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502927280,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502942585,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502957871,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502973165,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775502988457,
+        "online": 0,
+        "idle": 9,
+        "total": 93
       }
     ],
     "strategy": {
       "recommendation": "PUSH",
-      "confidence": 30,
+      "confidence": 50,
       "reasons": [
         "Behind on score — need to catch up",
+        "Enemy dead zone hour — strike now",
         "Late war and behind — push hard now"
       ],
-      "timing": "neutral",
+      "timing": "good",
       "enemyPeak": {
         "hour": 0,
         "avgOnline": 0
@@ -35431,8 +35432,8 @@
         "avgOnline": 0
       },
       "currentPhase": "late",
-      "currentHour": 17,
-      "score": 30
+      "currentHour": 19,
+      "score": 50
     },
     "enemyActivityByHour": {
       "0": 0,
@@ -35467,14 +35468,14 @@
     "warStart": 1775246400,
     "warOrigTarget": 11232,
     "warEta": {
-      "etaTimestamp": 1775504720285,
-      "hoursRemaining": 2.6464070908515356,
-      "currentTarget": 6318,
-      "calculatedAt": 1775495193220
+      "etaTimestamp": 1775504989412,
+      "hoursRemaining": 0.6097961867192637,
+      "currentTarget": 6084,
+      "calculatedAt": 1775502794146
     },
     "ourFactionOnline": {
-      "online": 13,
-      "idle": 15,
+      "online": 9,
+      "idle": 17,
       "total": 97
     },
     "enemyFactionName": "DarkHearts"

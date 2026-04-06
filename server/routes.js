@@ -85,8 +85,6 @@ function broadcastWarUpdate(warId) {
     warEta: war.warEta || null,
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
-    strategy: war.strategy || null,
-    enemyActivityByHour: war.enemyActivityByHour || null,
   };
   // Push to Socket.IO clients
   if (io) io.to(`war_${warId}`).emit("war_update", payload);
@@ -394,8 +392,6 @@ router.get("/api/stream", (req, res, next) => {
     warEta: war.warEta || null,
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
-    strategy: war.strategy || null,
-    enemyActivityByHour: war.enemyActivityByHour || null,
   };
   res.write(`data: ${JSON.stringify(initial)}\n\n`);
 

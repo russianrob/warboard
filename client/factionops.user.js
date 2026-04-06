@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.6
+// @version      4.8.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -40,6 +40,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.7   - Feature: Removed automated Push/Hold/Turtle Strategy Engine from the overlay.
 // v4.8.6   - Feature: Removed experimental "Enemy Surge" push notification (the heatmap natively tracks activity better now).
 // v4.8.5   - Feature: Rebuilt toast notification system with stacking, scaling duration, progress bars, and icons.
 // v4.5.33  - Feature: Added UI in settings for faction leaders to configure custom broadcast roles.
@@ -3283,13 +3284,7 @@ body.wb-chain-active {
             if (data.warEnded) showWarEndedBanner();
         }
 
-        // ── Strategy recommendation ──
-        if (data.strategy !== undefined) {
-            state.strategy = data.strategy;
-        }
-        if (data.enemyActivityByHour !== undefined) {
-            state.enemyActivityByHour = data.enemyActivityByHour;
-        }
+        // ── Removed strategy engine ──
         updateStrategyBar();
 
         // Refresh UI rows
@@ -6002,7 +5997,6 @@ body.wb-chain-active {
                 </div>
             </div>
             <div class="fo-next-up-bar" id="fo-next-up"></div>
-            <div class="fo-strategy-bar hidden" id="fo-strategy-bar"></div>
             ${isLeader() ? `
             <div class="fo-broadcast-entry-bar">
                 <input type="text" id="fo-input-broadcast" placeholder="Broadcast message to faction..." maxlength="150">
@@ -7702,11 +7696,8 @@ body.wb-chain-active {
                         if (msg.statuses) mergeStatusesMonotonic(msg.statuses);
                         if (msg.warScores) state.warScores = msg.warScores;
                         if (msg.warEta) state.warEta = msg.warEta;
-                        if (msg.strategy) state.strategy = msg.strategy;
-                        if (msg.enemyActivityByHour) state.enemyActivityByHour = msg.enemyActivityByHour;
-                        
-                        if (msg.chain || msg.chainData) {
-                            const c = msg.chain || msg.chainData;
+
+                        if (msg.chain || msg.chainData) {                            const c = msg.chain || msg.chainData;
                             const { timeout, cooldown, ...rest } = c;
                             Object.assign(state.chain, rest);
                             if (timeout != null) {
@@ -7917,59 +7908,7 @@ body.wb-chain-active {
 
     function updateStrategyBar() {
         const bar = document.getElementById('fo-strategy-bar');
-        if (!bar) return;
-
-        const s = state.strategy;
-        if (!s || !s.recommendation) {
-            bar.classList.add('hidden');
-            return;
-        }
-        bar.classList.remove('hidden');
-
-        const rec = s.recommendation; // "PUSH", "HOLD", "TURTLE"
-        const cls = rec.toLowerCase();
-
-        const timingLabels = {
-            good: 'Good time to attack',
-            neutral: 'Neutral timing',
-            bad: 'Bad time — enemy peak',
-        };
-        const timingLabel = timingLabels[s.timing] || 'Neutral timing';
-
-        const phaseLabels = { pre: 'Pre-War', opening: 'Opening', mid: 'Mid-War', late: 'Late War' };
-        const phaseLabel = phaseLabels[s.currentPhase] || '';
-
-        // Build activity sparkline
-        let sparkline = '';
-        const abh = state.enemyActivityByHour;
-        if (abh && Object.keys(abh).length > 0) {
-            const maxVal = Math.max(...Object.values(abh), 1);
-            const currentHour = s.currentHour != null ? s.currentHour : new Date().getUTCHours();
-            const peakH = s.enemyPeak ? s.enemyPeak.hour : -1;
-            const deadH = s.enemyDead ? s.enemyDead.hour : -1;
-
-            let bars = '';
-            for (let h = 0; h < 24; h++) {
-                const val = abh[h] || 0;
-                const pct = Math.max(2, Math.round((val / maxVal) * 100));
-                let barCls = 'fo-activity-chart-bar';
-                if (h === currentHour) barCls += ' current';
-                else if (h === peakH) barCls += ' peak';
-                else if (h === deadH) barCls += ' dead';
-                bars += '<div class="' + barCls + '" style="height:' + pct + '%" title="' + h + ':00 UTC — ' + val + ' avg online"></div>';
-            }
-            sparkline = '<div class="fo-activity-chart">' + bars + '</div>';
-        }
-
-        const reasons = (s.reasons || []).slice(0, 3).join(' · ');
-
-        bar.innerHTML =
-            '<span class="fo-strategy-badge ' + cls + '">' + escapeHtml(rec) + '</span>'
-            + '<span class="fo-strategy-confidence">' + (s.confidence || 0) + '%</span>'
-            + '<span class="fo-strategy-timing ' + (s.timing || 'neutral') + '">' + escapeHtml(timingLabel) + '</span>'
-            + '<span class="fo-strategy-reasons">' + escapeHtml(reasons) + '</span>'
-            + sparkline
-            + '<span class="fo-strategy-phase">' + escapeHtml(phaseLabel) + '</span>';
+        if (bar) bar.remove();
     }
 
     // =========================================================================
@@ -8403,70 +8342,7 @@ body.wb-chain-active {
             </div>
         </div>`;
 
-        // ── I. LIVE STRATEGY (only during active war) ──
-        if (state.strategy && state.strategy.recommendation && bp.warPhase !== 'pre') {
-            const strat = state.strategy;
-            const stratCls = strat.recommendation.toLowerCase();
-            const timingLabels = { good: 'Good time to attack', neutral: 'Neutral timing', bad: 'Bad time — enemy peak' };
-            const phaseLabels = { pre: 'Pre-War', opening: 'Opening', mid: 'Mid-War', late: 'Late War' };
-
-            html += `<div class="wb-scout-section">
-                <h3>Live Strategy Recommendation</h3>
-                <div style="text-align:center;margin-bottom:8px;">
-                    <span class="fo-strategy-badge ${stratCls}" style="font-size:18px;padding:4px 16px;">${escapeHtml(strat.recommendation)}</span>
-                    <span style="font-size:12px;color:var(--wb-text-muted);margin-left:8px;">${strat.confidence}% confidence</span>
-                </div>
-                <div style="text-align:center;margin-bottom:8px;">
-                    <span class="fo-strategy-timing ${strat.timing || 'neutral'}" style="font-size:11px;padding:2px 10px;">${escapeHtml(timingLabels[strat.timing] || 'Neutral')}</span>
-                    <span class="fo-strategy-phase" style="margin-left:8px;">${escapeHtml(phaseLabels[strat.currentPhase] || '')}</span>
-                </div>`;
-
-            if (strat.reasons && strat.reasons.length > 0) {
-                html += `<div style="margin-bottom:8px;">
-                    ${strat.reasons.map(r => `<div style="font-size:11px;color:#b0b0c0;padding:2px 0;">• ${escapeHtml(r)}</div>`).join('')}
-                </div>`;
-            }
-
-            // Enemy peak/dead hours
-            if (strat.enemyPeak || strat.enemyDead) {
-                html += `<div class="wb-scout-grid" style="margin-bottom:8px;">`;
-                if (strat.enemyPeak) html += `<span class="wb-scout-label">Enemy Peak Hour</span><span class="wb-scout-value" style="color:#d63031">${strat.enemyPeak.hour}:00 UTC (${strat.enemyPeak.avgOnline} avg)</span>`;
-                if (strat.enemyDead) html += `<span class="wb-scout-label">Enemy Dead Hour</span><span class="wb-scout-value" style="color:#00b894">${strat.enemyDead.hour}:00 UTC (${strat.enemyDead.avgOnline} avg)</span>`;
-                html += `</div>`;
-            }
-
-            // Activity sparkline in scout report
-            const abh = state.enemyActivityByHour;
-            if (abh && Object.keys(abh).length > 0) {
-                const maxVal = Math.max(...Object.values(abh), 1);
-                const currentH = strat.currentHour != null ? strat.currentHour : new Date().getUTCHours();
-                const peakH = strat.enemyPeak ? strat.enemyPeak.hour : -1;
-                const deadH = strat.enemyDead ? strat.enemyDead.hour : -1;
-
-                html += `<div style="margin-top:6px;"><div style="font-size:10px;color:var(--wb-text-muted);margin-bottom:4px;">Enemy Activity by Hour (UTC)</div>`;
-                html += `<div style="display:flex;align-items:flex-end;gap:1px;height:40px;">`;
-                for (let h = 0; h < 24; h++) {
-                    const val = abh[h] || 0;
-                    const pct = Math.max(2, Math.round((val / maxVal) * 100));
-                    let barColor = 'rgba(116,185,255,0.3)';
-                    if (h === currentH) barColor = '#74b9ff';
-                    else if (h === peakH) barColor = 'rgba(214,48,49,0.5)';
-                    else if (h === deadH) barColor = 'rgba(0,184,148,0.5)';
-                    html += `<div style="flex:1;height:${pct}%;background:${barColor};border-radius:1px 1px 0 0;" title="${h}:00 UTC — ${val} avg online"></div>`;
-                }
-                html += `</div>`;
-                html += `<div style="display:flex;justify-content:space-between;font-size:7px;color:var(--wb-text-muted);margin-top:2px;">
-                    <span>0</span><span>6</span><span>12</span><span>18</span><span>23</span>
-                </div>`;
-                html += `<div style="display:flex;gap:10px;margin-top:4px;font-size:9px;">
-                    <span style="color:#74b9ff;">■ Now</span>
-                    <span style="color:rgba(214,48,49,0.7);">■ Peak</span>
-                    <span style="color:rgba(0,184,148,0.7);">■ Dead</span>
-                </div></div>`;
-            }
-
-            html += `</div>`;
-        }
+        // ── I. LIVE STRATEGY (Removed) ──
 
         body.innerHTML = html;
     }

@@ -8,7 +8,6 @@
 import * as store from "./store.js";
 import { fetchFactionMembers } from "./torn-api.js";
 import { recordSample } from "./activity-heatmap.js";
-import { evaluateStrategy, getEnemyActivityByHour } from "./strategy-engine.js";
 
 const POLL_INTERVAL_MS = 15_000; // 15 seconds
 const MAX_BACKOFF_MS = 120_000;   // max 2 minutes between retries on failure
@@ -100,14 +99,6 @@ export function startWarStatusMonitor(io, warId) {
         recordSample(war.factionId, ourOnline + ourIdle, ourTotal);
         // Store on war for poll response
         war.ourFactionOnline = { online: ourOnline, idle: ourIdle, total: ourTotal };
-
-        // ── Strategy Engine ──
-        try {
-          const activityByHour = getEnemyActivityByHour(war.enemyActivityLog || []);
-          const strategy = evaluateStrategy(war, ourOnline, onlineNow, activityByHour);
-          war.strategy = strategy;
-          war.enemyActivityByHour = activityByHour;
-        } catch (_) { /* non-critical */ }
       } catch (_) {
         // Non-critical — skip silently
       }
