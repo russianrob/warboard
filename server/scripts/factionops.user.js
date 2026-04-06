@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.6.4
+// @version      4.6.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -207,7 +207,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.6.4',
+        VERSION: '4.6.5',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2957,7 +2957,7 @@ body.wb-chain-active {
                     'Authorization': `Bearer ${state.jwtToken}`,
                 },
                 data: json,
-                timeout: 20000,
+                timeout: 15000,
                 onload(res) {
                     const data = safeParse(res.responseText);
                     if (res.status >= 200 && res.status < 300) resolve(data);
@@ -3000,7 +3000,7 @@ body.wb-chain-active {
                     'Content-Type': 'application/json',
                 },
                 data: '{}',
-                timeout: 20000,
+                timeout: 15000,
                 onload(res) {
                     const data = safeParse(res.responseText);
                     if (res.status >= 200 && res.status < 300) resolve(data);
@@ -3347,13 +3347,13 @@ body.wb-chain-active {
 
         realtimeSocket = ioFn(CONFIG.SERVER_URL, {
             auth: { token: state.jwtToken },
-            transports: ['websocket', 'polling'],
+            transports: ['websocket'],
             withCredentials: true,
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 2000,
             reconnectionDelayMax: 30000,
-            timeout: 20000,
+            timeout: 15000,
         });
 
         realtimeSocket.on('connect', () => {
