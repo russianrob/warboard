@@ -289,8 +289,8 @@ export function updateFactionSettings(factionId, newSettings) {
 
 export function getAllowedBroadcastRoles(factionId) {
   const settings = getFactionSettings(factionId);
-  // Default roles if not configured
-  if (!settings.broadcastRoles || !Array.isArray(settings.broadcastRoles)) {
+  // Default roles if not configured or empty
+  if (!settings.broadcastRoles || !Array.isArray(settings.broadcastRoles) || settings.broadcastRoles.length === 0) {
     return ["leader", "co-leader", "war leader", "banker"];
   }
   return settings.broadcastRoles;
