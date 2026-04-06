@@ -510,13 +510,18 @@ router.get("/api/poll", (req, res, next) => {
     startChainMonitor(null, warId);
   }
 
-  // Track player as online (use playerId as pseudo-socketId for polling clients)
-  store.setPlayer(playerId, {
-    socketId: `poll_${playerId}`,
-    factionId,
-    warId,
-    name: playerName,
-  });
+  // Track player as online - but DON'T overwrite an active real-time session with a "poll" status
+  const existingPlayer = store.getPlayer(playerId);
+  const isRealtime = existingPlayer?.socketId && (existingPlayer.socketId.startsWith("sse_") || !existingPlayer.socketId.startsWith("poll_"));
+  
+  if (!isRealtime) {
+    store.setPlayer(playerId, {
+      socketId: `poll_${playerId}`,
+      factionId,
+      warId,
+      name: playerName,
+    });
+  }
 
   return res.json({
     warId: war.warId,

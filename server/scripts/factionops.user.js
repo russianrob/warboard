@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.6.2
+// @version      4.6.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -206,7 +206,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.6.2',
+        VERSION: '4.6.3',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -3536,10 +3536,12 @@ body.wb-chain-active {
         sseConnected = false;
         sseAbort = null;
         sseLastLength = 0;
-        updateRtBadge(false);
-        // Restart polling as fallback
-        if (!pollTimer && state.jwtToken) {
-            startPolling();
+        
+        // Only restart polling if we aren't currently trying to reconnect
+        // and no other real-time connection exists.
+        if (!sseRetryTimer && !sseConnected && !(realtimeSocket && realtimeSocket.connected)) {
+            updateRtBadge(false);
+            if (state.jwtToken) startPolling();
         }
     }
 
