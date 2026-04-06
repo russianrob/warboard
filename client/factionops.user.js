@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.4
+// @version      4.8.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -40,6 +40,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.5   - Feature: Rebuilt toast notification system with stacking, scaling duration, progress bars, and icons.
 // v4.5.33  - Feature: Added UI in settings for faction leaders to configure custom broadcast roles.
 // v4.5.31  - Improvement: Migrated Faction Broadcast to use HTTP POST, enabling leaders to broadcast even on fallback SSE connections.
 // v4.5.30  - Feature: Faction leaders and bankers can now broadcast messages to their faction directly from the war overlay.
@@ -8742,52 +8743,139 @@ body.wb-chain-active {
         });
     }
 
-    function showToast(message, type = 'info') {
-        const toast = document.createElement('div');
-        toast.style.cssText = `
-            position: fixed;
-            top: ${state.ui.chainBar ? '52px' : '10px'};
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 1000001;
-            padding: 8px 18px;
-            border-radius: 6px;
-            font-family: Arial, sans-serif;
-            font-size: 13px;
-            color: #fff;
-            opacity: 0;
-            transition: opacity 0.3s;
-            pointer-events: none;
-        `;
+    let toastContainer = null;
 
+    function getToastContainer() {
+        if (!toastContainer) {
+            toastContainer = document.createElement('div');
+            toastContainer.id = 'wb-toast-container';
+            toastContainer.style.cssText = `
+                position: fixed;
+                top: ${state.ui && state.ui.chainBar ? '52px' : '10px'};
+                left: 50%;
+                transform: translateX(-50%);
+                z-index: 1000001;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 8px;
+                pointer-events: none;
+            `;
+            document.body.appendChild(toastContainer);
+        }
+        // Update position dynamically in case UI shifted
+        toastContainer.style.top = state.ui && state.ui.chainBar ? '52px' : '10px';
+        return toastContainer;
+    }
+
+    function showToast(message, type = 'info') {
+        const container = getToastContainer();
+        const toast = document.createElement('div');
+        
+        let bg, border, icon;
         switch (type) {
             case 'success':
-                toast.style.background = 'var(--wb-call-green)';
+                bg = 'rgba(0, 184, 148, 0.95)'; // var(--wb-call-green)
+                border = '#00b894';
+                icon = '✓';
                 break;
             case 'warning':
-                toast.style.background = 'var(--wb-idle-yellow)';
-                toast.style.color = '#000';
+                bg = 'rgba(253, 203, 110, 0.95)'; // var(--wb-idle-yellow)
+                border = '#fdcb6e';
+                icon = '⚠️';
                 break;
             case 'error':
-                toast.style.background = 'var(--wb-call-red)';
+                bg = 'rgba(214, 48, 49, 0.95)'; // var(--wb-call-red)
+                border = '#d63031';
+                icon = '✕';
                 break;
+            case 'info':
+            case 'global_toast':
             default:
-                toast.style.background = 'var(--wb-accent)';
+                bg = 'rgba(9, 132, 227, 0.95)'; // var(--wb-accent)
+                border = '#0984e3';
+                icon = 'ℹ';
         }
 
-        toast.textContent = message;
-        document.body.appendChild(toast);
+        // Special handling for broadcasts
+        if (message.startsWith('📣')) {
+            icon = '📣';
+            message = message.substring(1).trim();
+            bg = 'rgba(108, 92, 231, 0.95)'; // Purple for broadcasts
+            border = '#6c5ce7';
+        }
+
+        toast.style.cssText = `
+            background: ${bg};
+            border-left: 4px solid ${border};
+            backdrop-filter: blur(4px);
+            padding: 10px 16px 10px 12px;
+            border-radius: 6px;
+            font-family: 'Open Sans', Arial, sans-serif;
+            font-size: 13px;
+            color: ${type === 'warning' ? '#000' : '#fff'};
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            opacity: 0;
+            transform: translateY(-15px) scale(0.95);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            pointer-events: auto;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 200px;
+            max-width: 450px;
+            line-height: 1.4;
+            position: relative;
+            overflow: hidden;
+            box-sizing: border-box;
+        `;
+
+        toast.innerHTML = `
+            <div style="font-size: 16px; display: flex; align-items: center; justify-content: center; width: 20px;">${icon}</div>
+            <div style="flex: 1; word-wrap: break-word;">${message}</div>
+        `;
+
+        // Calculate duration based on text length (min 3.5s, max 10s)
+        const duration = Math.min(Math.max(3500, message.length * 70), 10000);
+
+        // Progress bar at the bottom
+        const progressBar = document.createElement('div');
+        progressBar.style.cssText = `
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 3px;
+            background: rgba(255,255,255,0.4);
+            width: 100%;
+            transition: width ${duration}ms linear;
+        `;
+        if (type === 'warning') progressBar.style.background = 'rgba(0,0,0,0.2)';
+        toast.appendChild(progressBar);
+
+        container.appendChild(toast);
 
         // Animate in
         requestAnimationFrame(() => {
             toast.style.opacity = '1';
+            toast.style.transform = 'translateY(0) scale(1)';
+            requestAnimationFrame(() => {
+                progressBar.style.width = '0%';
+            });
         });
 
-        // Remove after 3 seconds
-        setTimeout(() => {
+        // Removal logic
+        let removeTimeout;
+        const removeToast = () => {
+            clearTimeout(removeTimeout);
             toast.style.opacity = '0';
+            toast.style.transform = 'translateY(-15px) scale(0.95)';
+            toast.style.marginTop = `-${toast.offsetHeight}px`; // animate collapse
             setTimeout(() => toast.remove(), 300);
-        }, 3000);
+        };
+
+        removeTimeout = setTimeout(removeToast, duration);
+        toast.addEventListener('click', removeToast);
     }
 
     // Notifications are now driven by the polling diff logic in pollOnce() (Section 6).
