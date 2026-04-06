@@ -263,7 +263,7 @@
         "level": 42,
         "status": "hospital",
         "description": "In hospital for 54 secs",
-        "until": 54,
+        "until": 50,
         "lastAction": "3 days ago",
         "activity": "offline"
       },
@@ -389,7 +389,7 @@
         "level": 16,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86301424,
+        "until": 86301420,
         "lastAction": "282 days ago",
         "activity": "offline"
       },
@@ -704,7 +704,7 @@
         "level": 16,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86301424,
+        "until": 86301420,
         "lastAction": "110 days ago",
         "activity": "offline"
       },
@@ -758,7 +758,7 @@
         "level": 15,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86301424,
+        "until": 86301420,
         "lastAction": "89 days ago",
         "activity": "offline"
       },
@@ -803,7 +803,7 @@
         "level": 8,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86301424,
+        "until": 86301420,
         "lastAction": "40 days ago",
         "activity": "offline"
       },
@@ -839,7 +839,7 @@
         "level": 4,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86301424,
+        "until": 86301420,
         "lastAction": "26 days ago",
         "activity": "offline"
       }
@@ -853,12 +853,6 @@
     },
     "warTarget": null,
     "enemyActivityLog": [
-      {
-        "timestamp": 1775356729860,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
       {
         "timestamp": 1775356745143,
         "online": 0,
@@ -35409,6 +35403,12 @@
       },
       {
         "timestamp": 1775445776888,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775445780644,
         "online": 0,
         "idle": 10,
         "total": 93

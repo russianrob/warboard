@@ -3896,7 +3896,8 @@ body.wb-chain-active {
                 </div>
                 <div style="font-size:11px;opacity:0.6;margin-top:4px;">
                     Define which faction positions can use "Shout". <br>
-                    <strong>Defaults:</strong> leader, co-leader, war leader, banker.
+                    <strong>Defaults:</strong> leader, co-leader, war leader, banker. <br>
+                    <em>Note: Saving a list replaces the defaults. Clear and save to reset.</em>
                 </div>
             </div>
             <div style="font-size:11px;opacity:0.6;margin-bottom:14px;">
