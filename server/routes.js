@@ -369,6 +369,9 @@ router.get("/api/stream", (req, res, next) => {
     "X-Accel-Buffering": "no",
   });
 
+  // Send 1KB preamble to force browser to fire onprogress immediately
+  res.write(": preamble " + ".".repeat(1024) + "\n\n");
+
   // Send initial war state immediately
   const initial = {
     warId: war.warId,
