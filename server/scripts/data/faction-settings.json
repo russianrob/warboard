@@ -1,7 +1,10 @@
 {
   "42055": {
     "broadcastRoles": [
-      "leader"
+      "leader",
+      "co-leader",
+      "war leader",
+      "admin leader"
     ]
   }
 }

@@ -260,6 +260,7 @@ io.on("connection", (socket) => {
 store.loadState();
 store.loadFactionKeys();
 store.loadPlayerKeys();
+store.loadFactionSettings();
 loadHeatmaps();
 loadSubscriptions();
 
