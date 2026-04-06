@@ -1,0 +1,214 @@
+    function updateWarTimer() {
+        if (state.warEnded) return;
+        const warTimerEl = document.getElementById('fo-war-timer');
+        const warTimerValue = document.getElementById('fo-war-timer-value');
+        const warTimerDetail = document.getElementById('fo-war-timer-detail');
+        if (!warTimerEl || !warTimerValue) return;
+
+        // ── Read timer + score from DOM (Bulletproof Text Scanner) ──
+        let lead = null, currentTarget = null, totalElapsedHours = null;
+        let timerDays = 0, timerHours = 0, timerMinutes = 0;
+
+        const warHeader = document.querySelector('[class*="rankedWar"]') || document.querySelector('[class*="rankBox"]') || document.querySelector('.faction-war') || document.body;
+        const timerEl = warHeader.querySelector('[class*="timer_"]');
+        const targetBox = warHeader.querySelector('[class*="target_"]');
+
+        // 1. Try standard desktop React classes first
+        if (targetBox) {
+            const match = targetBox.innerText.match(/(\d[\d,.\s]*)\s*\/\s*(\d[\d,.\s]*)/);
+            if (match) {
+                lead = parseInt(match[1].replace(/[^\d]/g, ''), 10);
+                currentTarget = parseInt(match[2].replace(/[^\d]/g, ''), 10);
+            }
+        }
+        if (timerEl) {
+            const text = timerEl.textContent.trim();
+            const timeParts = text.match(/\d+/g);
+            if (timeParts) {
+                if (timeParts.length >= 4) {
+                    timerDays = parseInt(timeParts[0], 10) || 0;
+                    timerHours = parseInt(timeParts[1], 10) || 0;
+                    timerMinutes = parseInt(timeParts[2], 10) || 0;
+                } else if (timeParts.length === 3) {
+                    const hh = parseInt(timeParts[0], 10) || 0;
+                    timerDays = Math.floor(hh / 24);
+                    timerHours = hh % 24;
+                    timerMinutes = parseInt(timeParts[1], 10) || 0;
+                }
+            }
+        }
+
+        // 2. PDA Fallback: Scan the raw text of the hidden Torn page
+        if (lead === null || currentTarget === null || timerDays + timerHours + timerMinutes === 0) {
+            // Use textContent to read the hidden Torn UI behind the overlay
+            const hiddenContainer = document.querySelector('[data-fo-hidden="true"]') || document.body;
+            const allText = hiddenContainer.textContent || "";
+            
+            // Extract target: Look for "number / number" where right side is >= 1000
+            const targetMatch = allText.match(/([\d,]{1,})\s*\/\s*([\d,]{4,})/);
+            if (targetMatch) {
+                lead = parseInt(targetMatch[1].replace(/[^\d]/g, ''), 10);
+                currentTarget = parseInt(targetMatch[2].replace(/[^\d]/g, ''), 10);
+            }
+
+            // Extract elapsed time: Torn timers usually have 3 segments like "34:50:12" or "1 days 10:50:12"
+            const timeMatches = [...allText.matchAll(/(?:(\d+)\s*[a-zA-Z]+\s*)?(\d{1,3})\s*:\s*(\d{2})(?:\s*:\s*(\d{2}))?/g)];
+            for (let m of timeMatches) {
+                const p1 = parseInt(m[1]) || 0; // days
+                const p2 = parseInt(m[2]) || 0; // hours (or days)
+                const p3 = parseInt(m[3]) || 0; // mins (or hours)
+                const p4 = parseInt(m[4]) || 0; // secs (or mins)
+                
+                // Avoid catching the Energy bar (e.g. 222:02) or Chain timer (04:59)
+                // War elapsed time usually has 3 segments (H:M:S), or if 2 segments, hours > 5
+                if (m[4] || p2 > 5) {
+                    timerDays = p1; timerHours = p2; timerMinutes = p3;
+                    break;
+                }
+            }
+        }
+        
+        // Debug Output: Show errors directly in the timer button if it still fails
+        if (!timerEl && !targetBox && document.getElementById('fo-war-timer-value')) {
+            if (lead === null || currentTarget === null) {
+                document.getElementById('fo-war-timer-value').textContent = "ERR: SCORE";
+                return; 
+            }
+            if (timerDays + timerHours + timerMinutes === 0) {
+                document.getElementById('fo-war-timer-value').textContent = "ERR: TIME";
+                return;
+            }
+        }
+
+        totalElapsedHours = (timerDays * 24) + timerHours + (timerMinutes / 60);
+
+        const myFactionScore = (state.warScores && state.warScores.myScore != null) ? state.warScores.myScore : lead;
+        const effectiveScore = myFactionScore;
+
+        if (effectiveScore === null || currentTarget === null || totalElapsedHours === null) return;
+
+        // Calculate our scoring rate from the very start
+        const ourScoreRate = totalElapsedHours > 0 ? (effectiveScore / totalElapsedHours) : 0;
+
+        // "Waiting" state for new wars
+        if (lead === 0 && currentTarget > 0 && totalElapsedHours < 2) {
+            const display = timerDays > 0 ? `${timerDays}d ${timerHours}h ${timerMinutes}m`
+                : timerHours > 0 ? `${timerHours}h ${timerMinutes}m`
+                : `${timerMinutes}m`;
+            warTimerEl.className = 'fo-war-timer waiting';
+            warTimerValue.textContent = display;
+            if (warTimerDetail) warTimerDetail.innerHTML =
+                warTimerDetailRow('Status', 'War not started')
+                + warTimerDetailRow('Starts in', display)
+                + warTimerDetailRow('Target', currentTarget.toLocaleString());
+            return;
+        }
+
+        // Reverted ETA Logic: Pure decay against whoever is currently winning
+        const calculateHoursRemaining = (goal, isDecaying) => {
+            // 'lead' is the highest score extracted directly from Torn's UI
+            const scoreToUse = lead !== null ? lead : effectiveScore;
+            const currentGap = goal - scoreToUse;
+            if (currentGap <= 0) return 0;
+
+            const dropHours = Math.max(0, Math.floor(totalElapsedHours - 24));
+            const originalTarget = currentTarget / (1 - (dropHours * 0.01));
+            const DROP_PER_HOUR = isDecaying ? (originalTarget * 0.01) : 0;
+
+            if (totalElapsedHours >= 24) {
+                // Ignore our scoring momentum, just calculate pure decay to the lead score
+                const closingSpeed = DROP_PER_HOUR;
+                return closingSpeed > 0 ? (currentGap / closingSpeed) : 999;
+            } else {
+                // If under 24 hours, add the time until decay actually starts
+                const timeTo24h = 24 - totalElapsedHours;
+                return timeTo24h + (DROP_PER_HOUR > 0 ? (currentGap / DROP_PER_HOUR) : 999);
+            }
+        };
+
+        let currentPct = null;
+
+        if (state.warTarget && state.warTarget.value) {
+            const goal = state.warTarget.value;
+            const remaining = goal - effectiveScore;
+            const pct = Math.min(100, Math.round((effectiveScore / goal) * 100));
+            currentPct = pct;
+
+            if (remaining <= 0) {
+                // Custom goal reached, show prediction to actual Ranked War target
+                const notifiedKey = 'fo_notified_' + deriveWarId() + '_' + goal;
+                if (!warTargetNotifiedThisSession) {
+                    warTargetNotifiedThisSession = true;
+                    if (GM_getValue(notifiedKey, false) !== true) {
+                        GM_setValue(notifiedKey, true);
+                        postAction('/api/war-target-reached', { warId: deriveWarId(), lead: effectiveScore }).catch(() => {});
+                        firePdaNotification('war_target', '🎯 War Target Reached!', `Faction hit ${effectiveScore.toLocaleString()} / ${goal.toLocaleString()} respect — hold the line!`);
+                        postAction('/api/set-war-target', { warId: deriveWarId(), value: null }).catch(() => {});
+                        state.warTarget = null;
+                    }
+                }
+
+                const hoursRemainingFloat = calculateHoursRemaining(currentTarget, true);
+                warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
+                warTimerLastCalc = Date.now();
+
+                if (hoursRemainingFloat <= 0) {
+                    warTimerEl.className = 'fo-war-timer safe';
+                    warTimerValue.textContent = '✓ WON';
+                } else {
+                    const totalMin = Math.floor(hoursRemainingFloat * 60);
+                    const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
+                    const mm = (totalMin % 60).toString().padStart(2, '0');
+                    const urgency = hoursRemainingFloat <= 2 ? 'danger' : hoursRemainingFloat <= 6 ? 'warning' : 'safe';
+                    warTimerEl.className = 'fo-war-timer ' + urgency;
+                    warTimerValue.textContent = hh + ':' + mm;
+                }
+            } else {
+                // Custom goal NOT reached, show progress + prediction to goal
+                const hoursRemainingFloat = calculateHoursRemaining(goal, false);
+                const totalMin = Math.floor(hoursRemainingFloat * 60);
+                const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
+                const mm = (totalMin % 60).toString().padStart(2, '0');
+                const urgency = pct >= 80 ? 'safe' : pct >= 50 ? 'warning' : 'danger';
+                warTimerEl.className = 'fo-war-timer ' + urgency;
+                warTimerValue.textContent = pct + '% (' + hh + ':' + mm + ')';
+            }
+        } else {
+            // Main Ranked War Block (Target Decay + Our Rate)
+            const hoursRemainingFloat = calculateHoursRemaining(currentTarget, true);
+            warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
+            warTimerLastCalc = Date.now();
+
+            if (hoursRemainingFloat <= 0) {
+                warTimerEl.className = 'fo-war-timer safe';
+                warTimerValue.textContent = 'WON';
+            } else {
+                const totalMin = Math.floor(hoursRemainingFloat * 60);
+                const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
+                const mm = (totalMin % 60).toString().padStart(2, '0');
+                const urgency = hoursRemainingFloat <= 2 ? 'danger' : hoursRemainingFloat <= 6 ? 'warning' : 'safe';
+                warTimerEl.className = 'fo-war-timer ' + urgency;
+                warTimerValue.textContent = hh + ':' + mm;
+            }
+
+            // Populate the detail popup box
+            if (warTimerDetail) {
+                const dropHrs = Math.max(0, Math.floor(totalElapsedHours - 24));
+                const origTarget = currentTarget / (1 - (dropHrs * 0.01));
+                const dropPerHr = origTarget * 0.01;
+                const gap = currentTarget - (lead !== null ? lead : effectiveScore);
+
+                warTimerDetail.innerHTML =
+                    warTimerDetailRow('Target Score', Math.round(currentTarget).toLocaleString()) +
+                    warTimerDetailRow('Lead Score', Math.round(lead !== null ? lead : effectiveScore).toLocaleString()) +
+                    warTimerDetailRow('Score Gap', Math.round(gap).toLocaleString()) +
+                    warTimerDetailRow('Target Decay/hr', Math.round(dropPerHr).toLocaleString());
+            }
+        }
+
+        if (currentPct !== null && !document.hidden && state.warPercentage !== currentPct) {
+            state.warPercentage = currentPct;
+            broadcastStateChange({ type: 'war_update', pct: currentPct });
+        }
+    }
+

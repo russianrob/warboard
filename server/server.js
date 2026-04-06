@@ -42,6 +42,20 @@ const PORT = parseInt(process.env.PORT, 10) || 3000;
 
 const app = express();
 
+// Enable CORS for all API routes
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      if (/.torn.com$/.test(origin) || /tornwar.com/.test(origin) || /^https?:\/\/localhost/.test(origin)) {
+        return callback(null, true);
+      }
+      callback(null, false);
+    },
+    credentials: true,
+  })
+);
+
 app.use(
   cors({
     origin: function (origin, callback) {

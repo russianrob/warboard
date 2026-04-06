@@ -10,9 +10,11 @@ import path from "node:path";
 
 const DATA_DIR = process.env.DATA_DIR || "./data";
 const WARS_FILE = path.join(DATA_DIR, "wars.json");
-const FACTION_KEYS_FILE = path.join(DATA_DIR, "faction-keys.json");
 const PLAYER_KEYS_FILE = path.join(DATA_DIR, "player-keys.json");
+const FACTION_KEYS_FILE = path.join(DATA_DIR, "faction-keys.json");
 const FACTION_SETTINGS_FILE = path.join(DATA_DIR, "faction-settings.json");
+
+const factionSettings = new Map();
 
 // ── In-memory maps ──────────────────────────────────────────────────────
 

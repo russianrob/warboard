@@ -149,7 +149,7 @@ router.get("/api/health", (req, res) => {
 // Verify Torn API key for landing page access. Sets a cookie on success.
 
 router.post("/api/gate", async (req, res) => {
-  const { apiKey } = req.body ?? {};
+  const { apiKey } = (req.body || {});
   if (!apiKey || typeof apiKey !== "string") {
     return res.status(400).json({ error: "API key is required" });
   }
@@ -239,7 +239,7 @@ function parseCookie(cookieHeader, name) {
 // ── POST /api/auth ──────────────────────────────────────────────────────
 
 router.post("/api/auth", async (req, res) => {
-  const { apiKey } = req.body ?? {};
+  const { apiKey } = (req.body || {});
   if (!apiKey || typeof apiKey !== "string") {
     return res.status(400).json({ error: "apiKey is required" });
   }
@@ -552,7 +552,7 @@ router.get("/api/war/:warId/strategy", requireAuth, (req, res) => {
 
 router.post("/api/call", requireAuth, (req, res) => {
   const { playerId, playerName } = req.user;
-  const { action, targetId, targetName, warId, isDeal } = req.body ?? {};
+  const { action, targetId, targetName, warId, isDeal } = (req.body || {});
 
   if (!targetId || !warId) {
     return res.status(400).json({ error: "targetId and warId are required" });
@@ -617,19 +617,19 @@ router.post("/api/call", requireAuth, (req, res) => {
 
 // ── POST /api/broadcast ──────────────────────────────────────────────────
 // Faction Leaders/Bankers: Broadcast a message to their faction's war room.
-router.post("/api/broadcast", requireAuth, (req, res) => {
 // Update custom broadcast roles for the faction.
 router.post("/api/broadcast/roles", requireAuth, (req, res) => {
   const { playerId, factionPosition, factionId } = req.user;
-  const { roles } = req.body ?? {};
+  const { roles } = (req.body || {});
 
   if (!Array.isArray(roles)) {
     return res.status(400).json({ error: "Roles must be an array of strings." });
   }
 
   const pos = (factionPosition || "").toLowerCase();
-  const isLeader = ["leader", "co-leader", "war leader"].includes(pos);
-  const isGlobalAdmin = (String(playerId) === '137558');
+  const allowedBase = ["leader", "co-leader", "war leader"];
+  const isLeader = allowedBase.includes(pos);
+  const isGlobalAdmin = (String(playerId) === "137558");
 
   if (!isLeader && !isGlobalAdmin) {
     return res.status(403).json({ error: "Only leaders and co-leaders can update broadcast roles." });
@@ -639,9 +639,9 @@ router.post("/api/broadcast/roles", requireAuth, (req, res) => {
   return res.json({ success: true, roles });
 });
 
-
-  const { playerId, playerName, factionPosition } = req.user;
-  const { message, type, warId } = req.body ?? {};
+router.post("/api/broadcast", requireAuth, (req, res) => {
+  const { playerId, playerName, factionPosition, factionId } = req.user;
+  const { message, type, warId } = (req.body || {});
 
   if (!warId) {
     return res.status(400).json({ error: "warId is required for faction broadcasts." });
@@ -652,11 +652,11 @@ router.post("/api/broadcast/roles", requireAuth, (req, res) => {
   }
 
   // Check if it's the global admin (can broadcast anywhere)
-  const isGlobalAdmin = (String(playerId) === '137558');
+  const isGlobalAdmin = (String(playerId) === "137558");
   
   // Enforce leader/banker position (or custom faction roles)
   const pos = (factionPosition || "").toLowerCase();
-  const allowedRoles = getAllowedBroadcastRoles(req.user.factionId);
+  const allowedRoles = getAllowedBroadcastRoles(factionId);
   const isLeader = allowedRoles.includes(pos);
 
   if (!isLeader && !isGlobalAdmin) {
@@ -666,16 +666,16 @@ router.post("/api/broadcast/roles", requireAuth, (req, res) => {
 
   const payload = { 
     message: message, 
-    type: type || 'info' 
+    type: type || "info" 
   };
 
   // 1. Broadcast to Socket.IO clients in this war room
   if (io) {
-    io.to(`war_${warId}`).emit('global_toast', payload);
+    io.to(`war_${warId}`).emit("global_toast", payload);
   }
 
   // 2. Broadcast to SSE clients in this war room
-  broadcastSSE(warId, { type: 'global_toast', ...payload });
+  broadcastSSE(warId, { type: "global_toast", ...payload });
 
   console.log(`[📣] Faction Broadcast sent to war ${warId} by ${playerName}: ${message}`);
 
@@ -689,7 +689,7 @@ const LEADER_POSITIONS = ["leader", "co-leader", "war leader", "banker"];
 
 router.post("/api/priority", requireAuth, (req, res) => {
   const { playerId, playerName, factionPosition } = req.user;
-  const { targetId, priority, warId } = req.body ?? {};
+  const { targetId, priority, warId } = (req.body || {});
 
   // Enforce leader/co-leader
   const pos = (factionPosition || "").toLowerCase();
@@ -755,7 +755,7 @@ router.get("/api/war-target", requireAuth, (req, res) => {
 
 router.post("/api/war-target", requireAuth, (req, res) => {
   const { playerId, playerName, factionPosition } = req.user;
-  const { warId, target } = req.body ?? {};
+  const { warId, target } = (req.body || {});
 
   // Enforce leader/co-leader
   const pos = (factionPosition || "").toLowerCase();
@@ -802,7 +802,7 @@ router.post("/api/war-target", requireAuth, (req, res) => {
 // Trigger push notification when custom war target is reached. Fires once.
 
 router.post("/api/war-target-reached", requireAuth, (req, res) => {
-  const { warId, lead } = req.body ?? {};
+  const { warId, lead } = (req.body || {});
 
   if (!warId) {
     return res.status(400).json({ error: "warId is required" });
@@ -839,7 +839,7 @@ router.post("/api/war-target-reached", requireAuth, (req, res) => {
 
 router.post("/api/faction-key", requireAuth, async (req, res) => {
   const { factionId } = req.user;
-  const { apiKey } = req.body ?? {};
+  const { apiKey } = (req.body || {});
 
   if (!apiKey || typeof apiKey !== "string") {
     return res.status(400).json({ error: "apiKey is required" });
@@ -884,7 +884,7 @@ router.post("/api/faction-key/remove", requireAuth, handleRemoveFactionKey);
 
 router.post("/api/status", requireAuth, async (req, res) => {
   const { playerId, playerName, factionId } = req.user;
-  const { warId, statuses, chainData, refresh } = req.body ?? {};
+  const { warId, statuses, chainData, refresh } = (req.body || {});
 
   if (!warId) {
     return res.status(400).json({ error: "warId is required" });
@@ -987,7 +987,7 @@ router.post("/api/status", requireAuth, async (req, res) => {
 
 router.post("/api/viewing", requireAuth, (req, res) => {
   const { playerId, playerName } = req.user;
-  const { targetId } = req.body ?? {};
+  const { targetId } = (req.body || {});
   store.setViewingTarget(playerId, targetId || null);
 
   // Broadcast viewer change — need warId from the player's current session
@@ -1059,7 +1059,7 @@ router.get("/api/push/vapid-key", (_req, res) => {
 
 router.post("/api/push/subscribe", requireAuth, (req, res) => {
   const { playerId } = req.user;
-  const { subscription } = req.body ?? {};
+  const { subscription } = (req.body || {});
 
   if (!subscription || !subscription.endpoint) {
     return res.status(400).json({ error: "Push subscription object is required" });
@@ -1074,7 +1074,7 @@ router.post("/api/push/subscribe", requireAuth, (req, res) => {
 
 router.post("/api/push/unsubscribe", requireAuth, (req, res) => {
   const { playerId } = req.user;
-  const { endpoint } = req.body ?? {};
+  const { endpoint } = (req.body || {});
 
   if (!endpoint) {
     return res.status(400).json({ error: "endpoint is required" });
@@ -1117,7 +1117,7 @@ router.get("/api/push/preferences", requireAuth, (req, res) => {
 
 router.post("/api/push/preferences", requireAuth, (req, res) => {
   const { playerId } = req.user;
-  const { preferences: prefs } = req.body ?? {};
+  const { preferences: prefs } = (req.body || {});
 
   if (!prefs || typeof prefs !== "object") {
     return res.status(400).json({ error: "preferences object is required" });
@@ -1132,7 +1132,7 @@ router.post("/api/push/preferences", requireAuth, (req, res) => {
 
 router.post("/api/push/test", requireAuth, async (req, res) => {
   const { playerId } = req.user;
-  const { type } = req.body ?? {};
+  const { type } = (req.body || {});
 
   if (!push.isSubscribed(playerId)) {
     return res.status(400).json({ error: "No push subscription found" });

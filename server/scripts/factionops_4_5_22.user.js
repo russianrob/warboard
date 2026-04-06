@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.33
+// @version      4.5.22
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,16 +39,6 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v4.5.33  - Feature: Added UI in settings for faction leaders to configure custom broadcast roles.
-// v4.5.31  - Improvement: Migrated Faction Broadcast to use HTTP POST, enabling leaders to broadcast even on fallback SSE connections.
-// v4.5.30  - Feature: Faction leaders and bankers can now broadcast messages to their faction directly from the war overlay.
-// v4.5.29  - Revert: Restored the exact PDA scanner logic from v4.5.22 after newer fixes caused false "LOST" reads during rapid target decay.
-// v4.5.28  - Fix: Fixed PDA scanner sometimes returning LOST prematurely when the server has not yet polled the decayed target.
-// v4.5.27  - Feature: Added Admin Broadcast feature allowing admin to send global toast notifications to all active tabs.
-// v4.5.26  - Fix: Timer says "LOST" instead of "WON" if the enemy reaches the target first, and prevents the PDA scanner from grabbing crazy elapsed times (e.g. "15d" from a player profile) which caused the target decay math to crash.
-// v4.5.25  - Fix: PDA text scanner now strictly pulls the target score directly from the server's state.warEta to prevent fake target extraction.
-// v4.5.24  - Fix: PDA text scanner now anchors the target search using the lead score to prevent greedy regex grabbing 10-digit IDs or stats.
-// v4.5.23  - Fix: Fixed "ERR: SCORE" bug on Torn PDA by bypassing the DOM entirely for the lead score and using the server state.
 // v4.5.22  - Fix: Fixed PDA text scanner failing by using textContent to read the hidden native Torn UI, plus improved regex extraction.
 // v4.5.21  - Fix: Added bulletproof raw-text scanner fallback to guarantee timer works on Torn PDA's mobile layout.
 // v4.5.20  - Feature: Added detailed stats to the Ranked War timer popup, displaying target score, lead score, score gap, and decay rate per hour.
@@ -206,7 +196,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.5.30',
+        VERSION: '4.4.8',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -2425,28 +2415,6 @@ body.wb-chain-active {
     font-size: 7px; color: var(--wb-text-muted); text-align: center;
     line-height: 1;
 }
-
-/* Broadcast entry bar */
-.fo-broadcast-entry-bar {
-    display: flex; align-items: center; gap: 10px;
-    padding: 8px 16px; background: var(--wb-bg-secondary);
-    border-bottom: 1px solid var(--wb-border);
-}
-.fo-broadcast-entry-bar input {
-    flex: 1; background: var(--wb-bg); border: 1px solid var(--wb-border);
-    color: var(--wb-text); padding: 5px 12px; border-radius: 4px; font-size: 13px;
-    box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
-}
-.fo-broadcast-entry-bar button {
-    background: var(--wb-hospital-red); color: white; border: none;
-    padding: 5px 16px; border-radius: 4px; cursor: pointer;
-    font-size: 12px; font-weight: 700; text-transform: uppercase;
-    transition: all 0.2s ease;
-}
-.fo-broadcast-entry-bar button:hover {
-    filter: brightness(1.2); transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(214,48,49,0.3);
-}
 `;
         GM_addStyle(css);
         log('Styles injected');
@@ -3089,21 +3057,12 @@ body.wb-chain-active {
                     warn('Re-auth failed:', authErr.message);
                 }
             }
-        } finally {
-            // Schedule next poll only if still polling and NOT connected via SSE/Socket.IO
-            if (pollTimer && !sseConnected && !(realtimeSocket && realtimeSocket.connected)) {
-                scheduleNextPoll();
-            }
         }
     }
 
     /** Start the polling loop. */
     function startPolling() {
         if (pollTimer) return; // already running
-        if (sseConnected || (realtimeSocket && realtimeSocket.connected)) {
-            log('Skipping startPolling — real-time connection active');
-            return;
-        }
         if (!state.jwtToken) {
             warn('No JWT token — cannot start polling');
             state.connected = false;
@@ -3116,33 +3075,30 @@ body.wb-chain-active {
         updateConnectionUI();
         log('Starting adaptive poll loop (fast=' + POLL_FAST_MS + 'ms, idle=' + POLL_IDLE_MS + 'ms)');
 
-        // Initialize timer placeholder
-        pollTimer = true;
-
         // Immediate first poll
         pollOnce();
-    }
 
-    function scheduleNextPoll() {
-        if (!pollTimer || sseConnected || (realtimeSocket && realtimeSocket.connected)) return;
-
-        const desired = isWarActive() ? POLL_FAST_MS : POLL_IDLE_MS;
-        if (desired !== currentPollInterval) {
-            log('Poll interval changed: ' + currentPollInterval + 'ms → ' + desired + 'ms');
-            currentPollInterval = desired;
-        }
-        const backoff = pollErrorCount > 0
-            ? Math.min(currentPollInterval * Math.pow(2, pollErrorCount), MAX_POLL_BACKOFF)
-            : currentPollInterval;
-
-        pollTimer = setTimeout(() => {
-            // Skip this tick if in backoff (simple jitter)
-            if (pollErrorCount > 0 && Math.random() > (currentPollInterval / backoff)) {
-                scheduleNextPoll();
-                return;
+        function scheduleNextPoll() {
+            const desired = isWarActive() ? POLL_FAST_MS : POLL_IDLE_MS;
+            if (desired !== currentPollInterval) {
+                log('Poll interval changed: ' + currentPollInterval + 'ms → ' + desired + 'ms');
+                currentPollInterval = desired;
             }
-            pollOnce();
-        }, backoff);
+            const backoff = pollErrorCount > 0
+                ? Math.min(currentPollInterval * Math.pow(2, pollErrorCount), MAX_POLL_BACKOFF)
+                : currentPollInterval;
+
+            pollTimer = setTimeout(() => {
+                // Skip this tick if in backoff (simple jitter)
+                if (pollErrorCount > 0 && Math.random() > (currentPollInterval / backoff)) {
+                    scheduleNextPoll();
+                    return;
+                }
+                pollOnce();
+                scheduleNextPoll();
+            }, backoff);
+        }
+        scheduleNextPoll();
     }
 
     /** Stop the polling loop. keepState=true preserves connection state (used when Socket.IO takes over). */
@@ -3384,14 +3340,6 @@ body.wb-chain-active {
             applyServerData(data);
         });
 
-        // Listen for Admin Broadcasts
-        realtimeSocket.on('global_toast', (data) => {
-            showToast(`📣 ${data.message}`, data.type);
-            if (typeof firePdaNotification === 'function') {
-                firePdaNotification('admin_broadcast', 'FactionOps Broadcast', data.message);
-            }
-        });
-
         // Also handle the initial state sent on join
         realtimeSocket.on('war_state', (data) => {
             applyServerData(data);
@@ -3477,9 +3425,6 @@ body.wb-chain-active {
             url: url,
             responseType: 'text',
             onprogress: (resp) => {
-                if (!resp || resp.responseText === undefined || resp.responseText === null) {
-                    return;
-                }
                 if (!sseConnected) {
                     sseConnected = true;
                     log('SSE stream connected');
@@ -3491,9 +3436,8 @@ body.wb-chain-active {
                 }
 
                 // Parse new SSE data since last check
-                const responseText = resp.responseText || '';
-                const newText = responseText.substring(sseLastLength);
-                sseLastLength = responseText.length;
+                const newText = resp.responseText.substring(sseLastLength);
+                sseLastLength = resp.responseText.length;
 
                 // Split into SSE events (separated by double newline)
                 const parts = newText.split('\n\n');
@@ -3502,14 +3446,7 @@ body.wb-chain-active {
                     if (!match) continue; // skip heartbeats and empty lines
                     try {
                         const data = JSON.parse(match[1]);
-                        if (data && data.type === 'global_toast') {
-                            showToast(`📣 ${data.message}`, data.type || 'info');
-                            if (typeof firePdaNotification === 'function') {
-                                firePdaNotification('admin_broadcast', 'FactionOps Broadcast', data.message);
-                            }
-                        } else {
-                            applyServerData(data);
-                        }
+                        applyServerData(data);
                     } catch (_) {}
                 }
             },
@@ -3870,15 +3807,6 @@ body.wb-chain-active {
                     <span class="wb-toggle-slider"></span>
                 </label>
             </div>
-
-            <div style="margin: 14px 0;">
-                <label for="wb-input-broadcast-roles">Custom Broadcast Roles (comma-separated)</label>
-                <div style="display:flex;gap:6px;">
-                    <input type="text" id="wb-input-broadcast-roles" placeholder="e.g. leader,co-leader,banker,warmaster" style="margin-bottom:0;flex:1;">
-                    <button class="wb-btn wb-btn-sm" id="wb-btn-save-roles">Save</button>
-                </div>
-                <div style="font-size:11px;opacity:0.6;margin-top:4px;">Define which faction positions can use the "Shout" feature.</div>
-            </div>
             <div style="font-size:11px;opacity:0.6;margin-bottom:14px;">
                 Keeps your Torn activity fresh while the warboard is open, so enemies can't tell you're idle.
             </div>
@@ -4118,22 +4046,6 @@ body.wb-chain-active {
             }
         })();
 
-        document.getElementById('wb-btn-save-roles').addEventListener('click', async () => {
-            const rolesInput = document.getElementById('wb-input-broadcast-roles').value.trim();
-            const roles = rolesInput ? rolesInput.split(',').map(r => r.trim().toLowerCase()) : [];
-            
-            try {
-                const resp = await postAction('/api/broadcast/roles', { roles });
-                if (resp && resp.success) {
-                    showToast('Broadcast roles updated!', 'success');
-                } else {
-                    showToast(resp.error || 'Failed to update roles', 'error');
-                }
-            } catch (e) {
-                showToast('Failed to connect to server.', 'error');
-            }
-        });
-
         document.getElementById('wb-btn-save-faction-key').addEventListener('click', async () => {
             const statusEl = document.getElementById('wb-faction-key-status');
             const keyVal = document.getElementById('wb-input-faction-key').value.trim();
@@ -4195,8 +4107,6 @@ body.wb-chain-active {
         }
 
         const viewLogsBtn = document.getElementById('wb-btn-view-logs');
-
-
         if (viewLogsBtn) {
             viewLogsBtn.addEventListener('click', async () => {
                 viewLogsBtn.textContent = 'Loading...';
@@ -5775,9 +5685,8 @@ body.wb-chain-active {
                 warTimerLastCalc = Date.now();
 
                 if (hoursRemainingFloat <= 0) {
-                    const isLosing = state.warScores && (state.warScores.enemyScore > state.warScores.myScore);
-                    warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
-                    warTimerValue.textContent = isLosing ? '✗ LOST' : '✓ WON';
+                    warTimerEl.className = 'fo-war-timer safe';
+                    warTimerValue.textContent = '✓ WON';
                 } else {
                     const totalMin = Math.floor(hoursRemainingFloat * 60);
                     const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
@@ -5803,9 +5712,8 @@ body.wb-chain-active {
             warTimerLastCalc = Date.now();
 
             if (hoursRemainingFloat <= 0) {
-                const isLosing = state.warScores && (state.warScores.enemyScore > state.warScores.myScore);
-                warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
-                warTimerValue.textContent = isLosing ? 'LOST' : 'WON';
+                warTimerEl.className = 'fo-war-timer safe';
+                warTimerValue.textContent = 'WON';
             } else {
                 const totalMin = Math.floor(hoursRemainingFloat * 60);
                 const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
@@ -5857,9 +5765,8 @@ body.wb-chain-active {
         
         // If the ETA is negative (or 0), someone reached the target.
         if (totalSec <= 0) {
-            const isLosing = state.warScores && (state.warScores.enemyScore > state.warScores.myScore);
-            warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
-            warTimerValue.textContent = isLosing ? 'LOST' : 'WON';
+            warTimerEl.className = 'fo-war-timer safe';
+            warTimerValue.textContent = 'WON';
             return;
         }
 
@@ -5951,12 +5858,6 @@ body.wb-chain-active {
             </div>
             <div class="fo-next-up-bar" id="fo-next-up"></div>
             <div class="fo-strategy-bar hidden" id="fo-strategy-bar"></div>
-            ${isLeader() ? `
-            <div class="fo-broadcast-entry-bar">
-                <input type="text" id="fo-input-broadcast" placeholder="Broadcast message to faction..." maxlength="150">
-                <button id="fo-btn-send-broadcast">Shout</button>
-            </div>
-            ` : ''}
             <div class="fo-col-headers">
                 <div class="fo-col-header">Prior.</div>
                 <div class="fo-col-header">Target</div>
@@ -6075,51 +5976,6 @@ body.wb-chain-active {
             updateWarTimer();
             setInterval(updateWarTimer, 30000);
             setInterval(updateWarTimerDisplay, 1000);
-        }
-
-        // Wire up broadcast button in overlay (leader/banker only)
-        const shoutBtn = document.getElementById('fo-btn-send-broadcast');
-        if (shoutBtn) {
-            shoutBtn.addEventListener('click', () => {
-                const msgInput = document.getElementById('fo-input-broadcast');
-                const msg = msgInput.value.trim();
-                
-                if (msg) {
-                    const currentWarId = deriveWarId();
-                    if (!currentWarId) {
-                        showToast('Error: Could not determine war ID.', 'error');
-                        return;
-                    }
-                    fetch(`${CONFIG.SERVER_URL}/api/broadcast`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${state.jwtToken}`
-                        },
-                        body: JSON.stringify({ message: msg, type: 'warning', warId: currentWarId })
-                    })
-                    .then(r => r.json())
-                    .then(data => {
-                        if (data.success) {
-                            msgInput.value = '';
-                            showToast('Broadcast sent to faction!', 'success');
-                        } else {
-                            showToast(data.error || 'Failed to send broadcast.', 'error');
-                        }
-                    })
-                    .catch(e => {
-                        warn('Broadcast failed:', e.message);
-                        showToast('Failed to send broadcast (Server Error).', 'error');
-                    });
-                }
-            });
-            // Also support Enter key
-            const msgInput = document.getElementById('fo-input-broadcast');
-            if (msgInput) {
-                msgInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') shoutBtn.click();
-                });
-            }
         }
 
         log('War overlay initialised');
