@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.6.0
+// @version      4.6.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -206,7 +206,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.6.0',
+        VERSION: '4.6.1',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -3347,7 +3347,7 @@ body.wb-chain-active {
         realtimeSocket = ioFn(CONFIG.SERVER_URL, {
             auth: { token: state.jwtToken },
             transports: ['websocket', 'polling'],
-            withCredentials: false,
+            withCredentials: true,
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 2000,
@@ -3568,14 +3568,18 @@ body.wb-chain-active {
     function updateRtBadge(mode) {
         const badge = document.getElementById('fo-rt-badge');
         if (!badge) return;
-        if (mode === true || mode === 'rt') {
-            badge.className = 'fo-rt-badge rt';
-            badge.textContent = 'RT';
-            badge.title = 'Socket.IO realtime active';
-        } else if (mode === 'sse') {
+
+        const isSocketActive = realtimeSocket && realtimeSocket.connected;
+        const isSseActive = sseConnected;
+
+        if (mode === 'sse' || isSseActive) {
             badge.className = 'fo-rt-badge rt';
             badge.textContent = 'RT';
             badge.title = 'SSE stream active';
+        } else if (mode === true || mode === 'rt' || isSocketActive) {
+            badge.className = 'fo-rt-badge rt';
+            badge.textContent = 'RT';
+            badge.title = 'Socket.IO realtime active';
         } else {
             badge.className = 'fo-rt-badge poll';
             badge.textContent = 'POLL';
@@ -5995,7 +5999,7 @@ body.wb-chain-active {
         }
 
         // Set RT badge initial state
-        updateRtBadge(realtimeSocket && realtimeSocket.connected);
+        updateRtBadge();
 
         // Move Torn's native #barChain into our overlay header
         moveTornChainBar();
