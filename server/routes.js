@@ -398,13 +398,25 @@ router.get("/api/stream", (req, res, next) => {
   addSSEClient(warId, client);
   console.log(`[sse] ${playerName} connected to stream for war ${warId}`);
 
-  // Heartbeat every 25s to keep connection alive
+  // Comment-based keep-alive every 5s to bypass browser buffering
+  const keepAlive = setInterval(() => {
+    try { 
+      res.write(": keepalive\n\n"); 
+      if (typeof res.flush === "function") res.flush();
+    } catch (_) {}
+  }, 5000);
+
+  // Heartbeat every 15s to keep connection alive
   const heartbeat = setInterval(() => {
-    try { res.write(`: heartbeat\n\n`); } catch (_) {}
-  }, 25000);
+    try { 
+      res.write(`data: ${JSON.stringify({ type: "heartbeat", ts: Date.now() })}\n\n`);
+      if (typeof res.flush === "function") res.flush();
+    } catch (_) {}
+  }, 15000);
 
   // Cleanup on disconnect
   req.on("close", () => {
+    clearInterval(keepAlive);
     clearInterval(heartbeat);
     removeSSEClient(warId, client);
     console.log(`[sse] ${playerName} disconnected from stream`);

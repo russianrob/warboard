@@ -1,8 +1,7 @@
 {
   "42055": {
     "broadcastRoles": [
-      "leader",
-      "co-leader"
+      "banker"
     ]
   }
 }
