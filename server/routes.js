@@ -407,19 +407,18 @@ router.get("/api/stream", (req, res, next) => {
   // Comment-based keep-alive every 5s to bypass browser buffering
   const keepAlive = setInterval(() => {
     try { 
-      // Send a larger comment to ensure we bypass any small-buffer logic in Chrome
       res.write(": keepalive " + ".".repeat(100) + "\n\n"); 
       if (typeof res.flush === "function") res.flush();
     } catch (_) {}
   }, 5000);
 
-  // Heartbeat every 10s to keep connection alive
+  // Heartbeat every 5s to keep connection alive
   const heartbeat = setInterval(() => {
     try { 
       res.write(`data: ${JSON.stringify({ type: "heartbeat", ts: Date.now() })}\n\n`);
       if (typeof res.flush === "function") res.flush();
     } catch (_) {}
-  }, 10000);
+  }, 5000);
 
   // Cleanup on disconnect
   req.on("close", () => {
