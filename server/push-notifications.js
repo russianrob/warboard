@@ -429,3 +429,21 @@ export async function notifyWarTargetReached(warPlayers, warId, targetValue, cur
     { urgency: "high", TTL: 300 },
   );
 }
+
+/**
+ * Notify faction members about a broadcast.
+ */
+export async function notifyBroadcast(playerIds, warId, senderName, message) {
+  await sendToPlayers(
+    playerIds.filter((id) => isSubscribed(id)),
+    {
+      title: `📣 Broadcast from ${senderName}`,
+      body: message,
+      tag: `broadcast-${Date.now()}`,
+      icon: "/icon-192.png",
+      data: { type: "broadcast", warId },
+    },
+    null, // Force delivery, bypass preferences
+    { urgency: "high", TTL: 3600 },
+  );
+}

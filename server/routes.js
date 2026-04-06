@@ -714,6 +714,22 @@ router.post("/api/broadcast", requireAuth, (req, res) => {
   // 2. Broadcast to SSE clients in this war room
   broadcastSSE(warId, { type: "global_toast", ...payload });
 
+  // 3. Send Push Notifications to subscribed faction members (offline/background)
+  // Fetch full faction member list to reach offline users who have push enabled
+  const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
+  if (apiKey) {
+    fetchFactionMembers(factionId, apiKey).then(members => {
+      const memberIds = Object.keys(members);
+      push.notifyBroadcast(memberIds, warId, playerName, message);
+    }).catch(err => {
+      console.error(`[api] Failed to fetch members for broadcast push: ${err.message}`);
+    });
+  } else {
+    // Fallback: just send to currently online/tracked players if no API key
+    const onlinePlayers = store.getOnlinePlayersForWar(warId).map(p => p.id);
+    push.notifyBroadcast(onlinePlayers, warId, playerName, message);
+  }
+
   console.log(`[📣] Faction Broadcast sent to war ${warId} by ${playerName}: ${message}`);
 
   return res.json({ success: true });
