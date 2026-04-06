@@ -648,6 +648,13 @@ router.post("/api/call", requireAuth, (req, res) => {
 // ── POST /api/broadcast ──────────────────────────────────────────────────
 // Faction Leaders/Bankers: Broadcast a message to their faction's war room.
 // Update custom broadcast roles for the faction.
+// Get custom broadcast roles for the faction.
+router.get("/api/broadcast/roles", requireAuth, (req, res) => {
+  const { factionId } = req.user;
+  const roles = getAllowedBroadcastRoles(factionId);
+  return res.json({ roles });
+});
+
 router.post("/api/broadcast/roles", requireAuth, (req, res) => {
   const { playerId, factionPosition, factionId } = req.user;
   const { roles } = (req.body || {});
