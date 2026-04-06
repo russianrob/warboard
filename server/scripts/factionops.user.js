@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.5.32
+// @version      4.5.33
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -39,7 +39,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v4.5.32  - Feature: Added UI in settings for faction leaders to configure custom broadcast roles.
+// v4.5.33  - Feature: Added UI in settings for faction leaders to configure custom broadcast roles.
 // v4.5.31  - Improvement: Migrated Faction Broadcast to use HTTP POST, enabling leaders to broadcast even on fallback SSE connections.
 // v4.5.30  - Feature: Faction leaders and bankers can now broadcast messages to their faction directly from the war overlay.
 // v4.5.29  - Revert: Restored the exact PDA scanner logic from v4.5.22 after newer fixes caused false "LOST" reads during rapid target decay.
@@ -3476,8 +3476,9 @@ body.wb-chain-active {
                 }
 
                 // Parse new SSE data since last check
-                const newText = resp.responseText.substring(sseLastLength);
-                sseLastLength = resp.responseText.length;
+                const responseText = resp.responseText || '';
+                const newText = responseText.substring(sseLastLength);
+                sseLastLength = responseText.length;
 
                 // Split into SSE events (separated by double newline)
                 const parts = newText.split('\n\n');
