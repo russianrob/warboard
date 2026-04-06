@@ -12,7 +12,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "54 minutes ago",
+        "lastAction": "55 minutes ago",
         "activity": "offline"
       },
       "427122": {
@@ -21,7 +21,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "14 minutes ago",
+        "lastAction": "15 minutes ago",
         "activity": "offline"
       },
       "995642": {
@@ -57,7 +57,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "42 minutes ago",
+        "lastAction": "43 minutes ago",
         "activity": "offline"
       },
       "1985713": {
@@ -111,7 +111,7 @@
         "status": "traveling",
         "description": "Returning to Torn from China",
         "until": 0,
-        "lastAction": "41 minutes ago",
+        "lastAction": "42 minutes ago",
         "activity": "offline"
       },
       "2256909": {
@@ -183,7 +183,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "3 minutes ago",
+        "lastAction": "4 minutes ago",
         "activity": "offline"
       },
       "2596398": {
@@ -219,7 +219,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "11 minutes ago",
+        "lastAction": "12 minutes ago",
         "activity": "idle"
       },
       "2686635": {
@@ -389,7 +389,7 @@
         "level": 16,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86303652,
+        "until": 86303617,
         "lastAction": "282 days ago",
         "activity": "offline"
       },
@@ -570,7 +570,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "7 minutes ago",
+        "lastAction": "8 minutes ago",
         "activity": "offline"
       },
       "3852897": {
@@ -678,7 +678,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "0 minutes ago",
+        "lastAction": "1 minute ago",
         "activity": "online"
       },
       "3948710": {
@@ -704,7 +704,7 @@
         "level": 16,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86303652,
+        "until": 86303617,
         "lastAction": "110 days ago",
         "activity": "offline"
       },
@@ -714,7 +714,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "36 minutes ago",
+        "lastAction": "37 minutes ago",
         "activity": "offline"
       },
       "3987497": {
@@ -741,7 +741,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "4 minutes ago",
+        "lastAction": "5 minutes ago",
         "activity": "offline"
       },
       "4022212": {
@@ -758,7 +758,7 @@
         "level": 15,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86303652,
+        "until": 86303617,
         "lastAction": "89 days ago",
         "activity": "offline"
       },
@@ -768,8 +768,8 @@
         "status": "traveling",
         "description": "Returning to Torn from UAE",
         "until": 0,
-        "lastAction": "2 hours ago",
-        "activity": "offline"
+        "lastAction": "0 minutes ago",
+        "activity": "online"
       },
       "4028234": {
         "name": "Wealtherie",
@@ -803,7 +803,7 @@
         "level": 8,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86303652,
+        "until": 86303617,
         "lastAction": "40 days ago",
         "activity": "offline"
       },
@@ -831,7 +831,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "7 minutes ago",
+        "lastAction": "8 minutes ago",
         "activity": "offline"
       },
       "4161748": {
@@ -839,7 +839,7 @@
         "level": 4,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86303652,
+        "until": 86303617,
         "lastAction": "26 days ago",
         "activity": "offline"
       }
@@ -853,24 +853,6 @@
     },
     "warTarget": null,
     "enemyActivityLog": [
-      {
-        "timestamp": 1775354449889,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775354465219,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775354480610,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
       {
         "timestamp": 1775354495877,
         "online": 0,
@@ -35412,14 +35394,31 @@
         "online": 0,
         "idle": 8,
         "total": 93
+      },
+      {
+        "timestamp": 1775443552546,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775443567796,
+        "online": 0,
+        "idle": 8,
+        "total": 93
+      },
+      {
+        "timestamp": 1775443583133,
+        "online": 0,
+        "idle": 8,
+        "total": 93
       }
     ],
     "strategy": {
       "recommendation": "HOLD",
-      "confidence": 10,
+      "confidence": 20,
       "reasons": [
         "Behind on score — need to catch up",
-        "Thin roster (4 online) — conserve energy",
         "Enemy peak activity hour — expect resistance",
         "Late war and behind — push hard now"
       ],
@@ -35434,7 +35433,7 @@
       },
       "currentPhase": "late",
       "currentHour": 2,
-      "score": 10
+      "score": 20
     },
     "enemyActivityByHour": {
       "0": 0,
@@ -35469,13 +35468,13 @@
     "warStart": 1775246400,
     "warOrigTarget": 11232,
     "warEta": {
-      "etaTimestamp": 1775507771831,
+      "etaTimestamp": 1775507867826,
       "hoursRemaining": 17.853338288120895,
       "currentTarget": 8073,
-      "calculatedAt": 1775443499814
+      "calculatedAt": 1775443595809
     },
     "ourFactionOnline": {
-      "online": 4,
+      "online": 5,
       "idle": 10,
       "total": 97
     },

@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.6.6
+// @version      4.6.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
 // @downloadURL  https://tornwar.com/scripts/factionops.user.js
 // @updateURL    https://tornwar.com/scripts/factionops.meta.js
-// @require      https://cdn.socket.io/4.8.1/socket.io.min.js
+// @require      https://tornwar.com/socket.io/socket.io.js
 // @match        https://www.torn.com/factions.php?step=your*
 // @match        https://www.torn.com/factions.php?step=profile*
 // @match        https://www.torn.com/loader.php?sid=attack&user*
@@ -207,7 +207,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const PDA_API_KEY = '###PDA-APIKEY###';
 
     const CONFIG = {
-        VERSION: '4.6.6',
+        VERSION: '4.6.7',
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
