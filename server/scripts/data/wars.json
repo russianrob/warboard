@@ -12,8 +12,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "0 minutes ago",
-        "activity": "online"
+        "lastAction": "1 minute ago",
+        "activity": "offline"
       },
       "427122": {
         "name": "FanceeUnicorn",
@@ -21,7 +21,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "24 minutes ago",
+        "lastAction": "26 minutes ago",
         "activity": "offline"
       },
       "995642": {
@@ -57,7 +57,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "52 minutes ago",
+        "lastAction": "53 minutes ago",
         "activity": "offline"
       },
       "1985713": {
@@ -111,7 +111,7 @@
         "status": "traveling",
         "description": "Returning to Torn from China",
         "until": 0,
-        "lastAction": "51 minutes ago",
+        "lastAction": "52 minutes ago",
         "activity": "offline"
       },
       "2256909": {
@@ -129,7 +129,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "25 minutes ago",
+        "lastAction": "26 minutes ago",
         "activity": "offline"
       },
       "2316988": {
@@ -156,7 +156,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "22 minutes ago",
+        "lastAction": "23 minutes ago",
         "activity": "idle"
       },
       "2352134": {
@@ -175,7 +175,7 @@
         "description": "Okay",
         "until": 0,
         "lastAction": "1 hour ago",
-        "activity": "idle"
+        "activity": "offline"
       },
       "2595471": {
         "name": "22Reflex",
@@ -183,7 +183,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "13 minutes ago",
+        "lastAction": "14 minutes ago",
         "activity": "offline"
       },
       "2596398": {
@@ -219,7 +219,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "22 minutes ago",
+        "lastAction": "23 minutes ago",
         "activity": "online"
       },
       "2686635": {
@@ -238,7 +238,7 @@
         "description": "Okay",
         "until": 0,
         "lastAction": "1 hour ago",
-        "activity": "idle"
+        "activity": "online"
       },
       "2746623": {
         "name": "PandaRampage",
@@ -262,8 +262,8 @@
         "name": "Knocturnal",
         "level": 42,
         "status": "hospital",
-        "description": "In hospital for 27 mins ",
-        "until": 1674,
+        "description": "In hospital for 26 mins ",
+        "until": 1603,
         "lastAction": "3 days ago",
         "activity": "offline"
       },
@@ -291,7 +291,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "4 hours ago",
+        "lastAction": "5 hours ago",
         "activity": "offline"
       },
       "2851239": {
@@ -389,7 +389,7 @@
         "level": 16,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86303044,
+        "until": 86302973,
         "lastAction": "282 days ago",
         "activity": "offline"
       },
@@ -480,7 +480,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "13 minutes ago",
+        "lastAction": "14 minutes ago",
         "activity": "offline"
       },
       "3680304": {
@@ -498,7 +498,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "23 minutes ago",
+        "lastAction": "24 minutes ago",
         "activity": "idle"
       },
       "3722615": {
@@ -507,7 +507,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "23 minutes ago",
+        "lastAction": "24 minutes ago",
         "activity": "offline"
       },
       "3763090": {
@@ -516,7 +516,7 @@
         "status": "traveling",
         "description": "Returning to Torn from Japan",
         "until": 0,
-        "lastAction": "44 minutes ago",
+        "lastAction": "45 minutes ago",
         "activity": "offline"
       },
       "3787350": {
@@ -526,7 +526,7 @@
         "description": "Okay",
         "until": 0,
         "lastAction": "1 hour ago",
-        "activity": "idle"
+        "activity": "offline"
       },
       "3802452": {
         "name": "SophiaSnow",
@@ -552,7 +552,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "53 minutes ago",
+        "lastAction": "54 minutes ago",
         "activity": "offline"
       },
       "3843961": {
@@ -561,8 +561,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "2 minutes ago",
-        "activity": "idle"
+        "lastAction": "3 minutes ago",
+        "activity": "offline"
       },
       "3846723": {
         "name": "Zara",
@@ -570,7 +570,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "17 minutes ago",
+        "lastAction": "18 minutes ago",
         "activity": "offline"
       },
       "3852897": {
@@ -678,7 +678,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "4 minutes ago",
+        "lastAction": "5 minutes ago",
         "activity": "idle"
       },
       "3948710": {
@@ -696,15 +696,15 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "0 minutes ago",
-        "activity": "online"
+        "lastAction": "1 minute ago",
+        "activity": "offline"
       },
       "3979973": {
         "name": "jammiedodger2",
         "level": 16,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86303044,
+        "until": 86302973,
         "lastAction": "110 days ago",
         "activity": "offline"
       },
@@ -714,7 +714,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "46 minutes ago",
+        "lastAction": "47 minutes ago",
         "activity": "offline"
       },
       "3987497": {
@@ -723,7 +723,7 @@
         "status": "traveling",
         "description": "Traveling to Switzerland",
         "until": 0,
-        "lastAction": "33 minutes ago",
+        "lastAction": "34 minutes ago",
         "activity": "offline"
       },
       "4000591": {
@@ -741,7 +741,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "14 minutes ago",
+        "lastAction": "15 minutes ago",
         "activity": "offline"
       },
       "4022212": {
@@ -758,7 +758,7 @@
         "level": 15,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86303044,
+        "until": 86302973,
         "lastAction": "89 days ago",
         "activity": "offline"
       },
@@ -768,8 +768,8 @@
         "status": "traveling",
         "description": "Traveling to UAE",
         "until": 0,
-        "lastAction": "0 minutes ago",
-        "activity": "online"
+        "lastAction": "1 minute ago",
+        "activity": "offline"
       },
       "4028234": {
         "name": "Wealtherie",
@@ -803,7 +803,7 @@
         "level": 8,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86303044,
+        "until": 86302973,
         "lastAction": "40 days ago",
         "activity": "offline"
       },
@@ -813,8 +813,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "2 minutes ago",
-        "activity": "online"
+        "lastAction": "3 minutes ago",
+        "activity": "idle"
       },
       "4106405": {
         "name": "Bobi007",
@@ -831,7 +831,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "17 minutes ago",
+        "lastAction": "19 minutes ago",
         "activity": "offline"
       },
       "4161748": {
@@ -839,7 +839,7 @@
         "level": 4,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86303044,
+        "until": 86302973,
         "lastAction": "26 days ago",
         "activity": "offline"
       }
@@ -853,36 +853,6 @@
     },
     "warTarget": null,
     "enemyActivityLog": [
-      {
-        "timestamp": 1775355076543,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
-      {
-        "timestamp": 1775355091814,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
-      {
-        "timestamp": 1775355107107,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
-      {
-        "timestamp": 1775355122382,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
-      {
-        "timestamp": 1775355137651,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
       {
         "timestamp": 1775355152922,
         "online": 0,
@@ -35412,6 +35382,36 @@
         "online": 0,
         "idle": 10,
         "total": 93
+      },
+      {
+        "timestamp": 1775444166158,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775444181404,
+        "online": 0,
+        "idle": 10,
+        "total": 93
+      },
+      {
+        "timestamp": 1775444196855,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775444212104,
+        "online": 0,
+        "idle": 9,
+        "total": 93
+      },
+      {
+        "timestamp": 1775444227409,
+        "online": 0,
+        "idle": 7,
+        "total": 93
       }
     ],
     "strategy": {
@@ -35469,14 +35469,14 @@
     "warStart": 1775246400,
     "warOrigTarget": 11232,
     "warEta": {
-      "etaTimestamp": 1775508430694,
+      "etaTimestamp": 1775508440832,
       "hoursRemaining": 17.853338288120895,
       "currentTarget": 8073,
-      "calculatedAt": 1775444158677
+      "calculatedAt": 1775444168815
     },
     "ourFactionOnline": {
       "online": 3,
-      "idle": 8,
+      "idle": 9,
       "total": 97
     },
     "enemyFactionName": "DarkHearts"
