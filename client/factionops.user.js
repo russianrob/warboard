@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.7
+// @version      4.8.8
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -40,6 +40,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.8   - UI: Improved Member Activity Heatmap colors to highlight peak hours (Top 5% red, top 20% yellow).
 // v4.8.7   - Feature: Removed automated Push/Hold/Turtle Strategy Engine from the overlay.
 // v4.8.6   - Feature: Removed experimental "Enemy Surge" push notification (the heatmap natively tracks activity better now).
 // v4.8.5   - Feature: Rebuilt toast notification system with stacking, scaling duration, progress bars, and icons.
@@ -8977,8 +8978,20 @@ body.wb-chain-active {
                     intensity = maxPct > 0 ? avg / maxPct : 0;
                 }
 
-                cell.style.backgroundColor = `rgba(0, 184, 148, ${(intensity * 0.9 + 0.1).toFixed(2)})`;
-                if (bucket.samples === 0) cell.style.backgroundColor = 'rgba(255,255,255,0.05)';
+                if (bucket.samples === 0) {
+                    cell.style.backgroundColor = 'rgba(255,255,255,0.05)';
+                } else if (intensity >= 0.95) {
+                    // Top 5% peak activity - High contrast Red/Pink
+                    cell.style.backgroundColor = `rgba(255, 118, 117, ${(intensity * 0.9 + 0.1).toFixed(2)})`;
+                    cell.style.boxShadow = '0 0 8px rgba(255, 118, 117, 0.4)';
+                    cell.style.zIndex = '1';
+                } else if (intensity >= 0.8) {
+                    // Very high activity - Yellow/Orange
+                    cell.style.backgroundColor = `rgba(253, 203, 110, ${(intensity * 0.9 + 0.1).toFixed(2)})`;
+                } else {
+                    // Normal activity - Green gradient
+                    cell.style.backgroundColor = `rgba(0, 184, 148, ${(intensity * 0.9 + 0.1).toFixed(2)})`;
+                }
                 
                 let tooltip = `${DAY_LABELS[d]} ${String(h).padStart(2, '0')}:00 TCT\n`;
                 tooltip += `Avg Active: ${avg.toFixed(1)}`;
