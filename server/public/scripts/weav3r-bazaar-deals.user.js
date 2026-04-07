@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.2.1
+// @version      1.3.0
 // @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals + item name search with full autocomplete
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -69,6 +69,7 @@
         dealsError:     null,
         filterCat:      store.get('w3_cat', 'All'),
         collapsed:      store.get('w3_collapsed', false),
+        minimized:      store.get('w3_minimized', false),
         lookupId:       null,
         lookupName:     '',
         lookupListings: [],
@@ -99,6 +100,17 @@
             transition: max-height 0.2s ease;
         }
         #w3b-panel.collapsed { max-height: 42px; overflow: hidden; }
+        #w3b-panel.minimized { display: none !important; }
+        #w3b-minbtn {
+            position: fixed; bottom: 70px; right: 16px;
+            background: #e05070; color: #fff; border: none;
+            border-radius: 8px; padding: 6px 12px;
+            font-size: 12px; font-weight: 700; cursor: pointer;
+            z-index: 99999; box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+            font-family: 'Segoe UI', Arial, sans-serif;
+            letter-spacing: .3px;
+        }
+        #w3b-minbtn:hover { background: #b8304a; }
         #w3b-head {
             display: flex; align-items: center; justify-content: space-between;
             padding: 8px 12px; background: #0d2845; flex-shrink: 0; user-select: none;
@@ -338,7 +350,7 @@
     }
 
     // ── DOM refs ──────────────────────────────────────────────────────────
-    let panel, body, statusBar;
+    let panel, body, statusBar, minBtn;
 
     // ── Render ─────────────────────────────────────────────────────────────
     function render() {
@@ -566,13 +578,20 @@
         head.innerHTML = `
             <span id="w3b-head-title">🔍 Weav3r Deals</span>
             <div id="w3b-head-ctrl">
-                <button class="w3b-btn dim" id="w3b-collapse" style="padding:2px 7px">${S.collapsed ? '▲' : '▼'}</button>
+                <button class="w3b-btn dim" id="w3b-collapse" style="padding:2px 7px" title="Collapse">${S.collapsed ? '▲' : '▼'}</button>
+                <button class="w3b-btn dim" id="w3b-minimize" style="padding:2px 7px" title="Minimize to button">_</button>
             </div>`;
         head.querySelector('#w3b-collapse').addEventListener('click', () => {
             S.collapsed = !S.collapsed;
             store.set('w3_collapsed', S.collapsed);
             panel.classList.toggle('collapsed', S.collapsed);
             head.querySelector('#w3b-collapse').textContent = S.collapsed ? '▲' : '▼';
+        });
+        head.querySelector('#w3b-minimize').addEventListener('click', () => {
+            S.minimized = true;
+            store.set('w3_minimized', true);
+            panel.classList.add('minimized');
+            minBtn.style.display = 'block';
         });
         panel.appendChild(head);
 
@@ -600,6 +619,22 @@
         panel.appendChild(statusBar);
 
         document.body.appendChild(panel);
+
+        // Floating restore button
+        minBtn = document.createElement('button');
+        minBtn.id = 'w3b-minbtn';
+        minBtn.textContent = '🔍 Deals';
+        minBtn.style.display = S.minimized ? 'block' : 'none';
+        minBtn.addEventListener('click', () => {
+            S.minimized = false;
+            store.set('w3_minimized', false);
+            panel.classList.remove('minimized');
+            minBtn.style.display = 'none';
+        });
+        document.body.appendChild(minBtn);
+
+        // Apply initial minimized state
+        if (S.minimized) panel.classList.add('minimized');
     }
 
     // ── Init ──────────────────────────────────────────────────────────────
