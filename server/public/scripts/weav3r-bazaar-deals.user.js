@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.5.2
+// @version      1.5.3
 // @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals + item name search with full autocomplete
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -474,7 +474,7 @@
                 </button>` : ''}
                 <button class="w3b-btn dim" id="w3b-refresh" title="Refresh">↻</button>
             </div>
-            ${S.apiKey && S.verifying ? '<div style="font-size:10px;color:#60a5fa;padding:2px 0 4px;">Verifying with Torn API…</div>' : ''}`;
+`;
 
         if (S.dealsLoading) {
             out += `<div class="w3b-loading">⏳ Loading deals from weav3r.dev…</div>`;
