@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.3.0
+// @version      1.3.1
 // @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals + item name search with full autocomplete
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -612,6 +612,16 @@
 
         body = document.createElement('div');
         body.id = 'w3b-body';
+        // Auto-minimize when an Open Bazaar link is clicked
+        body.addEventListener('click', e => {
+            const link = e.target.closest('a');
+            if (link && link.textContent.trim() === 'Open Bazaar') {
+                S.minimized = true;
+                store.set('w3_minimized', true);
+                panel.classList.add('minimized');
+                minBtn.style.display = 'block';
+            }
+        });
         panel.appendChild(body);
 
         statusBar = document.createElement('div');
