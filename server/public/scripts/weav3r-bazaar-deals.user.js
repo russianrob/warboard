@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      2.0.6
+// @version      2.0.7
 // @description  Find real below-market bazaar deals using weav3r.dev + item price lookup
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -375,10 +375,19 @@
                 await new Promise(r => setTimeout(r, 1500));
                 data = await gmJSON(`https://weav3r.dev/api/marketplace/${id}`);
             }
-            if (data.item_name) S.lookupName = data.item_name;
-            // Add to index if not already there
-            if (data.item_name && !itemIndex[data.item_name]) {
+            if (data.item_name) {
+                // Detect mismatch — Torn API mapped wrong ID to this name
+                if (name && data.item_name.toLowerCase() !== name.toLowerCase()) {
+                    // Remove the bad mapping and flag it
+                    delete itemIndex[name];
+                    S.lookupMismatch = { searched: name, got: data.item_name };
+                } else {
+                    S.lookupMismatch = null;
+                }
+                S.lookupName = data.item_name;
+                // Correct the index with the real name→id mapping
                 itemIndex[data.item_name] = data.item_id;
+                store.set('w3_index', JSON.stringify(itemIndex));
             }
             S.lookupTotal = data.total_listings ?? null;
             const listings = (data.listings || []).map(l => ({
@@ -504,6 +513,12 @@
                 <a href="https://weav3r.dev/item/${S.lookupId}" target="_blank" style="color:#e05070;">View on weav3r.dev →</a></div>`;
         } else if (S.lookupListings.length > 0) {
             const name = S.lookupName || `Item #${S.lookupId}`;
+            if (S.lookupMismatch) {
+                out += `<div class="w3b-error" style="margin-bottom:6px;">
+                    ⚠ "${esc(S.lookupMismatch.searched)}" wasn't found — showing <strong>${esc(S.lookupMismatch.got)}</strong> instead.<br>
+                    <span style="font-size:10px">Bad mapping removed from index. Try searching again.</span>
+                </div>`;
+            }
             out += `<div class="w3b-section-label">Cheapest bazaar listings — ${esc(name)}</div>`;
             out += S.lookupListings.slice(0, 20).map(l => `
                 <div class="w3b-row" style="border-left-color:#60a5fa">
