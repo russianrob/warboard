@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.1.0
-// @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals panel + item price lookup by name
+// @version      1.2.0
+// @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals + item name search with full autocomplete
 // @author       RussianRob
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
@@ -29,12 +29,12 @@
         set: (k, v) => { try { GM_setValue(k, v); } catch {} },
     };
 
-    // ── Static item name → ID map (weapons + armour) ───────────────────────
-    // Additional items are added dynamically from dollar deals API responses
-    const STATIC_ITEMS = {"Hammer":1,"Baseball Bat":2,"Crowbar":3,"Knuckle Dusters":4,"Pen Knife":5,"Kitchen Knife":6,"Dagger":7,"Axe":8,"Scimitar":9,"Samurai Sword":11,"Glock 17":12,"Raven MP25":13,"Ruger 57":14,"Beretta M9":15,"USP":16,"Beretta 92FS":17,"Fiveseven":18,"Magnum":19,"Desert Eagle":20,"Sawed-Off Shotgun":22,"Benelli M1 Tactical":23,"MP5 Navy":24,"P90":25,"AK-47":26,"M4A1 Colt Carbine":27,"Benelli M4 Super":28,"M16 A2 Rifle":29,"Steyr AUG":30,"M249 SAW":31,"Minigun":63,"Springfield 1911":99,"Egg Propelled Launcher":100,"9mm Uzi":108,"RPG Launcher":109,"Leather Bullwhip":110,"Ninja Claws":111,"Yasukuni Sword":146,"Butterfly Knife":173,"XM8 Rifle":174,"Cobra Derringer":177,"S&W Revolver":189,"Claymore Sword":217,"Enfield SA-80":219,"Jackhammer":223,"Swiss Army Knife":224,"Mag 7":225,"Spear":227,"Vektor CR-21":228,"Heckler & Koch SL8":231,"BT MP9":233,"Chain Whip":234,"Wooden Nunchaku":235,"Kama":236,"Kodachi":237,"Sai":238,"Type 98 Anti Tank":240,"Taurus":243,"Bo Staff":245,"Katana":247,"Qsz-92":248,"SKS Carbine":249,"Ithaca 37":252,"Lorcin 380":253,"S&W M29":254,"Dual Axes":289,"Dual Hammers":290,"Macana":391,"Metal Nunchaku":395,"Flail":397,"SIG 552":398,"ArmaLite M-15A4":399,"Guandao":400,"Ice Pick":402,"Cricket Bat":438,"Frying Pan":439,"MP5k":483,"AK74U":484,"Skorpion":485,"TMP":486,"Thompson":487,"MP 40":488,"Luger":489,"Blunderbuss":490,"Tavor TAR-21":612,"Harpoon":613,"Diamond Bladed Knife":614,"Naval Cutlass":615,"Nock Gun":830,"Beretta Pico":831,"Riding Crop":832,"Rheinmetall MG 3":837,"Homemade Pocket Shotgun":838,"Scalpel":846,"Sledgehammer":850,"Bread Knife":1053,"Poison Umbrella":1055,"SMAW Launcher":1152,"China Lake":1153,"Milkor MGL":1154,"PKM":1155,"Negev NG-5":1156,"Stoner 96":1157,"Meat Hook":1158,"Cleaver":1159,"Golf Club":1231,"Snow Cannon":1232,"Bushmaster Carbon 15":1302,"Riding Crop (2)":1360,"Scalpel (2)":1365,"Flak Jacket":178,"Hazmat Suit":348,"Kevlar Gloves":640,"WWII Helmet":641,"Motorcycle Helmet":642,"Construction Helmet":643,"Welding Helmet":644,"Riot Helmet":655,"Riot Body":656,"Riot Pants":657,"Riot Boots":658,"Riot Gloves":659,"Dune Helmet":660,"Dune Vest":661,"Dune Pants":662,"Dune Boots":663,"Dune Gloves":664,"Assault Helmet":665,"Assault Body":666,"Assault Pants":667,"Assault Boots":668,"Assault Gloves":669,"Delta Gas Mask":670,"Delta Body":671,"Delta Pants":672,"Delta Boots":673,"Delta Gloves":674,"Marauder Face Mask":675,"Marauder Body":676,"Marauder Pants":677,"Marauder Boots":678,"Marauder Gloves":679,"EOD Helmet":680,"EOD Apron":681,"EOD Pants":682,"EOD Boots":683,"EOD Gloves":684,"M'aol Visage":1164,"M'aol Hooves":1167,"Sentinel Helmet":1307,"Sentinel Apron":1308,"Sentinel Pants":1309,"Sentinel Boots":1310,"Sentinel Gloves":1311,"Vanguard Respirator":1355,"Vanguard Body":1356,"Vanguard Pants":1357,"Vanguard Boots":1358,"Vanguard Gloves":1359};
+    // ── Item index: name → id ────────────────────────────────────────────────
+    // Seeded with weapons + armour, then enriched by background scan + dollar deals
+    const itemIndex = {"Hammer":1,"Baseball Bat":2,"Crowbar":3,"Knuckle Dusters":4,"Pen Knife":5,"Kitchen Knife":6,"Dagger":7,"Axe":8,"Scimitar":9,"Samurai Sword":11,"Glock 17":12,"Raven MP25":13,"Ruger 57":14,"Beretta M9":15,"USP":16,"Beretta 92FS":17,"Fiveseven":18,"Magnum":19,"Desert Eagle":20,"Sawed-Off Shotgun":22,"Benelli M1 Tactical":23,"MP5 Navy":24,"P90":25,"AK-47":26,"M4A1 Colt Carbine":27,"Benelli M4 Super":28,"M16 A2 Rifle":29,"Steyr AUG":30,"M249 SAW":31,"Minigun":63,"Springfield 1911":99,"Egg Propelled Launcher":100,"9mm Uzi":108,"RPG Launcher":109,"Leather Bullwhip":110,"Ninja Claws":111,"Yasukuni Sword":146,"Butterfly Knife":173,"XM8 Rifle":174,"Cobra Derringer":177,"Flak Jacket":178,"S&W Revolver":189,"Claymore Sword":217,"Enfield SA-80":219,"Jackhammer":223,"Swiss Army Knife":224,"Mag 7":225,"Spear":227,"Vektor CR-21":228,"Heckler & Koch SL8":231,"BT MP9":233,"Chain Whip":234,"Wooden Nunchaku":235,"Kama":236,"Kodachi":237,"Sai":238,"Type 98 Anti Tank":240,"Taurus":243,"Bo Staff":245,"Katana":247,"Qsz-92":248,"SKS Carbine":249,"Ithaca 37":252,"Lorcin 380":253,"S&W M29":254,"Dual Axes":289,"Dual Hammers":290,"Hazmat Suit":348,"Macana":391,"Metal Nunchaku":395,"Flail":397,"SIG 552":398,"ArmaLite M-15A4":399,"Guandao":400,"Ice Pick":402,"Cricket Bat":438,"Frying Pan":439,"MP5k":483,"AK74U":484,"Skorpion":485,"TMP":486,"Thompson":487,"MP 40":488,"Luger":489,"Blunderbuss":490,"Tavor TAR-21":612,"Harpoon":613,"Diamond Bladed Knife":614,"Naval Cutlass":615,"Kevlar Gloves":640,"WWII Helmet":641,"Motorcycle Helmet":642,"Construction Helmet":643,"Welding Helmet":644,"Riot Helmet":655,"Riot Body":656,"Riot Pants":657,"Riot Boots":658,"Riot Gloves":659,"Dune Helmet":660,"Dune Vest":661,"Dune Pants":662,"Dune Boots":663,"Dune Gloves":664,"Assault Helmet":665,"Assault Body":666,"Assault Pants":667,"Assault Boots":668,"Assault Gloves":669,"Delta Gas Mask":670,"Delta Body":671,"Delta Pants":672,"Delta Boots":673,"Delta Gloves":674,"Marauder Face Mask":675,"Marauder Body":676,"Marauder Pants":677,"Marauder Boots":678,"Marauder Gloves":679,"EOD Helmet":680,"EOD Apron":681,"EOD Pants":682,"EOD Boots":683,"EOD Gloves":684,"Nock Gun":830,"Beretta Pico":831,"Riding Crop":832,"Rheinmetall MG 3":837,"Homemade Pocket Shotgun":838,"Scalpel":846,"Sledgehammer":850,"Bread Knife":1053,"Poison Umbrella":1055,"SMAW Launcher":1152,"China Lake":1153,"Milkor MGL":1154,"PKM":1155,"Negev NG-5":1156,"Stoner 96":1157,"Meat Hook":1158,"Cleaver":1159,"Golf Club":1231,"Snow Cannon":1232,"Bushmaster Carbon 15":1302,"M'aol Visage":1164,"M'aol Hooves":1167,"Sentinel Helmet":1307,"Sentinel Apron":1308,"Sentinel Pants":1309,"Sentinel Boots":1310,"Sentinel Gloves":1311,"Vanguard Respirator":1355,"Vanguard Body":1356,"Vanguard Pants":1357,"Vanguard Boots":1358,"Vanguard Gloves":1359};
 
-    // Dynamic index — enriched at runtime from dollar deals API (covers drugs, clothing, boosters, etc.)
-    const itemIndex = { ...STATIC_ITEMS }; // name → id
+    // Load any previously scanned items from storage
+    try { const saved = store.get('w3_index', null); if (saved) Object.assign(itemIndex, JSON.parse(saved)); } catch {}
 
     function enrichIndex(items) {
         for (const it of items) {
@@ -229,6 +229,55 @@
         });
     }
 
+    // ── Background index scan ──────────────────────────────────────────────
+    // Scans weav3r marketplace API across all known item ID ranges to discover
+    // drugs, medical, clothing, boosters, etc. — runs once, cached in storage.
+    async function buildIndexInBackground() {
+        const SCAN_KEY = 'w3_scan_done';
+        if (store.get(SCAN_KEY, false)) return; // already scanned
+
+        // ID ranges that cover all Torn item categories
+        const RANGES = [
+            [1,   500],
+            [500, 900],
+            [900, 1400],
+        ];
+        const BATCH = 15; // concurrent requests per batch
+
+        const tryId = (id) => new Promise(resolve => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: `https://weav3r.dev/api/marketplace/${id}`,
+                headers: { Accept: 'application/json' },
+                onload: r => {
+                    try {
+                        const d = JSON.parse(r.responseText);
+                        if (d.item_name && !itemIndex[d.item_name]) {
+                            itemIndex[d.item_name] = d.item_id;
+                        }
+                    } catch {}
+                    resolve();
+                },
+                onerror: () => resolve(),
+                ontimeout: () => resolve(),
+            });
+        });
+
+        for (const [start, end] of RANGES) {
+            for (let i = start; i < end; i += BATCH) {
+                const batch = [];
+                for (let j = i; j < Math.min(i + BATCH, end); j++) batch.push(tryId(j));
+                await Promise.all(batch);
+                // Small pause between batches to be polite
+                await new Promise(r => setTimeout(r, 300));
+            }
+        }
+
+        store.set('w3_index', JSON.stringify(itemIndex));
+        store.set(SCAN_KEY, true);
+        renderStatus(); // update the count in status bar
+    }
+
     // ── Dollar Deals API ───────────────────────────────────────────────────
     async function loadDeals() {
         S.dealsLoading = true;
@@ -254,7 +303,7 @@
         render();
     }
 
-    // ── Item Lookup — parse weav3r item page HTML ──────────────────────────
+    // ── Item Lookup — weav3r marketplace API ─────────────────────────────────
     async function lookupItem(id, name) {
         S.lookupId       = id;
         S.lookupName     = name || '';
@@ -264,55 +313,21 @@
         S.acOpen         = false;
         render();
         try {
-            const html = await gmHTML(`https://weav3r.dev/item/${id}`);
-            const doc  = new DOMParser().parseFromString(html, 'text/html');
-
-            // Extract item name from page title if not provided
-            if (!S.lookupName) {
-                const titleEl = doc.querySelector('title');
-                if (titleEl) {
-                    const t = titleEl.textContent.split(/[|–\-]/)[0].trim();
-                    if (t && t.length < 60) S.lookupName = t;
-                }
+            const data = await gmJSON(`https://weav3r.dev/api/marketplace/${id}`);
+            if (data.item_name) S.lookupName = data.item_name;
+            // Add to index if not already there
+            if (data.item_name && !itemIndex[data.item_name]) {
+                itemIndex[data.item_name] = data.item_id;
             }
-
-            const listings = [];
-
-            // Strategy 1: JSON blobs in script tags
-            for (const s of doc.querySelectorAll('script')) {
-                const txt = s.textContent;
-                if (txt.includes('"sellerName"')) {
-                    try {
-                        const match = txt.match(/\[\s*\{[^[\]]*"sellerName"[^[\]]*\}(?:\s*,\s*\{[^[\]]*"sellerName"[^[\]]*\})*\s*\]/);
-                        if (match) { listings.push(...JSON.parse(match[0])); break; }
-                    } catch {}
-                }
-            }
-
-            // Strategy 2: HTML tables
-            if (listings.length === 0) {
-                for (const table of doc.querySelectorAll('table')) {
-                    const headers = [...table.querySelectorAll('th')].map(th => th.textContent.trim().toLowerCase());
-                    const sellerIdx = headers.findIndex(h => h.includes('seller') || h.includes('player'));
-                    const qtyIdx    = headers.findIndex(h => h.includes('qty') || h.includes('quantity'));
-                    const priceIdx  = headers.findIndex(h => h.includes('price'));
-                    const ageIdx    = headers.findIndex(h => h.includes('age') || h.includes('updated') || h.includes('checked'));
-                    if (sellerIdx === -1 || priceIdx === -1) continue;
-                    for (const tr of table.querySelectorAll('tbody tr')) {
-                        const tds = [...tr.querySelectorAll('td')];
-                        if (tds.length < 2) continue;
-                        const priceRaw = tds[priceIdx]?.textContent.trim().replace(/[^0-9]/g, '');
-                        listings.push({
-                            sellerName:  tds[sellerIdx]?.textContent.trim() || '—',
-                            quantity:    qtyIdx >= 0 ? (tds[qtyIdx]?.textContent.trim() || '?') : '?',
-                            price:       parseInt(priceRaw) || 0,
-                            lastChecked: ageIdx >= 0 ? tds[ageIdx]?.textContent.trim() : null,
-                            playerId:    (() => { const a = tds[sellerIdx]?.querySelector('a'); const m = a?.href?.match(/(?:userId|XID|userID)=(\d+)/); return m ? m[1] : null; })(),
-                        });
-                    }
-                }
-            }
-
+            const listings = (data.listings || []).map(l => ({
+                sellerName:  l.player_name,
+                playerId:    l.player_id,
+                quantity:    l.quantity,
+                price:       l.price,
+                lastChecked: l.last_checked
+                    ? timeAgo(new Date(l.last_checked * 1000).toISOString())
+                    : null,
+            }));
             listings.sort((a, b) => a.price - b.price);
             S.lookupListings = listings;
         } catch (e) {
@@ -593,6 +608,8 @@
         render();
         loadDeals();
         setInterval(() => { if (!S.dealsLoading) loadDeals(); }, CFG.refreshMs);
+        // Build full item index in background (runs once, then cached)
+        setTimeout(buildIndexInBackground, 3000);
     }
 
     if (document.readyState === 'loading') {
