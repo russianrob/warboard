@@ -159,30 +159,31 @@ export function startChainMonitor(io, warId) {
             if (warStart && rw.warTarget && rw.myScore != null) {
               const nowSec = Math.floor(Date.now() / 1000);
               const totalElapsedHours = (nowSec - warStart) / 3600;
+
+              let hoursRemainingFloat = 0;
+              
               if (totalElapsedHours > 24) {
                 const dropHours = Math.floor(totalElapsedHours - 24);
-                
                 const originalTarget = rw.warTarget / (1 - (dropHours * 0.01));
                 const DROP_PER_HOUR = originalTarget * 0.01;
-                // Calculate gap based on the HIGHEST score
                 const lead = Math.max(rw.myScore, rw.enemyScore);
                 const gap = rw.warTarget - lead;
-                const hoursRemainingFloat = gap / DROP_PER_HOUR;
-
-                war.warEta = {
-                  etaTimestamp: hoursRemainingFloat > 0 ? Math.floor(Date.now() + (hoursRemainingFloat * 3600000)) : 0,
-                  hoursRemaining: Math.max(0, hoursRemainingFloat),
-                  currentTarget: rw.warTarget,
-                  calculatedAt: Date.now(),
-                };              } else {
-                war.warEta = {
-                  etaTimestamp: null,
-                  hoursRemaining: null,
-                  currentTarget: rw.warTarget,
-                  calculatedAt: Date.now(),
-                  preDropPhase: true,
-                };
+                hoursRemainingFloat = gap / DROP_PER_HOUR;
+              } else {
+                // Pre-24h phase: Calculate time until decay starts (24h mark) + time to decay the gap
+                const DROP_PER_HOUR = rw.warTarget * 0.01;
+                const lead = Math.max(rw.myScore, rw.enemyScore);
+                const gap = rw.warTarget - lead;
+                const timeUntilDecayStarts = 24 - totalElapsedHours;
+                hoursRemainingFloat = timeUntilDecayStarts + (gap / DROP_PER_HOUR);
               }
+
+              war.warEta = {
+                etaTimestamp: hoursRemainingFloat > 0 ? Math.floor(Date.now() + (hoursRemainingFloat * 3600000)) : 0,
+                hoursRemaining: Math.max(0, hoursRemainingFloat),
+                currentTarget: rw.warTarget,
+                calculatedAt: Date.now(),
+              };
             }
 
             store.saveState();
