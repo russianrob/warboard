@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      2.0.7
+// @version      2.0.8
 // @description  Find real below-market bazaar deals using weav3r.dev + item price lookup
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -378,8 +378,10 @@
             if (data.item_name) {
                 // Detect mismatch — Torn API mapped wrong ID to this name
                 if (name && data.item_name.toLowerCase() !== name.toLowerCase()) {
-                    // Remove the bad mapping and flag it
+                    // Remove the bad mapping, clear stale autocomplete, flag it
                     delete itemIndex[name];
+                    S.acResults = [];
+                    S.acOpen    = false;
                     S.lookupMismatch = { searched: name, got: data.item_name };
                 } else {
                     S.lookupMismatch = null;
