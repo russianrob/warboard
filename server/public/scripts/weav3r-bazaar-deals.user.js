@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.5.0
+// @version      1.5.1
 // @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals + item name search with full autocomplete
 // @author       RussianRob
 // @match        https://www.torn.com/*
+// @updateURL    https://tornwar.com/scripts/weav3r-bazaar-deals.user.js
+// @downloadURL  https://tornwar.com/scripts/weav3r-bazaar-deals.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_getValue
