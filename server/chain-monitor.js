@@ -150,6 +150,12 @@ export function startChainMonitor(io, warId) {
               store.saveState();
             }
 
+            // If the enemy changed, wipe old data safely through store
+            if (rw.enemyFactionId && String(war.enemyFactionId) !== String(rw.enemyFactionId)) {
+              console.log(`[chain] Enemy faction changed from ${war.enemyFactionId} to ${rw.enemyFactionId}`);
+              store.getOrCreateWar(warId, war.factionId, rw.enemyFactionId);
+            }
+
             // Calculate server-side war ETA
             const warStart = rw.warStart || war.warStart || 0;
             if (warStart) war.warStart = warStart;
