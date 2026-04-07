@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      2.0.1
+// @version      2.0.2
 // @description  Find real below-market bazaar deals using weav3r.dev + item price lookup
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -21,7 +21,7 @@
 
     // ── Config ─────────────────────────────────────────────────────────────
     const CFG = {
-        refreshMs:    5 * 60 * 1000,
+        refreshMs:    2 * 60 * 1000,
         pageSize:     50,
         maxPages:     4,
         dealsBatch:   8,   // parallel marketplace requests
