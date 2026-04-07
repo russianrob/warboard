@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      2.0.5
+// @version      2.0.6
 // @description  Find real below-market bazaar deals using weav3r.dev + item price lookup
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -529,7 +529,7 @@
                     ? `weav3r found ${S.lookupTotal} listings but none returned.`
                     : 'No bazaar listings found.';
             out += `<div class="w3b-empty">${totalMsg}<br>
-                <a href="https://weav3r.dev/item/${S.lookupId}" target="_blank" style="color:#e05070;">Verify on weav3r.dev →</a></div>`;}
+                <a href="https://weav3r.dev/item/${S.lookupId}" target="_blank" style="color:#e05070;">Verify on weav3r.dev →</a></div>`;
         } else {
             out += `<div class="w3b-empty" style="color:#556">Type an item name to search.<br>
                 <span style="font-size:10px">Index covers ${Object.keys(itemIndex).length} items<br>and grows as deals load.</span></div>`;
