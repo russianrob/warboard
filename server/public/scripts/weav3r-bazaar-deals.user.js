@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      2.0.0
+// @version      2.0.1
 // @description  Find real below-market bazaar deals using weav3r.dev + item price lookup
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -763,14 +763,19 @@
 ;(() => {
     const itemId = new URLSearchParams(window.location.search).get('highlightItem');
     if (!itemId) return;
+    let done = false;
     const highlight = () => {
+        if (done) return;
         document.querySelectorAll('img').forEach(img => {
+            if (done) return;
             if (img.src.includes(`/images/items/${itemId}/`)) {
                 const wrap = img.closest('div');
                 if (wrap) {
                     wrap.style.setProperty('outline', '3px solid #4ade80', 'important');
                     wrap.style.setProperty('border-radius', '4px', 'important');
                     img.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    done = true;       // scroll once only
+                    obs.disconnect();  // stop watching so scroll stays free
                 }
             }
         });
