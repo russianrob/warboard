@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.8
+// @version      4.8.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -40,6 +40,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.9   - UI: Updated Heatmap legend to match the new high-activity color scale (Red/Yellow).
 // v4.8.8   - UI: Improved Member Activity Heatmap colors to highlight peak hours (Top 5% red, top 20% yellow).
 // v4.8.7   - Feature: Removed automated Push/Hold/Turtle Strategy Engine from the overlay.
 // v4.8.6   - Feature: Removed experimental "Enemy Surge" push notification (the heatmap natively tracks activity better now).
@@ -9012,29 +9013,34 @@ body.wb-chain-active {
         
         const p33 = (maxPct * 0.33).toFixed(0);
         const p66 = (maxPct * 0.66).toFixed(0);
-        const p100 = maxPct.toFixed(0);
+        const p80 = (maxPct * 0.80).toFixed(0);
+        const p95 = (maxPct * 0.95).toFixed(0);
 
         legend.innerHTML = `
             <div style="display:flex; align-items:center; gap:4px;">
                 <div style="width:10px;height:10px;background:rgba(255,255,255,0.05);border-radius:2px;"></div>
-                <span>No Data / 0%</span>
+                <span>No Data</span>
             </div>
             <div style="display:flex; align-items:center; gap:12px; margin-left: 8px;">
                 <div style="display:flex; align-items:center; gap:4px;">
-                    <div style="width:10px;height:10px;background:rgba(0,184,148,0.1);border-radius:2px;"></div>
-                    <span>&gt;0%</span>
+                    <div style="width:10px;height:10px;background:rgba(0,184,148,0.2);border-radius:2px;"></div>
+                    <span>Low</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:4px;">
-                    <div style="width:10px;height:10px;background:rgba(0,184,148,0.4);border-radius:2px;"></div>
-                    <span>~${p33}%</span>
-                </div>
-                <div style="display:flex; align-items:center; gap:4px;">
-                    <div style="width:10px;height:10px;background:rgba(0,184,148,0.7);border-radius:2px;"></div>
-                    <span>~${p66}%</span>
+                    <div style="width:10px;height:10px;background:rgba(0,184,148,0.6);border-radius:2px;"></div>
+                    <span>Medium</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:4px;">
                     <div style="width:10px;height:10px;background:rgba(0,184,148,1.0);border-radius:2px;"></div>
-                    <span>${p100}%+</span>
+                    <span>High</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:4px;">
+                    <div style="width:10px;height:10px;background:rgba(253,203,110,0.9);border-radius:2px;"></div>
+                    <span>~${p80}%+</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:4px;">
+                    <div style="width:10px;height:10px;background:rgba(255,118,117,1.0);box-shadow:0 0 4px rgba(255,118,117,0.5);border-radius:2px;"></div>
+                    <span>Peak (${p95}%+)</span>
                 </div>
             </div>
         `;
