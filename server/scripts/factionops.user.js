@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.12
+// @version      4.8.13
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3282,6 +3282,8 @@ body.wb-chain-active {
         }
         if (data.warEta !== undefined) {
             state.warEta = data.warEta;
+            // Immediately refresh timer display when server ETA arrives
+            if (typeof updateWarTimerDisplay === 'function') updateWarTimerDisplay();
         }
         if (data.warEnded !== undefined) {
             state.warEnded = data.warEnded;
@@ -5912,14 +5914,23 @@ body.wb-chain-active {
             return;
         }
 
-        const msLeft = Math.max(0, etaMs - Date.now());
+        const msLeft = etaMs - Date.now();
         const totalSec = Math.floor(msLeft / 1000);
         
-        // If the ETA is negative (or 0), someone reached the target.
+        // Only show LOST/WON if server has explicitly confirmed war ended
+        // Avoids false LOST on non-war pages where ETA may be slightly stale
         if (totalSec <= 0) {
-            const isLosing = state.warScores && (state.warScores.enemyScore > state.warScores.myScore);
-            warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
-            warTimerValue.textContent = isLosing ? 'LOST' : 'WON';
+            if (state.warEnded) {
+                const isLosing = state.warScores && (state.warScores.enemyScore > state.warScores.myScore);
+                warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
+                warTimerValue.textContent = isLosing ? 'LOST' : 'WON';
+            } else {
+                // ETA expired but war not confirmed over — could be stale server data
+                // Keep showing last displayed value or SYNCING
+                if (warTimerValue.textContent === '--:--') {
+                    warTimerValue.textContent = 'SYNCING...';
+                }
+            }
             return;
         }
 
