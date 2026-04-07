@@ -164,18 +164,17 @@ export function startChainMonitor(io, warId) {
                 
                 const originalTarget = rw.warTarget / (1 - (dropHours * 0.01));
                 const DROP_PER_HOUR = originalTarget * 0.01;
-                // Calculate gap based ONLY on my faction's score to perfectly match GreasyFork script
-                const gap = rw.warTarget - rw.myScore;
+                // Calculate gap based on the HIGHEST score
+                const lead = Math.max(rw.myScore, rw.enemyScore);
+                const gap = rw.warTarget - lead;
                 const hoursRemainingFloat = gap / DROP_PER_HOUR;
-                
+
                 war.warEta = {
-                  // If my score has reached target, set to 0. Otherwise future timestamp.
                   etaTimestamp: hoursRemainingFloat > 0 ? Math.floor(Date.now() + (hoursRemainingFloat * 3600000)) : 0,
                   hoursRemaining: Math.max(0, hoursRemainingFloat),
                   currentTarget: rw.warTarget,
                   calculatedAt: Date.now(),
-                };
-              } else {
+                };              } else {
                 war.warEta = {
                   etaTimestamp: null,
                   hoursRemaining: null,
