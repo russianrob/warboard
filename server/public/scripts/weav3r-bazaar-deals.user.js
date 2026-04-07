@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      2.0.4
+// @version      2.0.5
 // @description  Find real below-market bazaar deals using weav3r.dev + item price lookup
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -369,7 +369,12 @@
         S.acOpen         = false;
         render();
         try {
-            const data = await gmJSON(`https://weav3r.dev/api/marketplace/${id}`);
+            let data = await gmJSON(`https://weav3r.dev/api/marketplace/${id}`);
+            // Retry once if total_listings > 0 but listings came back empty (likely mid-scan rate limit)
+            if (data.total_listings > 0 && (!data.listings || data.listings.length === 0)) {
+                await new Promise(r => setTimeout(r, 1500));
+                data = await gmJSON(`https://weav3r.dev/api/marketplace/${id}`);
+            }
             if (data.item_name) S.lookupName = data.item_name;
             // Add to index if not already there
             if (data.item_name && !itemIndex[data.item_name]) {
