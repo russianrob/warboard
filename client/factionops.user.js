@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.16
+// @version      4.8.17
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -5917,16 +5917,16 @@ body.wb-chain-active {
         const msLeft = etaMs - Date.now();
         const totalSec = Math.floor(msLeft / 1000);
         
-        // Only show LOST/WON if server has explicitly confirmed war ended
-        // Avoids false LOST on non-war pages where ETA may be slightly stale
+        // Show LOST/WON when war is confirmed ended OR when server computed hoursRemaining=0
+        // (which means enemy has exceeded the decayed target — war is effectively over)
         if (totalSec <= 0) {
-            if (state.warEnded) {
+            const serverConfirmsOver = state.warEnded || (eta && eta.hoursRemaining === 0);
+            if (serverConfirmsOver) {
                 const isLosing = state.warScores && (state.warScores.enemyScore > state.warScores.myScore);
                 warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
                 warTimerValue.textContent = isLosing ? 'LOST' : 'WON';
             } else {
-                // ETA expired but war not confirmed over — could be stale server data
-                // Keep showing last displayed value or SYNCING
+                // ETA expired but war not confirmed over — stale data
                 if (warTimerValue.textContent === '--:--') {
                     warTimerValue.textContent = 'SYNCING...';
                 }
