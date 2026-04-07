@@ -398,15 +398,39 @@
     }
 
     // ── DOM refs ──────────────────────────────────────────────────────────
-    let panel, body, statusBar, minBtn, settingsRow;
+    let panel, body, statusBar, minBtn;
 
     // ── Render ─────────────────────────────────────────────────────────────
     function render() {
         if (!panel) return;
         panel.classList.toggle('collapsed', S.collapsed);
-        body.innerHTML = S.tab === 'deals' ? renderDeals() : renderLookup();
+        if (S.settingsOpen) {
+            body.innerHTML = renderSettings();
+        } else {
+            body.innerHTML = S.tab === 'deals' ? renderDeals() : renderLookup();
+        }
         attachListeners();
         renderStatus();
+    }
+
+    function renderSettings() {
+        return `
+            <div style="padding:12px;">
+                <div class="w3b-section-label">Torn API Key</div>
+                <div class="w3b-hint" style="margin-bottom:10px;color:#778;">Use a public-only key. Used to verify which $1 deals are actually buyable.</div>
+                <input id="w3b-apikey-input"
+                    type="text"
+                    inputmode="url"
+                    placeholder="Paste your public API key here"
+                    value="${esc(S.apiKey)}"
+                    autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                    style="width:100%;box-sizing:border-box;background:#0f1a2e;border:1px solid #1e3a5f;color:#dde;border-radius:5px;padding:10px;font-size:13px;display:block;margin-bottom:10px;">
+                <div style="display:flex;gap:8px;">
+                    <button class="w3b-btn" id="w3b-apikey-save" style="flex:1;padding:8px;">Save Key</button>
+                    ${S.apiKey ? '<button class="w3b-btn dim" id="w3b-apikey-clear" style="flex:1;padding:8px;">Clear Key</button>' : ''}
+                </div>
+                ${S.apiKey ? '<div style="margin-top:10px;font-size:11px;color:#4ade80">✓ Key saved — tap Save Key to update</div>' : ''}
+            </div>`;
     }
 
     function renderDeals() {
@@ -564,6 +588,31 @@
             render();
         });
 
+        // Settings body
+        const keyInput = body.querySelector('#w3b-apikey-input');
+        if (keyInput) {
+            ['click','touchstart','touchend','mousedown','keydown','keyup','keypress']
+                .forEach(ev => keyInput.addEventListener(ev, e => e.stopPropagation()));
+        }
+        const saveBtn = body.querySelector('#w3b-apikey-save');
+        if (saveBtn) saveBtn.addEventListener('click', () => {
+            const val = body.querySelector('#w3b-apikey-input')?.value.trim() || '';
+            S.apiKey = val;
+            store.set('w3_apikey', val);
+            S.verified = {};
+            S.settingsOpen = false;
+            if (val && S.deals.length) verifyDeals();
+            render();
+        });
+        const clearBtn = body.querySelector('#w3b-apikey-clear');
+        if (clearBtn) clearBtn.addEventListener('click', () => {
+            S.apiKey = '';
+            store.set('w3_apikey', '');
+            S.verified = {};
+            S.settingsOpen = false;
+            render();
+        });
+
         // Lookup tab — name search input
         const input   = body.querySelector('#w3b-name-input');
         const srchBtn = body.querySelector('#w3b-search');
@@ -659,7 +708,7 @@
             </div>`;
         head.querySelector('#w3b-settings-btn').addEventListener('click', () => {
             S.settingsOpen = !S.settingsOpen;
-            settingsRow.style.display = S.settingsOpen ? 'flex' : 'none';
+            render();
         });
         head.querySelector('#w3b-minimize').addEventListener('click', () => {
             S.minimized = true;
@@ -668,37 +717,6 @@
             minBtn.style.display = 'block';
         });
         panel.appendChild(head);
-
-        // Settings row
-        settingsRow = document.createElement('div');
-        settingsRow.id = 'w3b-settings';
-        settingsRow.style.display = 'none';
-        settingsRow.innerHTML = `
-            <input id="w3b-apikey-input" type="password"
-                placeholder="Torn public API key"
-                value="${esc(S.apiKey)}"
-                autocomplete="off">
-            <button class="w3b-btn" id="w3b-apikey-save" style="padding:4px 8px;font-size:11px;">Save</button>
-            ${S.apiKey ? '<button class="w3b-btn dim" id="w3b-apikey-clear" style="padding:4px 8px;font-size:11px;">Clear</button>' : ''}
-        `;
-        settingsRow.querySelector('#w3b-apikey-save').addEventListener('click', () => {
-            const val = settingsRow.querySelector('#w3b-apikey-input').value.trim();
-            S.apiKey = val;
-            store.set('w3_apikey', val);
-            S.verified = {};
-            S.settingsOpen = false;
-            settingsRow.style.display = 'none';
-            if (val && S.deals.length) verifyDeals();
-        });
-        const clearBtn = settingsRow.querySelector('#w3b-apikey-clear');
-        if (clearBtn) clearBtn.addEventListener('click', () => {
-            S.apiKey = '';
-            store.set('w3_apikey', '');
-            S.verified = {};
-            settingsRow.querySelector('#w3b-apikey-input').value = '';
-            render();
-        });
-        panel.appendChild(settingsRow);
 
         const tabs = document.createElement('div');
         tabs.id = 'w3b-tabs';
