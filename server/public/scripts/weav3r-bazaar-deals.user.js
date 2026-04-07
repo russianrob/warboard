@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.3.2
+// @version      1.3.3
 // @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals + item name search with full autocomplete
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -577,7 +577,7 @@
         head.innerHTML = `
             <span id="w3b-head-title">🔍 Weav3r Deals</span>
             <div id="w3b-head-ctrl">
-                <button class="w3b-btn dim" id="w3b-minimize" style="padding:2px 7px" title="Minimize">_</button>
+                <button class="w3b-btn dim" id="w3b-minimize" style="padding:2px 7px" title="Minimize">×</button>
             </div>`;
         head.querySelector('#w3b-minimize').addEventListener('click', () => {
             S.minimized = true;
