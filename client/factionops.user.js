@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.17
+// @version      4.8.18
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -5863,6 +5863,14 @@ body.wb-chain-active {
             const hoursRemainingFloat = calculateHoursRemaining(currentTarget, true);
             warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
             warTimerLastCalc = Date.now();
+            // Report DOM-sourced ETA to server so other clients (OC tab, Armory, etc.) stay in sync
+            if (hoursRemainingFloat > 0 && state.jwtToken) {
+                postAction('/api/war-timer-report', {
+                    warId: deriveWarId(),
+                    etaTimestamp: warTimerEtaMs,
+                    calculatedAt: Date.now(),
+                }).catch(() => {});
+            }
 
             if (hoursRemainingFloat <= 0) {
                 const isLosing = state.warScores && (state.warScores.enemyScore > state.warScores.myScore);

@@ -67,6 +67,24 @@ function broadcastSSE(warId, data) {
 /** Compute a fresh warEta using currently stored war scores/target — no API call needed. */
 function computeFreshWarEta(war) {
   if (!war || war.warEnded) return war?.warEta || null;
+
+  // Prefer a recent client-reported ETA (from war page DOM) — most accurate source
+  const report = war.clientTimerReport;
+  if (report && report.etaTimestamp && (Date.now() - report.receivedAt) < 3 * 60 * 1000) {
+    // Adjust for time elapsed since the report was received
+    const msLeft = Math.max(0, report.etaTimestamp - Date.now());
+    const hrsRemaining = msLeft / 3600000;
+    return {
+      etaTimestamp: report.etaTimestamp,
+      hoursRemaining: Math.round(hrsRemaining * 100) / 100,
+      currentTarget: war.warOrigTarget || null,
+      calculatedAt: Date.now(),
+      preDropPhase: false,
+      source: 'client',
+    };
+  }
+
+  // Fallback: compute from stored scores/target
   if (!war.warScores || !war.warStart || !war.warOrigTarget) return war?.warEta || null;
   try {
     const nowSec = Math.floor(Date.now() / 1000);
@@ -821,6 +839,20 @@ router.get("/api/war-target", requireAuth, (req, res) => {
 
 // ── POST /api/war-target ─────────────────────────────────────────────────
 // Set or clear the custom war target. Leader/co-leader only.
+
+// Client-reported war timer (from war page DOM) — shared to all clients for accurate OC-tab countdown
+router.post("/api/war-timer-report", requireAuth, (req, res) => {
+  const { warId, etaTimestamp, calculatedAt } = (req.body || {});
+  if (!warId || !etaTimestamp) return res.json({ ok: false });
+  const war = store.getWar(warId);
+  if (!war) return res.json({ ok: false });
+  // Only accept reports that are in the future
+  if (etaTimestamp <= Date.now()) return res.json({ ok: false });
+  war.clientTimerReport = { etaTimestamp, calculatedAt, receivedAt: Date.now() };
+  // Broadcast updated ETA to all clients in this war room
+  broadcastWarUpdate(warId);
+  return res.json({ ok: true });
+});
 
 router.post("/api/war-target", requireAuth, (req, res) => {
   const { playerId, playerName, factionPosition } = req.user;
