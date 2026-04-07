@@ -12,7 +12,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "48 minutes ago",
+        "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "427122": {
@@ -21,7 +21,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "4 hours ago",
+        "lastAction": "5 hours ago",
         "activity": "offline"
       },
       "995642": {
@@ -57,8 +57,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "0 minutes ago",
-        "activity": "online"
+        "lastAction": "11 minutes ago",
+        "activity": "offline"
       },
       "1985713": {
         "name": "AsideKick",
@@ -66,7 +66,7 @@
         "status": "traveling",
         "description": "Traveling to Switzerland",
         "until": 0,
-        "lastAction": "31 minutes ago",
+        "lastAction": "43 minutes ago",
         "activity": "offline"
       },
       "2037705": {
@@ -84,7 +84,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "4 hours ago",
+        "lastAction": "5 hours ago",
         "activity": "offline"
       },
       "2161801": {
@@ -102,7 +102,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "20 minutes ago",
+        "lastAction": "32 minutes ago",
         "activity": "offline"
       },
       "2240004": {
@@ -111,7 +111,7 @@
         "status": "traveling",
         "description": "Traveling to China",
         "until": 0,
-        "lastAction": "15 minutes ago",
+        "lastAction": "27 minutes ago",
         "activity": "offline"
       },
       "2256909": {
@@ -130,7 +130,7 @@
         "description": "Okay",
         "until": 0,
         "lastAction": "1 hour ago",
-        "activity": "idle"
+        "activity": "offline"
       },
       "2316988": {
         "name": "Xhex55",
@@ -138,7 +138,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "17 hours ago",
+        "lastAction": "18 hours ago",
         "activity": "offline"
       },
       "2335842": {
@@ -147,8 +147,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "2 hours ago",
-        "activity": "offline"
+        "lastAction": "10 minutes ago",
+        "activity": "idle"
       },
       "2336935": {
         "name": "Ninjabom2",
@@ -165,7 +165,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "3 hours ago",
+        "lastAction": "4 hours ago",
         "activity": "offline"
       },
       "2578478": {
@@ -174,7 +174,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 hour ago",
+        "lastAction": "2 hours ago",
         "activity": "offline"
       },
       "2595471": {
@@ -183,7 +183,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "24 minutes ago",
+        "lastAction": "36 minutes ago",
         "activity": "offline"
       },
       "2596398": {
@@ -219,7 +219,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "52 minutes ago",
+        "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "2686635": {
@@ -237,7 +237,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "55 minutes ago",
+        "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "2746623": {
@@ -273,7 +273,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "4 minutes ago",
+        "lastAction": "16 minutes ago",
         "activity": "idle"
       },
       "2803351": {
@@ -291,7 +291,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 hour ago",
+        "lastAction": "2 hours ago",
         "activity": "offline"
       },
       "2851239": {
@@ -300,7 +300,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "3 hours ago",
+        "lastAction": "4 hours ago",
         "activity": "offline"
       },
       "2855542": {
@@ -372,7 +372,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "14 minutes ago",
+        "lastAction": "26 minutes ago",
         "activity": "idle"
       },
       "3336726": {
@@ -381,7 +381,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "32 minutes ago",
+        "lastAction": "44 minutes ago",
         "activity": "offline"
       },
       "3358933": {
@@ -389,7 +389,7 @@
         "level": 16,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86312072,
+        "until": 86311348,
         "lastAction": "283 days ago",
         "activity": "offline"
       },
@@ -405,18 +405,18 @@
       "3441372": {
         "name": "TsTEu",
         "level": 25,
-        "status": "traveling",
-        "description": "Returning to Torn from UAE",
+        "status": "okay",
+        "description": "Okay",
         "until": 0,
-        "lastAction": "2 hours ago",
+        "lastAction": "3 hours ago",
         "activity": "offline"
       },
       "3457809": {
         "name": "BlackRaptor",
         "level": 34,
-        "status": "okay",
-        "description": "Okay",
-        "until": 0,
+        "status": "hospital",
+        "description": "In hospital for 20 mins ",
+        "until": 1185,
         "lastAction": "24 days ago",
         "activity": "offline"
       },
@@ -441,10 +441,10 @@
       "3501351": {
         "name": "LaZyMan420",
         "level": 17,
-        "status": "okay",
-        "description": "Okay",
-        "until": 0,
-        "lastAction": "53 minutes ago",
+        "status": "hospital",
+        "description": "In hospital for 26 mins ",
+        "until": 1561,
+        "lastAction": "2 minutes ago",
         "activity": "offline"
       },
       "3553256": {
@@ -498,7 +498,7 @@
         "status": "traveling",
         "description": "Returning to Torn from Canada",
         "until": 0,
-        "lastAction": "12 minutes ago",
+        "lastAction": "24 minutes ago",
         "activity": "idle"
       },
       "3722615": {
@@ -507,8 +507,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "28 minutes ago",
-        "activity": "offline"
+        "lastAction": "3 minutes ago",
+        "activity": "idle"
       },
       "3763090": {
         "name": "Mbun",
@@ -516,7 +516,7 @@
         "status": "abroad",
         "description": "In Japan",
         "until": 0,
-        "lastAction": "3 minutes ago",
+        "lastAction": "15 minutes ago",
         "activity": "offline"
       },
       "3787350": {
@@ -543,16 +543,16 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "2 minutes ago",
+        "lastAction": "14 minutes ago",
         "activity": "offline"
       },
       "3839259": {
         "name": "Azarajah",
         "level": 51,
-        "status": "abroad",
-        "description": "In Switzerland",
+        "status": "traveling",
+        "description": "Returning to Torn from Switzerland",
         "until": 0,
-        "lastAction": "3 hours ago",
+        "lastAction": "4 minutes ago",
         "activity": "offline"
       },
       "3843961": {
@@ -561,8 +561,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "7 hours ago",
-        "activity": "offline"
+        "lastAction": "0 minutes ago",
+        "activity": "online"
       },
       "3846723": {
         "name": "Zara",
@@ -570,8 +570,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "0 minutes ago",
-        "activity": "online"
+        "lastAction": "4 minutes ago",
+        "activity": "offline"
       },
       "3852897": {
         "name": "daisycakes",
@@ -579,7 +579,7 @@
         "status": "traveling",
         "description": "Traveling to Japan",
         "until": 0,
-        "lastAction": "29 minutes ago",
+        "lastAction": "41 minutes ago",
         "activity": "offline"
       },
       "3862031": {
@@ -588,7 +588,7 @@
         "status": "traveling",
         "description": "Traveling to United Kingdom",
         "until": 0,
-        "lastAction": "10 minutes ago",
+        "lastAction": "22 minutes ago",
         "activity": "idle"
       },
       "3862800": {
@@ -597,7 +597,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "6 minutes ago",
+        "lastAction": "18 minutes ago",
         "activity": "offline"
       },
       "3869018": {
@@ -615,7 +615,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "18 hours ago",
+        "lastAction": "19 hours ago",
         "activity": "offline"
       },
       "3872206": {
@@ -624,7 +624,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "38 minutes ago",
+        "lastAction": "50 minutes ago",
         "activity": "offline"
       },
       "3879142": {
@@ -651,7 +651,7 @@
         "status": "traveling",
         "description": "Traveling to Argentina",
         "until": 0,
-        "lastAction": "31 minutes ago",
+        "lastAction": "43 minutes ago",
         "activity": "offline"
       },
       "3907210": {
@@ -678,7 +678,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "48 minutes ago",
+        "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "3948710": {
@@ -687,7 +687,7 @@
         "status": "traveling",
         "description": "Returning to Torn from UAE",
         "until": 0,
-        "lastAction": "48 minutes ago",
+        "lastAction": "1 hour ago",
         "activity": "offline"
       },
       "3974908": {
@@ -696,7 +696,7 @@
         "status": "traveling",
         "description": "Traveling to Japan",
         "until": 0,
-        "lastAction": "47 minutes ago",
+        "lastAction": "59 minutes ago",
         "activity": "offline"
       },
       "3979973": {
@@ -704,7 +704,7 @@
         "level": 16,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86312072,
+        "until": 86311348,
         "lastAction": "111 days ago",
         "activity": "offline"
       },
@@ -714,7 +714,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "34 minutes ago",
+        "lastAction": "46 minutes ago",
         "activity": "offline"
       },
       "3987497": {
@@ -732,7 +732,7 @@
         "status": "traveling",
         "description": "Returning to Torn from Mexico",
         "until": 0,
-        "lastAction": "4 minutes ago",
+        "lastAction": "16 minutes ago",
         "activity": "offline"
       },
       "4009573": {
@@ -741,7 +741,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "21 minutes ago",
+        "lastAction": "33 minutes ago",
         "activity": "offline"
       },
       "4022212": {
@@ -758,7 +758,7 @@
         "level": 15,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86312072,
+        "until": 86311348,
         "lastAction": "90 days ago",
         "activity": "offline"
       },
@@ -803,17 +803,17 @@
         "level": 8,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86312072,
+        "until": 86311348,
         "lastAction": "41 days ago",
         "activity": "offline"
       },
       "4100604": {
         "name": "Trepl",
         "level": 16,
-        "status": "traveling",
-        "description": "Returning to Torn from Cayman Islands",
+        "status": "okay",
+        "description": "Okay",
         "until": 0,
-        "lastAction": "33 minutes ago",
+        "lastAction": "45 minutes ago",
         "activity": "offline"
       },
       "4106405": {
@@ -831,316 +831,28 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "44 minutes ago",
-        "activity": "offline"
+        "lastAction": "0 minutes ago",
+        "activity": "online"
       },
       "4161748": {
         "name": "_Ech0_",
         "level": 4,
         "status": "federal",
         "description": "In federal jail permanently",
-        "until": 86312072,
+        "until": 86311348,
         "lastAction": "27 days ago",
         "activity": "offline"
       }
     },
     "chainData": {
-      "current": 1,
+      "current": 0,
       "max": 10,
-      "timeout": 275,
+      "timeout": 0,
       "cooldown": 0,
       "timestamp": 0
     },
     "warTarget": null,
     "enemyActivityLog": [
-      {
-        "timestamp": 1775432251437,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432266732,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432281995,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432297292,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432312543,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432327870,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432343135,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432358464,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432373746,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432389155,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432404411,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432419919,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432435272,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432450789,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432466056,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432481439,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432496697,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432512034,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432527302,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432542692,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432557948,
-        "online": 0,
-        "idle": 10,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432573295,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432588652,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432604003,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432619285,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432634605,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432649903,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432665198,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432680556,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432695954,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432711218,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432726548,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432741877,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432757213,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432772477,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432787777,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432803043,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432818383,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432833696,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432849022,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432864276,
-        "online": 0,
-        "idle": 9,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432879572,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432894862,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432910264,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432925564,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432940874,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432956145,
-        "online": 0,
-        "idle": 7,
-        "total": 93
-      },
-      {
-        "timestamp": 1775432971470,
-        "online": 0,
-        "idle": 8,
-        "total": 93
-      },
       {
         "timestamp": 1775432986743,
         "online": 0,
@@ -35412,6 +35124,294 @@
         "online": 0,
         "idle": 6,
         "total": 93
+      },
+      {
+        "timestamp": 1775521543957,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521558003,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521573321,
+        "online": 0,
+        "idle": 4,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521588594,
+        "online": 0,
+        "idle": 4,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521603885,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521619198,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521634481,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521648464,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521663748,
+        "online": 0,
+        "idle": 4,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521679036,
+        "online": 0,
+        "idle": 4,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521694343,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521709613,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521724892,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521739006,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521754317,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521769593,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521784868,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521800156,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521815590,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521829435,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521844749,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521860048,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521875328,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521890721,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521906841,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521920406,
+        "online": 0,
+        "idle": 5,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521938245,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521955408,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521972696,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775521989723,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522007802,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522011149,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522027059,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522042369,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522057744,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522073046,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522088424,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522100932,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522116210,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522131564,
+        "online": 0,
+        "idle": 6,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522146848,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522162125,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522177452,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522191467,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522206739,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522222023,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522237331,
+        "online": 0,
+        "idle": 7,
+        "total": 93
+      },
+      {
+        "timestamp": 1775522252622,
+        "online": 0,
+        "idle": 7,
+        "total": 93
       }
     ],
     "strategy": {
@@ -35471,11 +35471,11 @@
       "etaTimestamp": 0,
       "hoursRemaining": 0,
       "currentTarget": 5499,
-      "calculatedAt": 1775521081561
+      "calculatedAt": 1775522075713
     },
     "ourFactionOnline": {
       "online": 5,
-      "idle": 11,
+      "idle": 12,
       "total": 97
     },
     "enemyFactionName": "DarkHearts"

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.10
+// @version      4.8.11
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -40,6 +40,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.11  - Fix: Resolved bug causing "998:58" Ranked War timers when activating FactionOps from non-war tabs (e.g. Armory).
 // v4.8.10  - UI: Re-added percentage markers to the Heatmap legend for clarity.
 // v4.8.9   - UI: Updated Heatmap legend to match the new high-activity color scale (Red/Yellow).
 // v4.8.8   - UI: Improved Member Activity Heatmap colors to highlight peak hours (Top 5% red, top 20% yellow).
@@ -5681,9 +5682,9 @@ body.wb-chain-active {
         let lead = null, currentTarget = null, totalElapsedHours = null;
         let timerDays = 0, timerHours = 0, timerMinutes = 0;
 
-        const warHeader = document.querySelector('[class*="rankedWar"]') || document.querySelector('[class*="rankBox"]') || document.querySelector('.faction-war') || document.body;
-        const timerEl = warHeader.querySelector('[class*="timer_"]');
-        const targetBox = warHeader.querySelector('[class*="target_"]');
+        const warHeader = document.querySelector('[class*="rankedWar"]') || document.querySelector('[class*="rankBox"]') || document.querySelector('.faction-war');
+        const timerEl = warHeader ? warHeader.querySelector('[class*="timer_"]') : null;
+        const targetBox = warHeader ? warHeader.querySelector('[class*="target_"]') : null;
 
         // 1. Try standard desktop React classes first
         if (targetBox) {
@@ -5710,46 +5711,54 @@ body.wb-chain-active {
             }
         }
 
-        // 2. PDA Fallback: Scan the raw text of the hidden Torn page
+        // 2. PDA Fallback / Hidden Tab Fallback: Scan the raw text of the hidden Torn page
         if (lead === null || currentTarget === null || timerDays + timerHours + timerMinutes === 0) {
-            // Use textContent to read the hidden Torn UI behind the overlay
-            const hiddenContainer = document.querySelector('[data-fo-hidden="true"]') || document.body;
-            const allText = hiddenContainer.textContent || "";
+            // Only scan text if we are actually on the main faction war page where the timer exists
+            const isMainWarPage = document.querySelector('.faction-war') !== null || document.querySelector('#factions') !== null;
             
-            // Extract target: Look for "number / number" where right side is >= 1000
-            const targetMatch = allText.match(/([\d,]{1,})\s*\/\s*([\d,]{4,})/);
-            if (targetMatch) {
-                lead = parseInt(targetMatch[1].replace(/[^\d]/g, ''), 10);
-                currentTarget = parseInt(targetMatch[2].replace(/[^\d]/g, ''), 10);
-            }
-
-            // Extract elapsed time: Torn timers usually have 3 segments like "34:50:12" or "1 days 10:50:12"
-            const timeMatches = [...allText.matchAll(/(?:(\d+)\s*[a-zA-Z]+\s*)?(\d{1,3})\s*:\s*(\d{2})(?:\s*:\s*(\d{2}))?/g)];
-            for (let m of timeMatches) {
-                const p1 = parseInt(m[1]) || 0; // days
-                const p2 = parseInt(m[2]) || 0; // hours (or days)
-                const p3 = parseInt(m[3]) || 0; // mins (or hours)
-                const p4 = parseInt(m[4]) || 0; // secs (or mins)
+            if (isMainWarPage) {
+                const hiddenContainer = document.querySelector('[data-fo-hidden="true"]') || document.body;
+                const allText = hiddenContainer.textContent || "";
                 
-                // Avoid catching the Energy bar (e.g. 222:02) or Chain timer (04:59)
-                // War elapsed time usually has 3 segments (H:M:S), or if 2 segments, hours > 5
-                if (m[4] || p2 > 5) {
-                    timerDays = p1; timerHours = p2; timerMinutes = p3;
-                    break;
+                // Extract target: Look for "number / number" where right side is >= 1000
+                const targetMatch = allText.match(/([\d,]{1,})\s*\/\s*([\d,]{4,})/);
+                if (targetMatch) {
+                    lead = parseInt(targetMatch[1].replace(/[^\d]/g, ''), 10);
+                    currentTarget = parseInt(targetMatch[2].replace(/[^\d]/g, ''), 10);
+                }
+
+                // Extract elapsed time: Torn timers usually have 3 segments like "34:50:12" or "1 days 10:50:12"
+                const timeMatches = [...allText.matchAll(/(?:WAR\s*)?(?:(\d+)\s*[dD]\s*)?(\d{1,3})\s*:\s*(\d{2})(?:\s*:\s*(\d{2}))?/g)];
+                for (let m of timeMatches) {
+                    const p1 = parseInt(m[1]) || 0; // days
+                    const p2 = parseInt(m[2]) || 0; // hours (or days)
+                    const p3 = parseInt(m[3]) || 0; // mins (or hours)
+                    const p4 = parseInt(m[4]) || 0; // secs (or mins)
+                    
+                    if (m[4] || p2 > 5) {
+                        timerDays = p1; timerHours = p2; timerMinutes = p3;
+                        break;
+                    }
                 }
             }
         }
         
-        // Debug Output: Show errors directly in the timer button if it still fails
-        if (!timerEl && !targetBox && document.getElementById('fo-war-timer-value')) {
-            if (lead === null || currentTarget === null) {
-                document.getElementById('fo-war-timer-value').textContent = "ERR: SCORE";
-                return; 
+        // 3. Server Fallback: If DOM scanning completely failed (e.g. we are on the Armory tab)
+        if (lead === null || currentTarget === null || timerDays + timerHours + timerMinutes === 0) {
+            // Abort local calculation and just let the background sync handle it
+            if (state.warEta && state.warScores) {
+                warTimerEtaMs = null; // Forces updateWarTimerDisplay to use state.warEta.etaTimestamp
+                // Also update the pct if needed
+                const effectiveScore = state.warScores.myScore != null ? state.warScores.myScore : (Math.max(state.warScores.myScore, state.warScores.enemyScore) || 0);
+                const currentPct = (effectiveScore != null && state.warEta.currentTarget) ? Math.min(100, Math.round((effectiveScore / state.warEta.currentTarget) * 100)) : 0;
+                if (currentPct !== null && !document.hidden && state.warPercentage !== currentPct) {
+                    state.warPercentage = currentPct;
+                    broadcastStateChange({ type: 'war_update', pct: currentPct });
+                }
+            } else {
+                document.getElementById('fo-war-timer-value').textContent = "SYNCING...";
             }
-            if (timerDays + timerHours + timerMinutes === 0) {
-                document.getElementById('fo-war-timer-value').textContent = "ERR: TIME";
-                return;
-            }
+            return;
         }
 
         totalElapsedHours = (timerDays * 24) + timerHours + (timerMinutes / 60);
@@ -5893,7 +5902,7 @@ body.wb-chain-active {
         if (!warTimerEl || !warTimerValue) return;
 
         const eta = state.warEta;
-        const etaMs = warTimerEtaMs; // Forces the UI to use our local pure-decay math
+        const etaMs = warTimerEtaMs !== null ? warTimerEtaMs : (eta && eta.etaTimestamp ? eta.etaTimestamp : null);
         if (etaMs === null && !eta?.preDropPhase) return;
 
         if (eta?.preDropPhase) {
