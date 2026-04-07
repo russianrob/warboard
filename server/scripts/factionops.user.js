@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.11
+// @version      4.8.12
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -40,6 +40,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.12  - Fix: War timer showed "--:--" instead of WON/LOST when FactionOps was opened from a non-war tab at the end of a war.
 // v4.8.11  - Fix: Resolved bug causing "998:58" Ranked War timers when activating FactionOps from non-war tabs (e.g. Armory).
 // v4.8.10  - UI: Re-added percentage markers to the Heatmap legend for clarity.
 // v4.8.9   - UI: Updated Heatmap legend to match the new high-activity color scale (Red/Yellow).
@@ -5902,7 +5903,7 @@ body.wb-chain-active {
         if (!warTimerEl || !warTimerValue) return;
 
         const eta = state.warEta;
-        const etaMs = warTimerEtaMs !== null ? warTimerEtaMs : (eta && eta.etaTimestamp ? eta.etaTimestamp : null);
+        const etaMs = warTimerEtaMs !== null ? warTimerEtaMs : (eta && eta.etaTimestamp !== undefined && eta.etaTimestamp !== null ? eta.etaTimestamp : null);
         if (etaMs === null && !eta?.preDropPhase) return;
 
         if (eta?.preDropPhase) {
