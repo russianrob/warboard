@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.6.0
-// @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals + item name search with full autocomplete
+// @version      2.0.0
+// @description  Find real below-market bazaar deals using weav3r.dev + item price lookup
 // @author       RussianRob
 // @match        https://www.torn.com/*
 // @updateURL    https://tornwar.com/scripts/weav3r-bazaar-deals.user.js
@@ -21,9 +21,11 @@
 
     // ── Config ─────────────────────────────────────────────────────────────
     const CFG = {
-        refreshMs: 5 * 60 * 1000,
-        pageSize:  50,
-        maxPages:  4,
+        refreshMs:    5 * 60 * 1000,
+        pageSize:     50,
+        maxPages:     4,
+        dealsBatch:   8,   // parallel marketplace requests
+        minDiscount:  5,   // only show deals at least 5% below market
     };
 
     // ── Persistent storage helpers ─────────────────────────────────────────
@@ -75,9 +77,9 @@
         minimized:      store.get('w3_minimized', false),
         apiKey:         store.get('w3_apikey', ''),
         settingsOpen:   false,
-        verifying:      false,
-        onlyVerified:   false,
-        verified:       {},   // itemId → true/false (has real $1 listing)
+        realDeals:      [],
+        realDealsLoading: false,
+        realDealsTs:    null,
         lookupId:       null,
         lookupName:     '',
         lookupListings: [],
@@ -283,55 +285,51 @@
         } catch {}
     }
 
-    // ── Torn API verification ─────────────────────────────────────────────
-    function tornApiCheck(itemId) {
-        return new Promise(resolve => {
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: `https://api.torn.com/market/${itemId}?selections=bazaar&key=${S.apiKey}`,
-                headers: { Accept: 'application/json' },
-                timeout: 8000,
-                onload: r => {
-                    try {
-                        const d = JSON.parse(r.responseText);
-                        if (d.error) resolve(null); // bad key or item
-                        else resolve(Array.isArray(d.bazaar) && d.bazaar.some(l => l.cost <= 1));
-                    } catch { resolve(null); }
-                },
-                onerror:   () => resolve(null),
-                ontimeout: () => resolve(null),
-            });
-        });
-    }
+    // ── Real deals — cheapest bazaar listings below market value ─────────────
+    async function loadRealDeals() {
+        if (S.realDealsLoading || S.deals.length === 0) return;
+        S.realDealsLoading = true;
+        render();
 
-    async function verifyDeals() {
-        if (!S.apiKey || S.verifying) return;
-        S.verifying = true;
-        S.verifyProgress = 0;
-        renderStatus();
+        const uniqueIds = [...new Set(S.deals.map(d => d.itemId))];
+        const results = [];
 
-        const ids = [...new Set(
-            [...S.deals].sort((a, b) => b.marketPrice - a.marketPrice).map(d => d.itemId)
-        )].slice(0, 30);
-
-        S.verifyTotal = ids.length;
-
-        // Run in batches of 5 (stays well under 100 req/min)
-        const BATCH = 5;
-        for (let i = 0; i < ids.length; i += BATCH) {
-            const batch = ids.slice(i, i + BATCH);
-            const results = await Promise.all(batch.map(id => tornApiCheck(id)));
-            results.forEach((has1, j) => {
-                if (has1 !== null) S.verified[ids[i + j]] = has1;
-                S.verifyProgress++;
-            });
-            renderStatus();
-            if (i + BATCH < ids.length) {
-                await new Promise(r => setTimeout(r, 3500)); // 5 req per 3.5s = safe
+        for (let i = 0; i < uniqueIds.length; i += CFG.dealsBatch) {
+            const batch = uniqueIds.slice(i, i + CFG.dealsBatch);
+            const responses = await Promise.all(
+                batch.map(id =>
+                    gmJSON(`https://weav3r.dev/api/marketplace/${id}`).catch(() => null)
+                )
+            );
+            for (const data of responses) {
+                if (!data?.listings?.length || !data.market_price) continue;
+                // Filter out ghost trades ($1 listings)
+                const real = data.listings
+                    .filter(l => l.price > 1)
+                    .sort((a, b) => a.price - b.price);
+                if (real.length === 0) continue;
+                const cheapest = real[0];
+                const discount = ((data.market_price - cheapest.price) / data.market_price) * 100;
+                if (discount < CFG.minDiscount) continue;
+                results.push({
+                    itemId:      data.item_id,
+                    itemName:    data.item_name,
+                    marketPrice: data.market_price,
+                    price:       cheapest.price,
+                    discount:    discount,
+                    playerId:    cheapest.player_id,
+                    sellerName:  cheapest.player_name,
+                    quantity:    cheapest.quantity,
+                    lastChecked: cheapest.last_checked,
+                });
             }
+            if (i + CFG.dealsBatch < uniqueIds.length)
+                await new Promise(r => setTimeout(r, 400));
         }
 
-        S.verifying = false;
+        S.realDeals    = results.sort((a, b) => b.discount - a.discount);
+        S.realDealsTs  = Date.now();
+        S.realDealsLoading = false;
         render();
     }
 
@@ -353,7 +351,7 @@
             S.deals = all.sort((a, b) => b.marketPrice - a.marketPrice);
             S.dealsTs = Date.now();
             enrichIndex(all);
-            if (S.apiKey) verifyDeals();
+            loadRealDeals();
         } catch (e) {
             S.dealsError = e.message;
         }
@@ -432,63 +430,38 @@
     }
 
     function renderDeals() {
-        const filtered = S.filterCat === 'All'
-            ? S.deals
-            : S.deals.filter(i => i.itemType === S.filterCat);
-
         let out = `
             <div class="w3b-filter">
-                <select id="w3b-cat">
-                    ${CATS.map(c => `<option${S.filterCat === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}
-                </select>
-                ${S.apiKey ? `<button class="w3b-btn${S.onlyVerified ? '' : ' dim'}" id="w3b-verified-toggle"
-                    title="Show only verified available"
-                    style="white-space:nowrap;font-size:10px;padding:4px 7px;">
-                    ✓ Only available
-                </button>` : ''}
                 <button class="w3b-btn dim" id="w3b-refresh" title="Refresh">↻</button>
-            </div>
-`;
+            </div>`;
 
-        if (S.dealsLoading) {
-            out += `<div class="w3b-loading">⏳ Loading deals from weav3r.dev…</div>`;
+        if (S.dealsLoading || S.realDealsLoading) {
+            out += `<div class="w3b-loading">⏳ ${S.dealsLoading ? 'Loading items…' : 'Finding deals…'}</div>`;
         } else if (S.dealsError) {
             out += `<div class="w3b-error">⚠ ${esc(S.dealsError)}</div>`;
-        } else if (filtered.length === 0) {
-            out += `<div class="w3b-empty">No items in this category.<br>Try "All" or hit ↻ to refresh.</div>`;
+        } else if (S.realDeals.length === 0) {
+            out += `<div class="w3b-empty">No below-market deals found right now.<br>Hit ↻ to scan again.</div>`;
         } else {
-            // Apply verified filter if toggled
-            const display = S.onlyVerified && S.apiKey
-                ? filtered.filter(it => S.verified[it.itemId] === true)
-                : filtered;
-            if (display.length === 0) {
-                out += `<div class="w3b-empty">No verified available deals right now.<br>Verification is still running or none are open.</div>`;
-            }
-            out += display.map(it => {
-                const vStatus = S.apiKey
-                    ? (S.verified[it.itemId] === true  ? '<span class="w3b-verified">✓ Available</span>'
-                     : S.verified[it.itemId] === false ? '<span class="w3b-unverified">✕ Locked</span>'
-                     : '<span class="w3b-unverified">⋯</span>')
-                    : '';
-                return `
+            out += S.realDeals.map(it => `
                 <div class="w3b-row">
-                    <div class="w3b-row-name">${esc(it.itemName)} <span class="w3b-badge">${esc(it.itemType)}</span>${vStatus}</div>
-                    <div class="w3b-row-meta">
-                        <span>Listed <strong style="color:#fff">$1</strong> · Mkt: <span class="w3b-val">${fmtMoney(it.marketPrice)}</span></span>
-                        <span>Qty: ${it.quantity}</span>
+                    <div class="w3b-row-name">
+                        ${esc(it.itemName)}
+                        <span style="color:#facc15;font-weight:700;font-size:11px;margin-left:4px;">↓${it.discount.toFixed(1)}%</span>
                     </div>
                     <div class="w3b-row-meta">
-                        <span class="w3b-seller">🧍 ${esc(it.sellerName)} [${it.playerId}]</span>
-                        <span>${timeAgo(it.lastUpdated)}</span>
+                        <span class="w3b-price">${fmtMoney(it.price)}</span>
+                        <span style="color:#556;">Mkt: ${fmtMoney(it.marketPrice)}</span>
+                    </div>
+                    <div class="w3b-row-meta">
+                        <span class="w3b-seller">🧍 ${esc(it.sellerName)}</span>
+                        <span>Qty: ${it.quantity}</span>
                     </div>
                     <div class="w3b-links">
                         <a href="https://www.torn.com/bazaar.php?userId=${it.playerId}&highlightItem=${it.itemId}" target="_blank">Open Bazaar</a>
                         <a href="https://www.torn.com/trade.php#step=start&userID=${it.playerId}" target="_blank">Trade</a>
                         <a href="https://weav3r.dev/item/${it.itemId}" target="_blank">Weav3r</a>
-                        <a href="https://www.torn.com/profiles.php?XID=${it.playerId}" target="_blank">Profile</a>
                     </div>
-                </div>`;
-            }).join('');
+                </div>`).join('');
         }
         return out;
     }
@@ -558,13 +531,9 @@
         if (S.tab === 'deals') {
             const filtered = S.filterCat === 'All' ? S.deals : S.deals.filter(i => i.itemType === S.filterCat);
             const ts = S.dealsTs ? timeAgo(new Date(S.dealsTs).toISOString()) : '—';
-            const vCount = Object.values(S.verified).filter(Boolean).length;
-            const vStr = S.apiKey
-                ? (S.verifying
-                    ? ` · checking ${S.verifyProgress ?? 0}/${S.verifyTotal ?? '?'}…`
-                    : ` · ${vCount} available`)
-                : '';
-            statusBar.textContent = `${filtered.length} deals · ${ts}${vStr}`;
+            const n = S.realDeals.length;
+            const rStr = S.realDealsLoading ? ' · scanning…' : (n > 0 ? ` · ${n} deals` : '');
+            statusBar.textContent = `${filtered.length} items · ${ts}${rStr}`;
             statusBar.style.color = '#444';
         } else {
             statusBar.textContent = S.lookupId
@@ -583,11 +552,9 @@
             render();
         });
         const refreshBtn = body.querySelector('#w3b-refresh');
-        if (refreshBtn) refreshBtn.addEventListener('click', loadDeals);
-        const verToggle = body.querySelector('#w3b-verified-toggle');
-        if (verToggle) verToggle.addEventListener('click', () => {
-            S.onlyVerified = !S.onlyVerified;
-            render();
+        if (refreshBtn) refreshBtn.addEventListener('click', () => {
+            S.realDeals = [];
+            loadDeals();
         });
 
         // Settings body
