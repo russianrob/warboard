@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.3.1
+// @version      1.3.2
 // @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals + item name search with full autocomplete
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -99,7 +99,6 @@
             box-shadow: 0 6px 30px rgba(0,0,0,0.7); overflow: hidden;
             transition: max-height 0.2s ease;
         }
-        #w3b-panel.collapsed { max-height: 42px; overflow: hidden; }
         #w3b-panel.minimized { display: none !important; }
         #w3b-minbtn {
             position: fixed; bottom: 70px; right: 16px;
@@ -578,15 +577,8 @@
         head.innerHTML = `
             <span id="w3b-head-title">🔍 Weav3r Deals</span>
             <div id="w3b-head-ctrl">
-                <button class="w3b-btn dim" id="w3b-collapse" style="padding:2px 7px" title="Collapse">${S.collapsed ? '▲' : '▼'}</button>
-                <button class="w3b-btn dim" id="w3b-minimize" style="padding:2px 7px" title="Minimize to button">_</button>
+                <button class="w3b-btn dim" id="w3b-minimize" style="padding:2px 7px" title="Minimize">_</button>
             </div>`;
-        head.querySelector('#w3b-collapse').addEventListener('click', () => {
-            S.collapsed = !S.collapsed;
-            store.set('w3_collapsed', S.collapsed);
-            panel.classList.toggle('collapsed', S.collapsed);
-            head.querySelector('#w3b-collapse').textContent = S.collapsed ? '▲' : '▼';
-        });
         head.querySelector('#w3b-minimize').addEventListener('click', () => {
             S.minimized = true;
             store.set('w3_minimized', true);
