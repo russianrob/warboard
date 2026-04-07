@@ -2,6 +2,9 @@
  * Torn API helper functions for server-side calls.
  */
 
+/** Mask an API key for safe logging — shows only last 4 chars. */
+const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
+
 /**
  * Fetch faction member statuses from the Torn API.
  * Returns a map of memberId → { status, until, lastAction, online, level, name }.

@@ -9,6 +9,9 @@ import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.j
 import * as store from "./store.js";
 import { getAllowedBroadcastRoles, updateFactionSettings } from "./store.js";
 import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBasic, fetchRankedWarReport, fetchFactionAttacks } from "./torn-api.js";
+
+/** Mask an API key for safe logging — shows only last 4 chars. */
+const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
@@ -980,7 +983,7 @@ router.post("/api/faction-key", requireAuth, async (req, res) => {
   }
 
   store.storeFactionApiKey(factionId, apiKey);
-  console.log(`[api] Faction API key saved for faction ${factionId}`);
+  console.log(`[api] Faction API key saved for faction ${factionId} (key: ${maskKey(apiKey)})`);
   return res.json({ ok: true });
 });
 
@@ -1311,55 +1314,6 @@ router.get("/api/admin/subscriptions", requireAuth, (req, res) => {
   });
 });
 
-
-// ── GET /api/admin/pm2-logs ─────────────────────────────────────────
-
-router.get("/api/admin/pm2-logs", requireAuth, (req, res) => {
-  if (req.user.playerId !== "137558") {
-    return res.status(403).json({ error: "Unauthorized access. This endpoint is restricted." });
-  }
-
-  const outLogPath = "/root/.pm2/logs/warboard-out.log";
-  const errLogPath = "/root/.pm2/logs/warboard-error.log";
-
-  const readLastLines = (filePath, linesCount = 200) => {
-    if (!existsSync(filePath)) return `[Log file not found: ${filePath}]`;
-    try {
-      const content = readFileSync(filePath, "utf-8");
-      const lines = content.split("\n");
-      const relevantLines = lines.slice(-linesCount);
-      
-      const timeFormatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/New_York',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true
-      });
-
-      return relevantLines.map(line => {
-        // Look for the ISO timestamp PM2 produces: 2026-04-03T22:29:58.390+00:00:
-        const match = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+00:00):\s(.*)/);
-        if (match) {
-          try {
-             const d = new Date(match[1]);
-             return `EST ${timeFormatter.format(d)}: ${match[2]}`;
-          } catch(e) {}
-        }
-        return line;
-      }).join("\n");
-
-    } catch (err) {
-      return `[Error reading ${filePath}: ${err.message}]`;
-    }
-  };
-
-  return res.json({
-    out: readLastLines(outLogPath),
-    err: readLastLines(errLogPath),
-    timestamp: Date.now(),
-  });
-});
 
 // ── GET /api/war/:warId/scout-report ──────────────────────────────────
 // Generate a pre-war intelligence report about the enemy faction.
