@@ -1127,11 +1127,23 @@ router.get("/api/heatmap", requireAuth, (req, res) => {
 
 function handleResetHeatmap(req, res) {
   const { factionId, factionPosition } = req.user;
+  const targetFactionId = req.query.factionId || req.body?.factionId || factionId;
+
   const pos = (factionPosition || "").toLowerCase();
   if (!LEADER_POSITIONS.includes(pos)) {
     return res.status(403).json({ error: "Only leaders and co-leaders can reset the heatmap" });
   }
-  resetHeatmap(factionId);
+
+  // Only allow resetting your own faction OR your current enemy faction
+  if (String(targetFactionId) !== String(factionId)) {
+      const activeWars = Array.from(store.getAllWars().values()).filter(w => String(w.factionId) === String(factionId));
+      const isEnemy = activeWars.some(w => String(w.enemyFactionId) === String(targetFactionId));
+      if (!isEnemy) {
+          return res.status(403).json({ error: "You can only reset your own faction's heatmap or your current enemy's heatmap." });
+      }
+  }
+
+  resetHeatmap(targetFactionId);
   return res.json({ ok: true });
 }
 

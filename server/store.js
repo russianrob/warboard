@@ -96,6 +96,12 @@ export function getOrCreateWar(warId, factionId, enemyFactionId = null) {
     const war = wars.get(warId);
     if (enemyFactionId && war.enemyFactionId !== enemyFactionId) {
       console.log(`[store] New enemy detected (${enemyFactionId}). Resetting stale war data.`);
+      
+      // Attempt to clear previous enemy's heatmap to prevent ghost data
+      if (war.enemyFactionId) {
+          import('./activity-heatmap.js').then(hm => hm.resetHeatmap(war.enemyFactionId)).catch(() => {});
+      }
+
       war.enemyFactionId = enemyFactionId;
       war.calls = {};
       war.priorities = {};

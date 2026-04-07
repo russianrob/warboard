@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.18
+// @version      4.8.19
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -40,6 +40,8 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.19  - Fix: Faction Leaders can now reset the Enemy Activity Heatmap, and the server auto-wipes it when a new enemy is detected.
+// v4.8.18  - Feature: War page reports DOM timer to server — OC tab gets accurate countdown.
 // v4.8.12  - Fix: War timer showed "--:--" instead of WON/LOST when FactionOps was opened from a non-war tab at the end of a war.
 // v4.8.11  - Fix: Resolved bug causing "998:58" Ranked War timers when activating FactionOps from non-war tabs (e.g. Armory).
 // v4.8.10  - UI: Re-added percentage markers to the Heatmap legend for clarity.
@@ -8819,9 +8821,10 @@ body.wb-chain-active {
     }
 
     /** Ask the server to reset heatmap data. */
-    async function resetServerHeatmap() {
+    async function resetServerHeatmap(factionId = null) {
         try {
-            await removeAction('/api/heatmap/remove');
+            const body = factionId ? { factionId } : {};
+            await postAction('/api/heatmap/remove', body);
         } catch (e) {
             warn('Failed to reset heatmap:', e.message);
             showToast('Failed to reset heatmap: ' + e.message, 'error');
@@ -9081,16 +9084,18 @@ body.wb-chain-active {
         footer.className = 'wb-heatmap-footer';
         footer.innerHTML = `<span style="font-size:11px;opacity:0.6;">Based on ${totalSamples} total samples</span>`;
         
-        // Only show reset if viewing our own faction heatmap
+        // Only show reset if viewing our own faction heatmap, or we are a leader viewing the current enemy's heatmap
         const isOwnFaction = !factionId || String(factionId) === String(state.myFactionId);
+        const isCurrentEnemy = String(factionId) === String(state.enemyFactionId);
+        const canReset = isLeader() && (isOwnFaction || isCurrentEnemy);
         
         const resetBtn = document.createElement('button');
-        if (isOwnFaction) {
+        if (canReset) {
             resetBtn.className = 'wb-btn wb-btn-sm wb-btn-danger';
             resetBtn.textContent = 'Reset Data';
             resetBtn.addEventListener('click', async () => {
-                if (!confirm('Are you sure you want to permanently reset all heatmap data?')) return;
-                await resetServerHeatmap();
+                if (!confirm('Are you sure you want to permanently reset this heatmap data?')) return;
+                await resetServerHeatmap(factionId);
                 panel.remove();
                 renderHeatmapPanel(factionId, factionName);
             });
@@ -9104,7 +9109,7 @@ body.wb-chain-active {
             renderHeatmapPanel(factionId, factionName);
         });
         footer.appendChild(refreshBtn);
-        if (isOwnFaction) footer.appendChild(resetBtn);
+        if (canReset) footer.appendChild(resetBtn);
         panel.appendChild(footer);
 
         document.body.appendChild(panel);
