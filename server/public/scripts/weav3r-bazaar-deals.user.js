@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.5.1
+// @version      1.5.2
 // @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals + item name search with full autocomplete
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -310,29 +310,51 @@
     }
 
     // ── Torn API verification ─────────────────────────────────────────────
+    function tornApiCheck(itemId) {
+        return new Promise(resolve => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: `https://api.torn.com/market/${itemId}?selections=bazaar&key=${S.apiKey}`,
+                headers: { Accept: 'application/json' },
+                timeout: 8000,
+                onload: r => {
+                    try {
+                        const d = JSON.parse(r.responseText);
+                        if (d.error) resolve(null); // bad key or item
+                        else resolve(Array.isArray(d.bazaar) && d.bazaar.some(l => l.cost <= 1));
+                    } catch { resolve(null); }
+                },
+                onerror:   () => resolve(null),
+                ontimeout: () => resolve(null),
+            });
+        });
+    }
+
     async function verifyDeals() {
         if (!S.apiKey || S.verifying) return;
         S.verifying = true;
+        S.verifyProgress = 0;
         renderStatus();
 
-        // Unique item IDs sorted by market value (check best deals first)
         const ids = [...new Set(
             [...S.deals].sort((a, b) => b.marketPrice - a.marketPrice).map(d => d.itemId)
-        )].slice(0, 40);
+        )].slice(0, 30);
 
-        for (const itemId of ids) {
-            try {
-                const data = await gmJSON(
-                    `https://api.torn.com/market/${itemId}?selections=bazaar&key=${S.apiKey}`
-                );
-                if (data.error) { S.verifying = false; renderStatus(); return; }
-                // Torn API returns only purchasable (unlocked) listings
-                const has1 = Array.isArray(data.bazaar) &&
-                    data.bazaar.some(l => l.cost <= 1);
-                S.verified[itemId] = has1;
-            } catch {}
-            // Respect Torn's 100 req/min rate limit
-            await new Promise(r => setTimeout(r, 700));
+        S.verifyTotal = ids.length;
+
+        // Run in batches of 5 (stays well under 100 req/min)
+        const BATCH = 5;
+        for (let i = 0; i < ids.length; i += BATCH) {
+            const batch = ids.slice(i, i + BATCH);
+            const results = await Promise.all(batch.map(id => tornApiCheck(id)));
+            results.forEach((has1, j) => {
+                if (has1 !== null) S.verified[ids[i + j]] = has1;
+                S.verifyProgress++;
+            });
+            renderStatus();
+            if (i + BATCH < ids.length) {
+                await new Promise(r => setTimeout(r, 3500)); // 5 req per 3.5s = safe
+            }
         }
 
         S.verifying = false;
@@ -563,7 +585,11 @@
             const filtered = S.filterCat === 'All' ? S.deals : S.deals.filter(i => i.itemType === S.filterCat);
             const ts = S.dealsTs ? timeAgo(new Date(S.dealsTs).toISOString()) : '—';
             const vCount = Object.values(S.verified).filter(Boolean).length;
-            const vStr = S.apiKey ? (S.verifying ? ' · verifying…' : ` · ${vCount} available`) : '';
+            const vStr = S.apiKey
+                ? (S.verifying
+                    ? ` · checking ${S.verifyProgress ?? 0}/${S.verifyTotal ?? '?'}…`
+                    : ` · ${vCount} available`)
+                : '';
             statusBar.textContent = `${filtered.length} deals · ${ts}${vStr}`;
             statusBar.style.color = '#444';
         } else {
