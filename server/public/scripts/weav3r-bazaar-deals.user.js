@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.2.0
+// @version      1.2.1
 // @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals + item name search with full autocomplete
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -381,7 +381,7 @@
                         <span>${timeAgo(it.lastUpdated)}</span>
                     </div>
                     <div class="w3b-links">
-                        <a href="https://www.torn.com/bazaar.php?userId=${it.playerId}" target="_blank">Open Bazaar</a>
+                        <a href="https://www.torn.com/bazaar.php?userId=${it.playerId}&highlightItem=${it.itemId}" target="_blank">Open Bazaar</a>
                         <a href="https://www.torn.com/trade.php#step=start&userID=${it.playerId}" target="_blank">Trade</a>
                         <a href="https://weav3r.dev/item/${it.itemId}" target="_blank">Weav3r</a>
                         <a href="https://www.torn.com/profiles.php?XID=${it.playerId}" target="_blank">Profile</a>
@@ -435,7 +435,7 @@
                         <span>${l.lastChecked ? esc(l.lastChecked) : ''}</span>
                     </div>
                     ${l.playerId ? `<div class="w3b-links">
-                        <a href="https://www.torn.com/bazaar.php?userId=${l.playerId}" target="_blank">Open Bazaar</a>
+                        <a href="https://www.torn.com/bazaar.php?userId=${l.playerId}&highlightItem=${S.lookupId}" target="_blank">Open Bazaar</a>
                         <a href="https://www.torn.com/trade.php#step=start&userID=${l.playerId}" target="_blank">Trade</a>
                     </div>` : ''}
                 </div>`).join('');
@@ -618,4 +618,27 @@
         init();
     }
 
+})();
+
+// ── Bazaar item highlighter ────────────────────────────────────────────────
+// When landing on a bazaar page via an Open Bazaar link with ?highlightItem=
+// outlines the item in green and scrolls it into view.
+;(() => {
+    const itemId = new URLSearchParams(window.location.search).get('highlightItem');
+    if (!itemId) return;
+    const highlight = () => {
+        document.querySelectorAll('img').forEach(img => {
+            if (img.src.includes(`/images/items/${itemId}/`)) {
+                const wrap = img.closest('div');
+                if (wrap) {
+                    wrap.style.setProperty('outline', '3px solid #4ade80', 'important');
+                    wrap.style.setProperty('border-radius', '4px', 'important');
+                    img.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+        });
+    };
+    const obs = new MutationObserver(highlight);
+    obs.observe(document.body, { childList: true, subtree: true });
+    highlight();
 })();
