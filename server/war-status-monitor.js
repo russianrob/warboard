@@ -103,6 +103,27 @@ export function startWarStatusMonitor(io, warId) {
         // Non-critical — skip silently
       }
 
+      // ── Recalculate warEta from stored scores/target so non-war-page clients stay in sync ──
+      try {
+        if (war.warScores && war.warStart && war.warOrigTarget) {
+          const nowSec = Math.floor(Date.now() / 1000);
+          const elapsedHrs = (nowSec - war.warStart) / 3600;
+          const dropHrs = Math.max(0, Math.floor(elapsedHrs - 24));
+          const currentTarget = Math.round(war.warOrigTarget * (1 - dropHrs * 0.01));
+          const dropPerHour = war.warOrigTarget * 0.01;
+          const lead = Math.max(war.warScores.myScore || 0, war.warScores.enemyScore || 0);
+          const gap = currentTarget - lead;
+          const hrsRemaining = dropPerHour > 0 ? Math.max(0, gap / dropPerHour) : 0;
+          war.warEta = {
+            etaTimestamp: Date.now() + (hrsRemaining * 3600000),
+            hoursRemaining: Math.round(hrsRemaining * 100) / 100,
+            currentTarget,
+            calculatedAt: Date.now(),
+            preDropPhase: elapsedHrs < 24,
+          };
+        }
+      } catch (_) { /* non-critical */ }
+
       store.saveState();
       scheduleNext(POLL_INTERVAL_MS);
     } catch (err) {
