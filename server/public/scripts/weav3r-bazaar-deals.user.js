@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.0.0
+// @version      1.0.1
 // @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals panel + item price lookup
 // @author       RussianRob
 // @match        https://www.torn.com/*
