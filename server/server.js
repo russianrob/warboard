@@ -326,14 +326,30 @@ async function detectNewWars() {
           store.saveState();
         }
 
-        // If no existing war or the enemy changed, create/update
-        if (!existing || !existing.enemyFactionId || existing.warEnded) {
+        const enemyChanged = existing && String(existing.enemyFactionId) !== String(rw.enemyFactionId);
+
+        // If no existing war, enemy changed, or war ended — reset and create fresh entry
+        if (!existing || !existing.enemyFactionId || existing.warEnded || enemyChanged) {
+          if (enemyChanged) {
+            console.log(`[war-detect] Enemy changed: ${existing.enemyFactionId} → ${rw.enemyFactionId} — resetting war state`);
+            // Clear stale data from old war
+            const war = store.getWar(warId);
+            if (war) {
+              war.warEnded = false; war.warResult = null; war.warEndedAt = null;
+              war.warScores = null; war.warStart = null; war.warOrigTarget = null;
+              war.warEta = null; war.clientTimerReport = null; war.chainData = null;
+              war.enemyActivityLog = []; war.enemyActivityByHour = {};
+            }
+          }
           const war = store.getOrCreateWar(warId, factionId, rw.enemyFactionId);
           war.enemyFactionName = rw.enemyFactionName;
           war.enemyFactionId = rw.enemyFactionId;
+          // Store war start time from API
+          if (rw.warStart) war.warStart = rw.warStart;
+          if (rw.warTarget) war.warOrigTarget = rw.warTarget;
           store.saveState();
-          startWarStatusMonitor(io, warId);
-          console.log(`[war-detect] Auto-detected ranked war: ${factionId} vs ${rw.enemyFactionName} (${rw.enemyFactionId})`);
+          if (!enemyChanged) startWarStatusMonitor(io, warId);
+          console.log(`[war-detect] Detected war: ${factionId} vs ${rw.enemyFactionName} (${rw.enemyFactionId}), starts: ${new Date(rw.warStart * 1000).toISOString()}`);
         }
       } catch (_) {
         // API error for this faction, skip

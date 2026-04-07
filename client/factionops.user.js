@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.19
+// @version      4.8.20
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3236,7 +3236,9 @@ body.wb-chain-active {
             if (data.chainData.current && chainChanged) {
                 const next = nextBonusMilestone(data.chainData.current + 1);
                 const hitsToBonus = next ? next - data.chainData.current : null;
-                if (hitsToBonus !== null && hitsToBonus <= 3 && hitsToBonus > 0) {
+                // Only notify for bonuses above 10 (skip the first bonus at 10 since chain hasn't 'started' yet)
+                // Also only fire when already past the first bonus or very close to a meaningful one
+                if (hitsToBonus !== null && hitsToBonus <= 3 && hitsToBonus > 0 && data.chainData.current >= 10) {
                     showToast(`BONUS HIT in ${hitsToBonus}! Target: ${next}`, 'error');
                     firePdaNotification('bonus_imminent',
                         '\uD83D\uDCA5 Bonus Hit Imminent',
@@ -4446,7 +4448,8 @@ body.wb-chain-active {
         const hitsToBonus = next ? next - state.chain.current : null;
         let bonusText = '';
         let showBonus = false;
-        if (hitsToBonus !== null && hitsToBonus <= 10) {
+        // Only show bonus indicator when chain >= 10 (past first bonus or approaching a real one)
+        if (hitsToBonus !== null && hitsToBonus <= 10 && state.chain.current >= 10) {
             showBonus = true;
             bonusText = hitsToBonus <= 0 ? `BONUS ${next}!` : `BONUS in ${hitsToBonus}`;
         }
@@ -5916,7 +5919,16 @@ body.wb-chain-active {
 
         const eta = state.warEta;
         const etaMs = warTimerEtaMs !== null ? warTimerEtaMs : (eta && eta.etaTimestamp !== undefined && eta.etaTimestamp !== null ? eta.etaTimestamp : null);
-        if (etaMs === null && !eta?.preDropPhase) return;
+        if (etaMs === null && !eta?.preDropPhase && !eta?.preWarPhase) return;
+
+        if (eta?.preWarPhase) {
+            warTimerEl.className = 'fo-war-timer waiting';
+            const msToStart = Math.max(0, etaMs - Date.now());
+            const h = Math.floor(msToStart / 3600000);
+            const m = Math.floor((msToStart % 3600000) / 60000);
+            warTimerValue.textContent = `Starts ${h}h ${m}m`;
+            return;
+        }
 
         if (eta?.preDropPhase) {
             warTimerEl.className = 'fo-war-timer waiting';

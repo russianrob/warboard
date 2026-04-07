@@ -69,7 +69,10 @@ function computeFreshWarEta(war) {
   if (!war || war.warEnded) return war?.warEta || null;
 
   // Prefer a recent client-reported ETA (from war page DOM) — most accurate source
-  const report = war.clientTimerReport;
+  // But not during pre-war phase (war hasn't started yet)
+  const nowSec2 = Math.floor(Date.now() / 1000);
+  const isPreWar = war.warStart && (war.warStart > nowSec2 || (!war.warScores || (war.warScores.myScore === 0 && war.warScores.enemyScore === 0)));
+  const report = !isPreWar && war.clientTimerReport;
   if (report && report.etaTimestamp && (Date.now() - report.receivedAt) < 3 * 60 * 1000) {
     // Adjust for time elapsed since the report was received
     const msLeft = Math.max(0, report.etaTimestamp - Date.now());
@@ -82,6 +85,21 @@ function computeFreshWarEta(war) {
       preDropPhase: false,
       source: 'client',
     };
+  }
+
+  // Pre-war phase: war has been announced but not yet started
+  if (war.warStart) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const bothZero = !war.warScores || (war.warScores.myScore === 0 && war.warScores.enemyScore === 0);
+    if (war.warStart > nowSec || bothZero) {
+      return {
+        etaTimestamp: war.warStart * 1000,
+        hoursRemaining: Math.max(0, (war.warStart - nowSec) / 3600),
+        currentTarget: war.warOrigTarget || null,
+        calculatedAt: Date.now(),
+        preWarPhase: true,
+      };
+    }
   }
 
   // Fallback: compute from stored scores/target
