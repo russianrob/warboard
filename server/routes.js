@@ -64,6 +64,26 @@ function broadcastSSE(warId, data) {
  * Broadcast a full war state snapshot to all clients in a war room.
  * Called after any state mutation so connected clients get instant updates.
  */
+/** Compute a fresh warEta using currently stored war scores/target — no API call needed. */
+function computeFreshWarEta(war) {
+  if (!war || war.warEnded) return war?.warEta || null;
+  if (!war.warScores || !war.warStart || !war.warOrigTarget) return war?.warEta || null;
+  try {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const elapsedHrs = (nowSec - war.warStart) / 3600;
+    if (elapsedHrs < 24) {
+      return { etaTimestamp: null, hoursRemaining: null, currentTarget: war.warOrigTarget, calculatedAt: Date.now(), preDropPhase: true };
+    }
+    const dropHrs = Math.max(0, Math.floor(elapsedHrs - 24));
+    const currentTarget = Math.round(war.warOrigTarget * (1 - dropHrs * 0.01));
+    const dropPerHour = war.warOrigTarget * 0.01;
+    const lead = Math.max(war.warScores.myScore || 0, war.warScores.enemyScore || 0);
+    const gap = currentTarget - lead;
+    const hrsRemaining = dropPerHour > 0 ? Math.max(0, gap / dropPerHour) : 0;
+    return { etaTimestamp: Date.now() + (hrsRemaining * 3600000), hoursRemaining: Math.round(hrsRemaining * 100) / 100, currentTarget, calculatedAt: Date.now(), preDropPhase: false };
+  } catch (_) { return war?.warEta || null; }
+}
+
 function broadcastWarUpdate(warId) {
   const war = store.getWar(warId);
   if (!war) return;
@@ -82,7 +102,7 @@ function broadcastWarUpdate(warId) {
     factionKeyStored: !!store.getFactionApiKey(war.factionId),
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
-    warEta: war.warEta || null,
+    warEta: computeFreshWarEta(war),
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
   };
@@ -389,7 +409,7 @@ router.get("/api/stream", (req, res, next) => {
     factionKeyStored: !!store.getFactionApiKey(factionId),
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
-    warEta: war.warEta || null,
+    warEta: computeFreshWarEta(war),
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
   };
@@ -547,7 +567,7 @@ router.get("/api/poll", (req, res, next) => {
     factionKeyStored: !!store.getFactionApiKey(factionId),
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
-    warEta: war.warEta || null,
+    warEta: computeFreshWarEta(war),
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
     strategy: war.strategy || null,
