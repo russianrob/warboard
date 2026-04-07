@@ -13,6 +13,7 @@ import express from "express";
 import { createServer } from "node:http";
 import { Server as SocketIOServer } from "socket.io";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
@@ -70,7 +71,29 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '50kb' }));
+
+// ── Rate limiting ────────────────────────────────────────────────────────
+
+// Strict limit on auth endpoint — prevents API key brute-force and Torn API flooding
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many auth attempts, try again in a few minutes' },
+});
+app.use('/api/auth', authLimiter);
+
+// General limiter on all routes as a backstop
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 500,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, slow down' },
+});
+app.use(globalLimiter);
 
 // ── Landing page is public — gate is applied only to /scripts/*.user.js below ──
 
