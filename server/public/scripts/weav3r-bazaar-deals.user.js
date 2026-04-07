@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.3.3
+// @version      1.4.0
 // @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals + item name search with full autocomplete
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -18,9 +18,10 @@
 
     // ── Config ─────────────────────────────────────────────────────────────
     const CFG = {
-        refreshMs: 5 * 60 * 1000,
-        pageSize:  50,
-        maxPages:  4,
+        refreshMs:      5 * 60 * 1000,
+        pageSize:       50,
+        maxPages:       4,
+        sseReconnectMs: 5 * 1000,
     };
 
     // ── Persistent storage helpers ─────────────────────────────────────────
@@ -70,6 +71,7 @@
         filterCat:      store.get('w3_cat', 'All'),
         collapsed:      store.get('w3_collapsed', false),
         minimized:      store.get('w3_minimized', false),
+        sseConnected:   false,
         lookupId:       null,
         lookupName:     '',
         lookupListings: [],
@@ -289,6 +291,83 @@
         renderStatus(); // update the count in status bar
     }
 
+    // ── SSE ──────────────────────────────────────────────────────────────
+    let sseLastLen = 0;
+
+    function handleSSEChunk(chunk) {
+        // SSE lines look like: "data: {...}\n\n"
+        const lines = chunk.split('\n');
+        let changed = false;
+        for (const line of lines) {
+            if (!line.startsWith('data:')) continue;
+            try {
+                const ev = JSON.parse(line.slice(5).trim());
+                // Normalise — weav3r may send camelCase or snake_case
+                const item = {
+                    itemId:      ev.itemId      ?? ev.item_id,
+                    itemName:    ev.itemName    ?? ev.item_name,
+                    itemType:    ev.itemType    ?? ev.item_type    ?? '',
+                    playerId:    ev.playerId    ?? ev.player_id,
+                    sellerName:  ev.sellerName  ?? ev.seller_name  ?? ev.player_name ?? '',
+                    quantity:    ev.quantity    ?? 1,
+                    marketPrice: ev.marketPrice ?? ev.market_price ?? 0,
+                    lastUpdated: ev.lastUpdated ?? ev.last_updated ?? new Date().toISOString(),
+                };
+                if (!item.itemId || !item.playerId) continue;
+
+                // Enrich name index
+                if (item.itemName && !itemIndex[item.itemName]) {
+                    itemIndex[item.itemName] = item.itemId;
+                }
+
+                // Upsert into deals array
+                const idx = S.deals.findIndex(
+                    d => d.itemId === item.itemId && d.playerId === item.playerId
+                );
+                if (idx >= 0) S.deals[idx] = item;
+                else S.deals.unshift(item);
+                changed = true;
+            } catch {}
+        }
+        if (changed) {
+            S.deals.sort((a, b) => b.marketPrice - a.marketPrice);
+            if (S.tab === 'deals' && !S.minimized) render();
+        }
+    }
+
+    function connectSSE() {
+        sseLastLen = 0;
+        GM_xmlhttpRequest({
+            method:  'GET',
+            url:     'https://weav3r.dev/api/sse/dollar-bazaars',
+            headers: { Accept: 'text/event-stream', 'Cache-Control': 'no-cache' },
+            onprogress: (r) => {
+                const newData = r.responseText.slice(sseLastLen);
+                sseLastLen = r.responseText.length;
+                if (newData) handleSSEChunk(newData);
+                if (!S.sseConnected) {
+                    S.sseConnected = true;
+                    renderStatus();
+                }
+            },
+            onload: () => {
+                S.sseConnected = false;
+                renderStatus();
+                setTimeout(connectSSE, CFG.sseReconnectMs);
+            },
+            onerror: () => {
+                S.sseConnected = false;
+                renderStatus();
+                setTimeout(connectSSE, CFG.sseReconnectMs);
+            },
+            ontimeout: () => {
+                S.sseConnected = false;
+                renderStatus();
+                setTimeout(connectSSE, 1000);
+            },
+        });
+    }
+
     // ── Dollar Deals API ───────────────────────────────────────────────────
     async function loadDeals() {
         S.dealsLoading = true;
@@ -467,7 +546,10 @@
         if (S.tab === 'deals') {
             const filtered = S.filterCat === 'All' ? S.deals : S.deals.filter(i => i.itemType === S.filterCat);
             const ts = S.dealsTs ? timeAgo(new Date(S.dealsTs).toISOString()) : '—';
-            statusBar.textContent = `${filtered.length} deals · ${ts} · weav3r.dev`;
+            const live = S.sseConnected ? ' ● LIVE' : '';
+            statusBar.textContent = `${filtered.length} deals · ${ts}${live}`;
+            if (S.sseConnected) statusBar.style.color = '#4ade80';
+            else statusBar.style.color = '#444';
         } else {
             statusBar.textContent = S.lookupId
                 ? `weav3r.dev/item/${S.lookupId}`
@@ -645,6 +727,8 @@
         render();
         loadDeals();
         setInterval(() => { if (!S.dealsLoading) loadDeals(); }, CFG.refreshMs);
+        // Connect SSE for real-time dollar deal updates
+        connectSSE();
         // Build full item index in background (runs once, then cached)
         setTimeout(buildIndexInBackground, 3000);
     }
