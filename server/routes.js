@@ -13,6 +13,7 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 /** Mask an API key for safe logging — shows only last 4 chars. */
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
+import { getOcSpawnData } from "./oc-spawn.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
 import { isFactionAllowed, getAllSubscriptions, getOwnerFactionId, getSubscriptionRejectionMessage } from "./subscription-manager.js";
@@ -333,6 +334,25 @@ router.post("/api/auth", async (req, res) => {
   } catch (err) {
     console.error("[auth] Authentication failed:", err.message);
     return res.status(401).json({ error: err.message });
+  }
+});
+
+// ── GET /api/oc/spawn ───────────────────────────────────────────────────
+// Returns pre-calculated OC spawn recommendation data for the faction
+router.get("/api/oc/spawn", requireAuth, async (req, res) => {
+  const factionId = req.user.factionId;
+  const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
+  
+  if (!apiKey) {
+    return res.status(503).json({ error: "No API key available for this faction" });
+  }
+
+  try {
+    const data = await getOcSpawnData(factionId, apiKey);
+    return res.json(data);
+  } catch (err) {
+    console.error(`[api] /api/oc/spawn failed:`, err.message);
+    return res.status(500).json({ error: "Failed to fetch OC data: " + err.message });
   }
 });
 

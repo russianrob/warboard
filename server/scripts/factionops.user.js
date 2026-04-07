@@ -40,6 +40,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.20  - Feature: Integrated "OC Spawn Assistant" directly into FactionOps (Crimes Tab). Uses backend caching to save Torn API calls!
 // v4.8.19  - Fix: Faction Leaders can now reset the Enemy Activity Heatmap, and the server auto-wipes it when a new enemy is detected.
 // v4.8.18  - Feature: War page reports DOM timer to server — OC tab gets accurate countdown.
 // v4.8.12  - Fix: War timer showed "--:--" instead of WON/LOST when FactionOps was opened from a non-war tab at the end of a war.
@@ -9125,7 +9126,287 @@ body.wb-chain-active {
     }
 
     // =========================================================================
-    // SECTION 24: MAIN INITIALISATION
+    // SECTION 25: OC SPAWN ASSISTANCE
+    // =========================================================================
+
+    let spawnPanelVisible = false;
+
+    function formatSpawnTime(ts) {
+        if (!ts) return '—';
+        const d = new Date(ts * 1000);
+        const h = d.getHours().toString().padStart(2, '0');
+        const min = d.getMinutes().toString().padStart(2, '0');
+        const today = new Date();
+        if (d.toDateString() === today.toDateString()) return `today ${h}:${min}`;
+        return `${d.getMonth() + 1}/${d.getDate()} ${h}:${min}`;
+    }
+
+    async function loadAndRenderOcSpawn() {
+        let spawnPanel = document.getElementById('wb-spawn-panel');
+        if (!spawnPanel) {
+            spawnPanel = document.createElement('div');
+            spawnPanel.id = 'wb-spawn-panel';
+            spawnPanel.className = 'wb-heatmap-panel';
+            spawnPanel.style.cssText = `
+                width: min(600px, calc(100vw - 48px));
+                max-height: 80vh;
+                display: flex;
+                flex-direction: column;
+                z-index: 1000000;
+            `;
+            document.body.appendChild(spawnPanel);
+
+            let isDragging = false;
+            let dragOffsetX = 0, dragOffsetY = 0;
+            spawnPanel.addEventListener('mousedown', (e) => {
+                if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
+                isDragging = true;
+                const rect = spawnPanel.getBoundingClientRect();
+                dragOffsetX = e.clientX - rect.left;
+                dragOffsetY = e.clientY - rect.top;
+            });
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                spawnPanel.style.left = (e.clientX - dragOffsetX) + 'px';
+                spawnPanel.style.top = (e.clientY - dragOffsetY) + 'px';
+                spawnPanel.style.transform = 'none';
+            });
+            document.addEventListener('mouseup', () => { isDragging = false; });
+        }
+
+        spawnPanel.innerHTML = `
+            <div class="wb-heatmap-header">
+                <h3>OC Spawn Assistance</h3>
+                <button class="wb-heatmap-close" id="wb-spawn-close">✕</button>
+            </div>
+            <div style="padding: 20px; text-align: center; color: var(--wb-text-muted);">
+                <div class="fo-spinner" style="border: 2px solid rgba(255,255,255,0.1); border-left-color: var(--wb-accent); width: 24px; height: 24px; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 10px;"></div>
+                Fetching faction data... (This may take a moment)
+            </div>
+        `;
+
+        document.getElementById('wb-spawn-close').addEventListener('click', () => {
+            spawnPanelVisible = false;
+            spawnPanel.style.display = 'none';
+        });
+
+        try {
+            const data = await new Promise((resolve, reject) => {
+                httpRequest({
+                    method: 'GET',
+                    url: `${CONFIG.SERVER_URL}/api/oc/spawn`,
+                    headers: { 'Authorization': `Bearer ${state.jwtToken}` },
+                    onload: (resp) => {
+                        try {
+                            const json = JSON.parse(resp.responseText);
+                            if (resp.status !== 200 || json.error) throw new Error(json.error || `HTTP ${resp.status}`);
+                            resolve(json);
+                        } catch (e) { reject(e); }
+                    },
+                    onerror: reject
+                });
+            });
+
+            renderOcSpawnPanel(spawnPanel, data);
+        } catch (e) {
+            spawnPanel.innerHTML = `
+                <div class="wb-heatmap-header">
+                    <h3>OC Spawn Assistance</h3>
+                    <button class="wb-heatmap-close" id="wb-spawn-close">✕</button>
+                </div>
+                <div style="padding: 20px; color: var(--wb-call-red); text-align: center;">
+                    Failed to fetch OC data: ${escapeHtml(e.message)}
+                </div>
+            `;
+            document.getElementById('wb-spawn-close').addEventListener('click', () => {
+                spawnPanelVisible = false;
+                spawnPanel.style.display = 'none';
+            });
+        }
+    }
+
+    function renderOcSpawnPanel(panel, data) {
+        const { members, availableCrimes, cprCache } = data;
+        const nowSec = Math.floor(Date.now() / 1000);
+        
+        const ACTIVE_DAYS = 7;
+        const FORECAST_HOURS = 24;
+        const activeCutoff = nowSec - (ACTIVE_DAYS * 86400);
+        const forecastCutoff = nowSec + (FORECAST_HOURS * 3600);
+
+        // 1. Map current active OCs
+        const memberOcMap = {};
+        for (const crime of availableCrimes) {
+            if (crime.status === 'Expired') continue;
+            if (!Array.isArray(crime.slots)) continue;
+            for (const slot of crime.slots) {
+                const uid = slot.user_id ?? slot.user?.id;
+                if (!uid) continue;
+                memberOcMap[uid] = {
+                    crimeDifficulty: crime.difficulty,
+                    crimeStatus: crime.status,
+                    readyAt: crime.ready_at ?? 0,
+                    crimeId: crime.id,
+                    crimeName: crime.name,
+                };
+            }
+        }
+
+        // 2. Process members
+        const eligible = [];
+        const skipped = [];
+        
+        for (const m of members) {
+            const uid = m.id;
+            const lastAction = m.last_action?.timestamp ?? 0;
+            if (lastAction < activeCutoff) {
+                skipped.push({ ...m, skipReason: `Inactive >${ACTIVE_DAYS}d` });
+                continue;
+            }
+
+            const ocInfo = memberOcMap[uid];
+            const inOC = !!ocInfo;
+
+            if (inOC && ocInfo.readyAt > forecastCutoff) {
+                skipped.push({ ...m, skipReason: `In OC (ready ${formatSpawnTime(ocInfo.readyAt)})` });
+                continue;
+            }
+
+            const cpr = cprCache[uid] ?? null;
+            const cprValue = cpr?.cpr ?? null;
+            const highestLvl = cpr?.highestLevel ?? 0;
+            const joinable = (cprValue === null || cprValue < 60) ? 1 : (cpr?.joinable ?? 1);
+
+            eligible.push({
+                id: uid,
+                name: m.name,
+                inOC,
+                ocReadyAt: inOC ? ocInfo.readyAt : null,
+                cpr: cprValue,
+                highestLevel: highestLvl,
+                joinable,
+            });
+        }
+
+        // 3. Count Open Slots
+        const slotMap = {};
+        for (const crime of availableCrimes) {
+            if (crime.status !== 'Recruiting') continue;
+            const d = crime.difficulty;
+            if (!slotMap[d]) slotMap[d] = { totalSlots: 0, openSlots: 0, crimes: [] };
+
+            let open = 0, total = 0;
+            for (const slot of (crime.slots || [])) {
+                total++;
+                if (!slot.user_id && !slot.user?.id) open++;
+            }
+            slotMap[d].totalSlots += total;
+            slotMap[d].openSlots += open;
+            slotMap[d].crimes.push({ id: crime.id, name: crime.name, open, total });
+        }
+
+        // 4. Build Recs
+        const recs = [];
+        for (let lvl = 1; lvl <= 10; lvl++) {
+            const membersForLevel = eligible.filter(m => m.joinable === lvl);
+            const freeNow = membersForLevel.filter(m => !m.inOC);
+            const soonFree = membersForLevel.filter(m => m.inOC);
+            const totalNeeded = freeNow.length + soonFree.length;
+
+            const info = slotMap[lvl] || { totalSlots: 0, openSlots: 0, crimes: [] };
+            const openNow = info.openSlots;
+            const deficit = totalNeeded - openNow;
+
+            let action = 'none';
+            if (totalNeeded > 0) {
+                action = deficit > 0 ? 'spawn' : (deficit === 0 ? 'ok' : 'surplus');
+            }
+
+            recs.push({
+                level: lvl, freeMembers: freeNow.length, soonMembers: soonFree.length,
+                openSlots: openNow, totalSlots: info.totalSlots, recruitingOCs: info.crimes.length,
+                deficit, action
+            });
+        }
+
+        // 5. Render HTML
+        const recsHtml = recs.map(r => {
+            if (r.action === 'none') return '';
+            let badge;
+            if (r.action === 'spawn') badge = `<span style="color:#f4a261;font-weight:bold;">SPAWN ${r.deficit}</span>`;
+            else if (r.action === 'ok') badge = `<span style="color:#74c69d;">✓ Covered</span>`;
+            else badge = `<span style="color:#90e0ef;">Surplus (${Math.abs(r.deficit)})</span>`;
+            
+            const soonBadge = r.soonMembers > 0 ? `<span style="background:#3d3030;color:#f4a261;padding:1px 4px;border-radius:3px;font-size:10px;margin-left:4px;">+${r.soonMembers} soon</span>` : '';
+            
+            return `
+                <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <td style="padding:6px;font-weight:bold;">Lvl ${r.level}</td>
+                    <td style="padding:6px;">${r.freeMembers}${soonBadge}</td>
+                    <td style="padding:6px;">${r.openSlots} / ${r.totalSlots} <span style="opacity:0.5;font-size:10px;">(${r.recruitingOCs} OCs)</span></td>
+                    <td style="padding:6px;">${badge}</td>
+                </tr>
+            `;
+        }).filter(Boolean).join('');
+
+        const memberRows = [...eligible].sort((a, b) => (b.joinable - a.joinable) || a.name.localeCompare(b.name)).map(m => {
+            const status = m.inOC ? `<span style="color:#f4a261;">In OC (free ${formatSpawnTime(m.ocReadyAt)})</span>` : `<span style="color:#74c69d;">Free</span>`;
+            const cpr = m.cpr !== null ? `${m.cpr}%` : `<span style="opacity:0.5;">No data</span>`;
+            return `
+                <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <td style="padding:4px 6px;">${escapeHtml(m.name)}</td>
+                    <td style="padding:4px 6px;">${status}</td>
+                    <td style="padding:4px 6px;">${cpr}</td>
+                    <td style="padding:4px 6px;">Lvl ${m.joinable}</td>
+                </tr>
+            `;
+        }).join('');
+
+        panel.innerHTML = `
+            <div class="wb-heatmap-header">
+                <h3>OC Spawn Assistance</h3>
+                <button class="wb-heatmap-close" id="wb-spawn-close">✕</button>
+            </div>
+            <div style="padding: 16px; font-size: 12px; overflow-y: auto;">
+                <div style="margin-bottom:12px; padding:8px; background:rgba(255,255,255,0.05); border-radius:4px; line-height:1.5;">
+                    Analyzed <b>${eligible.length + skipped.length}</b> members · <b>${eligible.length}</b> eligible 
+                    (<span style="color:#74c69d;">${eligible.filter(m => !m.inOC).length} free</span>, 
+                    <span style="color:#f4a261;">${eligible.filter(m => m.inOC).length} soon</span>)<br>
+                    <span style="font-size:10px;opacity:0.6;">(Skipped ${skipped.length} inactive or currently committed members)</span>
+                </div>
+                
+                <h4 style="margin:0 0 8px; color:#74b9ff; font-size:13px; border-bottom:1px solid rgba(116,185,255,0.2); padding-bottom:4px;">Spawn Recommendations</h4>
+                <table style="width:100%; border-collapse:collapse; margin-bottom:16px; text-align:left;">
+                    <thead><tr style="background:rgba(255,255,255,0.05);"><th style="padding:6px;">Level</th><th style="padding:6px;">Eligible</th><th style="padding:6px;">Open Slots</th><th style="padding:6px;">Action</th></tr></thead>
+                    <tbody>${recsHtml || '<tr><td colspan="4" style="padding:8px;text-align:center;opacity:0.5;">No eligible members found.</td></tr>'}</tbody>
+                </table>
+
+                <details>
+                    <summary style="cursor:pointer; color:#74b9ff; font-size:13px; font-weight:bold; margin-bottom:8px;">View Member Details</summary>
+                    <table style="width:100%; border-collapse:collapse; text-align:left; font-size:11px; margin-top:8px;">
+                        <thead><tr style="background:rgba(255,255,255,0.05);"><th style="padding:4px 6px;">Name</th><th style="padding:4px 6px;">Status</th><th style="padding:4px 6px;">CPR</th><th style="padding:4px 6px;">Joinable</th></tr></thead>
+                        <tbody>${memberRows}</tbody>
+                    </table>
+                </details>
+            </div>
+            <div class="wb-heatmap-footer">
+                <span style="font-size:11px;opacity:0.6;">Data cached on server for 6 hours to prevent API limits.</span>
+                <button class="wb-btn wb-btn-sm" id="wb-spawn-refresh">Refresh</button>
+            </div>
+        `;
+
+        document.getElementById('wb-spawn-close').addEventListener('click', () => {
+            spawnPanelVisible = false;
+            panel.style.display = 'none';
+        });
+        document.getElementById('wb-spawn-refresh').addEventListener('click', () => {
+            panel.innerHTML = `<div style="padding:40px;text-align:center;">Reloading...</div>`;
+            loadAndRenderOcSpawn();
+        });
+    }
+
+    // =========================================================================
+    // SECTION 26: MAIN INITIALISATION
     // =========================================================================
 
     async function main() {
@@ -9148,6 +9429,27 @@ body.wb-chain-active {
         // 3b. Create heatmap toggle button (only on non-war, non-attack pages)
         if (!isWarOrAttack) {
             createHeatmapButton();
+            
+            // Check if we are on the Crimes tab
+            if (url.includes('tab=crimes') || url.includes('#crimes')) {
+                // Add OC Spawn button to the top of the crimes tab
+                const checkInterval = setInterval(() => {
+                    const header = document.querySelector('.crimes-title') || document.querySelector('.faction-crimes-wrap');
+                    if (header && !document.getElementById('fo-spawn-btn-crimes')) {
+                        const btn = document.createElement('button');
+                        btn.id = 'fo-spawn-btn-crimes';
+                        btn.className = 'wb-btn wb-btn-sm';
+                        btn.textContent = '⚔️ OC Spawn Assistant';
+                        btn.style.cssText = 'margin-bottom: 10px; background: var(--wb-accent); border: none; padding: 6px 12px; border-radius: 4px; color: #fff; cursor: pointer; font-size: 13px; width: 100%; font-weight: bold;';
+                        btn.addEventListener('click', () => {
+                            spawnPanelVisible = true;
+                            loadAndRenderOcSpawn();
+                        });
+                        header.parentNode.insertBefore(btn, header);
+                        clearInterval(checkInterval);
+                    }
+                }, 1000);
+            }
         }
 
         // 4. Set up keyboard shortcuts
