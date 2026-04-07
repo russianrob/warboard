@@ -414,7 +414,7 @@
                         <span>${timeAgo(it.lastUpdated)}</span>
                     </div>
                     <div class="w3b-links">
-                        <a href="https://www.torn.com/bazaar.php?userId=${it.playerId}#/p=bazaar/cat=All" target="_blank">Open Bazaar</a>
+                        <a href="https://www.torn.com/bazaar.php?userId=${it.playerId}" target="_blank">Open Bazaar</a>
                         <a href="https://www.torn.com/trade.php#step=start&userID=${it.playerId}" target="_blank">Trade</a>
                         <a href="https://weav3r.dev/item/${it.itemId}" target="_blank">Weav3r</a>
                         <a href="https://www.torn.com/profiles.php?XID=${it.playerId}" target="_blank">Profile</a>
@@ -461,7 +461,7 @@
                         <span>${l.lastChecked ? esc(l.lastChecked) : ''}</span>
                     </div>
                     ${l.playerId ? `<div class="w3b-links">
-                        <a href="https://www.torn.com/bazaar.php?userId=${l.playerId}#/p=bazaar/cat=All" target="_blank">Open Bazaar</a>
+                        <a href="https://www.torn.com/bazaar.php?userId=${l.playerId}" target="_blank">Open Bazaar</a>
                         <a href="https://www.torn.com/trade.php#step=start&userID=${l.playerId}" target="_blank">Trade</a>
                     </div>` : ''}
                 </div>`).join('');
