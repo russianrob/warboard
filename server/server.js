@@ -14,6 +14,7 @@ import { createServer } from "node:http";
 import { Server as SocketIOServer } from "socket.io";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
+import helmet from "helmet";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
@@ -72,6 +73,9 @@ app.use(
   }),
 );
 app.use(express.json({ limit: '50kb' }));
+
+// ── Security headers ───────────────────────────────────────────────────────
+app.use(helmet({ contentSecurityPolicy: false }));
 
 // ── Rate limiting ────────────────────────────────────────────────────────
 
