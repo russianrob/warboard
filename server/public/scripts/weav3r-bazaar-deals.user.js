@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.0.1
-// @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals panel + item price lookup
+// @version      1.1.0
+// @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals panel + item price lookup by name
 // @author       RussianRob
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
@@ -18,10 +18,9 @@
 
     // ── Config ─────────────────────────────────────────────────────────────
     const CFG = {
-        refreshMs:   5 * 60 * 1000, // auto-refresh dollar deals every 5 min
-        pageSize:    50,
-        maxPages:    4,              // fetch up to 200 items (4 × 50)
-        comboMin:    3,
+        refreshMs: 5 * 60 * 1000,
+        pageSize:  50,
+        maxPages:  4,
     };
 
     // ── Persistent storage helpers ─────────────────────────────────────────
@@ -30,10 +29,41 @@
         set: (k, v) => { try { GM_setValue(k, v); } catch {} },
     };
 
+    // ── Static item name → ID map (weapons + armour) ───────────────────────
+    // Additional items are added dynamically from dollar deals API responses
+    const STATIC_ITEMS = {"Hammer":1,"Baseball Bat":2,"Crowbar":3,"Knuckle Dusters":4,"Pen Knife":5,"Kitchen Knife":6,"Dagger":7,"Axe":8,"Scimitar":9,"Samurai Sword":11,"Glock 17":12,"Raven MP25":13,"Ruger 57":14,"Beretta M9":15,"USP":16,"Beretta 92FS":17,"Fiveseven":18,"Magnum":19,"Desert Eagle":20,"Sawed-Off Shotgun":22,"Benelli M1 Tactical":23,"MP5 Navy":24,"P90":25,"AK-47":26,"M4A1 Colt Carbine":27,"Benelli M4 Super":28,"M16 A2 Rifle":29,"Steyr AUG":30,"M249 SAW":31,"Minigun":63,"Springfield 1911":99,"Egg Propelled Launcher":100,"9mm Uzi":108,"RPG Launcher":109,"Leather Bullwhip":110,"Ninja Claws":111,"Yasukuni Sword":146,"Butterfly Knife":173,"XM8 Rifle":174,"Cobra Derringer":177,"S&W Revolver":189,"Claymore Sword":217,"Enfield SA-80":219,"Jackhammer":223,"Swiss Army Knife":224,"Mag 7":225,"Spear":227,"Vektor CR-21":228,"Heckler & Koch SL8":231,"BT MP9":233,"Chain Whip":234,"Wooden Nunchaku":235,"Kama":236,"Kodachi":237,"Sai":238,"Type 98 Anti Tank":240,"Taurus":243,"Bo Staff":245,"Katana":247,"Qsz-92":248,"SKS Carbine":249,"Ithaca 37":252,"Lorcin 380":253,"S&W M29":254,"Dual Axes":289,"Dual Hammers":290,"Macana":391,"Metal Nunchaku":395,"Flail":397,"SIG 552":398,"ArmaLite M-15A4":399,"Guandao":400,"Ice Pick":402,"Cricket Bat":438,"Frying Pan":439,"MP5k":483,"AK74U":484,"Skorpion":485,"TMP":486,"Thompson":487,"MP 40":488,"Luger":489,"Blunderbuss":490,"Tavor TAR-21":612,"Harpoon":613,"Diamond Bladed Knife":614,"Naval Cutlass":615,"Nock Gun":830,"Beretta Pico":831,"Riding Crop":832,"Rheinmetall MG 3":837,"Homemade Pocket Shotgun":838,"Scalpel":846,"Sledgehammer":850,"Bread Knife":1053,"Poison Umbrella":1055,"SMAW Launcher":1152,"China Lake":1153,"Milkor MGL":1154,"PKM":1155,"Negev NG-5":1156,"Stoner 96":1157,"Meat Hook":1158,"Cleaver":1159,"Golf Club":1231,"Snow Cannon":1232,"Bushmaster Carbon 15":1302,"Riding Crop (2)":1360,"Scalpel (2)":1365,"Flak Jacket":178,"Hazmat Suit":348,"Kevlar Gloves":640,"WWII Helmet":641,"Motorcycle Helmet":642,"Construction Helmet":643,"Welding Helmet":644,"Riot Helmet":655,"Riot Body":656,"Riot Pants":657,"Riot Boots":658,"Riot Gloves":659,"Dune Helmet":660,"Dune Vest":661,"Dune Pants":662,"Dune Boots":663,"Dune Gloves":664,"Assault Helmet":665,"Assault Body":666,"Assault Pants":667,"Assault Boots":668,"Assault Gloves":669,"Delta Gas Mask":670,"Delta Body":671,"Delta Pants":672,"Delta Boots":673,"Delta Gloves":674,"Marauder Face Mask":675,"Marauder Body":676,"Marauder Pants":677,"Marauder Boots":678,"Marauder Gloves":679,"EOD Helmet":680,"EOD Apron":681,"EOD Pants":682,"EOD Boots":683,"EOD Gloves":684,"M'aol Visage":1164,"M'aol Hooves":1167,"Sentinel Helmet":1307,"Sentinel Apron":1308,"Sentinel Pants":1309,"Sentinel Boots":1310,"Sentinel Gloves":1311,"Vanguard Respirator":1355,"Vanguard Body":1356,"Vanguard Pants":1357,"Vanguard Boots":1358,"Vanguard Gloves":1359};
+
+    // Dynamic index — enriched at runtime from dollar deals API (covers drugs, clothing, boosters, etc.)
+    const itemIndex = { ...STATIC_ITEMS }; // name → id
+
+    function enrichIndex(items) {
+        for (const it of items) {
+            if (it.itemName && it.itemId && !itemIndex[it.itemName]) {
+                itemIndex[it.itemName] = it.itemId;
+            }
+        }
+    }
+
+    function searchIndex(query) {
+        if (!query || query.length < 2) return [];
+        const q = query.toLowerCase();
+        return Object.entries(itemIndex)
+            .filter(([name]) => name.toLowerCase().includes(q))
+            .sort(([a], [b]) => {
+                // Exact prefix matches first
+                const aStart = a.toLowerCase().startsWith(q);
+                const bStart = b.toLowerCase().startsWith(q);
+                if (aStart && !bStart) return -1;
+                if (!aStart && bStart) return 1;
+                return a.localeCompare(b);
+            })
+            .slice(0, 12); // max 12 suggestions
+    }
+
     // ── State ──────────────────────────────────────────────────────────────
     const S = {
-        tab:            'deals',   // 'deals' | 'lookup'
-        deals:          [],        // cached dollar-deal items
+        tab:            'deals',
+        deals:          [],
         dealsTs:        null,
         dealsLoading:   false,
         dealsError:     null,
@@ -44,9 +74,12 @@
         lookupListings: [],
         lookupLoading:  false,
         lookupError:    null,
+        lookupQuery:    '',
+        acResults:      [],    // autocomplete results
+        acOpen:         false,
     };
 
-    // ── Category list ──────────────────────────────────────────────────────
+    // ── Categories ─────────────────────────────────────────────────────────
     const CATS = [
         'All','Alcohol','Armor','Artifact','Booster','Candy','Car',
         'Clothing','Collectible','Drug','Energy Drink','Enhancer',
@@ -57,65 +90,39 @@
     // ── Styles ─────────────────────────────────────────────────────────────
     GM_addStyle(`
         #w3b-panel {
-            position: fixed;
-            bottom: 70px;
-            right: 16px;
-            width: 370px;
-            max-height: 540px;
-            background: #12121e;
-            border: 1px solid #1e3a5f;
-            border-radius: 10px;
-            font-family: 'Segoe UI', Arial, sans-serif;
-            font-size: 13px;
-            color: #dde;
-            z-index: 99999;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 0 6px 30px rgba(0,0,0,0.7);
-            overflow: hidden;
+            position: fixed; bottom: 70px; right: 16px; width: 370px;
+            max-height: 540px; background: #12121e;
+            border: 1px solid #1e3a5f; border-radius: 10px;
+            font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px;
+            color: #dde; z-index: 99999; display: flex; flex-direction: column;
+            box-shadow: 0 6px 30px rgba(0,0,0,0.7); overflow: hidden;
             transition: max-height 0.2s ease;
         }
         #w3b-panel.collapsed { max-height: 42px; overflow: hidden; }
-
-        /* Header */
         #w3b-head {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 12px;
-            background: #0d2845;
-            flex-shrink: 0;
-            user-select: none;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 12px; background: #0d2845; flex-shrink: 0; user-select: none;
         }
         #w3b-head-title { font-weight: 700; font-size: 13px; color: #e05070; letter-spacing: .4px; }
         #w3b-head-ctrl  { display: flex; gap: 5px; }
-
-        /* Tabs */
         #w3b-tabs { display: flex; background: #0f1a2e; flex-shrink: 0; }
         .w3b-tab {
-            flex: 1; padding: 6px 0; text-align: center;
-            cursor: pointer; font-size: 11px; font-weight: 600;
-            color: #556; border-bottom: 2px solid transparent;
-            transition: color .15s, border-color .15s;
+            flex: 1; padding: 6px 0; text-align: center; cursor: pointer;
+            font-size: 11px; font-weight: 600; color: #556;
+            border-bottom: 2px solid transparent; transition: color .15s, border-color .15s;
         }
         .w3b-tab.active { color: #e05070; border-bottom-color: #e05070; }
         .w3b-tab:hover:not(.active) { color: #99a; }
-
-        /* Body */
         #w3b-body {
             flex: 1; overflow-y: auto; padding: 8px;
             scrollbar-width: thin; scrollbar-color: #1e3a5f #12121e;
         }
         #w3b-body::-webkit-scrollbar { width: 5px; }
         #w3b-body::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 3px; }
-
-        /* Status bar */
         #w3b-status {
             font-size: 10px; color: #444; text-align: right;
             padding: 3px 8px; flex-shrink: 0; border-top: 1px solid #1a1a2e;
         }
-
-        /* Buttons */
         .w3b-btn {
             background: #e05070; border: none; color: #fff;
             border-radius: 5px; padding: 4px 9px;
@@ -125,27 +132,39 @@
         .w3b-btn:hover { background: #b8304a; }
         .w3b-btn.dim { background: #1e3a5f; }
         .w3b-btn.dim:hover { background: #2a4f7f; }
-
-        /* Filter bar */
         .w3b-filter {
             display: flex; gap: 6px; margin-bottom: 8px; align-items: center;
         }
-        .w3b-filter select, .w3b-filter input[type=number], .w3b-filter input[type=text] {
+        .w3b-filter select, .w3b-filter input {
             background: #0f1a2e; border: 1px solid #1e3a5f;
             color: #dde; border-radius: 5px; padding: 4px 7px;
             font-size: 11px; flex: 1; min-width: 0;
         }
-
-        /* Item rows */
+        /* Autocomplete */
+        .w3b-ac-wrap { position: relative; flex: 1; }
+        .w3b-ac-input {
+            width: 100%; box-sizing: border-box;
+            background: #0f1a2e; border: 1px solid #1e3a5f;
+            color: #dde; border-radius: 5px; padding: 5px 8px;
+            font-size: 11px;
+        }
+        .w3b-ac-input:focus { outline: none; border-color: #e05070; }
+        .w3b-ac-drop {
+            position: absolute; top: calc(100% + 3px); left: 0; right: 0;
+            background: #0f1a2e; border: 1px solid #1e3a5f;
+            border-radius: 5px; z-index: 100001; max-height: 180px;
+            overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+        }
+        .w3b-ac-item {
+            padding: 6px 9px; cursor: pointer; font-size: 11px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .w3b-ac-item:hover, .w3b-ac-item.selected { background: #1e3a5f; }
+        .w3b-ac-id { color: #445; font-size: 10px; }
         .w3b-row {
-            background: #0f1a2e;
-            border-left: 3px solid #e05070;
-            border-radius: 6px;
-            padding: 7px 9px;
-            margin-bottom: 5px;
-            display: flex;
-            flex-direction: column;
-            gap: 3px;
+            background: #0f1a2e; border-left: 3px solid #e05070;
+            border-radius: 6px; padding: 7px 9px; margin-bottom: 5px;
+            display: flex; flex-direction: column; gap: 3px;
         }
         .w3b-row-name  { font-weight: 700; color: #fff; font-size: 12px; }
         .w3b-row-meta  { display: flex; justify-content: space-between; font-size: 11px; color: #8899aa; }
@@ -154,19 +173,15 @@
         .w3b-seller    { color: #60a5fa; }
         .w3b-badge {
             background: rgba(74,222,128,.12); color: #4ade80;
-            border-radius: 3px; padding: 1px 5px;
-            font-size: 10px; font-weight: 700;
+            border-radius: 3px; padding: 1px 5px; font-size: 10px; font-weight: 700;
         }
         .w3b-links { display: flex; gap: 5px; margin-top: 2px; flex-wrap: wrap; }
         .w3b-links a {
             font-size: 10px; color: #e05070; text-decoration: none;
-            background: rgba(224,80,112,.1);
-            padding: 2px 7px; border-radius: 3px;
+            background: rgba(224,80,112,.1); padding: 2px 7px; border-radius: 3px;
             transition: background .15s;
         }
         .w3b-links a:hover { background: rgba(224,80,112,.25); }
-
-        /* States */
         .w3b-loading { text-align: center; color: #e05070; padding: 20px; font-size: 12px; }
         .w3b-empty   { text-align: center; color: #445; padding: 20px; font-size: 12px; }
         .w3b-error   { text-align: center; color: #f87171; padding: 12px; font-size: 11px; background: rgba(248,113,113,.07); border-radius: 5px; }
@@ -181,7 +196,6 @@
         if (n >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'K';
         return '$' + n.toLocaleString();
     }
-
     function timeAgo(iso) {
         const d = (Date.now() - new Date(iso).getTime()) / 1000;
         if (d < 60)    return Math.round(d) + 's ago';
@@ -189,7 +203,6 @@
         if (d < 86400) return Math.round(d / 3600) + 'h ago';
         return Math.round(d / 86400) + 'd ago';
     }
-
     function esc(s) {
         return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
@@ -198,21 +211,19 @@
     function gmJSON(url) {
         return new Promise((res, rej) => {
             GM_xmlhttpRequest({
-                method: 'GET', url,
-                headers: { Accept: 'application/json' },
-                onload:  r => { try { res(JSON.parse(r.responseText)); } catch { rej(new Error('Parse error')); } },
-                onerror: () => rej(new Error('Network error')),
+                method: 'GET', url, headers: { Accept: 'application/json' },
+                onload:    r => { try { res(JSON.parse(r.responseText)); } catch { rej(new Error('Parse error')); } },
+                onerror:   () => rej(new Error('Network error')),
                 ontimeout: () => rej(new Error('Timeout')),
             });
         });
     }
-
     function gmHTML(url) {
         return new Promise((res, rej) => {
             GM_xmlhttpRequest({
                 method: 'GET', url,
-                onload:  r => res(r.responseText),
-                onerror: () => rej(new Error('Network error')),
+                onload:    r => res(r.responseText),
+                onerror:   () => rej(new Error('Network error')),
                 ontimeout: () => rej(new Error('Timeout')),
             });
         });
@@ -223,7 +234,6 @@
         S.dealsLoading = true;
         S.dealsError = null;
         render();
-
         const all = [];
         try {
             for (let p = 1; p <= CFG.maxPages; p++) {
@@ -234,140 +244,82 @@
                 all.push(...data.items);
                 if (data.items.length < CFG.pageSize) break;
             }
-            // Sort best deals first (highest market value at $1 listing price)
             S.deals = all.sort((a, b) => b.marketPrice - a.marketPrice);
             S.dealsTs = Date.now();
-            store.set('w3_deals_ts', S.dealsTs);
+            enrichIndex(all); // add all loaded items to the search index
         } catch (e) {
             S.dealsError = e.message;
         }
-
         S.dealsLoading = false;
         render();
     }
 
     // ── Item Lookup — parse weav3r item page HTML ──────────────────────────
-    async function lookupItem(id) {
+    async function lookupItem(id, name) {
         S.lookupId       = id;
+        S.lookupName     = name || '';
         S.lookupListings = [];
         S.lookupLoading  = true;
         S.lookupError    = null;
+        S.acOpen         = false;
         render();
-
         try {
             const html = await gmHTML(`https://weav3r.dev/item/${id}`);
             const doc  = new DOMParser().parseFromString(html, 'text/html');
 
-            // ── Strategy 1: look for embedded JSON in script tags ──────────
-            const listings = [];
-            for (const s of doc.querySelectorAll('script')) {
-                const txt = s.textContent;
-
-                // Next.js RSC / page props may embed data in various formats
-                // Try to find seller/price patterns in JSON blobs
-                const patterns = [
-                    /"sellerName"\s*:\s*"([^"]+)"/g,
-                ];
-                if (patterns[0].test(txt)) {
-                    // Extract all JSON objects that look like bazaar listings
-                    try {
-                        // Find array containing sellerName fields
-                        const match = txt.match(/\[\s*\{[^[\]]*"sellerName"[^[\]]*\}\s*(?:,\s*\{[^[\]]*"sellerName"[^[\]]*\}\s*)*\]/);
-                        if (match) {
-                            const parsed = JSON.parse(match[0]);
-                            listings.push(...parsed);
-                        }
-                    } catch {}
-                }
-
-                // Also try searching for the item name in the page title
+            // Extract item name from page title if not provided
+            if (!S.lookupName) {
                 const titleEl = doc.querySelector('title');
-                if (titleEl && !S.lookupName) {
-                    // Titles like "AK-47 | TornW3B" or "AK-47 - Bazaar Prices"
+                if (titleEl) {
                     const t = titleEl.textContent.split(/[|–\-]/)[0].trim();
                     if (t && t.length < 60) S.lookupName = t;
                 }
             }
 
-            // ── Strategy 2: parse HTML tables ─────────────────────────────
+            const listings = [];
+
+            // Strategy 1: JSON blobs in script tags
+            for (const s of doc.querySelectorAll('script')) {
+                const txt = s.textContent;
+                if (txt.includes('"sellerName"')) {
+                    try {
+                        const match = txt.match(/\[\s*\{[^[\]]*"sellerName"[^[\]]*\}(?:\s*,\s*\{[^[\]]*"sellerName"[^[\]]*\})*\s*\]/);
+                        if (match) { listings.push(...JSON.parse(match[0])); break; }
+                    } catch {}
+                }
+            }
+
+            // Strategy 2: HTML tables
             if (listings.length === 0) {
-                const tables = doc.querySelectorAll('table');
-                for (const table of tables) {
+                for (const table of doc.querySelectorAll('table')) {
                     const headers = [...table.querySelectorAll('th')].map(th => th.textContent.trim().toLowerCase());
-                    // Look for a table with seller/price columns
                     const sellerIdx = headers.findIndex(h => h.includes('seller') || h.includes('player'));
                     const qtyIdx    = headers.findIndex(h => h.includes('qty') || h.includes('quantity'));
                     const priceIdx  = headers.findIndex(h => h.includes('price'));
                     const ageIdx    = headers.findIndex(h => h.includes('age') || h.includes('updated') || h.includes('checked'));
-
                     if (sellerIdx === -1 || priceIdx === -1) continue;
-
                     for (const tr of table.querySelectorAll('tbody tr')) {
                         const tds = [...tr.querySelectorAll('td')];
                         if (tds.length < 2) continue;
-
-                        const priceRaw = tds[priceIdx]?.textContent.trim().replace(/[^0-9.]/g, '');
-                        const price = parseFloat(priceRaw) || 0;
-
+                        const priceRaw = tds[priceIdx]?.textContent.trim().replace(/[^0-9]/g, '');
                         listings.push({
                             sellerName:  tds[sellerIdx]?.textContent.trim() || '—',
                             quantity:    qtyIdx >= 0 ? (tds[qtyIdx]?.textContent.trim() || '?') : '?',
-                            price:       price,
-                            lastChecked: ageIdx >= 0 ? tds[ageIdx]?.textContent.trim() : null,
-                            playerId:    (() => {
-                                // Try to extract player ID from any link in the seller cell
-                                const a = tds[sellerIdx]?.querySelector('a');
-                                const m = a?.href?.match(/(?:userId|XID|userID)=(\d+)/);
-                                return m ? m[1] : null;
-                            })(),
-                        });
-                    }
-                }
-            }
-
-            // ── Strategy 3: extract structured data from definition lists / divs ──
-            if (listings.length === 0) {
-                // Some Next.js pages render data in div grids rather than tables
-                // Look for price + seller text patterns
-                const priceEls = [...doc.querySelectorAll('[class*="price"],[class*="Price"]')];
-                const sellerEls = [...doc.querySelectorAll('[class*="seller"],[class*="Seller"],[class*="player"],[class*="Player"]')];
-
-                if (priceEls.length > 0 && sellerEls.length > 0) {
-                    const len = Math.min(priceEls.length, sellerEls.length);
-                    for (let i = 0; i < len; i++) {
-                        const priceRaw = priceEls[i].textContent.replace(/[^0-9]/g, '');
-                        listings.push({
-                            sellerName:  sellerEls[i].textContent.trim(),
-                            quantity:    '?',
                             price:       parseInt(priceRaw) || 0,
-                            lastChecked: null,
-                            playerId:    null,
+                            lastChecked: ageIdx >= 0 ? tds[ageIdx]?.textContent.trim() : null,
+                            playerId:    (() => { const a = tds[sellerIdx]?.querySelector('a'); const m = a?.href?.match(/(?:userId|XID|userID)=(\d+)/); return m ? m[1] : null; })(),
                         });
                     }
                 }
             }
 
-            // Sort cheapest first
             listings.sort((a, b) => a.price - b.price);
             S.lookupListings = listings;
-
         } catch (e) {
             S.lookupError = e.message;
         }
-
         S.lookupLoading = false;
         render();
-    }
-
-    // ── Detect item ID from Torn URL ───────────────────────────────────────
-    function detectItemId() {
-        // Item Market: #/market/view=search&itemID=26
-        const hashMatch = location.hash.match(/itemID=(\d+)/i);
-        if (hashMatch) return hashMatch[1];
-        // Bazaar page with item param
-        const urlMatch = location.search.match(/[?&]itemID=(\d+)/i);
-        if (urlMatch) return urlMatch[1];
-        return null;
     }
 
     // ── DOM refs ──────────────────────────────────────────────────────────
@@ -425,28 +377,35 @@
     }
 
     function renderLookup() {
-        const detected = detectItemId();
+        const acHTML = S.acOpen && S.acResults.length > 0
+            ? `<div class="w3b-ac-drop" id="w3b-ac-drop">
+                ${S.acResults.map(([name, id], i) => `
+                    <div class="w3b-ac-item" data-id="${id}" data-name="${esc(name)}">
+                        <span>${esc(name)}</span>
+                        <span class="w3b-ac-id">#${id}</span>
+                    </div>`).join('')}
+               </div>`
+            : '';
+
         let out = `
             <div class="w3b-filter">
-                <input type="number" id="w3b-iid" placeholder="Item ID  (e.g. 26 = AK-47)"
-                    value="${esc(S.lookupId || detected || '')}">
+                <div class="w3b-ac-wrap">
+                    <input class="w3b-ac-input" id="w3b-name-input"
+                        type="text"
+                        placeholder="Search item name…"
+                        value="${esc(S.lookupQuery)}"
+                        autocomplete="off">
+                    ${acHTML}
+                </div>
                 <button class="w3b-btn" id="w3b-search">Search</button>
             </div>`;
-
-        if (detected && !S.lookupId) {
-            out += `<div class="w3b-hint">📍 Detected Item ID <strong>${detected}</strong> from page URL — hit Search to look up.</div>`;
-        }
 
         if (S.lookupLoading) {
             out += `<div class="w3b-loading">⏳ Fetching from weav3r.dev…</div>`;
         } else if (S.lookupError) {
             out += `<div class="w3b-error">⚠ ${esc(S.lookupError)}</div>`;
-            if (S.lookupId) {
-                out += `<div class="w3b-hint" style="text-align:center;margin-top:8px;">
-                    <a href="https://weav3r.dev/item/${S.lookupId}" target="_blank" style="color:#e05070;">
-                        View on weav3r.dev →
-                    </a></div>`;
-            }
+            if (S.lookupId) out += `<div class="w3b-hint" style="text-align:center;margin-top:8px;">
+                <a href="https://weav3r.dev/item/${S.lookupId}" target="_blank" style="color:#e05070;">View on weav3r.dev →</a></div>`;
         } else if (S.lookupListings.length > 0) {
             const name = S.lookupName || `Item #${S.lookupId}`;
             out += `<div class="w3b-section-label">Cheapest bazaar listings — ${esc(name)}</div>`;
@@ -466,18 +425,14 @@
                     </div>` : ''}
                 </div>`).join('');
             out += `<div class="w3b-hint" style="text-align:center;margin-top:6px;">
-                <a href="https://weav3r.dev/item/${S.lookupId}" target="_blank" style="color:#e05070;">
-                    View full data on weav3r.dev →
-                </a></div>`;
+                <a href="https://weav3r.dev/item/${S.lookupId}" target="_blank" style="color:#e05070;">Full data on weav3r.dev →</a></div>`;
         } else if (S.lookupId && !S.lookupLoading) {
-            out += `<div class="w3b-empty">
-                No bazaar data found in page HTML.<br>
-                <a href="https://weav3r.dev/item/${S.lookupId}" target="_blank" style="color:#e05070;">
-                    View on weav3r.dev →
-                </a>
-            </div>`;
+            out += `<div class="w3b-empty">No bazaar listings found.<br>
+                <a href="https://weav3r.dev/item/${S.lookupId}" target="_blank" style="color:#e05070;">View on weav3r.dev →</a></div>`;
+        } else {
+            out += `<div class="w3b-empty" style="color:#556">Type an item name to search.<br>
+                <span style="font-size:10px">Index covers ${Object.keys(itemIndex).length} items<br>and grows as deals load.</span></div>`;
         }
-
         return out;
     }
 
@@ -490,11 +445,11 @@
         } else {
             statusBar.textContent = S.lookupId
                 ? `weav3r.dev/item/${S.lookupId}`
-                : 'Enter an Item ID to check bazaar prices';
+                : `${Object.keys(itemIndex).length} items indexed`;
         }
     }
 
-    // ── Event listeners ────────────────────────────────────────────────────
+    // ── Listeners ──────────────────────────────────────────────────────────
     function attachListeners() {
         // Deals tab
         const catSel = body.querySelector('#w3b-cat');
@@ -503,38 +458,100 @@
             store.set('w3_cat', S.filterCat);
             render();
         });
-
         const refreshBtn = body.querySelector('#w3b-refresh');
         if (refreshBtn) refreshBtn.addEventListener('click', loadDeals);
 
-        // Lookup tab
-        const iidInput = body.querySelector('#w3b-iid');
-        const searchBtn = body.querySelector('#w3b-search');
-        if (searchBtn && iidInput) {
-            const doSearch = () => {
-                const id = iidInput.value.trim();
-                if (id) lookupItem(id);
-            };
-            searchBtn.addEventListener('click', doSearch);
-            iidInput.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+        // Lookup tab — name search input
+        const input   = body.querySelector('#w3b-name-input');
+        const srchBtn = body.querySelector('#w3b-search');
+
+        if (input) {
+            input.addEventListener('input', () => {
+                S.lookupQuery = input.value;
+                S.acResults   = searchIndex(input.value);
+                S.acOpen      = S.acResults.length > 0 && input.value.length >= 2;
+                // Re-render just the autocomplete part
+                const existing = body.querySelector('#w3b-ac-drop');
+                if (existing) existing.remove();
+                const wrap = body.querySelector('.w3b-ac-wrap');
+                if (wrap && S.acOpen) {
+                    const drop = document.createElement('div');
+                    drop.className = 'w3b-ac-drop';
+                    drop.id = 'w3b-ac-drop';
+                    drop.innerHTML = S.acResults.map(([name, id]) =>
+                        `<div class="w3b-ac-item" data-id="${id}" data-name="${esc(name)}">
+                            <span>${esc(name)}</span>
+                            <span class="w3b-ac-id">#${id}</span>
+                        </div>`
+                    ).join('');
+                    wrap.appendChild(drop);
+                    drop.querySelectorAll('.w3b-ac-item').forEach(el => {
+                        el.addEventListener('mousedown', (e) => {
+                            e.preventDefault();
+                            const id = el.dataset.id;
+                            const name = el.dataset.name;
+                            S.lookupQuery = name;
+                            S.acOpen = false;
+                            lookupItem(id, name);
+                        });
+                    });
+                }
+            });
+
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    // If autocomplete has results, use first one
+                    if (S.acResults.length > 0) {
+                        const [name, id] = S.acResults[0];
+                        S.lookupQuery = name;
+                        S.acOpen = false;
+                        lookupItem(id, name);
+                    } else if (S.lookupQuery.trim()) {
+                        // Try exact match in index
+                        const exact = itemIndex[S.lookupQuery.trim()];
+                        if (exact) lookupItem(exact, S.lookupQuery.trim());
+                    }
+                }
+                if (e.key === 'Escape') { S.acOpen = false; render(); }
+            });
+
+            input.addEventListener('blur', () => {
+                setTimeout(() => { S.acOpen = false; const d = body.querySelector('#w3b-ac-drop'); if (d) d.remove(); }, 150);
+            });
         }
+
+        if (srchBtn) srchBtn.addEventListener('click', () => {
+            if (S.acResults.length > 0) {
+                const [name, id] = S.acResults[0];
+                lookupItem(id, name);
+            } else if (S.lookupQuery.trim()) {
+                const exact = itemIndex[S.lookupQuery.trim()];
+                if (exact) lookupItem(exact, S.lookupQuery.trim());
+                else { S.lookupError = `"${S.lookupQuery}" not found in index. Try a different spelling.`; render(); }
+            }
+        });
+
+        // Autocomplete item clicks (initial render)
+        body.querySelectorAll('.w3b-ac-item').forEach(el => {
+            el.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                lookupItem(el.dataset.id, el.dataset.name);
+            });
+        });
     }
 
-    // ── Build panel DOM ────────────────────────────────────────────────────
+    // ── Build panel ────────────────────────────────────────────────────────
     function buildPanel() {
         panel = document.createElement('div');
         panel.id = 'w3b-panel';
         panel.classList.toggle('collapsed', S.collapsed);
 
-        // ── Header ─────────────────────────────────────────────────────────
         const head = document.createElement('div');
         head.id = 'w3b-head';
         head.innerHTML = `
             <span id="w3b-head-title">🔍 Weav3r Deals</span>
             <div id="w3b-head-ctrl">
-                <button class="w3b-btn dim" id="w3b-collapse" style="padding:2px 7px" title="${S.collapsed ? 'Expand' : 'Collapse'}">
-                    ${S.collapsed ? '▲' : '▼'}
-                </button>
+                <button class="w3b-btn dim" id="w3b-collapse" style="padding:2px 7px">${S.collapsed ? '▲' : '▼'}</button>
             </div>`;
         head.querySelector('#w3b-collapse').addEventListener('click', () => {
             S.collapsed = !S.collapsed;
@@ -544,7 +561,6 @@
         });
         panel.appendChild(head);
 
-        // ── Tabs ──────────────────────────────────────────────────────────
         const tabs = document.createElement('div');
         tabs.id = 'w3b-tabs';
         tabs.innerHTML = `
@@ -560,12 +576,10 @@
         });
         panel.appendChild(tabs);
 
-        // ── Body ──────────────────────────────────────────────────────────
         body = document.createElement('div');
         body.id = 'w3b-body';
         panel.appendChild(body);
 
-        // ── Status bar ────────────────────────────────────────────────────
         statusBar = document.createElement('div');
         statusBar.id = 'w3b-status';
         panel.appendChild(statusBar);
@@ -573,30 +587,12 @@
         document.body.appendChild(panel);
     }
 
-    // ── Hash / URL change watcher (Item Market auto-detect) ────────────────
-    let lastHash = '';
-    function watchHash() {
-        if (location.hash !== lastHash) {
-            lastHash = location.hash;
-            const id = detectItemId();
-            if (id && S.tab === 'lookup' && id !== S.lookupId) {
-                lookupItem(id);
-            }
-        }
-    }
-
     // ── Init ──────────────────────────────────────────────────────────────
     function init() {
         buildPanel();
         render();
         loadDeals();
-
-        // Auto-refresh deals
         setInterval(() => { if (!S.dealsLoading) loadDeals(); }, CFG.refreshMs);
-
-        // Watch for hash changes (item market navigation)
-        setInterval(watchHash, 600);
-        lastHash = location.hash;
     }
 
     if (document.readyState === 'loading') {
