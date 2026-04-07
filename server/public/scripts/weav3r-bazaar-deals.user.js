@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      2.0.3
+// @version      2.0.4
 // @description  Find real below-market bazaar deals using weav3r.dev + item price lookup
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -375,6 +375,7 @@
             if (data.item_name && !itemIndex[data.item_name]) {
                 itemIndex[data.item_name] = data.item_id;
             }
+            S.lookupTotal = data.total_listings ?? null;
             const listings = (data.listings || []).map(l => ({
                 sellerName:  l.player_name,
                 playerId:    l.player_id,
@@ -517,8 +518,13 @@
             out += `<div class="w3b-hint" style="text-align:center;margin-top:6px;">
                 <a href="https://weav3r.dev/item/${S.lookupId}" target="_blank" style="color:#e05070;">Full data on weav3r.dev →</a></div>`;
         } else if (S.lookupId && !S.lookupLoading) {
-            out += `<div class="w3b-empty">No bazaar listings found.<br>
-                <a href="https://weav3r.dev/item/${S.lookupId}" target="_blank" style="color:#e05070;">View on weav3r.dev →</a></div>`;
+            const totalMsg = S.lookupTotal === 0
+                ? 'weav3r shows 0 active bazaar listings for this item.'
+                : S.lookupTotal != null
+                    ? `weav3r found ${S.lookupTotal} listings but none returned.`
+                    : 'No bazaar listings found.';
+            out += `<div class="w3b-empty">${totalMsg}<br>
+                <a href="https://weav3r.dev/item/${S.lookupId}" target="_blank" style="color:#e05070;">Verify on weav3r.dev →</a></div>`;}
         } else {
             out += `<div class="w3b-empty" style="color:#556">Type an item name to search.<br>
                 <span style="font-size:10px">Index covers ${Object.keys(itemIndex).length} items<br>and grows as deals load.</span></div>`;
