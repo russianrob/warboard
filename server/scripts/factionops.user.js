@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.20
+// @version      4.8.21
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -5923,10 +5923,7 @@ body.wb-chain-active {
 
         if (eta?.preWarPhase) {
             warTimerEl.className = 'fo-war-timer waiting';
-            const msToStart = Math.max(0, etaMs - Date.now());
-            const h = Math.floor(msToStart / 3600000);
-            const m = Math.floor((msToStart % 3600000) / 60000);
-            warTimerValue.textContent = `Starts ${h}h ${m}m`;
+            warTimerValue.textContent = 'Pre-War';
             return;
         }
 
