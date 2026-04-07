@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      1.5.3
+// @version      1.6.0
 // @description  Find cheapest Torn bazaar deals using weav3r.dev — dollar deals + item name search with full autocomplete
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -260,53 +260,27 @@
         });
     }
 
-    // ── Background index scan ──────────────────────────────────────────────
-    // Scans weav3r marketplace API across all known item ID ranges to discover
-    // drugs, medical, clothing, boosters, etc. — runs once, cached in storage.
-    async function buildIndexInBackground() {
-        const SCAN_KEY = 'w3_scan_done';
-        if (store.get(SCAN_KEY, false)) return; // already scanned
-
-        // ID ranges that cover all Torn item categories
-        const RANGES = [
-            [1,   500],
-            [500, 900],
-            [900, 1400],
-        ];
-        const BATCH = 15; // concurrent requests per batch
-
-        const tryId = (id) => new Promise(resolve => {
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: `https://weav3r.dev/api/marketplace/${id}`,
-                headers: { Accept: 'application/json' },
-                onload: r => {
-                    try {
-                        const d = JSON.parse(r.responseText);
-                        if (d.item_name && !itemIndex[d.item_name]) {
-                            itemIndex[d.item_name] = d.item_id;
-                        }
-                    } catch {}
-                    resolve();
-                },
-                onerror: () => resolve(),
-                ontimeout: () => resolve(),
-            });
-        });
-
-        for (const [start, end] of RANGES) {
-            for (let i = start; i < end; i += BATCH) {
-                const batch = [];
-                for (let j = i; j < Math.min(i + BATCH, end); j++) batch.push(tryId(j));
-                await Promise.all(batch);
-                // Small pause between batches to be polite
-                await new Promise(r => setTimeout(r, 300));
+    // ── Full item index via Torn API ─────────────────────────────────────────
+    // One API call fetches all ~1100+ items and caches them permanently.
+    async function buildIndexFromTornAPI() {
+        if (!S.apiKey) return;
+        if (store.get('w3_torn_index_done', false)) return;
+        try {
+            const data = await gmJSON(
+                `https://api.torn.com/torn/?selections=items&key=${S.apiKey}`
+            );
+            if (data.error || !data.items) return;
+            let added = 0;
+            for (const [id, item] of Object.entries(data.items)) {
+                if (item.name && !itemIndex[item.name]) {
+                    itemIndex[item.name] = parseInt(id);
+                    added++;
+                }
             }
-        }
-
-        store.set('w3_index', JSON.stringify(itemIndex));
-        store.set(SCAN_KEY, true);
-        renderStatus(); // update the count in status bar
+            store.set('w3_index', JSON.stringify(itemIndex));
+            store.set('w3_torn_index_done', true);
+            renderStatus();
+        } catch {}
     }
 
     // ── Torn API verification ─────────────────────────────────────────────
@@ -629,7 +603,7 @@
             store.set('w3_apikey', val);
             S.verified = {};
             S.settingsOpen = false;
-            if (val && S.deals.length) verifyDeals();
+            if (val) { buildIndexFromTornAPI(); if (S.deals.length) verifyDeals(); }
             render();
         });
         const clearBtn = body.querySelector('#w3b-apikey-clear');
@@ -804,8 +778,8 @@
         render();
         loadDeals();
         setInterval(() => { if (!S.dealsLoading) loadDeals(); }, CFG.refreshMs);
-        // Build full item index in background (runs once, then cached)
-        setTimeout(buildIndexInBackground, 3000);
+        // Build full item index via Torn API if key is set, else skip
+        if (S.apiKey) setTimeout(buildIndexFromTornAPI, 2000);
     }
 
     if (document.readyState === 'loading') {
