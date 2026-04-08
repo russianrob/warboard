@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.5.1
-// @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
+// @version      1.6.0
+// @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering. Draggable UI.
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
 // @grant        GM_addStyle
@@ -47,12 +47,13 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.5.0',
+            VERSION:           '1.6.0',
         };
     }
     let CONFIG = loadConfig();
 
     let cprBreakdownMap = {};
+    let lastScopeProjection = null;
     let scopePushTimer  = null;
     const SERVER = 'https://tornwar.com';
 
@@ -264,22 +265,26 @@
     // ═══════════════════════════════════════════════════════════════════════
     GM_addStyle(`
         #oc-spawn-toggle {
-            position: fixed; bottom: 80px; right: 16px; z-index: 9999;
+            position: fixed; z-index: 9999;
             background: #2d6a4f; color: #fff; border: none; border-radius: 6px;
-            padding: 7px 13px; font-size: 12px; font-weight: bold; cursor: pointer;
+            padding: 7px 13px; font-size: 12px; font-weight: bold; cursor: move;
             box-shadow: 0 2px 8px rgba(0,0,0,.4);
         }
         #oc-spawn-toggle:hover { background: #1b4332; }
         #oc-spawn-panel {
-            position: fixed; bottom: 115px; right: 16px; z-index: 9998;
-            width: min(560px, calc(100vw - 48px)); max-height: 72vh; overflow-y: auto;
+            position: fixed; z-index: 9998;
+            width: min(560px, calc(100vw - 48px)); max-height: 72vh; overflow: hidden;
             background: #0f1a14; color: #d1d5db; border: 1px solid #2a3f30;
-            border-radius: 10px; padding: 14px 16px; font-size: 12px;
+            border-radius: 10px; font-size: 12px; display: flex; flex-direction: column;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             box-shadow: 0 4px 24px rgba(0,0,0,.7); display: none;
         }
+        #oc-spawn-hdr {
+            padding: 14px 16px 10px; cursor: move; border-bottom: 1px solid #1a2e20;
+            background: #0f1a14; flex-shrink: 0;
+        }
         #oc-spawn-panel h2 {
-            margin: 0 0 10px; font-size: 15px; font-weight: 700; color: #74c69d;
+            margin: 0; font-size: 15px; font-weight: 700; color: #74c69d;
             display: flex; justify-content: space-between; align-items: center;
         }
         #oc-spawn-panel h3 {
@@ -287,6 +292,7 @@
             text-transform: uppercase; letter-spacing: 0.7px;
             border-bottom: 1px solid #1a2e20; padding-bottom: 4px;
         }
+        #oc-spawn-content { padding: 14px 16px; overflow-y: auto; flex: 1; }
         /* Settings */
         #oc-settings-panel { display: none; background: #0f1f16; border: 1px solid #2a3f30; border-radius: 8px; padding: 12px 12px 8px; margin-bottom: 10px; }
         .oc-setting-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; gap: 10px; }
@@ -337,16 +343,16 @@
         .oc-cpr-high { color: #74c69d; } .oc-cpr-mid { color: #f4a261; } .oc-cpr-low { color: #9ca3af; }
         .oc-member-name { color: #f3f4f6; font-weight: 500; }
         .oc-member-id   { color: #6b7280; font-size: 10px; }
-        .oc-cpr-click { cursor: pointer; border-bottom: 1px dotted currentColor; }
-        .oc-cpr-click:hover { opacity: 0.75; }
-        /* CPR tooltip */
-        #oc-cpr-tooltip { position: fixed; z-index: 10001; background: #131f18; border: 1px solid #2d4a3e; border-radius: 8px; padding: 10px 12px; font-size: 11px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #d1d5db; box-shadow: 0 4px 20px rgba(0,0,0,.7); min-width: 200px; max-width: 240px; display: none; pointer-events: none; }
-        #oc-cpr-tooltip .oc-tt-title { font-weight: 600; color: #f3f4f6; margin-bottom: 5px; font-size: 12px; }
-        #oc-cpr-tooltip .oc-tt-avg   { color: #9ca3af; font-size: 10px; margin-bottom: 7px; }
-        #oc-cpr-tooltip table { width: 100%; border-collapse: collapse; }
-        #oc-cpr-tooltip th { color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; padding: 2px 4px; border-bottom: 1px solid #1a2e20; text-align: left; }
-        #oc-cpr-tooltip td { padding: 3px 4px; font-size: 11px; color: #f3f4f6; }
-        #oc-cpr-tooltip .oc-tt-note { color: #6b7280; font-size: 10px; margin-top: 7px; border-top: 1px solid #1a2e20; padding-top: 5px; }
+        .oc-cpr-click, .oc-proj-click { cursor: pointer; border-bottom: 1px dotted currentColor; }
+        .oc-cpr-click:hover, .oc-proj-click:hover { opacity: 0.75; }
+        /* Tooltips */
+        #oc-cpr-tooltip, #oc-scope-tooltip { position: fixed; z-index: 10001; background: #131f18; border: 1px solid #2d4a3e; border-radius: 8px; padding: 10px 12px; font-size: 11px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #d1d5db; box-shadow: 0 4px 20px rgba(0,0,0,.7); min-width: 220px; max-width: 300px; display: none; pointer-events: none; }
+        #oc-cpr-tooltip .oc-tt-title, #oc-scope-tooltip .oc-tt-title { font-weight: 600; color: #f3f4f6; margin-bottom: 5px; font-size: 12px; }
+        #oc-cpr-tooltip .oc-tt-avg, #oc-scope-tooltip .oc-tt-avg   { color: #9ca3af; font-size: 10px; margin-bottom: 7px; }
+        #oc-cpr-tooltip table, #oc-scope-tooltip table { width: 100%; border-collapse: collapse; }
+        #oc-cpr-tooltip th, #oc-scope-tooltip th { color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; padding: 2px 4px; border-bottom: 1px solid #1a2e20; text-align: left; }
+        #oc-cpr-tooltip td, #oc-scope-tooltip td { padding: 3px 4px; font-size: 11px; color: #f3f4f6; }
+        #oc-cpr-tooltip .oc-tt-note, #oc-scope-tooltip .oc-tt-note { color: #6b7280; font-size: 10px; margin-top: 7px; border-top: 1px solid #1a2e20; padding-top: 5px; }
         /* Misc */
         #oc-spawn-status { color: #6b7280; font-style: italic; margin: 4px 0 10px; font-size: 10px; }
         #oc-spawn-refresh { background: #152018; color: #74c69d; border: 1px solid #2d4a3e; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 11px; font-family: inherit; font-weight: 600; }
@@ -368,76 +374,79 @@
     const panel = document.createElement('div');
     panel.id = 'oc-spawn-panel';
     panel.innerHTML = `
-        <h2>
-            OC Spawn Assistance
-            <span style="display:flex;gap:6px;align-items:center;">
-                <button id="oc-spawn-refresh">↻ Refresh</button>
-                <button id="oc-spawn-settings" class="oc-hdr-btn" title="Settings">⚙</button>
-                <button id="oc-spawn-close" class="oc-hdr-btn">✕</button>
-            </span>
-        </h2>
-        <div id="oc-spawn-status">Click Refresh to load data.</div>
-
-        <div id="oc-settings-panel">
-            <div class="oc-setting-row">
-                <div class="oc-setting-info">
-                    <span class="oc-setting-label">API Key</span>
-                    <div class="oc-setting-desc">Your personal Torn API key. Must belong to a faction member.</div>
-                    <div class="oc-setting-key-wrap">
-                        <input id="oc-spawn-key-input" type="password" placeholder="Paste API key…" class="oc-setting-key-input"/>
-                        <button id="oc-spawn-key-save" class="oc-setting-save-btn">Save</button>
-                    </div>
-                </div>
-            </div>
-            <hr class="oc-setting-divider"/>
-            <div class="oc-setting-row">
-                <div class="oc-setting-info">
-                    <span class="oc-setting-label">Current Scope</span>
-                    <div class="oc-setting-desc">Your faction's current scope balance (0–100). Check the spawn page and update here — the script projects forward from this value.</div>
-                </div>
-                <input class="oc-setting-num" id="cfg-scope" type="number" min="0" max="100" placeholder="—"/>
-            </div>
-            <div class="oc-setting-row">
-                <div class="oc-setting-info">
-                    <span class="oc-setting-label">Active Days</span>
-                    <div class="oc-setting-desc">Members inactive longer than this are skipped entirely.</div>
-                </div>
-                <input class="oc-setting-num" id="cfg-active-days" type="number" min="1" max="30"/>
-            </div>
-            <div class="oc-setting-row">
-                <div class="oc-setting-info">
-                    <span class="oc-setting-label">Forecast Hours</span>
-                    <div class="oc-setting-desc">Members whose OC ends within this window count as "soon free".</div>
-                </div>
-                <input class="oc-setting-num" id="cfg-forecast-hours" type="number" min="1" max="72"/>
-            </div>
-            <div class="oc-setting-row">
-                <div class="oc-setting-info">
-                    <span class="oc-setting-label">Min CPR %</span>
-                    <div class="oc-setting-desc">Below this, member defaults to Lvl 1 eligibility.</div>
-                </div>
-                <input class="oc-setting-num" id="cfg-mincpr" type="number" min="0" max="100"/>
-            </div>
-            <div class="oc-setting-row">
-                <div class="oc-setting-info">
-                    <span class="oc-setting-label">CPR Boost</span>
-                    <div class="oc-setting-desc">CPR ≥ Min+Boost lets a member join one level above their best.</div>
-                </div>
-                <input class="oc-setting-num" id="cfg-cpr-boost" type="number" min="0" max="40"/>
-            </div>
-            <div class="oc-setting-row">
-                <div class="oc-setting-info">
-                    <span class="oc-setting-label">CPR Lookback Days</span>
-                    <div class="oc-setting-desc">Days of completed crimes for CPR. Server-cached 6h.</div>
-                </div>
-                <input class="oc-setting-num" id="cfg-lookback-days" type="number" min="7" max="365"/>
-            </div>
-            <div style="text-align:right;margin-top:4px;">
-                <button id="oc-spawn-cfg-save" class="oc-setting-save-btn">Save for All Members</button>
-            </div>
+        <div id="oc-spawn-hdr">
+            <h2>
+                OC Spawn Assistance
+                <span style="display:flex;gap:6px;align-items:center;">
+                    <button id="oc-spawn-refresh">↻ Refresh</button>
+                    <button id="oc-spawn-settings" class="oc-hdr-btn" title="Settings">⚙</button>
+                    <button id="oc-spawn-close" class="oc-hdr-btn">✕</button>
+                </span>
+            </h2>
+            <div id="oc-spawn-status">Click Refresh to load data.</div>
         </div>
 
-        <div id="oc-spawn-body"></div>
+        <div id="oc-spawn-content">
+            <div id="oc-settings-panel">
+                <div class="oc-setting-row">
+                    <div class="oc-setting-info">
+                        <span class="oc-setting-label">API Key</span>
+                        <div class="oc-setting-desc">Your personal Torn API key. Must belong to a faction member.</div>
+                        <div class="oc-setting-key-wrap">
+                            <input id="oc-spawn-key-input" type="password" placeholder="Paste API key…" class="oc-setting-key-input"/>
+                            <button id="oc-spawn-key-save" class="oc-setting-save-btn">Save</button>
+                        </div>
+                    </div>
+                </div>
+                <hr class="oc-setting-divider"/>
+                <div class="oc-setting-row">
+                    <div class="oc-setting-info">
+                        <span class="oc-setting-label">Current Scope</span>
+                        <div class="oc-setting-desc">Your faction's current scope balance (0–100). Check the spawn page and update here — the script projects forward from this value.</div>
+                    </div>
+                    <input class="oc-setting-num" id="cfg-scope" type="number" min="0" max="100" placeholder="—"/>
+                </div>
+                <div class="oc-setting-row">
+                    <div class="oc-setting-info">
+                        <span class="oc-setting-label">Active Days</span>
+                        <div class="oc-setting-desc">Members inactive longer than this are skipped entirely.</div>
+                    </div>
+                    <input class="oc-setting-num" id="cfg-active-days" type="number" min="1" max="30"/>
+                </div>
+                <div class="oc-setting-row">
+                    <div class="oc-setting-info">
+                        <span class="oc-setting-label">Forecast Hours</span>
+                        <div class="oc-setting-desc">Members whose OC ends within this window count as "soon free".</div>
+                    </div>
+                    <input class="oc-setting-num" id="cfg-forecast-hours" type="number" min="1" max="72"/>
+                </div>
+                <div class="oc-setting-row">
+                    <div class="oc-setting-info">
+                        <span class="oc-setting-label">Min CPR %</span>
+                        <div class="oc-setting-desc">Below this, member defaults to Lvl 1 eligibility.</div>
+                    </div>
+                    <input class="oc-setting-num" id="cfg-mincpr" type="number" min="0" max="100"/>
+                </div>
+                <div class="oc-setting-row">
+                    <div class="oc-setting-info">
+                        <span class="oc-setting-label">CPR Boost</span>
+                        <div class="oc-setting-desc">CPR ≥ Min+Boost lets a member join one level above their best.</div>
+                    </div>
+                    <input class="oc-setting-num" id="cfg-cpr-boost" type="number" min="0" max="40"/>
+                </div>
+                <div class="oc-setting-row">
+                    <div class="oc-setting-info">
+                        <span class="oc-setting-label">CPR Lookback Days</span>
+                        <div class="oc-setting-desc">Days of completed crimes for CPR. Server-cached 6h.</div>
+                    </div>
+                    <input class="oc-setting-num" id="cfg-lookback-days" type="number" min="7" max="365"/>
+                </div>
+                <div style="text-align:right;margin-top:4px;">
+                    <button id="oc-spawn-cfg-save" class="oc-setting-save-btn">Save for All Members</button>
+                </div>
+            </div>
+            <div id="oc-spawn-body"></div>
+        </div>
     `;
     document.body.appendChild(panel);
 
@@ -445,9 +454,68 @@
     cprTooltipEl.id = 'oc-cpr-tooltip';
     document.body.appendChild(cprTooltipEl);
 
-    let panelVisible = false, cprTipOpen = false;
+    const scopeTooltipEl = document.createElement('div');
+    scopeTooltipEl.id = 'oc-scope-tooltip';
+    document.body.appendChild(scopeTooltipEl);
 
-    toggleBtn.addEventListener('click', () => { panelVisible = !panelVisible; panel.style.display = panelVisible ? 'block' : 'none'; });
+    let panelVisible = false, cprTipOpen = false, scopeTipOpen = false;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  DRAGGABLE LOGIC
+    // ═══════════════════════════════════════════════════════════════════════
+    function makeDraggable(el, handle, keyPrefix) {
+        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+
+        // Load saved position
+        const savedPos = GM_getValue(keyPrefix + '_pos', null);
+        if (savedPos) {
+            el.style.top = savedPos.top;
+            el.style.left = savedPos.left;
+            el.style.bottom = 'auto';
+            el.style.right = 'auto';
+        } else {
+            // Default positions
+            if (el.id === 'oc-spawn-toggle') { el.style.bottom = '80px'; el.style.right = '16px'; }
+            else { el.style.bottom = '115px'; el.style.right = '16px'; }
+        }
+
+        handle.onmousedown = dragMouseDown;
+
+        function dragMouseDown(e) {
+            e = e || window.event;
+            if (e.target.tagName === 'BUTTON' || e.target.closest('button') || e.target.tagName === 'INPUT') return;
+            e.preventDefault();
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            document.onmouseup = closeDragElement;
+            document.onmousemove = elementDrag;
+        }
+
+        function elementDrag(e) {
+            e = e || window.event;
+            e.preventDefault();
+            pos1 = pos3 - e.clientX;
+            pos2 = pos4 - e.clientY;
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            el.style.top = (el.offsetTop - pos2) + "px";
+            el.style.left = (el.offsetLeft - pos1) + "px";
+            el.style.bottom = 'auto';
+            el.style.right = 'auto';
+        }
+
+        function closeDragElement() {
+            document.onmouseup = null;
+            document.onmousemove = null;
+            // Save position
+            GM_setValue(keyPrefix + '_pos', { top: el.style.top, left: el.style.left });
+        }
+    }
+
+    makeDraggable(toggleBtn, toggleBtn, 'oc_toggle');
+    makeDraggable(panel, document.getElementById('oc-spawn-hdr'), 'oc_panel');
+
+    toggleBtn.addEventListener('click', () => { panelVisible = !panelVisible; panel.style.display = panelVisible ? 'flex' : 'none'; });
     document.getElementById('oc-spawn-refresh').addEventListener('click', runAnalysis);
     document.getElementById('oc-spawn-close').addEventListener('click', () => { panelVisible = false; panel.style.display = 'none'; });
     document.getElementById('oc-spawn-settings').addEventListener('click', () => {
@@ -551,11 +619,52 @@
         cprTipOpen = true;
     }
     function hideCprTooltip() { cprTooltipEl.style.display = 'none'; cprTipOpen = false; }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  SCOPE TOOLTIP
+    // ═══════════════════════════════════════════════════════════════════════
+    function showScopeTooltip(el) {
+        if (!lastScopeProjection || !lastScopeProjection.details.length) {
+            if (lastScopeProjection) {
+                scopeTooltipEl.innerHTML = `<div class="oc-tt-title">Scope Projection</div><div class="oc-tt-avg">No in-flight crimes found in ${CONFIG.FORECAST_HOURS}h window. Only daily regen (+${lastScopeProjection.regen}) applied.</div>`;
+                scopeTooltipEl.style.display = 'block';
+                const r = el.getBoundingClientRect();
+                scopeTooltipEl.style.top = (r.bottom + 6) + 'px'; scopeTooltipEl.style.left = r.left + 'px';
+                scopeTipOpen = true;
+            }
+            return;
+        }
+        const p = lastScopeProjection;
+        const rows = p.details.map(d => {
+            return `<tr><td>${d.name}</td><td>${d.avgCpr}%</td><td>+${d.expectedGain}</td></tr>`;
+        }).join('');
+
+        scopeTooltipEl.innerHTML = `
+            <div class="oc-tt-title">Scope Calculation</div>
+            <div class="oc-tt-avg">Base: <b>${p.current}</b> + ${p.regen} daily</div>
+            <table><thead><tr><th>Crime</th><th>Prob.</th><th>Gain</th></tr></thead><tbody>${rows}</tbody></table>
+            <div class="oc-tt-note">Gain = Success payout × Average member CPR</div>`;
+        scopeTooltipEl.style.display = 'block';
+        const rect = el.getBoundingClientRect();
+        scopeTooltipEl.style.top = (rect.bottom + 6) + 'px';
+        scopeTooltipEl.style.left = rect.left + 'px';
+        requestAnimationFrame(() => {
+            const tr = scopeTooltipEl.getBoundingClientRect();
+            if (tr.right  > window.innerWidth  - 8) scopeTooltipEl.style.left = (window.innerWidth  - tr.width  - 8) + 'px';
+            if (tr.bottom > window.innerHeight - 8) scopeTooltipEl.style.top  = (rect.top - tr.height - 6) + 'px';
+        });
+        scopeTipOpen = true;
+    }
+    function hideScopeTooltip() { scopeTooltipEl.style.display = 'none'; scopeTipOpen = false; }
+
     panel.addEventListener('click', e => {
         const t = e.target.closest('.oc-cpr-click');
-        if (t) { e.stopPropagation(); showCprTooltip(t); } else hideCprTooltip();
+        if (t) { e.stopPropagation(); hideScopeTooltip(); showCprTooltip(t); return; }
+        const ps = e.target.closest('.oc-proj-click');
+        if (ps) { e.stopPropagation(); hideCprTooltip(); showScopeTooltip(ps); return; }
+        hideCprTooltip(); hideScopeTooltip();
     });
-    document.addEventListener('click', () => { if (cprTipOpen) hideCprTooltip(); });
+    document.addEventListener('click', () => { if (cprTipOpen) hideCprTooltip(); if (scopeTipOpen) hideScopeTooltip(); });
 
     // ═══════════════════════════════════════════════════════════════════════
     //  UTILITY
@@ -563,6 +672,122 @@
     const now = () => Math.floor(Date.now() / 1000);
     function setStatus(msg) { document.getElementById('oc-spawn-status').textContent = msg; }
     function normArr(raw) { return Array.isArray(raw) ? raw : Object.values(raw || {}); }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  SCOPE SYNC  — push detected scope to server ASAP
+    // ═══════════════════════════════════════════════════════════════════════
+    function handleDetectedScope(scope, source) {
+        if (scope === null || scope === CONFIG.SCOPE) return;
+
+        console.log(`[OC Spawn] Detected scope ${scope} from ${source}`);
+        CONFIG.SCOPE = scope;
+        CONFIG._scopeAutoDetected = true;
+
+        // Update settings panel if open
+        const scopeEl = document.getElementById('cfg-scope');
+        if (scopeEl) scopeEl.value = scope;
+
+        // Update local storage
+        GM_setValue('cfg_scope', scope);
+
+        // Push to server ASAP (short 1s debounce to catch rapid updates)
+        clearTimeout(scopePushTimer);
+        scopePushTimer = setTimeout(async () => {
+            const apiKey = getApiKey();
+            if (apiKey && apiKey !== 'YOUR_API_KEY_HERE') {
+                try {
+                    await pushFactionSettings(apiKey, CONFIG);
+                    console.log('[OC Spawn] Scope pushed to server:', scope);
+                } catch (e) {
+                    console.warn('[OC Spawn] Failed to push scope:', e.message);
+                }
+            }
+        }, 1000);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  AJAX INTERCEPTOR  — Catches internal Torn data (ASAP detection)
+    // ═══════════════════════════════════════════════════════════════════════
+    function setupAjaxInterceptor() {
+        // Intercept XMLHttpRequest
+        const oldOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function() {
+            this.addEventListener('load', function() {
+                if (this.responseURL.includes('step=getCrimesData')) {
+                    try {
+                        const data = JSON.parse(this.responseText);
+                        const s = data?.scope_balance ?? data?.scope;
+                        if (typeof s === 'number') handleDetectedScope(s, 'AJAX (XHR)');
+                    } catch (e) {}
+                }
+            });
+            return oldOpen.apply(this, arguments);
+        };
+
+        // Intercept Fetch
+        const oldFetch = window.fetch;
+        window.fetch = async function() {
+            const res = await oldFetch.apply(this, arguments);
+            const url = arguments[0] instanceof Request ? arguments[0].url : arguments[0];
+            if (url && url.includes('step=getCrimesData')) {
+                try {
+                    const cloned = res.clone();
+                    const data = await cloned.json();
+                    const s = data?.scope_balance ?? data?.scope;
+                    if (typeof s === 'number') handleDetectedScope(s, 'AJAX (Fetch)');
+                } catch (e) {}
+            }
+            return res;
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  DOM SCOPE READER  — fallback / secondary detection
+    // ═══════════════════════════════════════════════════════════════════════
+    function readScopeFromDom() {
+        // Strategy 0: Check internal page state
+        const win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+        if (win.torn && win.torn.faction) {
+             const s = win.torn.faction.scope_balance ?? win.torn.faction.scope;
+             if (typeof s === 'number' && s >= 0 && s <= SCOPE_MAX) return s;
+        }
+
+        // Strategy 1: any element whose class contains 'scope' (exclude our panel)
+        const byClass = document.querySelector('[class*="scope" i]:not(#oc-spawn-panel *)');
+        if (byClass) {
+            const num = parseInt(byClass.textContent.trim());
+            if (!isNaN(num) && num >= 0 && num <= SCOPE_MAX) return num;
+            const numChild = byClass.querySelector('span, b, strong');
+            if (numChild) {
+                const n2 = parseInt(numChild.textContent.trim());
+                if (!isNaN(n2) && n2 >= 0 && n2 <= SCOPE_MAX) return n2;
+            }
+        }
+
+        // Strategy 2: elements matching "Scope balance: NN" (exclude our panel)
+        const candidates = document.querySelectorAll('span, div, p, li');
+        for (const el of candidates) {
+            if (el.closest('#oc-spawn-panel')) continue;
+            if (el.children.length > 2) continue;
+            const text = el.textContent.trim();
+            const m = text.match(/scope[\s\w:]*?(\d+)/i);
+            if (m) {
+                const val = parseInt(m[1]);
+                if (val >= 0 && val <= SCOPE_MAX) return val;
+            }
+        }
+        return null;
+    }
+
+    function setupScopeDomReader() {
+        function check() {
+            const s = readScopeFromDom();
+            if (s !== null) handleDetectedScope(s, 'DOM/State');
+        }
+        check();
+        const observer = new MutationObserver(check);
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     //  PROCESS MEMBERS
@@ -620,20 +845,23 @@
         const crimeGroups = {};
         for (const m of completingSoon) {
             const key = `${m.ocReadyAt}_${m.currentCrimeDiff}`;
-            if (!crimeGroups[key]) crimeGroups[key] = { diff: m.currentCrimeDiff, members: [] };
+            if (!crimeGroups[key]) crimeGroups[key] = { diff: m.currentCrimeDiff, name: m.ocCrimeName, members: [] };
             crimeGroups[key].members.push(m);
         }
 
-        let expectedGain = 0;
+        let totalExpectedGain = 0;
+        const details = [];
         for (const group of Object.values(crimeGroups)) {
             if (!group.diff) continue;
             const range   = diffToScopeRange(group.diff);
-            const avgCPR  = group.members.reduce((s, m) => s + (m.cpr ?? 0), 0) / group.members.length / 100;
-            expectedGain += range.payout * avgCPR;
+            const avgCPR  = group.members.reduce((s, m) => s + (m.cpr ?? 0), 0) / group.members.length;
+            const gain    = Math.round((range.payout * (avgCPR / 100)) * 10) / 10;
+            totalExpectedGain += gain;
+            details.push({ name: group.name || `Lvl ${group.diff} OC`, avgCpr: Math.round(avgCPR), payout: range.payout, expectedGain: gain });
         }
 
-        const projected = Math.min(SCOPE_MAX, currentScope + regen + expectedGain);
-        return { current: currentScope, regen: Math.round(regen * 10) / 10, expectedGain: Math.round(expectedGain * 10) / 10, projected: Math.round(projected * 10) / 10 };
+        const projected = Math.min(SCOPE_MAX, currentScope + regen + totalExpectedGain);
+        return { current: currentScope, regen: Math.round(regen * 10) / 10, expectedGain: Math.round(totalExpectedGain * 10) / 10, projected: Math.round(projected * 10) / 10, details };
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -738,7 +966,7 @@
             <div style="white-space:nowrap;color:#9ca3af;font-size:10px;">Scope${autoTag}</div>
             <div style="font-weight:600;color:#f3f4f6;white-space:nowrap;">${current}</div>
             <div class="oc-scope-bar-wrap"><div class="oc-scope-bar ${barClass}" style="width:${Math.round(current/SCOPE_MAX*100)}%"></div></div>
-            <div style="color:#6b7280;font-size:10px;white-space:nowrap;">→ <b style="color:#74c69d">${projected}</b> projected
+            <div style="color:#6b7280;font-size:10px;white-space:nowrap;">→ <span class="oc-proj-click"><b style="color:#74c69d">${projected}</b> projected</span>
                 <span style="color:#374151">(+${regen} daily, +${expectedGain} from crimes)</span>
             </div>
         </div>`;
@@ -915,6 +1143,7 @@
             const slotMap               = countOpenSlots(availableCrimes);
             const { eligible, skipped } = processMembers(members, availableCrimes, cprCache);
             const scopeProjection        = projectScope(CONFIG.SCOPE, eligible);
+            lastScopeProjection         = scopeProjection; // cache for tooltip
             const recs                  = buildRecommendations(eligible, slotMap, scopeProjection);
 
             renderBody(recs, eligible, skipped, scopeProjection);
@@ -935,7 +1164,7 @@
     setupAjaxInterceptor();
 
     if (window.location.href.includes('tab=crimes') || window.location.hash.includes('crimes')) {
-        panelVisible = true; panel.style.display = 'block';
+        panelVisible = true; panel.style.display = 'flex';
         if (getApiKey()) setTimeout(runAnalysis, 500);
     }
 
