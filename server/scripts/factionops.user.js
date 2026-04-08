@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.23
+// @version      4.8.24
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -40,6 +40,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.24  - Fix: Rewrote button injection logic to ensure Spawn Assistant appears on Crimes tab dynamically.
 // v4.8.23  - Fix: Improved injection logic for the OC Spawn Assistant button so it properly appears on the Crimes tab.
 // v4.8.20  - Feature: Integrated "OC Spawn Assistant" directly into FactionOps (Crimes Tab). Uses backend caching to save Torn API calls!
 // v4.8.19  - Fix: Faction Leaders can now reset the Enemy Activity Heatmap, and the server auto-wipes it when a new enemy is detected.
@@ -7653,6 +7654,31 @@ body.wb-chain-active {
         } else if (url.includes('factions.php') || url.includes('war.php')) {
             log('Page: Faction/War — showing activate button');
             showActivateButton();
+            
+            // Show OC Spawn Assistant on Crimes tab
+            if (url.includes('tab=crimes') || url.includes('#crimes') || url.includes('step=your&crimes')) {
+                const checkInterval = setInterval(() => {
+                    const crimesWrap = document.querySelector('.faction-crimes-wrap') || document.querySelector('.crimes-title');
+                    if (crimesWrap && !document.getElementById('fo-spawn-btn-crimes')) {
+                        const btnContainer = document.createElement('div');
+                        btnContainer.style.cssText = 'padding: 10px; background: rgba(0,0,0,0.2); text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 10px;';
+                        
+                        const btn = document.createElement('button');
+                        btn.id = 'fo-spawn-btn-crimes';
+                        btn.className = 'wb-btn wb-btn-sm';
+                        btn.textContent = '⚔️ FactionOps Spawn Assistant';
+                        btn.style.cssText = 'background: var(--wb-accent); border: none; padding: 8px 16px; border-radius: 4px; color: #fff; cursor: pointer; font-size: 14px; font-weight: bold; width: auto; display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.3);';
+                        btn.addEventListener('click', () => {
+                            spawnPanelVisible = true;
+                            loadAndRenderOcSpawn();
+                        });
+                        
+                        btnContainer.appendChild(btn);
+                        crimesWrap.parentNode.insertBefore(btnContainer, crimesWrap);
+                        clearInterval(checkInterval);
+                    }
+                }, 1000);
+            }
         } else {
             log('Page: Unknown — running in passive mode');
         }
@@ -9430,31 +9456,6 @@ body.wb-chain-active {
         // 3b. Create heatmap toggle button (only on non-war, non-attack pages)
         if (!isWarOrAttack) {
             createHeatmapButton();
-            
-            // Add OC Spawn Assistant button if on Crimes tab
-            if (url.includes('tab=crimes') || url.includes('#crimes')) {
-                const checkInterval = setInterval(() => {
-                    const crimesWrap = document.querySelector('.faction-crimes-wrap');
-                    if (crimesWrap && !document.getElementById('fo-spawn-btn-crimes')) {
-                        const btnContainer = document.createElement('div');
-                        btnContainer.style.cssText = 'padding: 10px; background: rgba(0,0,0,0.2); text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 10px;';
-                        
-                        const btn = document.createElement('button');
-                        btn.id = 'fo-spawn-btn-crimes';
-                        btn.className = 'wb-btn wb-btn-sm';
-                        btn.textContent = '⚔️ FactionOps Spawn Assistant';
-                        btn.style.cssText = 'background: var(--wb-accent); border: none; padding: 8px 16px; border-radius: 4px; color: #fff; cursor: pointer; font-size: 14px; font-weight: bold; width: auto; display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.3);';
-                        btn.addEventListener('click', () => {
-                            spawnPanelVisible = true;
-                            loadAndRenderOcSpawn();
-                        });
-                        
-                        btnContainer.appendChild(btn);
-                        crimesWrap.insertBefore(btnContainer, crimesWrap.firstChild);
-                        clearInterval(checkInterval);
-                    }
-                }, 1000);
-            }
         }
 
         // 4. Set up keyboard shortcuts
