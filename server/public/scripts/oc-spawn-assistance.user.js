@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.6.0
+// @version      1.6.1
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering. Draggable UI.
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -47,7 +47,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.6.0',
+            VERSION:           '1.6.1',
         };
     }
     let CONFIG = loadConfig();
@@ -268,7 +268,7 @@
             position: fixed; z-index: 9999;
             background: #2d6a4f; color: #fff; border: none; border-radius: 6px;
             padding: 7px 13px; font-size: 12px; font-weight: bold; cursor: move;
-            box-shadow: 0 2px 8px rgba(0,0,0,.4);
+            box-shadow: 0 2px 8px rgba(0,0,0,.4); touch-action: none;
         }
         #oc-spawn-toggle:hover { background: #1b4332; }
         #oc-spawn-panel {
@@ -281,7 +281,7 @@
         }
         #oc-spawn-hdr {
             padding: 14px 16px 10px; cursor: move; border-bottom: 1px solid #1a2e20;
-            background: #0f1a14; flex-shrink: 0;
+            background: #0f1a14; flex-shrink: 0; touch-action: none;
         }
         #oc-spawn-panel h2 {
             margin: 0; font-size: 15px; font-weight: 700; color: #74c69d;
@@ -361,6 +361,7 @@
         .oc-error { color: #f87171; font-weight: 600; }
         .oc-hdr-btn { background: #1a2a1f; color: #9ca3af; border: 1px solid #2d4a3e; border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer; line-height: 1; font-family: inherit; }
         .oc-hdr-btn:hover { background: #253525; color: #d1d5db; }
+        .oc-dragging { user-select: none !important; }
     `);
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -479,35 +480,55 @@
             else { el.style.bottom = '115px'; el.style.right = '16px'; }
         }
 
-        handle.onmousedown = dragMouseDown;
+        handle.addEventListener('mousedown', dragStart, false);
+        handle.addEventListener('touchstart', dragStart, { passive: false });
 
-        function dragMouseDown(e) {
-            e = e || window.event;
+        function dragStart(e) {
             if (e.target.tagName === 'BUTTON' || e.target.closest('button') || e.target.tagName === 'INPUT') return;
-            e.preventDefault();
-            pos3 = e.clientX;
-            pos4 = e.clientY;
-            document.onmouseup = closeDragElement;
-            document.onmousemove = elementDrag;
+            
+            if (e.type === 'mousedown') {
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                document.onmouseup = dragEnd;
+                document.onmousemove = dragMove;
+            } else if (e.type === 'touchstart') {
+                pos3 = e.touches[0].clientX;
+                pos4 = e.touches[0].clientY;
+                document.addEventListener('touchend', dragEnd, false);
+                document.addEventListener('touchmove', dragMove, { passive: false });
+            }
+            
+            document.body.classList.add('oc-dragging');
         }
 
-        function elementDrag(e) {
-            e = e || window.event;
-            e.preventDefault();
-            pos1 = pos3 - e.clientX;
-            pos2 = pos4 - e.clientY;
-            pos3 = e.clientX;
-            pos4 = e.clientY;
+        function dragMove(e) {
+            let clientX, clientY;
+            if (e.type === 'mousemove') {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            } else {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+                if (e.cancelable) e.preventDefault(); // Prevent page scrolling
+            }
+
+            pos1 = pos3 - clientX;
+            pos2 = pos4 - clientY;
+            pos3 = clientX;
+            pos4 = clientY;
+
             el.style.top = (el.offsetTop - pos2) + "px";
             el.style.left = (el.offsetLeft - pos1) + "px";
             el.style.bottom = 'auto';
             el.style.right = 'auto';
         }
 
-        function closeDragElement() {
+        function dragEnd() {
             document.onmouseup = null;
             document.onmousemove = null;
-            // Save position
+            document.removeEventListener('touchend', dragEnd);
+            document.removeEventListener('touchmove', dragMove);
+            document.body.classList.remove('oc-dragging');
             GM_setValue(keyPrefix + '_pos', { top: el.style.top, left: el.style.left });
         }
     }
@@ -515,7 +536,10 @@
     makeDraggable(toggleBtn, toggleBtn, 'oc_toggle');
     makeDraggable(panel, document.getElementById('oc-spawn-hdr'), 'oc_panel');
 
-    toggleBtn.addEventListener('click', () => { panelVisible = !panelVisible; panel.style.display = panelVisible ? 'flex' : 'none'; });
+    toggleBtn.addEventListener('click', (e) => { 
+        panelVisible = !panelVisible; 
+        panel.style.display = panelVisible ? 'flex' : 'none'; 
+    });
     document.getElementById('oc-spawn-refresh').addEventListener('click', runAnalysis);
     document.getElementById('oc-spawn-close').addEventListener('click', () => { panelVisible = false; panel.style.display = 'none'; });
     document.getElementById('oc-spawn-settings').addEventListener('click', () => {
