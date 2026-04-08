@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.4.2
+// @version      1.4.3
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
-// @author       You
+// @author       RussianRob
 // @match        https://www.torn.com/factions.php*
 // @grant        GM_addStyle
 // @grant        GM_setValue
@@ -58,6 +58,13 @@
     //  DOM SCOPE READER  — auto-reads scope from the recruiting tab
     // ═══════════════════════════════════════════════════════════════════════
     function readScopeFromDom() {
+        // Strategy 0: Check internal page state (most reliable)
+        const win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+        if (win.torn && win.torn.faction) {
+             const s = win.torn.faction.scope_balance ?? win.torn.faction.scope;
+             if (typeof s === 'number' && s >= 0 && s <= SCOPE_MAX) return s;
+        }
+
         // Strategy 1: any element whose class contains 'scope' (case-insensitive)
         const byClass = document.querySelector('[class*="scope" i]');
         if (byClass) {
