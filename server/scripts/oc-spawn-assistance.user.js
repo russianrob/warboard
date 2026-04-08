@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.4.8
+// @version      1.5.0
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -47,7 +47,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.4.8',
+            VERSION:           '1.5.0',
         };
     }
     let CONFIG = loadConfig();
@@ -57,10 +57,78 @@
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  DOM SCOPE READER  — auto-reads scope from the recruiting tab
+    //  SCOPE SYNC  — push detected scope to server ASAP
+    // ═══════════════════════════════════════════════════════════════════════
+    function handleDetectedScope(scope, source) {
+        if (scope === null || scope === CONFIG.SCOPE) return;
+
+        console.log(`[OC Spawn] Detected scope ${scope} from ${source}`);
+        CONFIG.SCOPE = scope;
+        CONFIG._scopeAutoDetected = true;
+
+        // Update settings panel if open
+        const scopeEl = document.getElementById('cfg-scope');
+        if (scopeEl) scopeEl.value = scope;
+
+        // Update local storage
+        GM_setValue('cfg_scope', scope);
+
+        // Push to server ASAP (short 1s debounce to catch rapid updates)
+        clearTimeout(scopePushTimer);
+        scopePushTimer = setTimeout(async () => {
+            const apiKey = getApiKey();
+            if (apiKey && apiKey !== 'YOUR_API_KEY_HERE') {
+                try {
+                    await pushFactionSettings(apiKey, CONFIG);
+                    console.log('[OC Spawn] Scope pushed to server:', scope);
+                } catch (e) {
+                    console.warn('[OC Spawn] Failed to push scope:', e.message);
+                }
+            }
+        }, 1000);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  AJAX INTERCEPTOR  — Catches internal Torn data (ASAP detection)
+    // ═══════════════════════════════════════════════════════════════════════
+    function setupAjaxInterceptor() {
+        // Intercept XMLHttpRequest
+        const oldOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function() {
+            this.addEventListener('load', function() {
+                if (this.responseURL.includes('step=getCrimesData')) {
+                    try {
+                        const data = JSON.parse(this.responseText);
+                        const s = data?.scope_balance ?? data?.scope;
+                        if (typeof s === 'number') handleDetectedScope(s, 'AJAX (XHR)');
+                    } catch (e) {}
+                }
+            });
+            return oldOpen.apply(this, arguments);
+        };
+
+        // Intercept Fetch
+        const oldFetch = window.fetch;
+        window.fetch = async function() {
+            const res = await oldFetch.apply(this, arguments);
+            const url = arguments[0] instanceof Request ? arguments[0].url : arguments[0];
+            if (url && url.includes('step=getCrimesData')) {
+                try {
+                    const cloned = res.clone();
+                    const data = await cloned.json();
+                    const s = data?.scope_balance ?? data?.scope;
+                    if (typeof s === 'number') handleDetectedScope(s, 'AJAX (Fetch)');
+                } catch (e) {}
+            }
+            return res;
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  DOM SCOPE READER  — fallback / secondary detection
     // ═══════════════════════════════════════════════════════════════════════
     function readScopeFromDom() {
-        // Strategy 0: Check internal page state (most reliable)
+        // Strategy 0: Check internal page state
         const win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
         if (win.torn && win.torn.faction) {
              const s = win.torn.faction.scope_balance ?? win.torn.faction.scope;
@@ -85,7 +153,6 @@
             if (el.closest('#oc-spawn-panel')) continue;
             if (el.children.length > 2) continue;
             const text = el.textContent.trim();
-            // Match "Scope balance: 19", "Scope: 19", "19/100"
             const m = text.match(/scope[\s\w:]*?(\d+)/i);
             if (m) {
                 const val = parseInt(m[1]);
@@ -96,33 +163,10 @@
     }
 
     function setupScopeDomReader() {
-        let lastScope = null;
-
         function check() {
-            const scope = readScopeFromDom();
-            if (scope === null || scope === lastScope) return;
-            lastScope = scope;
-
-            if (scope !== CONFIG.SCOPE) {
-                CONFIG.SCOPE = scope;
-                CONFIG._scopeAutoDetected = true;
-                console.log('[OC Spawn] Auto-detected scope from DOM:', scope);
-                // Update settings panel if open
-                const scopeEl = document.getElementById('cfg-scope');
-                if (scopeEl) scopeEl.value = scope;
-                // Push to server, debounced 5s
-                clearTimeout(scopePushTimer);
-                scopePushTimer = setTimeout(async () => {
-                    const apiKey = getApiKey();
-                    if (apiKey && apiKey !== 'YOUR_API_KEY_HERE') {
-                        await pushFactionSettings(apiKey, CONFIG);
-                        console.log('[OC Spawn] Scope auto-pushed to server:', scope);
-                    }
-                }, 5000);
-            }
+            const s = readScopeFromDom();
+            if (s !== null) handleDetectedScope(s, 'DOM/State');
         }
-
-        // Run immediately and watch for DOM changes
         check();
         const observer = new MutationObserver(check);
         observer.observe(document.body, { childList: true, subtree: true });
@@ -425,7 +469,7 @@
         document.getElementById('cfg-forecast-hours').value = CONFIG.FORECAST_HOURS;
         document.getElementById('cfg-mincpr').value         = CONFIG.MINCPR;
         document.getElementById('cfg-cpr-boost').value      = CONFIG.CPR_BOOST;
-        document.getElementById('cfg-lookback-days').value  = CONFIG.CPR_LOOKBACK_DAYS;
+        document.getElementById('cfg-lookback-days').value  = CONFIG.LOOKBACK_DAYS;
     }
 
     function checkKeyRow() {
@@ -886,6 +930,9 @@
             refreshBtn.disabled = false;
         }
     }
+
+    // Start ASAP interception
+    setupAjaxInterceptor();
 
     if (window.location.href.includes('tab=crimes') || window.location.hash.includes('crimes')) {
         panelVisible = true; panel.style.display = 'block';
