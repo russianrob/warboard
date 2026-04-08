@@ -21,7 +21,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "32 minutes ago",
+        "lastAction": "33 minutes ago",
         "activity": "idle"
       },
       "621321": {
@@ -39,7 +39,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "55 minutes ago",
+        "lastAction": "56 minutes ago",
         "activity": "offline"
       },
       "887806": {
@@ -406,8 +406,8 @@
         "name": "crankenstein",
         "level": 19,
         "status": "hospital",
-        "description": "In hospital for 1 hrs 14 mins ",
-        "until": 4443,
+        "description": "In hospital for 1 hrs 13 mins ",
+        "until": 4412,
         "lastAction": "6 hours ago",
         "activity": "offline"
       },
@@ -489,7 +489,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "3 hours ago",
+        "lastAction": "4 hours ago",
         "activity": "offline"
       },
       "3351083": {
@@ -507,7 +507,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 minute ago",
+        "lastAction": "0 minutes ago",
         "activity": "online"
       },
       "3401783": {
@@ -516,7 +516,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "10 minutes ago",
+        "lastAction": "11 minutes ago",
         "activity": "offline"
       },
       "3408899": {
@@ -552,8 +552,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "0 minutes ago",
-        "activity": "online"
+        "lastAction": "1 minute ago",
+        "activity": "idle"
       },
       "3439757": {
         "name": "Youjo_Senki",
@@ -687,7 +687,7 @@
         "status": "traveling",
         "description": "Returning to Torn from Argentina",
         "until": 0,
-        "lastAction": "6 minutes ago",
+        "lastAction": "7 minutes ago",
         "activity": "idle"
       },
       "3680912": {
@@ -705,7 +705,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "44 minutes ago",
+        "lastAction": "45 minutes ago",
         "activity": "idle"
       },
       "3693248": {
@@ -714,7 +714,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "18 minutes ago",
+        "lastAction": "19 minutes ago",
         "activity": "offline"
       },
       "3731550": {
@@ -750,7 +750,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 minute ago",
+        "lastAction": "0 minutes ago",
         "activity": "online"
       },
       "3823315": {
@@ -813,7 +813,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "31 minutes ago",
+        "lastAction": "32 minutes ago",
         "activity": "offline"
       },
       "3954027": {
@@ -822,7 +822,7 @@
         "status": "traveling",
         "description": "Traveling to Switzerland",
         "until": 0,
-        "lastAction": "19 minutes ago",
+        "lastAction": "20 minutes ago",
         "activity": "offline"
       },
       "3979258": {
@@ -867,7 +867,7 @@
         "status": "traveling",
         "description": "Returning to Torn from Argentina",
         "until": 0,
-        "lastAction": "18 minutes ago",
+        "lastAction": "19 minutes ago",
         "activity": "idle"
       },
       "4029742": {
@@ -11748,6 +11748,24 @@
         "online": 0,
         "idle": 10,
         "total": 99
+      },
+      {
+        "timestamp": 1775615317027,
+        "online": 0,
+        "idle": 10,
+        "total": 99
+      },
+      {
+        "timestamp": 1775615332331,
+        "online": 0,
+        "idle": 10,
+        "total": 99
+      },
+      {
+        "timestamp": 1775615348552,
+        "online": 0,
+        "idle": 11,
+        "total": 99
       }
     ],
     "strategy": null,
@@ -11765,15 +11783,15 @@
     },
     "enemyFactionName": "Wolf Pack Next Generation",
     "clientTimerReport": {
-      "etaTimestamp": 1775845694541,
-      "calculatedAt": 1775615294541,
-      "receivedAt": 1775615294706
+      "etaTimestamp": 1775845724542,
+      "calculatedAt": 1775615324542,
+      "receivedAt": 1775615324685
     },
     "warEta": {
-      "etaTimestamp": 1775975301878,
+      "etaTimestamp": 1775975348697,
       "hoursRemaining": 100,
       "currentTarget": 11232,
-      "calculatedAt": 1775615301878,
+      "calculatedAt": 1775615348697,
       "preDropPhase": true
     }
   }
