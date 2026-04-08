@@ -2442,7 +2442,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     try {
       const info = await verifyTornApiKey(key);
       if (!isFactionAllowed(info.factionId)) {
-        if (!hasXanaxSubscription(info.playerId)) {
+        if (!hasXanaxSubscription(info.factionId)) {
           return res.status(403).json({ error: "Access restricted. Send 2 Xanax for a 7-day trial or 20 Xanax for 30 days to RussianRob [137558]." });
         }
       }

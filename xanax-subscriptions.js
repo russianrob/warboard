@@ -1,14 +1,11 @@
 /**
- * Xanax-based player trial subscriptions.
+ * Xanax-based faction trial subscription system.
  *
- * Polls the owner's Torn events every 5 minutes looking for
- * incoming Xanax (item ID 206) sends.
+ * Polls the owner's Torn events every 5 minutes for incoming Xanax sends.
+ * Access is granted at the FACTION level — all members of the paying faction get in.
  *
- *   2  Xanax  → +7 days
- *   20 Xanax  → +30 days
- *
- * Time stacks — sending again before expiry extends from the current expiry.
- * Non-faction players with an active subscription can use OC Spawn Assistance.
+ *   2  Xanax  → 7-day trial  (one-time per faction — cannot be used again)
+ *   20 Xanax  → +30 days     (stackable, repeatable)
  *
  * Persists to data/xanax-subscriptions.json.
  */
@@ -23,34 +20,39 @@ const __dirname  = dirname(__filename);
 // ── Config ───────────────────────────────────────────────────────────────
 
 const OWNER_API_KEY    = process.env.OWNER_API_KEY || '';
-const XANAX_SMALL_QTY  = 2;    // minimum Xanax for short trial
-const XANAX_LARGE_QTY  = 20;   // Xanax for full month
-const DAYS_SMALL       = 7;
-const DAYS_LARGE       = 30;
+const XANAX_TRIAL_QTY  = 2;    // 2 Xanax → 7-day trial (once per faction)
+const XANAX_FULL_QTY   = 20;   // 20 Xanax → +30 days
+const DAYS_TRIAL       = 7;
+const DAYS_FULL        = 30;
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 const DATA_DIR  = process.env.DATA_DIR || join(__dirname, 'data');
 const SUBS_FILE = join(DATA_DIR, 'xanax-subscriptions.json');
 
-// ── State ────────────────────────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────────────────────
+//
+// factions: { factionId: { name, expiresAt, lastPayment } }
+// trialsUsed: [ factionId, ... ]   — factions that already used their trial
+// processed:  [ eventId, ... ]     — Torn event IDs already handled
 
-// players:   { playerId: { name, expiresAt, lastQty, lastPayment } }
-// processed: [ eventId, ... ]  — IDs already handled
-let state = { players: {}, processed: [] };
+let state = { factions: {}, trialsUsed: [], processed: [] };
 
 let pollTimer = null;
 
-// ── Persistence ──────────────────────────────────────────────────────────
+// ── Persistence ───────────────────────────────────────────────────────────
 
 function loadState() {
     try {
         if (existsSync(SUBS_FILE)) {
-            const raw = readFileSync(SUBS_FILE, 'utf-8');
+            const raw    = readFileSync(SUBS_FILE, 'utf-8');
             const loaded = JSON.parse(raw);
-            state.players   = loaded.players   || {};
-            state.processed = loaded.processed || [];
-            const count = Object.keys(state.players).length;
-            console.log(`[xanax-subs] Loaded ${count} player subscription(s), ${state.processed.length} processed event(s)`);
+            state.factions    = loaded.factions    || {};
+            state.trialsUsed  = loaded.trialsUsed  || [];
+            state.processed   = loaded.processed   || [];
+            console.log(
+                `[xanax-subs] Loaded ${Object.keys(state.factions).length} faction subscription(s),` +
+                ` ${state.trialsUsed.length} trial(s) used`
+            );
         }
     } catch (e) {
         console.error('[xanax-subs] Failed to load state:', e.message);
@@ -66,7 +68,7 @@ function saveState() {
     }
 }
 
-// ── Torn API ─────────────────────────────────────────────────────────────
+// ── Torn API ──────────────────────────────────────────────────────────────
 
 async function fetchEvents() {
     const url  = `https://api.torn.com/user/?selections=events&key=${OWNER_API_KEY}`;
@@ -77,28 +79,34 @@ async function fetchEvents() {
     return data.events || {};
 }
 
+async function fetchPlayerFaction(playerId) {
+    const url  = `https://api.torn.com/user/${playerId}?selections=basic&key=${OWNER_API_KEY}`;
+    const res  = await fetch(url);
+    if (!res.ok) throw new Error(`Torn API HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(`Torn API error: ${data.error.error}`);
+    return {
+        factionId:   String(data.faction?.faction_id  || 0),
+        factionName: data.faction?.faction_name || 'Unknown',
+        playerName:  data.name || `Player ${playerId}`,
+    };
+}
+
 // ── Event parsing ─────────────────────────────────────────────────────────
 //
-// Torn event HTML looks like:
-// "<a href='profiles.php?XID=12345'>PlayerName</a> sent you 5 Xanax."
-// "<a href='profiles.php?XID=12345'>PlayerName</a> sent you 20 x Xanax."
+// Torn event HTML format:
+// "<a href='profiles.php?XID=12345'>PlayerName</a> sent you 2 x Xanax."
 
 function parseXanaxSend(eventText) {
-    // Extract sender player ID from profile link
-    const idMatch = eventText.match(/XID=(\d+)/i);
+    const idMatch    = eventText.match(/XID=(\d+)/i);
     if (!idMatch) return null;
-    const senderId = idMatch[1];
+    const senderId   = idMatch[1];
 
-    // Extract sender name from link text
-    const nameMatch = eventText.match(/>([^<]+)<\/a>\s+sent you/i);
-    const senderName = nameMatch ? nameMatch[1].trim() : `Player ${senderId}`;
-
-    // Detect Xanax and quantity  — covers "5 Xanax" and "5 x Xanax"
     const xanaxMatch = eventText.match(/sent you (\d+)\s*(?:x\s*)?Xanax/i);
     if (!xanaxMatch) return null;
 
     const qty = parseInt(xanaxMatch[1], 10);
-    return { senderId, senderName, qty };
+    return { senderId, qty };
 }
 
 // ── Poll ──────────────────────────────────────────────────────────────────
@@ -111,7 +119,7 @@ async function pollXanax() {
 
     try {
         const events = await fetchEvents();
-        let changed = false;
+        let changed  = false;
 
         for (const [eventId, entry] of Object.entries(events)) {
             if (state.processed.includes(eventId)) continue;
@@ -120,34 +128,67 @@ async function pollXanax() {
             const parsed = parseXanaxSend(entry.event || '');
             if (!parsed) continue;
 
-            const { senderId, senderName, qty } = parsed;
+            const { senderId, qty } = parsed;
 
-            let days = 0;
-            if (qty >= XANAX_LARGE_QTY)     days = DAYS_LARGE;
-            else if (qty >= XANAX_SMALL_QTY) days = DAYS_SMALL;
-            else continue; // Not enough Xanax
+            // Determine tier
+            let days = 0, isTrial = false;
+            if (qty >= XANAX_FULL_QTY) {
+                days = DAYS_FULL;
+            } else if (qty >= XANAX_TRIAL_QTY) {
+                days = DAYS_TRIAL;
+                isTrial = true;
+            } else {
+                continue; // Not enough Xanax
+            }
+
+            // Look up sender's faction
+            let factionId, factionName, playerName;
+            try {
+                ({ factionId, factionName, playerName } = await fetchPlayerFaction(senderId));
+            } catch (e) {
+                console.warn(`[xanax-subs] Could not look up player ${senderId}:`, e.message);
+                continue;
+            }
+
+            if (!factionId || factionId === '0') {
+                console.log(`[xanax-subs] ${playerName} [${senderId}] has no faction — skipping`);
+                continue;
+            }
+
+            // Trials are one-time per faction
+            if (isTrial && state.trialsUsed.includes(factionId)) {
+                console.log(`[xanax-subs] ${playerName} tried to use trial for faction ${factionId} (${factionName}) — already used`);
+                continue;
+            }
+
+            if (isTrial) state.trialsUsed.push(factionId);
 
             const now      = Date.now();
-            const existing = state.players[senderId];
-
-            // Stack on top of any remaining time
-            const base      = (existing && new Date(existing.expiresAt).getTime() > now)
+            const existing = state.factions[factionId];
+            const base     = (existing && new Date(existing.expiresAt).getTime() > now)
                                 ? new Date(existing.expiresAt).getTime()
                                 : now;
             const expiresAt = new Date(base + days * 86400_000).toISOString();
 
-            state.players[senderId] = {
-                name:        senderName,
+            state.factions[factionId] = {
+                name:        factionName,
                 expiresAt,
-                lastQty:     qty,
                 lastPayment: new Date(now).toISOString(),
+                lastQty:     qty,
+                lastPaidBy:  playerName,
             };
 
-            console.log(`[xanax-subs] ${senderName} [${senderId}] sent ${qty} Xanax → +${days} days, access until ${expiresAt}`);
+            const tier = isTrial ? '7-day trial' : '+30 days';
+            console.log(
+                `[xanax-subs] ${playerName} [${senderId}] (${factionName} [${factionId}])` +
+                ` sent ${qty} Xanax → ${tier}, access until ${expiresAt}`
+            );
             changed = true;
+
+            // Small delay between API calls to avoid rate-limiting
+            await new Promise(r => setTimeout(r, 1000));
         }
 
-        // Keep processed list from growing unbounded
         if (state.processed.length > 5000) {
             state.processed = state.processed.slice(-5000);
         }
@@ -161,21 +202,26 @@ async function pollXanax() {
 
 // ── Public API ────────────────────────────────────────────────────────────
 
-/** Returns true if the player has an active Xanax subscription. */
-export function hasXanaxSubscription(playerId) {
-    const sub = state.players[String(playerId)];
+/** Returns true if the faction has an active Xanax subscription. */
+export function hasXanaxSubscription(factionId) {
+    const sub = state.factions[String(factionId)];
     if (!sub) return false;
     return new Date(sub.expiresAt).getTime() > Date.now();
 }
 
+/** Returns whether a faction has already used their one-time trial. */
+export function trialAlreadyUsed(factionId) {
+    return state.trialsUsed.includes(String(factionId));
+}
+
 /** Returns subscription details or null. */
-export function getXanaxSubscription(playerId) {
-    return state.players[String(playerId)] || null;
+export function getXanaxSubscription(factionId) {
+    return state.factions[String(factionId)] || null;
 }
 
 export function startXanaxSubscriptions() {
     loadState();
-    pollXanax(); // immediate first poll
+    pollXanax();
     pollTimer = setInterval(pollXanax, POLL_INTERVAL_MS);
     console.log('[xanax-subs] Started — polling every 5 minutes for Xanax payments');
 }
