@@ -2511,6 +2511,7 @@ router.get("/api/oc/settings", async (req, res) => {
     mincpr:         s.oc_mincpr         ?? 60,
     cpr_boost:      s.oc_cpr_boost      ?? 15,
     lookback_days:  s.oc_lookback_days  ?? 90,
+    scope:          s.oc_scope          ?? null,
   });
 });
 
@@ -2532,12 +2533,14 @@ router.get("/api/oc/settings/update", async (req, res) => {
     } catch (err) { return res.status(401).json({ error: err.message }); }
   }
   const num = (k, d) => { const v = parseInt(req.query[k], 10); return isNaN(v) ? d : v; };
+  const scopeRaw = parseInt(req.query.scope, 10);
   store.updateFactionSettings(info.factionId, {
     oc_active_days:    num("active_days",    7),
     oc_forecast_hours: num("forecast_hours", 24),
     oc_mincpr:         num("mincpr",         60),
     oc_cpr_boost:      num("cpr_boost",      15),
     oc_lookback_days:  num("lookback_days",  90),
+    oc_scope:          isNaN(scopeRaw) ? null : Math.max(0, Math.min(100, scopeRaw)),
   });
   console.log("[oc/settings] " + info.playerName + " updated faction " + info.factionId + " OC settings");
   return res.json({ ok: true });
