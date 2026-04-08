@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.4.7
+// @version      1.4.8
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -47,7 +47,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.4.7',
+            VERSION:           '1.4.8',
         };
     }
     let CONFIG = loadConfig();
@@ -67,12 +67,11 @@
              if (typeof s === 'number' && s >= 0 && s <= SCOPE_MAX) return s;
         }
 
-        // Strategy 1: any element whose class contains 'scope' (case-insensitive)
-        const byClass = document.querySelector('[class*="scope" i]');
+        // Strategy 1: any element whose class contains 'scope' (exclude our panel)
+        const byClass = document.querySelector('[class*="scope" i]:not(#oc-spawn-panel *)');
         if (byClass) {
             const num = parseInt(byClass.textContent.trim());
             if (!isNaN(num) && num >= 0 && num <= SCOPE_MAX) return num;
-            // maybe the number is a child
             const numChild = byClass.querySelector('span, b, strong');
             if (numChild) {
                 const n2 = parseInt(numChild.textContent.trim());
@@ -80,13 +79,14 @@
             }
         }
 
-        // Strategy 2: leaf elements whose text matches "Scope: NN" or just "NN/100"
+        // Strategy 2: elements matching "Scope balance: NN" (exclude our panel)
         const candidates = document.querySelectorAll('span, div, p, li');
         for (const el of candidates) {
-            if (el.children.length > 2) continue; // skip containers
+            if (el.closest('#oc-spawn-panel')) continue;
+            if (el.children.length > 2) continue;
             const text = el.textContent.trim();
-            // "Scope: 42" or "Scope 42" or "42/100"
-            const m = text.match(/scope[\s:]*?(\d+)/i);
+            // Match "Scope balance: 19", "Scope: 19", "19/100"
+            const m = text.match(/scope[\s\w:]*?(\d+)/i);
             if (m) {
                 const val = parseInt(m[1]);
                 if (val >= 0 && val <= SCOPE_MAX) return val;
