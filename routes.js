@@ -14,7 +14,7 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { getOcSpawnData } from "./oc-spawn.js";
-import { hasXanaxSubscription } from "./xanax-subscriptions.js";
+import { hasXanaxSubscription, grantFactionAccess } from "./xanax-subscriptions.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
 import { isFactionAllowed, getAllSubscriptions, getOwnerFactionId, getSubscriptionRejectionMessage } from "./subscription-manager.js";
@@ -1522,9 +1522,15 @@ function analyzeFaction(data, estimates) {
     const statusState = (m.status?.state || "Okay").toLowerCase();
     const ts = m.last_action?.timestamp || 0;
     const secsAgo = ts > 0 ? Math.max(0, now - ts) : Infinity;
+    
+    // isAvailable means they can be attacked RIGHT NOW
     const isUnavailable = ["hospital", "jail", "traveling", "abroad"].includes(statusState);
-    const isActive = !isUnavailable && secsAgo <= 1800;
-    const isAvailable = !isUnavailable; // not in hospital/jail/traveling — may just be idle
+    const isAvailable = !isUnavailable; 
+    
+    // isActive means they play the game actively (logged in recently). 
+    // We shouldn't exclude them from tactical analysis just because they are currently asleep or traveling.
+    // Let's define active as having logged in within the last 72 hours.
+    const isActive = secsAgo <= (3 * 24 * 3600);
     return {
       id: m.id,
       name: m.name,
@@ -1608,13 +1614,18 @@ function analyzeWarReport(ourData, enemyData, estimates, warScores) {
     hasEstimates,
   };
 
-  // ── B. Top-End Comparison (top 10 each, prioritize active/available members) ──
-  const ourAvailable = ourAnalysis.rankedMembers.filter(m => m.isAvailable);
-  const ourUnavailable = ourAnalysis.rankedMembers.filter(m => !m.isAvailable);
-  const ourTop = [...ourAvailable, ...ourUnavailable].slice(0, 10);
-  const enemyAvailable = enemyAnalysis.rankedMembers.filter(m => m.isAvailable);
-  const enemyUnavailable = enemyAnalysis.rankedMembers.filter(m => !m.isAvailable);
-  const enemyTop = [...enemyAvailable, ...enemyUnavailable].slice(0, 10);
+  // ── B. Top-End Comparison (top 10 each) ──
+  // Sort ALL active members strictly by stats/level, regardless of whether they are currently in hospital/traveling
+  const ourTop = ourAnalysis.rankedMembers
+    .filter(m => m.isActive)
+    .sort((a, b) => (b.stats || b.level * 10e6) - (a.stats || a.level * 10e6))
+    .slice(0, 10);
+  
+  const enemyTop = enemyAnalysis.rankedMembers
+    .filter(m => m.isActive)
+    .sort((a, b) => (b.stats || b.level * 10e6) - (a.stats || a.level * 10e6))
+    .slice(0, 10);
+
   const matchups = [];
   for (let i = 0; i < Math.max(ourTop.length, enemyTop.length, 10); i++) {
     const ours = ourTop[i] || null;
@@ -1716,12 +1727,15 @@ function analyzeWarReport(ourData, enemyData, estimates, warScores) {
   // ── G. Tactical Battle Plan ──
   const enemyWeak = enemyAnalysis.rankedMembers
     .filter(m => m.isActive && (m.stats != null ? m.stats < 250e6 : m.level < 50))
+    .sort((a, b) => (a.stats || a.level * 10e6) - (b.stats || b.level * 10e6))
     .slice(0, 10);
   const enemyMid = enemyAnalysis.rankedMembers
     .filter(m => m.isActive && (m.stats != null ? (m.stats >= 250e6 && m.stats < 1e9) : (m.level >= 50 && m.level < 75)))
+    .sort((a, b) => (a.stats || a.level * 10e6) - (b.stats || b.level * 10e6))
     .slice(0, 10);
   const enemyThreats = enemyAnalysis.rankedMembers
     .filter(m => m.isActive && (m.stats != null ? m.stats >= 1e9 : m.level >= 75))
+    .sort((a, b) => (b.stats || b.level * 10e6) - (a.stats || a.level * 10e6))
     .slice(0, 10);
   const enemyIgnore = enemyAnalysis.rankedMembers
     .filter(m => !m.isActive)
@@ -1729,9 +1743,11 @@ function analyzeWarReport(ourData, enemyData, estimates, warScores) {
 
   const ourChainers = ourAnalysis.rankedMembers
     .filter(m => m.isActive && (m.stats != null ? m.stats < 500e6 : m.level < 60))
+    .sort((a, b) => (a.stats || a.level * 10e6) - (b.stats || b.level * 10e6))
     .slice(0, 10);
   const ourHitters = ourAnalysis.rankedMembers
-    .filter(m => m.isAvailable && (m.stats != null ? m.stats >= 250e6 : m.level >= 50))
+    .filter(m => m.isActive && (m.stats != null ? m.stats >= 250e6 : m.level >= 50))
+    .sort((a, b) => (b.stats || b.level * 10e6) - (a.stats || a.level * 10e6))
     .slice(0, 15);
 
   // Detect war phase from scores
@@ -2426,6 +2442,7 @@ router.get("/api/oc-verify", async (req, res) => {
 
 const _spawnKeyCache = new Map(); // keySuffix → { ts, factionId, playerName }
 const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
+const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
 
 
 router.get("/api/oc/spawn-key", async (req, res) => {
@@ -2444,7 +2461,11 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     try {
       const info = await verifyTornApiKey(key);
       if (!isFactionAllowed(info.factionId) && !PARTNER_FACTIONS.includes(String(info.factionId)) && !hasXanaxSubscription(info.factionId)) {
-        return res.status(403).json({ error: "Access restricted. Send 2 Xanax for a 7-day trial or 20 Xanax for 30 days to RussianRob [137558]." });
+        // Not subscribed — check buyer's own events for a just-sent Xanax (instant grant)
+        const instantGranted = await checkInstantXanax(key, info);
+        if (!instantGranted) {
+          return res.status(403).json({ error: "Access restricted. Send 2 Xanax for a 7-day trial or 20 Xanax for 30 days to RussianRob [137558]." });
+        }
       }
       store.storeApiKey(info.playerId, key);
       playerInfo = { ts: Date.now(), factionId: info.factionId, playerName: info.playerName };

@@ -203,6 +203,39 @@ async function pollXanax() {
 // ── Public API ────────────────────────────────────────────────────────────
 
 /** Returns true if the faction has an active Xanax subscription. */
+
+// ── Instant grant (called from routes when buyer's events confirm a send) ──
+
+export function grantFactionAccess(factionId, factionName, qty, paidBy) {
+    factionId = String(factionId);
+    let days = 0, isTrial = false;
+    if (qty >= XANAX_FULL_QTY)        { days = DAYS_FULL; }
+    else if (qty >= XANAX_TRIAL_QTY)  { days = DAYS_TRIAL; isTrial = true; }
+    else return false;
+
+    if (isTrial && state.trialsUsed.includes(factionId)) {
+        console.log(`[xanax-subs] Trial already used for faction ${factionId} — ignoring`);
+        return false;
+    }
+    if (isTrial) state.trialsUsed.push(factionId);
+
+    const now      = Date.now();
+    const existing = state.factions[factionId];
+    const base     = (existing && new Date(existing.expiresAt).getTime() > now)
+                        ? new Date(existing.expiresAt).getTime() : now;
+    const expiresAt = new Date(base + days * 86400_000).toISOString();
+
+    state.factions[factionId] = {
+        name: factionName, expiresAt,
+        lastPayment: new Date(now).toISOString(),
+        lastQty: qty, lastPaidBy: paidBy,
+    };
+    saveState();
+    const tier = isTrial ? '7-day trial' : '+30 days';
+    console.log(`[xanax-subs] Instant grant: ${paidBy} (${factionName} [${factionId}]) ${qty} Xanax → ${tier}, until ${expiresAt}`);
+    return true;
+}
+
 export function hasXanaxSubscription(factionId) {
     const sub = state.factions[String(factionId)];
     if (!sub) return false;
