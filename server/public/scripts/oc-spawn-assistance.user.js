@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.0.9
+// @version      1.1.0
 // @description  Analyzes faction member availability and OC slot supply; recommends which crime levels to spawn
 // @author       You
 // @match        https://www.torn.com/factions.php*
@@ -51,102 +51,145 @@
             bottom: 80px;
             right: 16px;
             z-index: 9999;
-            background: #2d6a4f;
+            background: #0984e3;
             color: #fff;
             border: none;
             border-radius: 6px;
-            padding: 7px 13px;
-            font-size: 12px;
+            padding: 8px 16px;
+            font-size: 13px;
+            font-family: Arial, sans-serif;
             font-weight: bold;
             cursor: pointer;
-            box-shadow: 0 2px 8px rgba(0,0,0,.4);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            transition: all 0.2s ease;
         }
-        #oc-spawn-toggle:hover { background: #1b4332; }
+        #oc-spawn-toggle:hover { background: #74b9ff; transform: translateY(-2px); }
 
         #oc-spawn-panel {
             position: fixed;
-            bottom: 115px;
-            right: 16px;
-            z-index: 9998;
-            width: min(560px, calc(100vw - 48px));
-            max-height: 72vh;
-            overflow-y: auto;
-            background: #1a1a2e;
-            color: #e0e0e0;
-            border: 1px solid #2d6a4f;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10000;
+            width: min(600px, calc(100vw - 32px));
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            background: #1e1e1e;
+            color: #dcdcdc;
+            border: 1px solid rgba(255,255,255,0.1);
             border-radius: 8px;
-            padding: 14px 16px;
-            font-size: 12px;
-            font-family: monospace;
-            box-shadow: 0 4px 20px rgba(0,0,0,.6);
+            font-size: 13px;
+            font-family: Arial, sans-serif;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.8);
             display: none;
         }
-        #oc-spawn-panel h2 {
-            margin: 0 0 10px;
-            font-size: 14px;
-            color: #74c69d;
+        
+        #oc-spawn-header {
+            padding: 12px 16px;
+            background: #2d2d2d;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            border-radius: 8px 8px 0 0;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            cursor: grab;
         }
+        #oc-spawn-header:active { cursor: grabbing; }
+        
+        #oc-spawn-panel h2 {
+            margin: 0;
+            font-size: 16px;
+            color: #fff;
+            font-weight: 600;
+            pointer-events: none;
+        }
+        
+        #oc-spawn-content-wrapper {
+            padding: 16px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
         #oc-spawn-panel h3 {
-            margin: 10px 0 5px;
-            font-size: 12px;
-            color: #95d5b2;
-            border-bottom: 1px solid #2d4a3e;
-            padding-bottom: 3px;
+            margin: 16px 0 8px;
+            font-size: 14px;
+            color: #74b9ff;
+            border-bottom: 1px solid rgba(116, 185, 255, 0.2);
+            padding-bottom: 4px;
         }
         .oc-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 10px;
-            font-size: 11px;
+            margin-bottom: 16px;
+            font-size: 12px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 6px;
+            overflow: hidden;
         }
         .oc-table th {
-            background: #1b4332;
-            color: #b7e4c7;
-            padding: 4px 6px;
+            background: rgba(255,255,255,0.05);
+            color: #aaa;
+            padding: 8px 10px;
             text-align: left;
+            font-weight: normal;
         }
         .oc-table td {
-            padding: 3px 8px;
-            border-bottom: 1px solid #2d4a3e;
+            padding: 6px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
             vertical-align: top;
-            white-space: nowrap;
         }
-        .oc-table tr:hover td { background: #162032; }
+        .oc-table tr:last-child td { border-bottom: none; }
+        .oc-table tr:hover td { background: rgba(255,255,255,0.02); }
         .oc-tag-spawn   { color: #f4a261; font-weight: bold; }
-        .oc-tag-ok      { color: #74c69d; }
-        .oc-tag-surplus { color: #90e0ef; }
+        .oc-tag-ok      { color: #00b894; }
+        .oc-tag-surplus { color: #74b9ff; }
         .oc-tag-none    { color: #888; }
+        
         .oc-badge {
             display: inline-block;
-            padding: 1px 5px;
-            border-radius: 3px;
-            font-size: 10px;
-            margin-left: 3px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-left: 4px;
         }
-        .oc-badge-in  { background: #264653; color: #90e0ef; }
         .oc-badge-soon{ background: #3d3030; color: #f4a261; }
-        .oc-badge-free { background: #1b4332; color: #74c69d; }
+        .oc-badge-free { background: rgba(0, 184, 148, 0.2); color: #00b894; }
+        
         #oc-spawn-status {
             color: #aaa;
             font-style: italic;
-            margin: 4px 0 8px;
-            font-size: 11px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            text-align: center;
         }
-        #oc-spawn-refresh {
-            background: #2d6a4f;
+        
+        .wb-btn {
+            background: rgba(255,255,255,0.1);
             color: #fff;
             border: none;
             border-radius: 4px;
-            padding: 4px 10px;
+            padding: 6px 12px;
             cursor: pointer;
-            font-size: 11px;
+            font-size: 12px;
+            transition: background 0.2s;
         }
-        #oc-spawn-refresh:hover { background: #1b4332; }
-        #oc-spawn-refresh:disabled { opacity: .5; cursor: default; }
-        .oc-error { color: #e76f51; font-weight: bold; }
+        .wb-btn:hover { background: rgba(255,255,255,0.2); }
+        .wb-btn-primary { background: #0984e3; }
+        .wb-btn-primary:hover { background: #74b9ff; }
+        .wb-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        #oc-spawn-close {
+            background: transparent;
+            color: #888;
+            border: none;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 0 4px;
+        }
+        #oc-spawn-close:hover { color: #fff; }
+        
+        .oc-error { color: #d63031; font-weight: bold; text-align: center; margin: 10px 0; }
     `);
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -160,25 +203,47 @@
     const panel = document.createElement('div');
     panel.id = 'oc-spawn-panel';
     panel.innerHTML = `
-        <h2>
-            OC Spawn Assistance
-            <span style="display:flex;gap:6px;align-items:center;">
-                <button id="oc-spawn-refresh">↻ Refresh</button>
-                <button id="oc-spawn-close" style="background:#555;color:#fff;border:none;border-radius:4px;padding:4px 9px;font-size:13px;cursor:pointer;line-height:1;">✕</button>
+        <div id="oc-spawn-header">
+            <h2>OC Spawn Assistance</h2>
+            <span style="display:flex;gap:8px;align-items:center;">
+                <button id="oc-spawn-refresh" class="wb-btn wb-btn-primary">↻ Refresh</button>
+                <button id="oc-spawn-close">✕</button>
             </span>
-        </h2>
-        <div id="oc-spawn-status">Click Refresh to load data.</div>
-        <div id="oc-spawn-key-row" style="display:none;margin-bottom:8px;">
-            <input id="oc-spawn-key-input" type="password" placeholder="Paste Torn API key…"
-                style="width:calc(100% - 74px);padding:4px 6px;background:#0d1b2a;color:#e0e0e0;
-                       border:1px solid #2d6a4f;border-radius:4px;font-size:11px;font-family:monospace;"/>
-            <button id="oc-spawn-key-save"
-                style="margin-left:4px;padding:4px 8px;background:#2d6a4f;color:#fff;
-                       border:none;border-radius:4px;font-size:11px;cursor:pointer;">Save</button>
         </div>
-        <div id="oc-spawn-body"></div>
+        <div id="oc-spawn-content-wrapper">
+            <div id="oc-spawn-status">Click Refresh to load data.</div>
+            <div id="oc-spawn-key-row" style="display:none;margin-bottom:16px;gap:8px;">
+                <input id="oc-spawn-key-input" type="password" placeholder="Paste Torn API key…"
+                    style="flex:1;padding:8px;background:rgba(0,0,0,0.2);color:#e0e0e0;
+                           border:1px solid rgba(255,255,255,0.1);border-radius:4px;font-size:12px;font-family:monospace;"/>
+                <button id="oc-spawn-key-save" class="wb-btn wb-btn-primary">Save</button>
+            </div>
+            <div id="oc-spawn-body"></div>
+        </div>
     `;
     document.body.appendChild(panel);
+
+    // Draggable Logic
+    let isDragging = false;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+
+    const header = panel.querySelector('#oc-spawn-header');
+    header.addEventListener('mousedown', (e) => {
+        if (e.target.tagName === 'BUTTON') return;
+        isDragging = true;
+        const rect = panel.getBoundingClientRect();
+        dragOffsetX = e.clientX - rect.left;
+        dragOffsetY = e.clientY - rect.top;
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        panel.style.left = (e.clientX - dragOffsetX + (panel.offsetWidth / 2)) + 'px';
+        panel.style.top = (e.clientY - dragOffsetY + (panel.offsetHeight / 2)) + 'px';
+    });
+
+    document.addEventListener('mouseup', () => { isDragging = false; });
 
     let panelVisible = false;
     toggleBtn.addEventListener('click', () => {
