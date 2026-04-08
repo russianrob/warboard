@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.4.3
+// @version      1.4.4
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -28,6 +28,7 @@
     ];
     const SCOPE_REGEN_PER_DAY = 1;
     const SCOPE_MAX           = 100;
+    const DEFAULT_SLOTS_PER_OC = { 1: 2, 2: 4, 3: 3, 4: 6, 5: 8 };
 
     function diffToScopeRange(diff) {
         return SCOPE_RANGES.find(r => diff >= r.minDiff && diff <= r.maxDiff) || SCOPE_RANGES[0];
@@ -603,37 +604,40 @@
             const deficit = totalNeeded - info.openSlots;
             const sr      = diffToScopeRange(lvl);
 
-            let action, spawnCount = 0;
+            const slotsPerOc = info.crimes.length > 0 ? (info.totalSlots / info.crimes.length) : DEFAULT_SLOTS_PER_OC[sr.range];
+            const numOcsNeeded = Math.ceil(deficit / slotsPerOc);
+
+            let action, numOcsToSpawn = 0;
 
             if (totalNeeded === 0) {
                 action = 'none';
             } else if (deficit <= 0) {
                 action = deficit === 0 ? 'ok' : 'surplus';
-                spawnCount = 0;
+                numOcsToSpawn = 0;
             } else if (scopeBudget === null) {
                 // No scope configured — fall back to simple deficit
                 action = 'spawn';
-                spawnCount = deficit;
+                numOcsToSpawn = numOcsNeeded;
             } else {
                 const canAfford = Math.floor(scopeBudget / sr.cost);
                 if (canAfford <= 0) {
                     action = 'deferred';
-                    spawnCount = 0;
-                } else if (canAfford < deficit) {
+                    numOcsToSpawn = 0;
+                } else if (canAfford < numOcsNeeded) {
                     action = 'spawn_partial';
-                    spawnCount = canAfford;
+                    numOcsToSpawn = canAfford;
                     scopeBudget -= canAfford * sr.cost;
                 } else {
                     action = 'spawn';
-                    spawnCount = deficit;
-                    scopeBudget -= deficit * sr.cost;
+                    numOcsToSpawn = numOcsNeeded;
+                    scopeBudget -= numOcsNeeded * sr.cost;
                 }
             }
 
             recs.push({
                 level: lvl, freeMembers: freeNow.length, soonMembers: soonFree.length,
                 openSlots: info.openSlots, totalSlots: info.totalSlots,
-                recruitingOCs: info.crimes.length, deficit, spawnCount, action,
+                recruitingOCs: info.crimes.length, deficit, numOcsToSpawn, action,
                 scopeCost: sr.cost, scopeRange: sr.range,
                 names: membersForLevel.map(m => m.name),
             });
@@ -681,9 +685,9 @@
         const rows = visible.map(r => {
             let actionHtml;
             if (r.action === 'spawn') {
-                actionHtml = `<span class="oc-tag-spawn">SPAWN +${r.spawnCount}</span>`;
+                actionHtml = `<span class="oc-tag-spawn">Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''}</span>`;
             } else if (r.action === 'spawn_partial') {
-                actionHtml = `<span class="oc-tag-spawn-partial">SPAWN +${r.spawnCount} <span style="font-size:9px;opacity:.8">(of ${r.deficit})</span></span>`;
+                actionHtml = `<span class="oc-tag-spawn-partial">Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''} <span style="font-size:9px;opacity:.8">(need +${r.deficit} roles)</span></span>`;
             } else if (r.action === 'deferred') {
                 actionHtml = `<span class="oc-tag-deferred">Deferred — no scope</span>`;
             } else if (r.action === 'ok') {
