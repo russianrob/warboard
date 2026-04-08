@@ -1614,13 +1614,18 @@ function analyzeWarReport(ourData, enemyData, estimates, warScores) {
     hasEstimates,
   };
 
-  // ── B. Top-End Comparison (top 10 each, prioritize active/available members) ──
-  const ourAvailable = ourAnalysis.rankedMembers.filter(m => m.isAvailable);
-  const ourUnavailable = ourAnalysis.rankedMembers.filter(m => !m.isAvailable);
-  const ourTop = [...ourAvailable, ...ourUnavailable].slice(0, 10);
-  const enemyAvailable = enemyAnalysis.rankedMembers.filter(m => m.isAvailable);
-  const enemyUnavailable = enemyAnalysis.rankedMembers.filter(m => !m.isAvailable);
-  const enemyTop = [...enemyAvailable, ...enemyUnavailable].slice(0, 10);
+  // ── B. Top-End Comparison (top 10 each) ──
+  // Sort ALL active members strictly by stats/level, regardless of whether they are currently in hospital/traveling
+  const ourTop = ourAnalysis.rankedMembers
+    .filter(m => m.isActive)
+    .sort((a, b) => (b.stats || b.level * 10e6) - (a.stats || a.level * 10e6))
+    .slice(0, 10);
+  
+  const enemyTop = enemyAnalysis.rankedMembers
+    .filter(m => m.isActive)
+    .sort((a, b) => (b.stats || b.level * 10e6) - (a.stats || a.level * 10e6))
+    .slice(0, 10);
+
   const matchups = [];
   for (let i = 0; i < Math.max(ourTop.length, enemyTop.length, 10); i++) {
     const ours = ourTop[i] || null;
