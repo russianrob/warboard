@@ -14,7 +14,7 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { getOcSpawnData } from "./oc-spawn.js";
-import { hasXanaxSubscription } from "./xanax-subscriptions.js";
+import { hasXanaxSubscription, grantFactionAccess } from "./xanax-subscriptions.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
 import { isFactionAllowed, getAllSubscriptions, getOwnerFactionId, getSubscriptionRejectionMessage } from "./subscription-manager.js";
@@ -2442,6 +2442,7 @@ router.get("/api/oc-verify", async (req, res) => {
 
 const _spawnKeyCache = new Map(); // keySuffix → { ts, factionId, playerName }
 const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
+const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
 
 
 router.get("/api/oc/spawn-key", async (req, res) => {
@@ -2460,7 +2461,11 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     try {
       const info = await verifyTornApiKey(key);
       if (!isFactionAllowed(info.factionId) && !PARTNER_FACTIONS.includes(String(info.factionId)) && !hasXanaxSubscription(info.factionId)) {
-        return res.status(403).json({ error: "Access restricted. Send 2 Xanax for a 7-day trial or 20 Xanax for 30 days to RussianRob [137558]." });
+        // Not subscribed — check buyer's own events for a just-sent Xanax (instant grant)
+        const instantGranted = await checkInstantXanax(key, info);
+        if (!instantGranted) {
+          return res.status(403).json({ error: "Access restricted. Send 2 Xanax for a 7-day trial or 20 Xanax for 30 days to RussianRob [137558]." });
+        }
       }
       store.storeApiKey(info.playerId, key);
       playerInfo = { ts: Date.now(), factionId: info.factionId, playerName: info.playerName };
@@ -2506,6 +2511,7 @@ router.get("/api/oc/settings", async (req, res) => {
     mincpr:         s.oc_mincpr         ?? 60,
     cpr_boost:      s.oc_cpr_boost      ?? 15,
     lookback_days:  s.oc_lookback_days  ?? 90,
+    scope:          s.oc_scope          ?? null,
   });
 });
 
@@ -2527,12 +2533,14 @@ router.get("/api/oc/settings/update", async (req, res) => {
     } catch (err) { return res.status(401).json({ error: err.message }); }
   }
   const num = (k, d) => { const v = parseInt(req.query[k], 10); return isNaN(v) ? d : v; };
+  const scopeRaw = parseInt(req.query.scope, 10);
   store.updateFactionSettings(info.factionId, {
     oc_active_days:    num("active_days",    7),
     oc_forecast_hours: num("forecast_hours", 24),
     oc_mincpr:         num("mincpr",         60),
     oc_cpr_boost:      num("cpr_boost",      15),
     oc_lookback_days:  num("lookback_days",  90),
+    oc_scope:          isNaN(scopeRaw) ? null : Math.max(0, Math.min(100, scopeRaw)),
   });
   console.log("[oc/settings] " + info.playerName + " updated faction " + info.factionId + " OC settings");
   return res.json({ ok: true });

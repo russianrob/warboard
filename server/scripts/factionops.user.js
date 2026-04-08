@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.27
+// @version      4.8.28
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -40,6 +40,8 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.28  - Revert: Removed OC Spawn Assistant integration from FactionOps (keeping it as a standalone tool).
+// v4.8.27  - Fix: Tactical Battle Plan (Scout Report) now strictly sorts targets and hitters by highest/lowest stats properly.
 // v4.8.26  - Fix: Chain notifications (bonus hits, panics, alerts) will no longer fire when the chain is in Cooldown.
 // v4.8.25  - Feature: Upgraded OC Spawn Assistant with tooltips and detailed member CPR breakdowns (synced with standalone v1.1.4).
 // v4.8.24  - Fix: Rewrote button injection logic to ensure Spawn Assistant appears on Crimes tab dynamically.
@@ -7657,31 +7659,6 @@ body.wb-chain-active {
         } else if (url.includes('factions.php') || url.includes('war.php')) {
             log('Page: Faction/War — showing activate button');
             showActivateButton();
-            
-            // Show OC Spawn Assistant on Crimes tab
-            if (url.includes('tab=crimes') || url.includes('#crimes') || url.includes('step=your&crimes')) {
-                const checkInterval = setInterval(() => {
-                    const crimesWrap = document.querySelector('.faction-crimes-wrap') || document.querySelector('.crimes-title');
-                    if (crimesWrap && !document.getElementById('fo-spawn-btn-crimes')) {
-                        const btnContainer = document.createElement('div');
-                        btnContainer.style.cssText = 'padding: 10px; background: rgba(0,0,0,0.2); text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 10px;';
-                        
-                        const btn = document.createElement('button');
-                        btn.id = 'fo-spawn-btn-crimes';
-                        btn.className = 'wb-btn wb-btn-sm';
-                        btn.textContent = '⚔️ FactionOps Spawn Assistant';
-                        btn.style.cssText = 'background: var(--wb-accent); border: none; padding: 8px 16px; border-radius: 4px; color: #fff; cursor: pointer; font-size: 14px; font-weight: bold; width: auto; display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.3);';
-                        btn.addEventListener('click', () => {
-                            spawnPanelVisible = true;
-                            loadAndRenderOcSpawn();
-                        });
-                        
-                        btnContainer.appendChild(btn);
-                        crimesWrap.parentNode.insertBefore(btnContainer, crimesWrap);
-                        clearInterval(checkInterval);
-                    }
-                }, 1000);
-            }
         } else {
             log('Page: Unknown — running in passive mode');
         }
@@ -9154,218 +9131,6 @@ body.wb-chain-active {
 
         document.body.appendChild(panel);
     }
-
-    // =========================================================================
-    // SECTION 25: OC SPAWN ASSISTANCE
-    // =========================================================================
-
-    let spawnPanelVisible = false;
-    let cprBreakdownMap = {}; // store for tooltips
-
-    function formatSpawnTime(ts) {
-        if (!ts) return '—';
-        const d = new Date(ts * 1000);
-        const h = d.getHours().toString().padStart(2, '0');
-        const min = d.getMinutes().toString().padStart(2, '0');
-        if (d.toDateString() === new Date().toDateString()) return `today ${h}:${min}`;
-        return `${d.getMonth() + 1}/${d.getDate()} ${h}:${min}`;
-    }
-
-    async function loadAndRenderOcSpawn() {
-        let spawnPanel = document.getElementById('wb-spawn-panel');
-        if (!spawnPanel) {
-            spawnPanel = document.createElement('div');
-            spawnPanel.id = 'wb-spawn-panel';
-            spawnPanel.className = 'wb-heatmap-panel';
-            spawnPanel.style.cssText = `
-                width: min(600px, calc(100vw - 48px));
-                max-height: 85vh;
-                display: flex;
-                flex-direction: column;
-                z-index: 1000000;
-                background: #0f1a14;
-                border: 1px solid #2a3f30;
-                color: #d1d5db;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            `;
-            document.body.appendChild(spawnPanel);
-
-            let isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
-            spawnPanel.addEventListener('mousedown', (e) => {
-                if (e.target.tagName === 'BUTTON' || e.target.closest('button') || e.target.closest('.oc-cpr-click')) return;
-                isDragging = true;
-                const rect = spawnPanel.getBoundingClientRect();
-                dragOffsetX = e.clientX - rect.left;
-                dragOffsetY = e.clientY - rect.top;
-            });
-            document.addEventListener('mousemove', (e) => {
-                if (!isDragging) return;
-                spawnPanel.style.left = (e.clientX - dragOffsetX) + 'px';
-                spawnPanel.style.top = (e.clientY - dragOffsetY) + 'px';
-                spawnPanel.style.transform = 'none';
-            });
-            document.addEventListener('mouseup', () => { isDragging = false; });
-            
-            // Delegate clicks for CPR tooltip
-            spawnPanel.addEventListener('click', e => {
-                const target = e.target.closest('.oc-cpr-click');
-                if (target) { e.stopPropagation(); showOcCprTooltip(target); }
-                else hideOcCprTooltip();
-            });
-        }
-
-        spawnPanel.innerHTML = `
-            <div class="wb-heatmap-header" style="background:#0f1a14; border-bottom: 1px solid #1a2e20;">
-                <h3 style="color:#74c69d;">OC Spawn Assistance</h3>
-                <button class="wb-heatmap-close" id="wb-spawn-close">✕</button>
-            </div>
-            <div style="padding: 20px; text-align: center; color: #6b7280;">
-                <div class="fo-spinner" style="border: 2px solid rgba(255,255,255,0.05); border-left-color: #74c69d; width: 24px; height: 24px; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 10px;"></div>
-                Analysing faction data...
-            </div>
-        `;
-
-        document.getElementById('wb-spawn-close').addEventListener('click', () => {
-            spawnPanelVisible = false;
-            spawnPanel.style.display = 'none';
-            hideOcCprTooltip();
-        });
-
-        try {
-            const data = await new Promise((resolve, reject) => {
-                httpRequest({
-                    method: 'GET',
-                    url: `${CONFIG.SERVER_URL}/api/oc/spawn`,
-                    headers: { 'Authorization': `Bearer ${state.jwtToken}` },
-                    onload: (resp) => {
-                        try {
-                            const json = JSON.parse(resp.responseText);
-                            if (resp.status !== 200 || json.error) throw new Error(json.error || `HTTP ${resp.status}`);
-                            resolve(json);
-                        } catch (e) { reject(e); }
-                    },
-                    onerror: reject
-                });
-            });
-            renderOcSpawnPanel(spawnPanel, data);
-        } catch (e) {
-            spawnPanel.innerHTML = `<div class="wb-heatmap-header"><h3>OC Spawn Assistance</h3><button class="wb-heatmap-close" id="wb-spawn-close">✕</button></div>
-                <div style="padding: 20px; color: #f87171; text-align: center;">Failed to fetch OC data: ${escapeHtml(e.message)}</div>`;
-            document.getElementById('wb-spawn-close').addEventListener('click', () => { spawnPanelVisible = false; spawnPanel.style.display = 'none'; });
-        }
-    }
-
-    function renderOcSpawnPanel(panel, data) {
-        const { members, availableCrimes, cprCache } = data;
-        const nowSec = Math.floor(Date.now() / 1000);
-        const ACTIVE_DAYS = 7, FORECAST_HOURS = 24;
-        const activeCutoff = nowSec - (ACTIVE_DAYS * 86400), forecastCutoff = nowSec + (FORECAST_HOURS * 3600);
-
-        const memberOcMap = {};
-        for (const crime of availableCrimes) {
-            if (crime.status === 'Expired' || !Array.isArray(crime.slots)) continue;
-            for (const slot of crime.slots) {
-                const uid = slot.user_id ?? slot.user?.id;
-                if (uid) memberOcMap[uid] = { diff: crime.difficulty, status: crime.status, readyAt: crime.ready_at ?? 0, name: crime.name };
-            }
-        }
-
-        const eligible = [], skipped = [];
-        for (const m of members) {
-            const uid = m.id, lastAction = m.last_action?.timestamp ?? 0;
-            if (lastAction < activeCutoff) { skipped.push({ ...m, skipReason: `Inactive >${ACTIVE_DAYS}d` }); continue; }
-            const ocInfo = memberOcMap[uid], inOC = !!ocInfo;
-            if (inOC && ocInfo.readyAt > forecastCutoff) { skipped.push({ ...m, skipReason: `In OC (ready ${formatSpawnTime(ocInfo.readyAt)})` }); continue; }
-            const cpr = cprCache[uid] ?? null, cprValue = cpr?.cpr ?? null, highestLvl = cpr?.highestLevel ?? 0;
-            const joinable = (cprValue === null || cprValue < 60) ? 1 : (cpr?.joinable ?? 1);
-            eligible.push({ id: uid, name: m.name, inOC, ocReadyAt: inOC ? ocInfo.readyAt : null, cpr: cprValue, highestLevel: highestLvl, joinable, cprEntries: cpr?.entries || [] });
-        }
-
-        const slotMap = {};
-        for (const crime of availableCrimes) {
-            if (crime.status !== 'Recruiting') continue;
-            const d = crime.difficulty;
-            if (!slotMap[d]) slotMap[d] = { total: 0, open: 0, count: 0 };
-            let open = 0, total = 0;
-            for (const slot of (crime.slots || [])) { total++; if (!slot.user_id && !slot.user?.id) open++; }
-            slotMap[d].total += total; slotMap[d].open += open; slotMap[d].count++;
-        }
-
-        const recs = [];
-        for (let lvl = 1; lvl <= 10; lvl++) {
-            const mAtLvl = eligible.filter(m => m.joinable === lvl), totalNeeded = mAtLvl.length;
-            const info = slotMap[lvl] || { total: 0, open: 0, count: 0 }, deficit = totalNeeded - info.open;
-            if (totalNeeded > 0) recs.push({ level: lvl, free: mAtLvl.filter(m => !m.inOC).length, soon: mAtLvl.filter(m => m.inOC).length, open: info.open, total: info.total, count: info.count, deficit, action: deficit > 0 ? 'spawn' : (deficit === 0 ? 'ok' : 'surplus') });
-        }
-
-        const spawnLevels = recs.filter(r => r.action === 'spawn').map(r => `Lvl ${r.level}`);
-        const bannerHtml = spawnLevels.length
-            ? `<div style="display:flex;align-items:center;gap:5px;background:#1c1a0f;border:1px solid #3d3010;border-left:3px solid #f4a261;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#9ca3af;">
-                Spawn needed: ${spawnLevels.map(l => `<span style="background:rgba(244,162,97,.15);color:#f4a261;border:1px solid rgba(244,162,97,.3);border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;">${l}</span>`).join('')}
-               </div>`
-            : `<div style="display:flex;align-items:center;gap:5px;background:#0f1c14;border:1px solid #1b4332;border-left:3px solid #74c69d;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#74c69d;">✓ No additional spawns needed.</div>`;
-
-        cprBreakdownMap = {}; // Reset breakdown store
-        const memberRows = [...eligible].sort((a, b) => (b.joinable - a.joinable) || a.name.localeCompare(b.name)).map(m => {
-            const status = m.inOC ? `<span style="background:rgba(244,162,97,.12);color:#f4a261;border:1px solid rgba(244,162,97,.25);padding:2px 7px;border-radius:4px;font-size:10px;">In OC → free ${formatSpawnTime(m.ocReadyAt)}</span>` : `<span style="background:rgba(116,198,157,.12);color:#74c69d;border:1px solid rgba(116,198,157,.25);padding:2px 7px;border-radius:4px;font-size:10px;">Free</span>`;
-            let cprClass = m.cpr >= 80 ? '#74c69d' : (m.cpr >= 60 ? '#f4a261' : '#6b7280');
-            if (m.cpr !== null) cprBreakdownMap[m.id] = { name: m.name, cpr: m.cpr, entries: m.cprEntries };
-            const cprStr = m.cpr !== null ? `<span class="oc-cpr-click" data-uid="${m.id}" style="color:${cprClass};cursor:pointer;border-bottom:1px dotted currentColor;">${m.cpr}%</span>` : `<span style="color:#6b7280">—</span>`;
-            return `<tr style="border-bottom:1px solid #131f18;"><td style="padding:4px 8px;"><span style="color:#f3f4f6;font-weight:500;">${escapeHtml(m.name)}</span> <span style="color:#6b7280;font-size:10px;">[${m.id}]</span></td><td style="padding:4px 8px;">${status}</td><td style="padding:4px 8px;">${cprStr}</td><td style="padding:4px 8px;color:#6b7280;">${m.highestLevel || '—'}</td><td style="padding:4px 8px;"><b style="color:#74c69d">Lvl ${m.joinable}</b></td></tr>`;
-        }).join('');
-
-        panel.innerHTML = `
-            <div class="wb-heatmap-header" style="background:#0f1a14; border-bottom: 1px solid #1a2e20;">
-                <h3 style="color:#74c69d;">OC Spawn Assistance</h3>
-                <button class="wb-heatmap-close" id="wb-spawn-close">✕</button>
-            </div>
-            <div style="padding: 16px; font-size: 12px; overflow-y: auto;">
-                <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;">
-                    <span style="background:#131f18;border:1px solid #253525;border-radius:20px;padding:3px 10px;font-size:11px;color:#9ca3af;"><b style="color:#74c69d">${eligible.length + skipped.length}</b> members</span>
-                    <span style="background:#131f18;border:1px solid #253525;border-radius:20px;padding:3px 10px;font-size:11px;color:#9ca3af;"><b style="color:#74c69d">${eligible.length}</b> eligible</span>
-                    <span style="background:#131f18;border:1px solid #253525;border-radius:20px;padding:3px 10px;font-size:11px;color:#9ca3af;"><b style="color:#74c69d">${eligible.filter(m => !m.inOC).length}</b> free now</span>
-                </div>
-                ${bannerHtml}
-                <h4 style="margin:14px 0 6px; font-size:10px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:0.7px; border-bottom:1px solid #1a2e20; padding-bottom:4px;">Spawn Recommendations</h4>
-                <table style="width:100%; border-collapse:collapse; margin-bottom:10px; font-size:11px;">
-                    <thead><tr><th style="color:#6b7280;padding:5px 8px;text-align:left;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1a2e20;">Level</th><th style="color:#6b7280;padding:5px 8px;text-align:left;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1a2e20;">Free + Soon</th><th style="color:#6b7280;padding:5px 8px;text-align:left;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1a2e20;">Slots</th><th style="color:#6b7280;padding:5px 8px;text-align:left;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1a2e20;">Action</th></tr></thead>
-                    <tbody>${recs.map(r => `<tr style="border-bottom:1px solid #131f18;"><td style="padding:4px 8px;${r.action==='spawn'?'border-left:2px solid #f4a261;padding-left:6px;':(r.action==='ok'?'border-left:2px solid #74c69d;padding-left:6px;':'border-left:2px solid #60a5fa;padding-left:6px;')}"><b>Lvl ${r.level}</b></td><td style="padding:4px 8px;">${r.free}${r.soon > 0 ? ` <span style="background:rgba(244,162,97,.12);color:#f4a261;padding:1px 4px;border-radius:3px;font-size:10px;">+${r.soon}</span>` : ''}</td><td style="padding:4px 8px;color:#f3f4f6;">${r.open} / ${r.total} <span style="color:#374151">(${r.count})</span></td><td style="padding:4px 8px;">${r.action==='spawn'?`<span style="background:rgba(244,162,97,.15);color:#f4a261;border:1px solid rgba(244,162,97,.3);border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700;">SPAWN +${r.deficit}</span>`:(r.action==='ok'?`<span style="background:rgba(116,198,157,.12);color:#74c69d;border:1px solid rgba(116,198,157,.25);border-radius:4px;padding:2px 7px;font-size:10px;">✓ Covered</span>`:`<span style="background:rgba(96,165,250,.1);color:#90e0ef;border:1px solid rgba(96,165,250,.2);border-radius:4px;padding:2px 7px;font-size:10px;">+${Math.abs(r.deficit)} extra</span>`)}</td></tr>`).join('')}</tbody>
-                </table>
-                <details style="margin-top:10px;"><summary style="cursor:pointer;color:#74c69d;font-weight:600;margin-bottom:8px;">View Member Details (Click CPR for breakdown)</summary>
-                    <table style="width:100%; border-collapse:collapse; font-size:11px;">
-                        <thead><tr><th style="color:#6b7280;padding:5px 8px;text-align:left;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1a2e20;">Member</th><th style="color:#6b7280;padding:5px 8px;text-align:left;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1a2e20;">Status</th><th style="color:#6b7280;padding:5px 8px;text-align:left;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1a2e20;">CPR</th><th style="color:#6b7280;padding:5px 8px;text-align:left;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1a2e20;">Highest</th><th style="color:#6b7280;padding:5px 8px;text-align:left;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1a2e20;">Joinable</th></tr></thead>
-                        <tbody>${memberRows}</tbody>
-                    </table>
-                </details>
-            </div>
-            <div class="wb-heatmap-footer" style="background:#0f1a14; border-top:1px solid #1a2e20;">
-                <span style="font-size:10px;color:#6b7280;">CPR based on 90-day lookback (crimes at level-1 or higher only).</span>
-                <button class="wb-btn wb-btn-sm" id="wb-spawn-refresh" style="background:#152018;color:#74c69d;border:1px solid #2d4a3e;font-weight:600;">Refresh</button>
-            </div>
-        `;
-        document.getElementById('wb-spawn-close').addEventListener('click', () => { spawnPanelVisible = false; panel.style.display = 'none'; hideOcCprTooltip(); });
-        document.getElementById('wb-spawn-refresh').addEventListener('click', () => { panel.innerHTML = `<div style="padding:40px;text-align:center;">Reloading...</div>`; loadAndRenderOcSpawn(); });
-    }
-
-    function showOcCprTooltip(el) {
-        const uid = parseInt(el.dataset.uid), data = cprBreakdownMap[uid];
-        if (!data || !data.entries.length) return;
-        const byLevel = {};
-        for (const e of data.entries) { if (!byLevel[e.diff]) byLevel[e.diff] = { sum: 0, count: 0 }; byLevel[e.diff].sum += e.rate; byLevel[e.diff].count++; }
-        const levels = Object.keys(byLevel).map(Number).sort((a, b) => b - a);
-        const rows = levels.map(lvl => {
-            const avg = Math.round(byLevel[lvl].sum / byLevel[lvl].count * 10) / 10;
-            return `<tr><td>Lvl ${lvl}</td><td>${byLevel[lvl].count} crimes</td><td style="color:${avg>=80?'#74c69d':(avg>=60?'#f4a261':'#9ca3af')}">${avg}%</td></tr>`;
-        }).join('');
-
-        let tip = document.getElementById('oc-cpr-tooltip');
-        if (!tip) { tip = document.createElement('div'); tip.id = 'oc-cpr-tooltip'; tip.style.cssText = 'position:fixed;z-index:1000001;background:#131f18;border:1px solid #2d4a3e;border-radius:8px;padding:10px 12px;font-size:11px;color:#d1d5db;box-shadow:0 4px 20px rgba(0,0,0,.7);min-width:200px;pointer-events:none;display:none;'; document.body.appendChild(tip); }
-        tip.innerHTML = `<div style="font-weight:600;color:#f3f4f6;margin-bottom:5px;">${data.name} Breakdown</div><div style="color:#9ca3af;font-size:10px;margin-bottom:7px;">Avg: <b style="color:${data.cpr>=80?'#74c69d':(data.cpr>=60?'#f4a261':'#9ca3af')}">${data.cpr}%</b> from ${data.entries.length} crimes</div><table style="width:100%;border-collapse:collapse;"><thead><tr><th style="color:#6b7280;font-size:10px;text-transform:uppercase;padding:2px 4px;border-bottom:1px solid #1a2e20;text-align:left;">Level</th><th style="color:#6b7280;font-size:10px;text-transform:uppercase;padding:2px 4px;border-bottom:1px solid #1a2e20;text-align:left;">Crimes</th><th style="color:#6b7280;font-size:10px;text-transform:uppercase;padding:2px 4px;border-bottom:1px solid #1a2e20;text-align:left;">Avg</th></tr></thead><tbody>${rows}</tbody></table><div style="color:#6b7280;font-size:10px;margin-top:7px;border-top:1px solid #1a2e20;padding-top:5px;">Only includes crimes at/above level-1</div>`;
-        tip.style.display = 'block';
-        const rect = el.getBoundingClientRect();
-        tip.style.top = (rect.bottom + 6) + 'px'; tip.style.left = rect.left + 'px';
-    }
-    function hideOcCprTooltip() { const tip = document.getElementById('oc-cpr-tooltip'); if (tip) tip.style.display = 'none'; }
 
     // =========================================================================
     // SECTION 26: MAIN INITIALISATION
