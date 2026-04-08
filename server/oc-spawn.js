@@ -56,9 +56,10 @@ function buildCprCache(completedCrimes) {
       const rawRate = slot.checkpoint_pass_rate ?? slot.success_chance ?? null;
       if (rawRate === null) continue;
 
-      if (!cache[uid]) cache[uid] = { rateSum: 0, count: 0 };
+      if (!cache[uid]) cache[uid] = { rateSum: 0, count: 0, entries: [] };
       cache[uid].rateSum += rawRate;
       cache[uid].count += 1;
+      cache[uid].entries.push({ diff, rate: rawRate });
     }
   }
 
@@ -69,7 +70,7 @@ function buildCprCache(completedCrimes) {
     const cpr = d.count > 0 ? d.rateSum / d.count : 0;
     const topLevel = highestLevel[uid] || 0;
     const joinable = cpr >= MINCPR + CPR_BOOST ? Math.min(topLevel + 1, 10) : topLevel;
-    result[uid] = { cpr: Math.round(cpr * 10) / 10, highestLevel: topLevel, joinable };
+    result[uid] = { cpr: Math.round(cpr * 10) / 10, highestLevel: topLevel, joinable, entries: d.entries };
   }
   return result;
 }
