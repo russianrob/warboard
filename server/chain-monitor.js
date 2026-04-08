@@ -78,8 +78,11 @@ export function startChainMonitor(io, warId) {
       // Reset backoff on success
       backoffs.set(warId, POLL_INTERVAL_MS);
 
+      // Only evaluate chain alerts if the chain is active and NOT cooling down
+      const isCoolingDown = chain.cooldown > 0;
+
       // ── Chain-break push alerts ──
-      if (chain.timeout > 0 && chain.current >= CHAIN_MIN_HITS) {
+      if (!isCoolingDown && chain.timeout > 0 && chain.current >= CHAIN_MIN_HITS) {
         // Panic alert at 30s
         if (chain.timeout <= CHAIN_PANIC_THRESHOLD) {
           const lastPanic = lastPanicSent.get(warId) || 0;
@@ -102,7 +105,7 @@ export function startChainMonitor(io, warId) {
       }
 
       // ── Bonus-imminent push alert ──
-      if (chain.current >= CHAIN_MIN_HITS) {
+      if (!isCoolingDown && chain.current >= CHAIN_MIN_HITS) {
         const nextBonus = BONUS_HITS.find((b) => b > chain.current);
         if (nextBonus && nextBonus - chain.current <= 2 && (prevChain.current || 0) < chain.current) {
           const warPlayers = store.getOnlinePlayersForWar(warId);

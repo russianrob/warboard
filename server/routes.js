@@ -14,6 +14,7 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { getOcSpawnData } from "./oc-spawn.js";
+import { hasXanaxSubscription } from "./xanax-subscriptions.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
 import { isFactionAllowed, getAllSubscriptions, getOwnerFactionId, getSubscriptionRejectionMessage } from "./subscription-manager.js";
@@ -2385,5 +2386,82 @@ async function handlePostWarReport(req, res) {
 
 router.get("/api/war/:warId/post-war-report", requireAuth, handlePostWarReport);
 router.post("/api/war/:warId/post-war-report", requireAuth, handlePostWarReport);
+
+
+// ── GET /api/oc-verify ──────────────────────────────────────────────────
+// Verify an API key belongs to a faction member. Used by OC Spawn Assistance.
+// Rate-limited: one live Torn API call per key per 5 minutes; results cached.
+
+const _ocVerifyCache = new Map(); // keySuffix → { ok, player, ts }
+
+router.get("/api/oc-verify", async (req, res) => {
+  const key = req.query.key;
+  if (!key || typeof key !== "string" || key.length < 10) {
+    return res.status(400).json({ ok: false, error: "Invalid key" });
+  }
+
+  const suffix = key.slice(-8);
+  const cached = _ocVerifyCache.get(suffix);
+  if (cached && (Date.now() - cached.ts) < 5 * 60_000) {
+    return res.json({ ok: cached.ok, player: cached.player, cached: true });
+  }
+
+  try {
+    const info = await verifyTornApiKey(key);
+    const ok   = isFactionAllowed(info.factionId);
+    _ocVerifyCache.set(suffix, { ok, player: info.playerName, ts: Date.now() });
+    console.log(`[oc-verify] ${info.playerName} factionId=${info.factionId} ok=${ok}`);
+    return res.json({ ok, player: info.playerName });
+  } catch (err) {
+    console.warn("[oc-verify] Error:", err.message);
+    return res.status(401).json({ ok: false, error: err.message });
+  }
+});
+
+
+// ── GET /api/oc/spawn-key ───────────────────────────────────────────────
+// Single-call endpoint for OC Spawn Assistance userscript.
+// Accepts API key as query param (no CORS preflight needed).
+// Verifies faction membership, then returns spawn data with 6h CPR cache.
+
+const _spawnKeyCache = new Map(); // keySuffix → { ts, factionId, playerName }
+
+router.get("/api/oc/spawn-key", async (req, res) => {
+  // Explicit wildcard CORS: WebKit (TornPDA) sends Origin: null which cors middleware skips
+  res.set("Access-Control-Allow-Origin", "*");
+  const key = req.query.key;
+  if (!key || typeof key !== "string" || key.length < 10) {
+    return res.status(400).json({ error: "Invalid key" });
+  }
+
+  const suffix = key.slice(-8);
+  let playerInfo = _spawnKeyCache.get(suffix);
+
+  // Re-verify identity max once per 5 minutes
+  if (!playerInfo || (Date.now() - playerInfo.ts) > 5 * 60_000) {
+    try {
+      const info = await verifyTornApiKey(key);
+      const PARTNER_FACTIONS = ["51430"]; // Permanent free access
+      if (!isFactionAllowed(info.factionId) && !PARTNER_FACTIONS.includes(String(info.factionId)) && !hasXanaxSubscription(info.factionId)) {
+        return res.status(403).json({ error: "Access restricted. Send 2 Xanax for a 7-day trial or 20 Xanax for 30 days to RussianRob [137558]." });
+      }
+      store.storeApiKey(info.playerId, key);
+      playerInfo = { ts: Date.now(), factionId: info.factionId, playerName: info.playerName };
+      _spawnKeyCache.set(suffix, playerInfo);
+      console.log(`[oc/spawn-key] Verified ${info.playerName} (faction ${info.factionId})`);
+    } catch (err) {
+      console.warn("[oc/spawn-key] Verify failed:", err.message);
+      return res.status(401).json({ error: err.message });
+    }
+  }
+
+  try {
+    const data = await getOcSpawnData(playerInfo.factionId, key);
+    return res.json(data);
+  } catch (err) {
+    console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
+    return res.status(500).json({ error: "Failed to fetch OC data: " + err.message });
+  }
+});
 
 export default router;

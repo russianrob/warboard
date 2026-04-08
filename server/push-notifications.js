@@ -291,10 +291,21 @@ export async function sendToWar(getPlayersForWar, warId, payload, notifType, exc
 
 // ── War Event Helpers ───────────────────────────────────────────────────
 
+/** Check if the war has officially started. */
+async function hasWarStarted(warId) {
+  const store = await import('./store.js');
+  const war = store.getWar(warId);
+  if (!war) return false;
+  if (!war.warStart) return true; // fallback if start time unknown
+  const nowSec = Math.floor(Date.now() / 1000);
+  return nowSec >= war.warStart;
+}
+
 /**
  * Notify war room that a target was called.
  */
 export async function notifyTargetCalled(warPlayers, warId, callerName, targetName, excludePlayerId) {
+  if (!(await hasWarStarted(warId))) return;
   await sendToWar(
     () => warPlayers,
     warId,
@@ -314,6 +325,7 @@ export async function notifyTargetCalled(warPlayers, warId, callerName, targetNa
  * Notify war room about chain danger.
  */
 export async function notifyChainAlert(warPlayers, warId, current, timeout, timeLeft) {
+  if (!(await hasWarStarted(warId))) return;
   const playerIds = warPlayers.map((p) => p.playerId || p.id);
   await sendToPlayers(
     playerIds.filter((id) => isSubscribed(id)),
@@ -333,6 +345,7 @@ export async function notifyChainAlert(warPlayers, warId, current, timeout, time
  * PANIC alert — chain is about to die (< 30s).
  */
 export async function notifyChainPanic(warPlayers, warId, current, timeLeft) {
+  if (!(await hasWarStarted(warId))) return;
   const playerIds = warPlayers.map((p) => p.playerId || p.id);
   await sendToPlayers(
     playerIds.filter((id) => isSubscribed(id)),
@@ -352,6 +365,7 @@ export async function notifyChainPanic(warPlayers, warId, current, timeLeft) {
  * Notify a specific player that a target left hospital.
  */
 export async function notifyHospitalPop(playerId, targetName, targetId) {
+  // Hospital pops are useful regardless of war state (e.g. chaining before war)
   await sendToPlayer(playerId, {
     title: "🏥 Target Out of Hospital",
     body: `${targetName} just left the hospital — attack now!`,
@@ -365,6 +379,7 @@ export async function notifyHospitalPop(playerId, targetName, targetId) {
  * Notify war room about a bonus hit milestone approaching.
  */
 export async function notifyBonusImminent(warPlayers, warId, current, nextBonus) {
+  if (!(await hasWarStarted(warId))) return;
   const playerIds = warPlayers.map((p) => p.playerId || p.id);
   await sendToPlayers(
     playerIds.filter((id) => isSubscribed(id)),

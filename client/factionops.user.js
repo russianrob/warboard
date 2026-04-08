@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.25
+// @version      4.8.26
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -40,6 +40,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.26  - Fix: Chain notifications (bonus hits, panics, alerts) will no longer fire when the chain is in Cooldown.
 // v4.8.25  - Feature: Upgraded OC Spawn Assistant with tooltips and detailed member CPR breakdowns (synced with standalone v1.1.4).
 // v4.8.24  - Fix: Rewrote button injection logic to ensure Spawn Assistant appears on Crimes tab dynamically.
 // v4.8.23  - Fix: Improved injection logic for the OC Spawn Assistant button so it properly appears on the Crimes tab.
@@ -3240,9 +3241,10 @@ body.wb-chain-active {
             if (data.chainData.current && chainChanged) {
                 const next = nextBonusMilestone(data.chainData.current + 1);
                 const hitsToBonus = next ? next - data.chainData.current : null;
+                const isCoolingDown = state.chain.cooldown > 0;
                 // Only notify for bonuses above 10 (skip the first bonus at 10 since chain hasn't 'started' yet)
                 // Also only fire when already past the first bonus or very close to a meaningful one
-                if (hitsToBonus !== null && hitsToBonus <= 3 && hitsToBonus > 0 && data.chainData.current >= 10) {
+                if (!isCoolingDown && hitsToBonus !== null && hitsToBonus <= 3 && hitsToBonus > 0 && data.chainData.current >= 10) {
                     showToast(`BONUS HIT in ${hitsToBonus}! Target: ${next}`, 'error');
                     firePdaNotification('bonus_imminent',
                         '\uD83D\uDCA5 Bonus Hit Imminent',
