@@ -1731,7 +1731,7 @@ function analyzeWarReport(ourData, enemyData, estimates, warScores) {
     .filter(m => m.isActive && (m.stats != null ? m.stats < 500e6 : m.level < 60))
     .slice(0, 10);
   const ourHitters = ourAnalysis.rankedMembers
-    .filter(m => m.isAvailable && (m.stats != null ? m.stats >= 250e6 : m.level >= 50))
+    .filter(m => m.isActive && (m.stats != null ? m.stats >= 250e6 : m.level >= 50))
     .slice(0, 15);
 
   // Detect war phase from scores
@@ -2425,6 +2425,8 @@ router.get("/api/oc-verify", async (req, res) => {
 // Verifies faction membership, then returns spawn data with 6h CPR cache.
 
 const _spawnKeyCache = new Map(); // keySuffix → { ts, factionId, playerName }
+const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
+
 
 router.get("/api/oc/spawn-key", async (req, res) => {
   // Explicit wildcard CORS: WebKit (TornPDA) sends Origin: null which cors middleware skips
@@ -2441,7 +2443,6 @@ router.get("/api/oc/spawn-key", async (req, res) => {
   if (!playerInfo || (Date.now() - playerInfo.ts) > 5 * 60_000) {
     try {
       const info = await verifyTornApiKey(key);
-      const PARTNER_FACTIONS = ["51430"]; // Permanent free access
       if (!isFactionAllowed(info.factionId) && !PARTNER_FACTIONS.includes(String(info.factionId)) && !hasXanaxSubscription(info.factionId)) {
         return res.status(403).json({ error: "Access restricted. Send 2 Xanax for a 7-day trial or 20 Xanax for 30 days to RussianRob [137558]." });
       }
@@ -2462,6 +2463,63 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
     return res.status(500).json({ error: "Failed to fetch OC data: " + err.message });
   }
+});
+
+
+// -- GET /api/oc/settings ---------------------------------------------------
+router.get("/api/oc/settings", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const key = req.query.key;
+  if (!key || key.length < 10) return res.status(400).json({ error: "Invalid key" });
+  const suffix = key.slice(-8);
+  let info = _spawnKeyCache.get(suffix);
+  if (!info || (Date.now() - info.ts) > 5 * 60_000) {
+    try {
+      const tornInfo = await verifyTornApiKey(key);
+      if (!isFactionAllowed(tornInfo.factionId) && !PARTNER_FACTIONS.includes(String(tornInfo.factionId)) && !hasXanaxSubscription(tornInfo.factionId)) {
+        return res.status(403).json({ error: "Access restricted" });
+      }
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName };
+      _spawnKeyCache.set(suffix, info);
+    } catch (err) { return res.status(401).json({ error: err.message }); }
+  }
+  const s = store.getFactionSettings(info.factionId);
+  return res.json({
+    active_days:    s.oc_active_days    ?? 7,
+    forecast_hours: s.oc_forecast_hours ?? 24,
+    mincpr:         s.oc_mincpr         ?? 60,
+    cpr_boost:      s.oc_cpr_boost      ?? 15,
+    lookback_days:  s.oc_lookback_days  ?? 90,
+  });
+});
+
+// -- GET /api/oc/settings/update --------------------------------------------
+router.get("/api/oc/settings/update", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const key = req.query.key;
+  if (!key || key.length < 10) return res.status(400).json({ error: "Invalid key" });
+  const suffix = key.slice(-8);
+  let info = _spawnKeyCache.get(suffix);
+  if (!info || (Date.now() - info.ts) > 5 * 60_000) {
+    try {
+      const tornInfo = await verifyTornApiKey(key);
+      if (!isFactionAllowed(tornInfo.factionId) && !PARTNER_FACTIONS.includes(String(tornInfo.factionId)) && !hasXanaxSubscription(tornInfo.factionId)) {
+        return res.status(403).json({ error: "Access restricted" });
+      }
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName };
+      _spawnKeyCache.set(suffix, info);
+    } catch (err) { return res.status(401).json({ error: err.message }); }
+  }
+  const num = (k, d) => { const v = parseInt(req.query[k], 10); return isNaN(v) ? d : v; };
+  store.updateFactionSettings(info.factionId, {
+    oc_active_days:    num("active_days",    7),
+    oc_forecast_hours: num("forecast_hours", 24),
+    oc_mincpr:         num("mincpr",         60),
+    oc_cpr_boost:      num("cpr_boost",      15),
+    oc_lookback_days:  num("lookback_days",  90),
+  });
+  console.log("[oc/settings] " + info.playerName + " updated faction " + info.factionId + " OC settings");
+  return res.json({ ok: true });
 });
 
 export default router;
