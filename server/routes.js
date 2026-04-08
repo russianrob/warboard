@@ -1716,12 +1716,15 @@ function analyzeWarReport(ourData, enemyData, estimates, warScores) {
   // ── G. Tactical Battle Plan ──
   const enemyWeak = enemyAnalysis.rankedMembers
     .filter(m => m.isActive && (m.stats != null ? m.stats < 250e6 : m.level < 50))
+    .sort((a, b) => (a.stats || a.level * 10e6) - (b.stats || b.level * 10e6))
     .slice(0, 10);
   const enemyMid = enemyAnalysis.rankedMembers
     .filter(m => m.isActive && (m.stats != null ? (m.stats >= 250e6 && m.stats < 1e9) : (m.level >= 50 && m.level < 75)))
+    .sort((a, b) => (a.stats || a.level * 10e6) - (b.stats || b.level * 10e6))
     .slice(0, 10);
   const enemyThreats = enemyAnalysis.rankedMembers
     .filter(m => m.isActive && (m.stats != null ? m.stats >= 1e9 : m.level >= 75))
+    .sort((a, b) => (b.stats || b.level * 10e6) - (a.stats || a.level * 10e6))
     .slice(0, 10);
   const enemyIgnore = enemyAnalysis.rankedMembers
     .filter(m => !m.isActive)
@@ -1729,9 +1732,11 @@ function analyzeWarReport(ourData, enemyData, estimates, warScores) {
 
   const ourChainers = ourAnalysis.rankedMembers
     .filter(m => m.isActive && (m.stats != null ? m.stats < 500e6 : m.level < 60))
+    .sort((a, b) => (a.stats || a.level * 10e6) - (b.stats || b.level * 10e6))
     .slice(0, 10);
   const ourHitters = ourAnalysis.rankedMembers
     .filter(m => m.isActive && (m.stats != null ? m.stats >= 250e6 : m.level >= 50))
+    .sort((a, b) => (b.stats || b.level * 10e6) - (a.stats || a.level * 10e6))
     .slice(0, 15);
 
   // Detect war phase from scores
