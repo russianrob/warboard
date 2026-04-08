@@ -1522,9 +1522,15 @@ function analyzeFaction(data, estimates) {
     const statusState = (m.status?.state || "Okay").toLowerCase();
     const ts = m.last_action?.timestamp || 0;
     const secsAgo = ts > 0 ? Math.max(0, now - ts) : Infinity;
+    
+    // isAvailable means they can be attacked RIGHT NOW
     const isUnavailable = ["hospital", "jail", "traveling", "abroad"].includes(statusState);
-    const isActive = !isUnavailable && secsAgo <= 1800;
-    const isAvailable = !isUnavailable; // not in hospital/jail/traveling — may just be idle
+    const isAvailable = !isUnavailable; 
+    
+    // isActive means they play the game actively (logged in recently). 
+    // We shouldn't exclude them from tactical analysis just because they are currently asleep or traveling.
+    // Let's define active as having logged in within the last 72 hours.
+    const isActive = secsAgo <= (3 * 24 * 3600);
     return {
       id: m.id,
       name: m.name,

@@ -5,6 +5,11 @@
       "co-leader",
       "war leader",
       "admin leader"
-    ]
+    ],
+    "oc_active_days": 7,
+    "oc_forecast_hours": 24,
+    "oc_mincpr": 67,
+    "oc_cpr_boost": 15,
+    "oc_lookback_days": 90
   }
 }

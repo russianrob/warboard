@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.26
+// @version      4.8.27
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -40,6 +40,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.27  - Fix: Tactical Battle Plan (Scout Report) now strictly sorts targets and hitters by highest/lowest stats properly.
 // v4.8.26  - Fix: Chain notifications (bonus hits, panics, alerts) will no longer fire when the chain is in Cooldown.
 // v4.8.25  - Feature: Upgraded OC Spawn Assistant with tooltips and detailed member CPR breakdowns (synced with standalone v1.1.4).
 // v4.8.24  - Fix: Rewrote button injection logic to ensure Spawn Assistant appears on Crimes tab dynamically.
