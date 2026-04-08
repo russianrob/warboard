@@ -45,6 +45,9 @@ const PORT = parseInt(process.env.PORT, 10) || 3000;
 
 const app = express();
 
+// Trust Nginx proxy for correct IP detection (needed for rate limiting)
+app.set("trust proxy", 1);
+
 // Enable CORS for all API routes
 app.use(
   cors({

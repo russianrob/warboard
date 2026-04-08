@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.4.4
+// @version      1.4.6
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -47,7 +47,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.4.5',
+            VERSION:           '1.4.6',
         };
     }
 
@@ -148,14 +148,26 @@
                 GM_xmlhttpRequest({
                     method: 'GET', url,
                     onload(r) {
-                        try { resolve({ ok: r.status < 400, status: r.status, data: JSON.parse(r.responseText) }); }
-                        catch (e) { reject(new Error('Bad JSON from server')); }
+                        try {
+                            const data = JSON.parse(r.responseText);
+                            resolve({ ok: r.status < 400, status: r.status, data });
+                        } catch (e) {
+                            const snippet = (r.responseText || '').substring(0, 100).replace(/<[^>]*>/g, '');
+                            reject(new Error(`Bad JSON (${r.status}): ${snippet}...`));
+                        }
                     },
-                    onerror() { reject(new Error('Network error')); },
+                    onerror(err) { reject(new Error('Network error: ' + (err.statusText || 'check console'))); },
                 });
             });
         }
-        return fetch(url).then(async r => ({ ok: r.ok, status: r.status, data: await r.json() }));
+        return fetch(url).then(async r => {
+            const text = await r.text();
+            try { return { ok: r.ok, status: r.status, data: JSON.parse(text) }; }
+            catch (e) {
+                const snippet = text.substring(0, 100).replace(/<[^>]*>/g, '');
+                throw new Error(`Bad JSON (${r.status}): ${snippet}...`);
+            }
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════
