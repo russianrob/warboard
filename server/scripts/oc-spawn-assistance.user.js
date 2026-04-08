@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.5.0
+// @version      1.5.1
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -739,7 +739,7 @@
             <div style="font-weight:600;color:#f3f4f6;white-space:nowrap;">${current}</div>
             <div class="oc-scope-bar-wrap"><div class="oc-scope-bar ${barClass}" style="width:${Math.round(current/SCOPE_MAX*100)}%"></div></div>
             <div style="color:#6b7280;font-size:10px;white-space:nowrap;">→ <b style="color:#74c69d">${projected}</b> projected
-                <span style="color:#374151">(+${regen}d +${expectedGain}c)</span>
+                <span style="color:#374151">(+${regen} daily, +${expectedGain} from crimes)</span>
             </div>
         </div>`;
     }
