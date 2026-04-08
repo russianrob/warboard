@@ -40,16 +40,16 @@
     function loadConfig() {
         return {
             API_KEY:           'YOUR_API_KEY_HERE',
-            FACTION_ID:        42055,
+            FACTION_ID:        0, // Set by server
             ACTIVE_DAYS:       Number(GM_getValue('cfg_active_days',    7)),
             FORECAST_HOURS:    Number(GM_getValue('cfg_forecast_hours', 24)),
             MINCPR:            Number(GM_getValue('cfg_mincpr',         60)),
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
+            VERSION:           '1.4.5',
         };
     }
-    let CONFIG = loadConfig();
 
     let cprBreakdownMap = {};
     let scopePushTimer  = null;
@@ -443,6 +443,15 @@
         CONFIG.MINCPR         = get('cfg-mincpr');
         CONFIG.CPR_BOOST      = get('cfg-cpr-boost');
         CONFIG.CPR_LOOKBACK_DAYS = get('cfg-lookback-days');
+
+        // Local persistence
+        GM_setValue('cfg_active_days',    CONFIG.ACTIVE_DAYS);
+        GM_setValue('cfg_forecast_hours', CONFIG.FORECAST_HOURS);
+        GM_setValue('cfg_mincpr',         CONFIG.MINCPR);
+        GM_setValue('cfg_cpr_boost',      CONFIG.CPR_BOOST);
+        GM_setValue('cfg_lookback_days',  CONFIG.CPR_LOOKBACK_DAYS);
+        GM_setValue('cfg_scope',          CONFIG.SCOPE);
+
         document.getElementById('oc-settings-panel').style.display = 'none';
         setStatus('Saving settings for all faction members…');
         const apiKey = getApiKey();
@@ -808,6 +817,15 @@
                 CONFIG.CPR_BOOST         = srvSettings.cpr_boost;
                 CONFIG.CPR_LOOKBACK_DAYS = srvSettings.lookback_days;
                 CONFIG.SCOPE             = srvSettings.scope;
+
+                // Sync local storage with server values
+                GM_setValue('cfg_active_days',    CONFIG.ACTIVE_DAYS);
+                GM_setValue('cfg_forecast_hours', CONFIG.FORECAST_HOURS);
+                GM_setValue('cfg_mincpr',         CONFIG.MINCPR);
+                GM_setValue('cfg_cpr_boost',      CONFIG.CPR_BOOST);
+                GM_setValue('cfg_lookback_days',  CONFIG.CPR_LOOKBACK_DAYS);
+                GM_setValue('cfg_scope',          CONFIG.SCOPE);
+
                 populateSettings();
             }
 
@@ -858,6 +876,7 @@
 
     if (window.location.href.includes('tab=crimes') || window.location.hash.includes('crimes')) {
         panelVisible = true; panel.style.display = 'block';
+        if (getApiKey()) setTimeout(runAnalysis, 500);
     }
 
     // Start DOM scope reader (runs whenever recruiting tab is visible)
