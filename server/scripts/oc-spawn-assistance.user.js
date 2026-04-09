@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.5.7
+// @version      1.5.8
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -47,7 +47,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.5.7',
+            VERSION:           '1.5.8',
         };
     }
     let CONFIG = loadConfig();
@@ -612,33 +612,46 @@
             }
 
             const lvl = parseInt(plan.dataset.lvl);
-            const crimeRows = document.querySelectorAll('.crimes-list > li');
+            const list = document.querySelector('.crimes-list');
+            if (!list) {
+                alert("Crimes list not found. Please wait for the page to load or refresh.");
+                return;
+            }
+
+            const crimeRows = list.querySelectorAll(':scope > li');
             let found = false;
             
+            // Strategy 1: Match by the 'data-crimeid' attribute on the plan link
             for (const row of crimeRows) {
                 const planLink = row.querySelector('a[data-action="planOrganizedCrime"]');
-                if (planLink) {
-                    const cid = parseInt(planLink.getAttribute('data-crimeid'));
-                    if (cid === lvl) {
-                        planLink.click();
-                        found = true;
-                        break;
-                    }
+                if (planLink && parseInt(planLink.getAttribute('data-crimeid')) === lvl) {
+                    planLink.click();
+                    found = true;
+                    break;
                 }
             }
             
+            // Strategy 2: Match by crime name keywords
             if (!found) {
-                const terms = { 1: 'Assassination', 2: 'Illegal Transaction', 3: 'Hijacking', 4: 'Bomb Threat', 5: 'Kidnapping', 6: 'Plane Hijacking', 7: 'Bank Heist', 8: 'FBI Hack' };
+                const terms = { 1: 'Assassination', 2: 'Transaction', 3: 'Hijacking', 4: 'Threat', 5: 'Kidnap', 6: 'Plane', 7: 'Heist', 8: 'FBI' };
                 const term = terms[lvl];
                 for (const row of crimeRows) {
-                    if (row.textContent.includes(term)) {
+                    const title = row.querySelector('.title')?.textContent || '';
+                    if (title.includes(term)) {
                         const btn = row.querySelector('a[data-action="planOrganizedCrime"]');
                         if (btn) { btn.click(); found = true; break; }
                     }
                 }
             }
+
+            // Strategy 3: Match by index (Level 1 is usually first row, etc.)
+            if (!found && crimeRows.length >= lvl) {
+                const targetRow = crimeRows[lvl - 1];
+                const btn = targetRow.querySelector('a[data-action="planOrganizedCrime"]');
+                if (btn) { btn.click(); found = true; }
+            }
             
-            if (!found) alert(`Could not find native 'Plan' button for Level ${lvl}. Please ensure the list is loaded.`);
+            if (!found) alert(`Could not find native 'Plan' button for Level ${lvl}. Please ensure the list is fully loaded.`);
             return;
         }
 
