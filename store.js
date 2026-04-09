@@ -8,6 +8,41 @@
 import fs from "node:fs";
 import path from "node:path";
 
+// ── API key encryption (AES-256-GCM) ──────────────────────────────────────
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+
+const _ALGO = 'aes-256-gcm';
+function _getSecret() {
+    const hex = process.env.KEY_SECRET || '';
+    if (hex.length !== 64) throw new Error('KEY_SECRET must be a 64-char hex string (32 bytes)');
+    return Buffer.from(hex, 'hex');
+}
+
+function encryptKey(plaintext) {
+    const iv  = randomBytes(12);
+    const cipher = createCipheriv(_ALGO, _getSecret(), iv);
+    const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return `${iv.toString('hex')}:${tag.toString('hex')}:${enc.toString('hex')}`;
+}
+
+function decryptKey(val) {
+    // If not encrypted format, return as-is (plaintext legacy key)
+    const parts = val.split(':');
+    if (parts.length !== 3) return val;
+    const [ivHex, tagHex, dataHex] = parts;
+    try {
+        const decipher = createDecipheriv(_ALGO, _getSecret(), Buffer.from(ivHex, 'hex'));
+        decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+        return decipher.update(Buffer.from(dataHex, 'hex')) + decipher.final('utf8');
+    } catch { return val; }
+}
+
+function isEncrypted(val) {
+    return typeof val === 'string' && val.split(':').length === 3;
+}
+
+
 function atomicWriteJSON(filePath, data) {
     const tmp = filePath + '.tmp';
     atomicWriteJSON(tmp, data);
@@ -203,7 +238,9 @@ export function getViewersForWar(warId) {
 // ── API key storage ─────────────────────────────────────────────────────
 
 export function storeApiKey(playerId, apiKey) {
-  apiKeys.set(playerId, apiKey);
+  // Always store encrypted
+  const toStore = isEncrypted(apiKey) ? apiKey : encryptKey(apiKey);
+  apiKeys.set(playerId, toStore);
   savePlayerKeys();
 }
 
@@ -215,7 +252,7 @@ export function getApiKeyForFaction(factionId) {
   }
   // Fallback: return any stored key for a player whose factionId we recorded
   // even if they're offline – the key is still valid.
-  return apiKeys.values().next().value ?? null;
+  const raw = apiKeys.values().next().value ?? null; return raw ? decryptKey(raw) : null;
 }
 
 export function getApiKeyForPlayer(playerId) {
@@ -234,6 +271,7 @@ export function getAllApiKeys() {
 
 /** Load player API keys from disk (called once at startup). */
 export function loadPlayerKeys() {
+  let needsMigration = false;
   ensureDataDir();
   if (!fs.existsSync(PLAYER_KEYS_FILE)) return;
 
@@ -241,12 +279,13 @@ export function loadPlayerKeys() {
     const raw = fs.readFileSync(PLAYER_KEYS_FILE, "utf-8");
     const data = JSON.parse(raw);
     for (const [playerId, key] of Object.entries(data)) {
-      apiKeys.set(playerId, key);
+      if (!isEncrypted(key)) { apiKeys.set(playerId, encryptKey(key)); needsMigration = true; }
+      else { apiKeys.set(playerId, key); }
     }
     console.log(`[store] Loaded ${apiKeys.size} player API key(s) from disk`);
   } catch (err) {
     console.error("[store] Failed to load player keys:", err.message);
-  }
+  }  if (needsMigration) { savePlayerKeys(); console.log('[store] Migrated plaintext API keys to encrypted format'); }
 }
 
 /** Persist player API keys to disk. */
