@@ -47,8 +47,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            MAX_LEVEL:         Number(GM_getValue('cfg_max_level',    10)),
-            VERSION:           '1.5.5',
+            VERSION:           '1.5.6',
         };
     }
     let CONFIG = loadConfig();
@@ -403,16 +402,6 @@
             </div>
             <div class="oc-setting-row">
                 <div class="oc-setting-info">
-                    <span class="oc-setting-label">Max Recommended Level</span>
-                    <div class="oc-setting-desc">Cap recommendations at this level (e.g., set to 1 for scope farming).</div>
-                </div>
-                <select class="oc-setting-num" id="cfg-max-level" style="width:60px;">
-                    <option value="1">Lvl 1</option><option value="2">Lvl 2</option><option value="3">Lvl 3</option><option value="4">Lvl 4</option><option value="5">Lvl 5</option>
-                    <option value="6">Lvl 6</option><option value="7">Lvl 7</option><option value="8">Lvl 8</option><option value="9">Lvl 9</option><option value="10">Lvl 10</option>
-                </select>
-            </div>
-            <div class="oc-setting-row">
-                <div class="oc-setting-info">
                     <span class="oc-setting-label">Active Days</span>                    <div class="oc-setting-desc">Members inactive longer than this are skipped entirely.</div>
                 </div>
                 <input class="oc-setting-num" id="cfg-active-days" type="number" min="1" max="30"/>
@@ -482,7 +471,6 @@
         const scopeEl = document.getElementById('cfg-scope');
         scopeEl.value = CONFIG.SCOPE !== null ? CONFIG.SCOPE : '';
         scopeEl.placeholder = CONFIG.SCOPE !== null ? '' : '—';
-        document.getElementById('cfg-max-level').value      = CONFIG.MAX_LEVEL;
         document.getElementById('cfg-active-days').value    = CONFIG.ACTIVE_DAYS;
         document.getElementById('cfg-forecast-hours').value = CONFIG.FORECAST_HOURS;
         document.getElementById('cfg-mincpr').value         = CONFIG.MINCPR;
@@ -513,7 +501,6 @@
         const get    = id => Math.max(0, parseInt(document.getElementById(id).value) || 0);
         const rawScope = parseInt(document.getElementById('cfg-scope').value, 10);
         CONFIG.SCOPE          = isNaN(rawScope) ? null : Math.max(0, Math.min(100, rawScope));
-        CONFIG.MAX_LEVEL      = get('cfg-max-level');
         CONFIG.ACTIVE_DAYS    = get('cfg-active-days');
         CONFIG.FORECAST_HOURS = get('cfg-forecast-hours');
         CONFIG.MINCPR         = get('cfg-mincpr');
@@ -527,7 +514,6 @@
         GM_setValue('cfg_cpr_boost',      CONFIG.CPR_BOOST);
         GM_setValue('cfg_lookback_days',  CONFIG.CPR_LOOKBACK_DAYS);
         GM_setValue('cfg_scope',          CONFIG.SCOPE);
-        GM_setValue('cfg_max_level',      CONFIG.MAX_LEVEL);
 
         document.getElementById('oc-settings-panel').style.display = 'none';
         setStatus('Saving settings for all faction members…');
@@ -1016,15 +1002,12 @@
 
             // Re-apply user's MINCPR/CPR_BOOST to joinable
             const cprCache = {};
-            const maxLvl = CONFIG.MAX_LEVEL || 10;
             for (const [uid, d] of Object.entries(rawCprCache || {})) {
-                let j = d.cpr >= CONFIG.MINCPR + CONFIG.CPR_BOOST
-                        ? Math.min(d.highestLevel + 1, 10) : d.highestLevel;
-                
-                // Respect the user's preferred Max Level cap
-                if (j > maxLvl) j = maxLvl;
-
-                cprCache[uid] = { ...d, joinable: j };
+                cprCache[uid] = {
+                    ...d,
+                    joinable: d.cpr >= CONFIG.MINCPR + CONFIG.CPR_BOOST
+                        ? Math.min(d.highestLevel + 1, 10) : d.highestLevel,
+                };
             }
 
             setStatus('Analysing…');
