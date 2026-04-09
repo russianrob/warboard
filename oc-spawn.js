@@ -122,18 +122,22 @@ async function getOcWeights() {
 }
 
 export async function getOcSpawnData(factionId, apiKey) {
+  // Always use the owner key for faction data — member keys may have Minimal access
+  // which cannot query /v2/faction/* endpoints.
+  const fetchKey = process.env.OWNER_API_KEY || apiKey;
+
   let cprCache = null;
   const cached = factionOcsCache.get(factionId);
   if (cached && (Date.now() - cached.timestamp < CACHE_TTL_MS)) {
     cprCache = cached.cprCache;
   } else {
-    const completedCrimes = await fetchCompletedCrimes(factionId, apiKey);
+    const completedCrimes = await fetchCompletedCrimes(factionId, fetchKey);
     cprCache = buildCprCache(completedCrimes);
     factionOcsCache.set(factionId, { timestamp: Date.now(), cprCache });
   }
 
-  const availableCrimes = await fetchAvailableCrimes(factionId, apiKey);
-  const basicData = await fetchFactionBasic(factionId, apiKey);
+  const availableCrimes = await fetchAvailableCrimes(factionId, fetchKey);
+  const basicData = await fetchFactionBasic(factionId, fetchKey);
   const members = Object.entries(basicData.members || {}).map(([id, m]) => ({ id, ...m }));
 
   for (const m of members) {
