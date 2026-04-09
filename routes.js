@@ -2457,8 +2457,8 @@ router.get("/api/oc/spawn-key", async (req, res) => {
   const suffix = key.slice(-8);
   let playerInfo = _spawnKeyCache.get(suffix);
 
-  // Re-verify identity max once per 5 minutes
-  if (!playerInfo || (Date.now() - playerInfo.ts) > 5 * 60_000) {
+  // Re-verify if missing, stale, or populated by another route without playerId
+  if (!playerInfo || (Date.now() - playerInfo.ts) > 5 * 60_000 || !playerInfo.playerId) {
     try {
       const info = await verifyTornApiKey(key);
       if (!isFactionAllowed(info.factionId) && !PARTNER_FACTIONS.includes(String(info.factionId)) && !hasXanaxSubscription(info.factionId)) {
@@ -2469,7 +2469,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
         }
       }
       store.storeApiKey(info.playerId, key);
-      playerInfo = { ts: Date.now(), factionId: info.factionId, playerName: info.playerName, playerId: info.playerId };
+      playerInfo = { ts: Date.now(), factionId: info.factionId, playerName: info.playerName, playerId: info.playerId, factionPosition: info.factionPosition };
       _spawnKeyCache.set(suffix, playerInfo);
       console.log(`[oc/spawn-key] Verified ${info.playerName} (faction ${info.factionId})`);
     } catch (err) {
@@ -2480,10 +2480,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
 
   try {
     const data = await getOcSpawnData(playerInfo.factionId, key);
-    // Look up viewer's faction position from the members list
-    const viewerMember = (data.members || []).find(m => String(m.id) === String(playerInfo.playerId));
-    const viewerPosition = viewerMember?.position || '';
-    return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: viewerPosition } });
+    return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '' } });
   } catch (err) {
     console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
     return res.status(500).json({ error: "Failed to fetch OC data: " + err.message });
@@ -2504,7 +2501,7 @@ router.get("/api/oc/settings", async (req, res) => {
       if (!isFactionAllowed(tornInfo.factionId) && !PARTNER_FACTIONS.includes(String(tornInfo.factionId)) && !hasXanaxSubscription(tornInfo.factionId)) {
         return res.status(403).json({ error: "Access restricted" });
       }
-      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName };
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition };
       _spawnKeyCache.set(suffix, info);
     } catch (err) { return res.status(401).json({ error: err.message }); }
   }
@@ -2534,7 +2531,7 @@ router.get("/api/oc/settings/update", async (req, res) => {
       if (!isFactionAllowed(tornInfo.factionId)) {
         return res.status(403).json({ error: "Settings can only be changed by faction members." });
       }
-      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName };
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition };
       _spawnKeyCache.set(suffix, info);
     } catch (err) { return res.status(401).json({ error: err.message }); }
   } else if (!isFactionAllowed(info.factionId)) {
