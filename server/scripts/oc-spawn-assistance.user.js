@@ -49,7 +49,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.6.2',
+            VERSION:           '1.6.3',
         };
     }
     let CONFIG = loadConfig();
@@ -494,7 +494,8 @@
         handle.addEventListener('touchstart', dragStart, { passive: false });
 
         function dragStart(e) {
-            if (e.target.tagName === 'BUTTON' || e.target.closest('button') || e.target.tagName === 'INPUT') return;
+            // If clicking a button/input INSIDE the handle (but not the handle itself), ignore drag
+            if (e.target !== handle && (e.target.tagName === 'BUTTON' || e.target.closest('button') || e.target.tagName === 'INPUT')) return;
             
             const pos = getClientPos(e);
             dragStartX = pos.x;
@@ -506,6 +507,7 @@
             
             isDragging = true;
             wasDragged = false;
+            el.dataset.wasDragged = 'false';
             
             if (el.id === 'oc-spawn-toggle') {
                 el.style.transform = 'scale(0.95)';
@@ -530,6 +532,7 @@
 
             if (!wasDragged && Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
             wasDragged = true;
+            el.dataset.wasDragged = 'true';
 
             if (e.cancelable) e.preventDefault();
 
@@ -560,9 +563,6 @@
             
             if (wasDragged) {
                 GM_setValue(keyPrefix + '_pos', { top: el.style.top, left: el.style.left });
-                el.dataset.wasDragged = 'true';
-            } else {
-                el.dataset.wasDragged = 'false';
             }
         }
     }
