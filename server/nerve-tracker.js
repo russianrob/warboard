@@ -37,6 +37,7 @@ let state = {
     // nnbChanges: logged every time base NNB changes by any amount
     nnbChanges: [],
     totalCrimes:   null,        // personalstats.criminaloffenses at last poll
+    crimeChain:    0,           // current chain calculated from crime logs
 };
 
 let pollTimer = null;
@@ -133,6 +134,14 @@ async function poll() {
         state.lastUpdated = now;
         if (totalCrimes != null) state.totalCrimes = totalCrimes;
 
+        // Recalculate chain from logs every poll cycle
+        try {
+            state.crimeChain = await calculateChain(state.apiKey);
+            console.log(`[NerveTracker] Chain: ${state.crimeChain}`);
+        } catch (chainErr) {
+            console.warn("[NerveTracker] Chain calc failed:", chainErr.message);
+        }
+
         // Append to rolling history (keep last 2016 entries = ~6 weeks)
         state.history.push({ ts: now, nerveMax, baseNNB, crimes: totalCrimes });
         if (state.history.length > 2016) state.history.splice(0, state.history.length - 2016);
@@ -158,6 +167,7 @@ export function getData() {
         nextNNB:       state.baseNNB != null ? Math.floor(state.baseNNB / 5) * 5 + 5 : null,
         // Last 48 hours of history (96 entries at 30-min intervals)
         recentHistory: state.history.slice(-96),
+        crimeChain:    state.crimeChain,
         // All NNB change events (compact — full history)
         nnbChanges: state.nnbChanges,
     };
