@@ -96,6 +96,31 @@ function estimateCprFromLevel(level) {
     else                   return { cpr: 82, highestLevel: 9, entries: [], estimated: true };
 }
 
+
+// ── OC Role Weights (from tornprobability.com) ────────────────────────────
+let _weightsCache = null;
+let _weightsFetchedAt = 0;
+const WEIGHTS_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+function _normalizeKey(str) {
+    return (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+async function getOcWeights() {
+    if (_weightsCache && (Date.now() - _weightsFetchedAt) < WEIGHTS_TTL_MS) return _weightsCache;
+    try {
+        const res = await fetch('https://tornprobability.com:3000/api/GetRoleWeights');
+        if (res.ok) {
+            _weightsCache = await res.json();
+            _weightsFetchedAt = Date.now();
+            console.log('[oc-weights] Fetched role weights from tornprobability.com');
+        }
+    } catch (e) {
+        console.warn('[oc-weights] Failed to fetch weights:', e.message);
+    }
+    return _weightsCache || {};
+}
+
 export async function getOcSpawnData(factionId, apiKey) {
   let cprCache = null;
   const cached = factionOcsCache.get(factionId);
@@ -115,5 +140,8 @@ export async function getOcSpawnData(factionId, apiKey) {
     const uid = String(m.id);
     if (!cprCache[uid] && m.level) cprCache[uid] = estimateCprFromLevel(m.level);
   }
-  return { members, availableCrimes, cprCache };
+  // Fetch role weights (cached 24h)
+  const weights = await getOcWeights();
+
+  return { members, availableCrimes, cprCache, weights };
 }
