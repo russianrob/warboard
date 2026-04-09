@@ -269,6 +269,7 @@
             background: #2d6a4f; color: #fff; border: none; border-radius: 6px;
             padding: 7px 13px; font-size: 12px; font-weight: bold; cursor: move;
             box-shadow: 0 2px 8px rgba(0,0,0,.4); touch-action: none;
+            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.2s ease;
         }
         #oc-spawn-toggle:hover { background: #1b4332; }
         #oc-spawn-panel {
@@ -464,8 +465,15 @@
     // ═══════════════════════════════════════════════════════════════════════
     //  DRAGGABLE LOGIC
     // ═══════════════════════════════════════════════════════════════════════
+    const getClientPos = (e) => {
+        if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        return { x: e.clientX, y: e.clientY };
+    };
+
     function makeDraggable(el, handle, keyPrefix) {
-        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+        let isDragging = false, wasDragged = false;
+        let dragStartX, dragStartY, elStartX, elStartY;
+        const DRAG_THRESHOLD = 5;
 
         // Load saved position
         const savedPos = GM_getValue(keyPrefix + '_pos', null);
@@ -486,50 +494,74 @@
         function dragStart(e) {
             if (e.target.tagName === 'BUTTON' || e.target.closest('button') || e.target.tagName === 'INPUT') return;
             
+            const pos = getClientPos(e);
+            dragStartX = pos.x;
+            dragStartY = pos.y;
+            
+            const rect = el.getBoundingClientRect();
+            elStartX = rect.left;
+            elStartY = rect.top;
+            
+            isDragging = true;
+            wasDragged = false;
+            
+            if (el.id === 'oc-spawn-toggle') {
+                el.style.transform = 'scale(0.95)';
+            }
+            
             if (e.type === 'mousedown') {
-                pos3 = e.clientX;
-                pos4 = e.clientY;
-                document.onmouseup = dragEnd;
-                document.onmousemove = dragMove;
-            } else if (e.type === 'touchstart') {
-                pos3 = e.touches[0].clientX;
-                pos4 = e.touches[0].clientY;
-                document.addEventListener('touchend', dragEnd, false);
+                document.addEventListener('mousemove', dragMove, false);
+                document.addEventListener('mouseup', dragEnd, false);
+            } else {
                 document.addEventListener('touchmove', dragMove, { passive: false });
+                document.addEventListener('touchend', dragEnd, false);
             }
             
             document.body.classList.add('oc-dragging');
         }
 
         function dragMove(e) {
-            let clientX, clientY;
-            if (e.type === 'mousemove') {
-                clientX = e.clientX;
-                clientY = e.clientY;
-            } else {
-                clientX = e.touches[0].clientX;
-                clientY = e.touches[0].clientY;
-                if (e.cancelable) e.preventDefault(); // Prevent page scrolling
-            }
+            if (!isDragging) return;
+            const pos = getClientPos(e);
+            const dx = pos.x - dragStartX;
+            const dy = pos.y - dragStartY;
 
-            pos1 = pos3 - clientX;
-            pos2 = pos4 - clientY;
-            pos3 = clientX;
-            pos4 = clientY;
+            if (!wasDragged && Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+            wasDragged = true;
 
-            el.style.top = (el.offsetTop - pos2) + "px";
-            el.style.left = (el.offsetLeft - pos1) + "px";
+            if (e.cancelable) e.preventDefault();
+
+            const ew = el.offsetWidth, eh = el.offsetHeight;
+            const newX = Math.max(0, Math.min(window.innerWidth - ew, elStartX + dx));
+            const newY = Math.max(0, Math.min(window.innerHeight - eh, elStartY + dy));
+
+            el.style.top = newY + "px";
+            el.style.left = newX + "px";
             el.style.bottom = 'auto';
             el.style.right = 'auto';
         }
 
         function dragEnd() {
-            document.onmouseup = null;
-            document.onmousemove = null;
-            document.removeEventListener('touchend', dragEnd);
+            if (!isDragging) return;
+            isDragging = false;
+            
+            if (el.id === 'oc-spawn-toggle') {
+                el.style.transform = 'scale(1)';
+            }
+
+            document.removeEventListener('mousemove', dragMove);
+            document.removeEventListener('mouseup', dragEnd);
             document.removeEventListener('touchmove', dragMove);
+            document.removeEventListener('touchend', dragEnd);
+            
             document.body.classList.remove('oc-dragging');
-            GM_setValue(keyPrefix + '_pos', { top: el.style.top, left: el.style.left });
+            
+            if (wasDragged) {
+                GM_setValue(keyPrefix + '_pos', { top: el.style.top, left: el.style.left });
+                el.dataset.wasDragged = 'true';
+            } else {
+                el.dataset.wasDragged = 'false';
+            }
         }
     }
 
@@ -537,6 +569,7 @@
     makeDraggable(panel, document.getElementById('oc-spawn-hdr'), 'oc_panel');
 
     toggleBtn.addEventListener('click', (e) => { 
+        if (toggleBtn.dataset.wasDragged === 'true') return;
         panelVisible = !panelVisible; 
         panel.style.display = panelVisible ? 'flex' : 'none'; 
     });
