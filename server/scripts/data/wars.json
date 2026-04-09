@@ -12,15 +12,15 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "41 minutes ago",
+        "lastAction": "42 minutes ago",
         "activity": "offline"
       },
       "421578": {
         "name": "R35PECT",
         "level": 75,
         "status": "hospital",
-        "description": "In an Emirati hospital for 8 mins ",
-        "until": 483,
+        "description": "In an Emirati hospital for 7 mins ",
+        "until": 422,
         "lastAction": "12 hours ago",
         "activity": "offline"
       },
@@ -48,7 +48,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "12 minutes ago",
+        "lastAction": "13 minutes ago",
         "activity": "offline"
       },
       "925842": {
@@ -84,7 +84,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "9 hours ago",
+        "lastAction": "10 hours ago",
         "activity": "offline"
       },
       "1316964": {
@@ -102,7 +102,7 @@
         "status": "traveling",
         "description": "Traveling to UAE",
         "until": 0,
-        "lastAction": "4 minutes ago",
+        "lastAction": "5 minutes ago",
         "activity": "idle"
       },
       "1858749": {
@@ -111,7 +111,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "8 minutes ago",
+        "lastAction": "9 minutes ago",
         "activity": "offline"
       },
       "1945944": {
@@ -129,7 +129,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "6 minutes ago",
+        "lastAction": "7 minutes ago",
         "activity": "offline"
       },
       "1974297": {
@@ -156,7 +156,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "16 minutes ago",
+        "lastAction": "17 minutes ago",
         "activity": "idle"
       },
       "2090911": {
@@ -201,8 +201,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "8 minutes ago",
-        "activity": "online"
+        "lastAction": "9 minutes ago",
+        "activity": "idle"
       },
       "2287273": {
         "name": "NastyChief",
@@ -237,7 +237,7 @@
         "status": "abroad",
         "description": "In UAE",
         "until": 0,
-        "lastAction": "7 hours ago",
+        "lastAction": "8 hours ago",
         "activity": "offline"
       },
       "2482925": {
@@ -246,7 +246,7 @@
         "status": "traveling",
         "description": "Traveling to Switzerland",
         "until": 0,
-        "lastAction": "7 minutes ago",
+        "lastAction": "8 minutes ago",
         "activity": "offline"
       },
       "2520644": {
@@ -255,7 +255,7 @@
         "status": "traveling",
         "description": "Returning to Torn from Argentina",
         "until": 0,
-        "lastAction": "28 minutes ago",
+        "lastAction": "29 minutes ago",
         "activity": "idle"
       },
       "2619856": {
@@ -264,7 +264,7 @@
         "status": "traveling",
         "description": "Returning to Torn from UAE",
         "until": 0,
-        "lastAction": "11 minutes ago",
+        "lastAction": "12 minutes ago",
         "activity": "idle"
       },
       "2633162": {
@@ -282,7 +282,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "8 minutes ago",
+        "lastAction": "9 minutes ago",
         "activity": "offline"
       },
       "2653946": {
@@ -291,7 +291,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "0 minutes ago",
+        "lastAction": "1 minute ago",
         "activity": "online"
       },
       "2654560": {
@@ -318,7 +318,7 @@
         "status": "traveling",
         "description": "Returning to Torn from China",
         "until": 0,
-        "lastAction": "51 minutes ago",
+        "lastAction": "52 minutes ago",
         "activity": "offline"
       },
       "2710089": {
@@ -327,7 +327,7 @@
         "status": "traveling",
         "description": "Traveling to UAE",
         "until": 0,
-        "lastAction": "48 minutes ago",
+        "lastAction": "49 minutes ago",
         "activity": "idle"
       },
       "2731923": {
@@ -345,7 +345,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "22 minutes ago",
+        "lastAction": "23 minutes ago",
         "activity": "offline"
       },
       "2856835": {
@@ -363,7 +363,7 @@
         "status": "traveling",
         "description": "Returning to Torn from UAE",
         "until": 0,
-        "lastAction": "12 minutes ago",
+        "lastAction": "13 minutes ago",
         "activity": "offline"
       },
       "2889734": {
@@ -372,7 +372,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "51 minutes ago",
+        "lastAction": "52 minutes ago",
         "activity": "offline"
       },
       "2978084": {
@@ -399,7 +399,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "26 minutes ago",
+        "lastAction": "27 minutes ago",
         "activity": "offline"
       },
       "2992180": {
@@ -408,7 +408,7 @@
         "status": "traveling",
         "description": "Returning to Torn from China",
         "until": 0,
-        "lastAction": "25 minutes ago",
+        "lastAction": "26 minutes ago",
         "activity": "offline"
       },
       "3036887": {
@@ -426,7 +426,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "53 minutes ago",
+        "lastAction": "54 minutes ago",
         "activity": "offline"
       },
       "3103393": {
@@ -435,7 +435,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "10 minutes ago",
+        "lastAction": "11 minutes ago",
         "activity": "offline"
       },
       "3103492": {
@@ -489,7 +489,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 minute ago",
+        "lastAction": "0 minutes ago",
         "activity": "online"
       },
       "3351083": {
@@ -507,7 +507,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "7 minutes ago",
+        "lastAction": "8 minutes ago",
         "activity": "offline"
       },
       "3401783": {
@@ -534,8 +534,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 minute ago",
-        "activity": "online"
+        "lastAction": "2 minutes ago",
+        "activity": "idle"
       },
       "3432096": {
         "name": "Zumbus",
@@ -543,7 +543,7 @@
         "status": "traveling",
         "description": "Returning to Torn from Cayman Islands",
         "until": 0,
-        "lastAction": "8 minutes ago",
+        "lastAction": "9 minutes ago",
         "activity": "idle"
       },
       "3438125": {
@@ -552,7 +552,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "16 minutes ago",
+        "lastAction": "17 minutes ago",
         "activity": "offline"
       },
       "3439757": {
@@ -624,7 +624,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "42 minutes ago",
+        "lastAction": "43 minutes ago",
         "activity": "offline"
       },
       "3629436": {
@@ -633,7 +633,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "5 minutes ago",
+        "lastAction": "6 minutes ago",
         "activity": "idle"
       },
       "3637529": {
@@ -642,7 +642,7 @@
         "status": "abroad",
         "description": "In United Kingdom",
         "until": 0,
-        "lastAction": "12 minutes ago",
+        "lastAction": "13 minutes ago",
         "activity": "idle"
       },
       "3637820": {
@@ -687,7 +687,7 @@
         "status": "traveling",
         "description": "Traveling to China",
         "until": 0,
-        "lastAction": "6 minutes ago",
+        "lastAction": "7 minutes ago",
         "activity": "idle"
       },
       "3680912": {
@@ -705,7 +705,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "31 minutes ago",
+        "lastAction": "32 minutes ago",
         "activity": "offline"
       },
       "3693248": {
@@ -723,7 +723,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "33 minutes ago",
+        "lastAction": "34 minutes ago",
         "activity": "offline"
       },
       "3739824": {
@@ -741,8 +741,8 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "2 minutes ago",
-        "activity": "offline"
+        "lastAction": "0 minutes ago",
+        "activity": "online"
       },
       "3810662": {
         "name": "BallBusterDan",
@@ -768,7 +768,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "0 minutes ago",
+        "lastAction": "1 minute ago",
         "activity": "online"
       },
       "3878998": {
@@ -795,8 +795,8 @@
         "status": "traveling",
         "description": "Returning to Torn from Switzerland",
         "until": 0,
-        "lastAction": "39 minutes ago",
-        "activity": "idle"
+        "lastAction": "40 minutes ago",
+        "activity": "offline"
       },
       "3925380": {
         "name": "4leggedbeef",
@@ -804,7 +804,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "8 minutes ago",
+        "lastAction": "9 minutes ago",
         "activity": "online"
       },
       "3939211": {
@@ -813,7 +813,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "46 minutes ago",
+        "lastAction": "47 minutes ago",
         "activity": "offline"
       },
       "3954027": {
@@ -840,7 +840,7 @@
         "status": "traveling",
         "description": "Traveling to China",
         "until": 0,
-        "lastAction": "14 minutes ago",
+        "lastAction": "15 minutes ago",
         "activity": "idle"
       },
       "4013580": {
@@ -867,7 +867,7 @@
         "status": "okay",
         "description": "Okay",
         "until": 0,
-        "lastAction": "1 minute ago",
+        "lastAction": "0 minutes ago",
         "activity": "online"
       },
       "4029742": {
@@ -914,30 +914,6 @@
       "timestamp": 1775734168454
     },
     "enemyActivityLog": [
-      {
-        "timestamp": 1775653109280,
-        "online": 0,
-        "idle": 10,
-        "total": 99
-      },
-      {
-        "timestamp": 1775653124699,
-        "online": 0,
-        "idle": 10,
-        "total": 99
-      },
-      {
-        "timestamp": 1775653138858,
-        "online": 0,
-        "idle": 9,
-        "total": 99
-      },
-      {
-        "timestamp": 1775653154125,
-        "online": 0,
-        "idle": 9,
-        "total": 99
-      },
       {
         "timestamp": 1775653169453,
         "online": 0,
@@ -35473,6 +35449,30 @@
         "online": 0,
         "idle": 16,
         "total": 99
+      },
+      {
+        "timestamp": 1775741000177,
+        "online": 0,
+        "idle": 16,
+        "total": 99
+      },
+      {
+        "timestamp": 1775741015476,
+        "online": 0,
+        "idle": 16,
+        "total": 99
+      },
+      {
+        "timestamp": 1775741030785,
+        "online": 0,
+        "idle": 17,
+        "total": 99
+      },
+      {
+        "timestamp": 1775741045126,
+        "online": 0,
+        "idle": 17,
+        "total": 99
       }
     ],
     "strategy": null,
@@ -35484,8 +35484,8 @@
     "warStart": 1775833200,
     "warOrigTarget": 11232,
     "ourFactionOnline": {
-      "online": 12,
-      "idle": 8,
+      "online": 13,
+      "idle": 9,
       "total": 96
     },
     "enemyFactionName": "Wolf Pack Next Generation",
@@ -35495,10 +35495,10 @@
       "receivedAt": 1775732939143
     },
     "warEta": {
-      "etaTimestamp": 1776100985009,
+      "etaTimestamp": 1776101045240,
       "hoursRemaining": 100,
       "currentTarget": 11232,
-      "calculatedAt": 1775740985009,
+      "calculatedAt": 1775741045240,
       "preDropPhase": true
     }
   }
