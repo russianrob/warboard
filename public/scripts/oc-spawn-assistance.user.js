@@ -1,7 +1,11 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
+<<<<<<< Updated upstream
 // @version      1.5.4
+=======
+// @version      1.5.5
+>>>>>>> Stashed changes
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -282,6 +286,7 @@
         #oc-spawn-panel h2 {
             margin: 0 0 10px; font-size: 15px; font-weight: 700; color: #74c69d;
             display: flex; justify-content: space-between; align-items: center;
+            cursor: move; user-select: none;
         }
         #oc-spawn-panel h3 {
             margin: 14px 0 6px; font-size: 10px; font-weight: 600; color: #6b7280;
@@ -359,6 +364,75 @@
     `);
 
     // ═══════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════
+    //  DRAGGABLE HELPER  — works for both mouse and touch (TornPDA)
+    // ═══════════════════════════════════════════════════════════════════════
+    function makeDraggable(el, { handle = el, onClickFn = null, storageKey = null } = {}) {
+        // Restore saved position
+        if (storageKey) {
+            const saved = GM_getValue(storageKey, null);
+            if (saved) {
+                el.style.bottom = 'auto'; el.style.right = 'auto';
+                el.style.top    = saved.top  + 'px';
+                el.style.left   = saved.left + 'px';
+            }
+        }
+
+        let sx, sy, sl, st, moved;
+
+        function evtPos(e) {
+            return e.touches ? [e.touches[0].clientX, e.touches[0].clientY]
+                             : [e.clientX, e.clientY];
+        }
+
+        function onStart(e) {
+            if (e.target.closest('button, input, select, a')) return;
+            const [x, y] = evtPos(e);
+            sx = x; sy = y;
+            const r = el.getBoundingClientRect();
+            sl = r.left; st = r.top;
+            moved = false;
+            // Switch to absolute top/left so dragging works from any starting position
+            el.style.bottom = 'auto'; el.style.right = 'auto';
+            el.style.top  = st + 'px';
+            el.style.left = sl + 'px';
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('touchmove', onMove, { passive: false });
+            document.addEventListener('mouseup',   onEnd);
+            document.addEventListener('touchend',  onEnd);
+            e.preventDefault();
+        }
+
+        function onMove(e) {
+            const [x, y] = evtPos(e);
+            const dx = x - sx, dy = y - sy;
+            if (!moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) moved = true;
+            if (!moved) return;
+            const w = el.offsetWidth, h = el.offsetHeight;
+            el.style.left = Math.max(0, Math.min(window.innerWidth  - w, sl + dx)) + 'px';
+            el.style.top  = Math.max(0, Math.min(window.innerHeight - h, st + dy)) + 'px';
+            if (e.cancelable) e.preventDefault();
+        }
+
+        function onEnd() {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('touchmove', onMove);
+            document.removeEventListener('mouseup',   onEnd);
+            document.removeEventListener('touchend',  onEnd);
+            if (!moved && onClickFn) onClickFn();
+            if (moved && storageKey) {
+                GM_setValue(storageKey, {
+                    top:  parseInt(el.style.top),
+                    left: parseInt(el.style.left),
+                });
+            }
+        }
+
+        handle.style.cursor = 'grab';
+        handle.addEventListener('mousedown',  onStart);
+        handle.addEventListener('touchstart', onStart, { passive: false });
+    }
+
     //  DOM SETUP
     // ═══════════════════════════════════════════════════════════════════════
     const toggleBtn = document.createElement('button');
@@ -449,10 +523,25 @@
     const scopeTooltipEl = document.createElement('div');
     scopeTooltipEl.id = 'oc-scope-tooltip';
     document.body.appendChild(scopeTooltipEl);
+<<<<<<< Updated upstream
+
+    let panelVisible = false, cprTipOpen = false, scopeTipOpen = false;
+=======
+>>>>>>> Stashed changes
 
     let panelVisible = false, cprTipOpen = false, scopeTipOpen = false;
 
-    toggleBtn.addEventListener('click', () => { panelVisible = !panelVisible; panel.style.display = panelVisible ? 'block' : 'none'; });
+    // Draggable toggle button — tap to open/close, drag to reposition
+    makeDraggable(toggleBtn, {
+        onClickFn:  () => { panelVisible = !panelVisible; panel.style.display = panelVisible ? 'block' : 'none'; },
+        storageKey: 'oc_btn_pos',
+    });
+
+    // Draggable panel — drag the header to reposition
+    makeDraggable(panel, {
+        handle:     panel.querySelector('h2'),
+        storageKey: 'oc_panel_pos',
+    });
     document.getElementById('oc-spawn-refresh').addEventListener('click', runAnalysis);
     document.getElementById('oc-spawn-close').addEventListener('click', () => { panelVisible = false; panel.style.display = 'none'; });
     document.getElementById('oc-spawn-settings').addEventListener('click', () => {
