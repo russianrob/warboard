@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.7.1
+// @version      1.7.5
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -67,26 +67,11 @@
         CONFIG.SCOPE = scope;
         CONFIG._scopeAutoDetected = true;
 
-        // Update settings panel if open
+        // Update settings panel input
         const scopeEl = document.getElementById('cfg-scope');
         if (scopeEl) scopeEl.value = scope;
-
-        // Update local storage
-        GM_setValue('cfg_scope', scope);
-
-        // Push to server ASAP (short 1s debounce to catch rapid updates)
-        clearTimeout(scopePushTimer);
-        scopePushTimer = setTimeout(async () => {
-            const apiKey = getApiKey();
-            if (apiKey && apiKey !== 'YOUR_API_KEY_HERE') {
-                try {
-                    await pushFactionSettings(apiKey, CONFIG);
-                    console.log('[OC Spawn] Scope pushed to server:', scope);
-                } catch (e) {
-                    console.warn('[OC Spawn] Failed to push scope:', e.message);
-                }
-            }
-        }, 1000);
+        // Scope is sent to the server only when the user manually
+        // clicks Refresh or Save Settings — no automatic server calls
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -760,6 +745,7 @@
                 noCrimeHistory: cprValue === null,
                 cprEstimated:  cpr?.estimated || false,
                 cprEntries:    cpr?.entries ?? [],
+                byPosition:    cpr?.byPosition ?? {},
             });
         }
         return { eligible, skipped };
@@ -953,8 +939,10 @@
         // Sort by joinable level desc, then name
         const sorted = [...eligible].sort((a, b) => (b.joinable - a.joinable) || a.name.localeCompare(b.name));
         const rows = sorted.map(m => {
+            const readyLabel = (m.ocReadyAt && m.ocReadyAt > now())
+                ? `free ${fmtTs(m.ocReadyAt)}` : 'active (paused)';
             const sb = m.inOC
-                ? `<span class="oc-badge oc-badge-in">In OC → free ${fmtTs(m.ocReadyAt)}</span>`
+                ? `<span class="oc-badge oc-badge-in">In OC → ${readyLabel}</span>`
                 : `<span class="oc-badge oc-badge-free">Free</span>`;
             let cc = 'oc-cpr-low';
             if (m.cpr !== null && m.cpr >= 80)                cc = 'oc-cpr-high';
@@ -1000,12 +988,16 @@
         if (!me) {
             statusHtml = `<span style="color:#6b7280">Not found in eligible members</span>`;
         } else if (me.inOC) {
-            statusHtml = `<span class="oc-badge oc-badge-in">In OC → free ${fmtTs(me.ocReadyAt)}</span>`;
+            const readyLabel = (me.ocReadyAt && me.ocReadyAt > now())
+                ? `free ${fmtTs(me.ocReadyAt)}`
+                : 'active (timer paused)';
+            statusHtml = `<span class="oc-badge oc-badge-in">In OC → ${readyLabel}</span>`;
         } else {
             statusHtml = `<span class="oc-badge oc-badge-free">Free now</span>`;
         }
 
-        // Find recruiting OCs the viewer can join (at their joinable level, with open slots)
+        // Find recruiting OCs with best-fit position recommendation
+        const byPos = me?.byPosition || {};
         const myOcs = normArr(availableCrimes).filter(c => {
             if (c.status !== 'Recruiting') return false;
             if (c.difficulty !== joinable) return false;
@@ -1019,8 +1011,17 @@
             recsHtml = `<div class="oc-viewer-none">No open Lvl ${joinable} OCs recruiting right now.</div>`;
         } else {
             const chips = myOcs.map(c => {
-                const open = (c.slots || []).filter(s => !s.user_id && !s.user?.id).length;
-                return `<span class="oc-viewer-crime">${c.name} (${open} slot${open > 1 ? 's' : ''})</span>`;
+                const openSlots = (c.slots || []).filter(s => !s.user_id && !s.user?.id);
+                let bestPos = null, bestCPR = -1;
+                for (const slot of openSlots) {
+                    const key = slot.position_id || slot.position;
+                    const pd  = byPos[key];
+                    if (pd && pd.cpr > bestCPR) { bestCPR = pd.cpr; bestPos = pd.position; }
+                }
+                const posTag = bestPos
+                    ? ` <span style="color:#9ca3af;font-size:9px;">as ${bestPos}${bestCPR > 0 ? ' ' + bestCPR + '%' : ''}</span>`
+                    : ` <span style="color:#6b7280;font-size:9px;">${openSlots.length} slot${openSlots.length > 1 ? 's' : ''}</span>`;
+                return `<span class="oc-viewer-crime">${c.name}${posTag}</span>`;
             }).join('');
             recsHtml = `<div class="oc-viewer-crimes">${chips}</div>`;
         }
