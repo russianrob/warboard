@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.5.4
+// @version      1.5.5
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -48,7 +48,7 @@
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
             MAX_LEVEL:         Number(GM_getValue('cfg_max_level',    10)),
-            VERSION:           '1.5.4',
+            VERSION:           '1.5.5',
         };
     }
     let CONFIG = loadConfig();
@@ -617,23 +617,42 @@
         if (ps) { e.stopPropagation(); hideCprTooltip(); showScopeTooltip(ps); return; }
 
         const plan = e.target.closest('.oc-plan-btn');
-        if (plan && plan.dataset.lvl) {
+        if (plan) {
             e.stopPropagation();
+            
+            if (plan.dataset.action === 'goto-crimes') {
+                window.location.href = 'factions.php?step=your_crimes#/tab=crimes';
+                return;
+            }
+
             const lvl = parseInt(plan.dataset.lvl);
             const crimeRows = document.querySelectorAll('.crimes-list > li');
             let found = false;
+            
             for (const row of crimeRows) {
                 const planLink = row.querySelector('a[data-action="planOrganizedCrime"]');
                 if (planLink) {
-                    const crimeID = parseInt(planLink.getAttribute('data-crimeid'));
-                    if (crimeID === lvl) {
+                    const cid = parseInt(planLink.getAttribute('data-crimeid'));
+                    if (cid === lvl) {
                         planLink.click();
                         found = true;
                         break;
                     }
                 }
             }
-            if (!found) alert(`Could not find native 'Plan' button for Level ${lvl}. Please try clicking it manually on the page.`);
+            
+            if (!found) {
+                const terms = { 1: 'Assassination', 2: 'Illegal Transaction', 3: 'Hijacking', 4: 'Bomb Threat', 5: 'Kidnapping', 6: 'Plane Hijacking', 7: 'Bank Heist', 8: 'FBI Hack' };
+                const term = terms[lvl];
+                for (const row of crimeRows) {
+                    if (row.textContent.includes(term)) {
+                        const btn = row.querySelector('a[data-action="planOrganizedCrime"]');
+                        if (btn) { btn.click(); found = true; break; }
+                    }
+                }
+            }
+            
+            if (!found) alert(`Could not find native 'Plan' button for Level ${lvl}. Please ensure the list is loaded.`);
             return;
         }
 
@@ -843,10 +862,9 @@
                 const label = r.action === 'spawn' ? `Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''}` : `Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''} <span style="font-size:9px;opacity:.8">(need +${r.deficit} roles)</span>`;
                 const tagClass = r.action === 'spawn' ? 'oc-tag-spawn' : 'oc-tag-spawn-partial';
                 
-                // Add the Plan button if we need to spawn
                 const planBtn = onCrimesPage 
                     ? `<button class="oc-plan-btn" data-lvl="${r.level}">Plan</button>` 
-                    : `<button class="oc-plan-btn" onclick="window.location.href='factions.php?step=your_crimes#/crimes'">Go to Crimes</button>`;
+                    : `<button class="oc-plan-btn" data-action="goto-crimes">Go to Crimes</button>`;
                 
                 actionHtml = `<span class="${tagClass}">${label}</span>${planBtn}`;
             } else if (r.action === 'deferred') {
