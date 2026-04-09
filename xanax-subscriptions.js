@@ -10,7 +10,13 @@
  * Persists to data/xanax-subscriptions.json.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs';
+
+function atomicWriteJSON(filePath, data) {
+    const tmp = filePath + '.tmp';
+    writeFileSync(tmp, data);
+    renameSync(tmp, filePath);
+}
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -62,7 +68,7 @@ function loadState() {
 function saveState() {
     try {
         if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-        writeFileSync(SUBS_FILE, JSON.stringify(state, null, 2), 'utf-8');
+        atomicWriteJSON(SUBS_FILE, JSON.stringify(state, null, 2));
     } catch (e) {
         console.error('[xanax-subs] Failed to save state:', e.message);
     }
