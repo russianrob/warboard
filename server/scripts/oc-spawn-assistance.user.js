@@ -47,12 +47,13 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.5.0',
+            VERSION:           '1.5.2',
         };
     }
     let CONFIG = loadConfig();
 
     let cprBreakdownMap = {};
+    let lastScopeProjection = null;
     let scopePushTimer  = null;
     const SERVER = 'https://tornwar.com';
 
@@ -337,16 +338,16 @@
         .oc-cpr-high { color: #74c69d; } .oc-cpr-mid { color: #f4a261; } .oc-cpr-low { color: #9ca3af; }
         .oc-member-name { color: #f3f4f6; font-weight: 500; }
         .oc-member-id   { color: #6b7280; font-size: 10px; }
-        .oc-cpr-click { cursor: pointer; border-bottom: 1px dotted currentColor; }
-        .oc-cpr-click:hover { opacity: 0.75; }
-        /* Tooltip */
-        #oc-cpr-tooltip { position: fixed; z-index: 10001; background: #131f18; border: 1px solid #2d4a3e; border-radius: 8px; padding: 10px 12px; font-size: 11px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #d1d5db; box-shadow: 0 4px 20px rgba(0,0,0,.7); min-width: 220px; max-width: 300px; display: none; pointer-events: none; }
-        #oc-cpr-tooltip .oc-tt-title { font-weight: 600; color: #f3f4f6; margin-bottom: 5px; font-size: 12px; }
-        #oc-cpr-tooltip .oc-tt-avg   { color: #9ca3af; font-size: 10px; margin-bottom: 7px; }
-        #oc-cpr-tooltip table { width: 100%; border-collapse: collapse; }
-        #oc-cpr-tooltip th { color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; padding: 2px 4px; border-bottom: 1px solid #1a2e20; text-align: left; }
-        #oc-cpr-tooltip td { padding: 3px 4px; font-size: 11px; color: #f3f4f6; }
-        #oc-cpr-tooltip .oc-tt-note { color: #6b7280; font-size: 10px; margin-top: 7px; border-top: 1px solid #1a2e20; padding-top: 5px; }
+        .oc-cpr-click, .oc-proj-click { cursor: pointer; border-bottom: 1px dotted currentColor; }
+        .oc-cpr-click:hover, .oc-proj-click:hover { opacity: 0.75; }
+        /* Tooltips */
+        #oc-cpr-tooltip, #oc-scope-tooltip { position: fixed; z-index: 10001; background: #131f18; border: 1px solid #2d4a3e; border-radius: 8px; padding: 10px 12px; font-size: 11px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #d1d5db; box-shadow: 0 4px 20px rgba(0,0,0,.7); min-width: 220px; max-width: 300px; display: none; pointer-events: none; }
+        #oc-cpr-tooltip .oc-tt-title, #oc-scope-tooltip .oc-tt-title { font-weight: 600; color: #f3f4f6; margin-bottom: 5px; font-size: 12px; }
+        #oc-cpr-tooltip .oc-tt-avg, #oc-scope-tooltip .oc-tt-avg   { color: #9ca3af; font-size: 10px; margin-bottom: 7px; }
+        #oc-cpr-tooltip table, #oc-scope-tooltip table { width: 100%; border-collapse: collapse; }
+        #oc-cpr-tooltip th, #oc-scope-tooltip th { color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; padding: 2px 4px; border-bottom: 1px solid #1a2e20; text-align: left; }
+        #oc-cpr-tooltip td, #oc-scope-tooltip td { padding: 3px 4px; font-size: 11px; color: #f3f4f6; }
+        #oc-cpr-tooltip .oc-tt-note, #oc-scope-tooltip .oc-tt-note { color: #6b7280; font-size: 10px; margin-top: 7px; border-top: 1px solid #1a2e20; padding-top: 5px; }
         /* Misc */
         #oc-spawn-status { color: #6b7280; font-style: italic; margin: -6px 0 10px; font-size: 10px; }
         #oc-spawn-refresh { background: #152018; color: #74c69d; border: 1px solid #2d4a3e; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 11px; font-family: inherit; font-weight: 600; }
@@ -445,7 +446,11 @@
     cprTooltipEl.id = 'oc-cpr-tooltip';
     document.body.appendChild(cprTooltipEl);
 
-    let panelVisible = false, cprTipOpen = false;
+    const scopeTooltipEl = document.createElement('div');
+    scopeTooltipEl.id = 'oc-scope-tooltip';
+    document.body.appendChild(scopeTooltipEl);
+
+    let panelVisible = false, cprTipOpen = false, scopeTipOpen = false;
 
     toggleBtn.addEventListener('click', () => { panelVisible = !panelVisible; panel.style.display = panelVisible ? 'block' : 'none'; });
     document.getElementById('oc-spawn-refresh').addEventListener('click', runAnalysis);
@@ -551,11 +556,52 @@
         cprTipOpen = true;
     }
     function hideCprTooltip() { cprTooltipEl.style.display = 'none'; cprTipOpen = false; }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  SCOPE TOOLTIP
+    // ═══════════════════════════════════════════════════════════════════════
+    function showScopeTooltip(el) {
+        if (!lastScopeProjection || !lastScopeProjection.details.length) {
+            if (lastScopeProjection) {
+                scopeTooltipEl.innerHTML = `<div class="oc-tt-title">Scope Projection</div><div class="oc-tt-avg">No in-flight crimes found in ${CONFIG.FORECAST_HOURS}h window. Only daily regen (+${lastScopeProjection.regen}) applied.</div>`;
+                scopeTooltipEl.style.display = 'block';
+                const r = el.getBoundingClientRect();
+                scopeTooltipEl.style.top = (r.bottom + 6) + 'px'; scopeTooltipEl.style.left = r.left + 'px';
+                scopeTipOpen = true;
+            }
+            return;
+        }
+        const p = lastScopeProjection;
+        const rows = p.details.map(d => {
+            return `<tr><td>${d.name}</td><td>${d.avgCpr}%</td><td>+${d.expectedGain}</td></tr>`;
+        }).join('');
+
+        scopeTooltipEl.innerHTML = `
+            <div class="oc-tt-title">Scope Calculation</div>
+            <div class="oc-tt-avg">Base: <b>${p.current}</b> + ${p.regen} daily</div>
+            <table><thead><tr><th>Crime</th><th>Prob.</th><th>Gain</th></tr></thead><tbody>${rows}</tbody></table>
+            <div class="oc-tt-note">Gain = Success payout × Average member CPR</div>`;
+        scopeTooltipEl.style.display = 'block';
+        const rect = el.getBoundingClientRect();
+        scopeTooltipEl.style.top = (rect.bottom + 6) + 'px';
+        scopeTooltipEl.style.left = rect.left + 'px';
+        requestAnimationFrame(() => {
+            const tr = scopeTooltipEl.getBoundingClientRect();
+            if (tr.right  > window.innerWidth  - 8) scopeTooltipEl.style.left = (window.innerWidth  - tr.width  - 8) + 'px';
+            if (tr.bottom > window.innerHeight - 8) scopeTooltipEl.style.top  = (rect.top - tr.height - 6) + 'px';
+        });
+        scopeTipOpen = true;
+    }
+    function hideScopeTooltip() { scopeTooltipEl.style.display = 'none'; scopeTipOpen = false; }
+
     panel.addEventListener('click', e => {
         const t = e.target.closest('.oc-cpr-click');
-        if (t) { e.stopPropagation(); showCprTooltip(t); } else hideCprTooltip();
+        if (t) { e.stopPropagation(); hideScopeTooltip(); showCprTooltip(t); return; }
+        const ps = e.target.closest('.oc-proj-click');
+        if (ps) { e.stopPropagation(); hideCprTooltip(); showScopeTooltip(ps); return; }
+        hideCprTooltip(); hideScopeTooltip();
     });
-    document.addEventListener('click', () => { if (cprTipOpen) hideCprTooltip(); });
+    document.addEventListener('click', () => { if (cprTipOpen) hideCprTooltip(); if (scopeTipOpen) hideScopeTooltip(); });
 
     // ═══════════════════════════════════════════════════════════════════════
     //  UTILITY
@@ -620,20 +666,23 @@
         const crimeGroups = {};
         for (const m of completingSoon) {
             const key = `${m.ocReadyAt}_${m.currentCrimeDiff}`;
-            if (!crimeGroups[key]) crimeGroups[key] = { diff: m.currentCrimeDiff, members: [] };
+            if (!crimeGroups[key]) crimeGroups[key] = { diff: m.currentCrimeDiff, name: m.ocCrimeName, members: [] };
             crimeGroups[key].members.push(m);
         }
 
-        let expectedGain = 0;
+        let totalExpectedGain = 0;
+        const details = [];
         for (const group of Object.values(crimeGroups)) {
             if (!group.diff) continue;
             const range   = diffToScopeRange(group.diff);
-            const avgCPR  = group.members.reduce((s, m) => s + (m.cpr ?? 0), 0) / group.members.length / 100;
-            expectedGain += range.payout * avgCPR;
+            const avgCPR  = group.members.reduce((s, m) => s + (m.cpr ?? 0), 0) / group.members.length;
+            const gain    = Math.round((range.payout * (avgCPR / 100)) * 10) / 10;
+            totalExpectedGain += gain;
+            details.push({ name: group.name || `Lvl ${group.diff} OC`, avgCpr: Math.round(avgCPR), payout: range.payout, expectedGain: gain });
         }
 
-        const projected = Math.min(SCOPE_MAX, currentScope + regen + expectedGain);
-        return { current: currentScope, regen: Math.round(regen * 10) / 10, expectedGain: Math.round(expectedGain * 10) / 10, projected: Math.round(projected * 10) / 10 };
+        const projected = Math.min(SCOPE_MAX, currentScope + regen + totalExpectedGain);
+        return { current: currentScope, regen: Math.round(regen * 10) / 10, expectedGain: Math.round(totalExpectedGain * 10) / 10, projected: Math.round(projected * 10) / 10, details };
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -738,7 +787,7 @@
             <div style="white-space:nowrap;color:#9ca3af;font-size:10px;">Scope${autoTag}</div>
             <div style="font-weight:600;color:#f3f4f6;white-space:nowrap;">${current}</div>
             <div class="oc-scope-bar-wrap"><div class="oc-scope-bar ${barClass}" style="width:${Math.round(current/SCOPE_MAX*100)}%"></div></div>
-            <div style="color:#6b7280;font-size:10px;white-space:nowrap;">→ <b style="color:#74c69d">${projected}</b> projected
+            <div style="color:#6b7280;font-size:10px;white-space:nowrap;">→ <span class="oc-proj-click"><b style="color:#74c69d">${projected}</b> projected</span>
                 <span style="color:#374151">(+${regen} daily, +${expectedGain} from crimes)</span>
             </div>
         </div>`;
@@ -915,6 +964,7 @@
             const slotMap               = countOpenSlots(availableCrimes);
             const { eligible, skipped } = processMembers(members, availableCrimes, cprCache);
             const scopeProjection        = projectScope(CONFIG.SCOPE, eligible);
+            lastScopeProjection         = scopeProjection; // cache for tooltip
             const recs                  = buildRecommendations(eligible, slotMap, scopeProjection);
 
             renderBody(recs, eligible, skipped, scopeProjection);
