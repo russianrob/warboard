@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.5.8
+// @version      1.5.9
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -47,7 +47,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.5.8',
+            VERSION:           '1.5.9',
         };
     }
     let CONFIG = loadConfig();
