@@ -86,6 +86,41 @@ async function fetchNerveData(apiKey) {
     };
 }
 
+
+// ── Chain calculation ──────────────────────────────────────────────────────
+async function calculateChain(apiKey) {
+    const fetchPage = async (to) => {
+        const p = new URLSearchParams({ selections: 'log', cat: '136', key: apiKey });
+        if (to) p.set('to', String(to));
+        const res  = await fetch(`https://api.torn.com/user/?${p}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error.error);
+        if (!data.log) return [];
+        return Object.values(data.log)
+            .filter(e => /crime (success|fail|critical fail)/i.test(e.title));
+    };
+
+    let collected = [];
+    let toTs = null;
+    for (let i = 0; i < 20; i++) {
+        const batch = await fetchPage(toTs);
+        if (!batch.length) break;
+        collected = [...batch, ...collected];
+        if (collected.some(e => /crime critical fail/i.test(e.title))) break;
+        toTs = batch.reduce((min, e) => Math.min(min, e.timestamp), Infinity) - 1;
+        await new Promise(r => setTimeout(r, 350));
+    }
+    collected.sort((a, b) => a.timestamp - b.timestamp);
+    let chain = 0;
+    for (const e of collected) {
+        if      (/crime success/i.test(e.title))       chain++;
+        else if (/crime critical fail/i.test(e.title)) chain = 0;
+        else                                            chain /= 2;
+    }
+    return Math.round(chain * 100) / 100;
+}
+
 // ── Poll ───────────────────────────────────────────────────────────────────
 
 async function poll() {
