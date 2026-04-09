@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.5.10
+// @version      1.5.2
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -47,7 +47,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.5.11',
+            VERSION:           '1.5.2',
         };
     }
     let CONFIG = loadConfig();
@@ -340,8 +340,6 @@
         .oc-member-id   { color: #6b7280; font-size: 10px; }
         .oc-cpr-click, .oc-proj-click { cursor: pointer; border-bottom: 1px dotted currentColor; }
         .oc-cpr-click:hover, .oc-proj-click:hover { opacity: 0.75; }
-        .oc-plan-btn { margin-left: 6px; padding: 2px 6px; background: #2d6a4f; color: #fff; border: none; border-radius: 3px; font-size: 9px; cursor: pointer; font-weight: bold; }
-        .oc-plan-btn:hover { background: #1b4332; }
         /* Tooltips */
         #oc-cpr-tooltip, #oc-scope-tooltip { position: fixed; z-index: 10001; background: #131f18; border: 1px solid #2d4a3e; border-radius: 8px; padding: 10px 12px; font-size: 11px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #d1d5db; box-shadow: 0 4px 20px rgba(0,0,0,.7); min-width: 220px; max-width: 300px; display: none; pointer-events: none; }
         #oc-cpr-tooltip .oc-tt-title, #oc-scope-tooltip .oc-tt-title { font-weight: 600; color: #f3f4f6; margin-bottom: 5px; font-size: 12px; }
@@ -402,7 +400,8 @@
             </div>
             <div class="oc-setting-row">
                 <div class="oc-setting-info">
-                    <span class="oc-setting-label">Active Days</span>                    <div class="oc-setting-desc">Members inactive longer than this are skipped entirely.</div>
+                    <span class="oc-setting-label">Active Days</span>
+                    <div class="oc-setting-desc">Members inactive longer than this are skipped entirely.</div>
                 </div>
                 <input class="oc-setting-num" id="cfg-active-days" type="number" min="1" max="30"/>
             </div>
@@ -475,7 +474,7 @@
         document.getElementById('cfg-forecast-hours').value = CONFIG.FORECAST_HOURS;
         document.getElementById('cfg-mincpr').value         = CONFIG.MINCPR;
         document.getElementById('cfg-cpr-boost').value      = CONFIG.CPR_BOOST;
-        document.getElementById('cfg-lookback-days').value  = CONFIG.CPR_LOOKBACK_DAYS;
+        document.getElementById('cfg-lookback-days').value  = CONFIG.LOOKBACK_DAYS;
     }
 
     function checkKeyRow() {
@@ -598,63 +597,8 @@
     panel.addEventListener('click', e => {
         const t = e.target.closest('.oc-cpr-click');
         if (t) { e.stopPropagation(); hideScopeTooltip(); showCprTooltip(t); return; }
-        
         const ps = e.target.closest('.oc-proj-click');
         if (ps) { e.stopPropagation(); hideCprTooltip(); showScopeTooltip(ps); return; }
-
-        const plan = e.target.closest('.oc-plan-btn');
-        if (plan) {
-            e.stopPropagation();
-            
-            if (plan.dataset.action === 'goto-crimes') {
-                window.location.href = 'factions.php?step=your_crimes#/tab=crimes';
-                return;
-            }
-
-            const lvl = parseInt(plan.dataset.lvl);
-            const list = document.querySelector('.crimes-list');
-            if (!list) {
-                alert("Crimes list not found. Please wait for the page to load or refresh.");
-                return;
-            }
-
-            const crimeRows = list.querySelectorAll(':scope > li');
-            let found = false;
-            
-            // Strategy 1: Match by the 'data-crimeid' attribute on the plan link
-            for (const row of crimeRows) {
-                const planLink = row.querySelector('a[data-action="planOrganizedCrime"]');
-                if (planLink && parseInt(planLink.getAttribute('data-crimeid')) === lvl) {
-                    planLink.click();
-                    found = true;
-                    break;
-                }
-            }
-            
-            // Strategy 2: Match by crime name keywords
-            if (!found) {
-                const terms = { 1: 'Assassination', 2: 'Transaction', 3: 'Hijacking', 4: 'Threat', 5: 'Kidnap', 6: 'Plane', 7: 'Heist', 8: 'FBI' };
-                const term = terms[lvl];
-                for (const row of crimeRows) {
-                    const title = row.querySelector('.title')?.textContent || '';
-                    if (title.includes(term)) {
-                        const btn = row.querySelector('a[data-action="planOrganizedCrime"]');
-                        if (btn) { btn.click(); found = true; break; }
-                    }
-                }
-            }
-
-            // Strategy 3: Match by index (Level 1 is usually first row, etc.)
-            if (!found && crimeRows.length >= lvl) {
-                const targetRow = crimeRows[lvl - 1];
-                const btn = targetRow.querySelector('a[data-action="planOrganizedCrime"]');
-                if (btn) { btn.click(); found = true; }
-            }
-            
-            if (!found) alert(`Could not find native 'Plan' button for Level ${lvl}. Please ensure the list is fully loaded.`);
-            return;
-        }
-
         hideCprTooltip(); hideScopeTooltip();
     });
     document.addEventListener('click', () => { if (cprTipOpen) hideCprTooltip(); if (scopeTipOpen) hideScopeTooltip(); });
@@ -853,26 +797,18 @@
         const visible = recs.filter(r => r.action !== 'none');
         if (!visible.length) return '<p class="oc-tag-none">No eligible members found for any level.</p>';
 
-        const onCrimesPage = window.location.href.includes('tab=crimes') || window.location.hash.includes('crimes');
-
         const rows = visible.map(r => {
             let actionHtml;
-            const planBtn = onCrimesPage 
-                ? `<button class="oc-plan-btn" data-lvl="${r.level}">Plan</button>` 
-                : `<button class="oc-plan-btn" data-action="goto-crimes">Go to Crimes</button>`;
-
-            if (r.action === 'spawn' || r.action === 'spawn_partial') {
-                const label = r.action === 'spawn' ? `Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''}` : `Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''} <span style="font-size:9px;opacity:.8">(need +${r.deficit} roles)</span>`;
-                const tagClass = r.action === 'spawn' ? 'oc-tag-spawn' : 'oc-tag-spawn-partial';
-                actionHtml = `<span class="${tagClass}">${label}</span>${planBtn}`;
+            if (r.action === 'spawn') {
+                actionHtml = `<span class="oc-tag-spawn">Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''}</span>`;
+            } else if (r.action === 'spawn_partial') {
+                actionHtml = `<span class="oc-tag-spawn-partial">Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''} <span style="font-size:9px;opacity:.8">(need +${r.deficit} roles)</span></span>`;
             } else if (r.action === 'deferred') {
-                actionHtml = `<span class="oc-tag-deferred">Deferred — no scope</span>${planBtn}`;
+                actionHtml = `<span class="oc-tag-deferred">Deferred — no scope</span>`;
             } else if (r.action === 'ok') {
-                actionHtml = `<span class="oc-tag-ok">✓ Covered</span>${planBtn}`;
-            } else if (r.action === 'surplus') {
-                actionHtml = `<span class="oc-tag-surplus">+${Math.abs(r.deficit)} extra</span>${planBtn}`;
+                actionHtml = `<span class="oc-tag-ok">✓ Covered</span>`;
             } else {
-                actionHtml = `<span class="oc-tag-none">0 needed</span>${planBtn}`;
+                actionHtml = `<span class="oc-tag-surplus">+${Math.abs(r.deficit)} extra</span>`;
             }
             const soonBadge = r.soonMembers > 0 ? ` <span class="oc-badge oc-badge-soon">+${r.soonMembers}</span>` : '';
             const costBadge = scopeProjection ? `<span class="oc-range-chip">R${r.scopeRange} · ${r.scopeCost}sp</span>` : '';
