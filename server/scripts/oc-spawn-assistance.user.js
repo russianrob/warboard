@@ -47,7 +47,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.5.2',
+            VERSION:           '1.5.12',
         };
     }
     let CONFIG = loadConfig();
@@ -720,14 +720,19 @@
             const sr      = diffToScopeRange(lvl);
 
             const slotsPerOc = info.crimes.length > 0 ? (info.totalSlots / info.crimes.length) : DEFAULT_SLOTS_PER_OC[sr.range];
-            const numOcsNeeded = Math.ceil(deficit / slotsPerOc);
+            // Only recommend spawning if we have enough people to FILL an OC
+            const numOcsNeeded = Math.floor(deficit / slotsPerOc);
 
             let action, numOcsToSpawn = 0;
 
-            if (totalNeeded === 0) {
+            if (totalNeeded === 0 || (info.openSlots === 0 && numOcsNeeded === 0)) {
                 action = 'none';
             } else if (deficit <= 0) {
                 action = deficit === 0 ? 'ok' : 'surplus';
+                numOcsToSpawn = 0;
+            } else if (numOcsNeeded === 0) {
+                // Deficit > 0 but not enough for a full OC. Open slots exist and are being filled.
+                action = 'waiting';
                 numOcsToSpawn = 0;
             } else if (scopeBudget === null) {
                 // No scope configured — fall back to simple deficit
@@ -807,6 +812,8 @@
                 actionHtml = `<span class="oc-tag-deferred">Deferred — no scope</span>`;
             } else if (r.action === 'ok') {
                 actionHtml = `<span class="oc-tag-ok">✓ Covered</span>`;
+            } else if (r.action === 'waiting') {
+                actionHtml = `<span class="oc-tag-deferred">${r.deficit} waiting</span>`;
             } else {
                 actionHtml = `<span class="oc-tag-surplus">+${Math.abs(r.deficit)} extra</span>`;
             }
