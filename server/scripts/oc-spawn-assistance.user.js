@@ -47,7 +47,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.5.9',
+            VERSION:           '1.5.10',
         };
     }
     let CONFIG = loadConfig();
@@ -850,28 +850,28 @@
     }
 
     function renderRecommendations(recs, scopeProjection) {
-        const visible = recs.filter(r => r.action !== 'none');
-        if (!visible.length) return '<p class="oc-tag-none">No eligible members found for any level.</p>';
+        if (!recs.length) return '<p class="oc-tag-none">No recommendations available.</p>';
 
         const onCrimesPage = window.location.href.includes('tab=crimes') || window.location.hash.includes('crimes');
 
-        const rows = visible.map(r => {
+        const rows = recs.map(r => {
             let actionHtml;
+            const planBtn = onCrimesPage 
+                ? `<button class="oc-plan-btn" data-lvl="${r.level}">Plan</button>` 
+                : `<button class="oc-plan-btn" data-action="goto-crimes">Go to Crimes</button>`;
+
             if (r.action === 'spawn' || r.action === 'spawn_partial') {
                 const label = r.action === 'spawn' ? `Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''}` : `Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''} <span style="font-size:9px;opacity:.8">(need +${r.deficit} roles)</span>`;
                 const tagClass = r.action === 'spawn' ? 'oc-tag-spawn' : 'oc-tag-spawn-partial';
-                
-                const planBtn = onCrimesPage 
-                    ? `<button class="oc-plan-btn" data-lvl="${r.level}">Plan</button>` 
-                    : `<button class="oc-plan-btn" data-action="goto-crimes">Go to Crimes</button>`;
-                
                 actionHtml = `<span class="${tagClass}">${label}</span>${planBtn}`;
             } else if (r.action === 'deferred') {
-                actionHtml = `<span class="oc-tag-deferred">Deferred — no scope</span>`;
+                actionHtml = `<span class="oc-tag-deferred">Deferred — no scope</span>${planBtn}`;
             } else if (r.action === 'ok') {
-                actionHtml = `<span class="oc-tag-ok">✓ Covered</span>`;
+                actionHtml = `<span class="oc-tag-ok">✓ Covered</span>${planBtn}`;
+            } else if (r.action === 'surplus') {
+                actionHtml = `<span class="oc-tag-surplus">+${Math.abs(r.deficit)} extra</span>${planBtn}`;
             } else {
-                actionHtml = `<span class="oc-tag-surplus">+${Math.abs(r.deficit)} extra</span>`;
+                actionHtml = `<span class="oc-tag-none">0 needed</span>${planBtn}`;
             }
             const soonBadge = r.soonMembers > 0 ? ` <span class="oc-badge oc-badge-soon">+${r.soonMembers}</span>` : '';
             const costBadge = scopeProjection ? `<span class="oc-range-chip">R${r.scopeRange} · ${r.scopeCost}sp</span>` : '';
