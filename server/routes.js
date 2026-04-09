@@ -14,6 +14,7 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { getOcSpawnData } from "./oc-spawn.js";
+import { getData as getNerveData, updateConfig as updateNerveConfig } from "./nerve-tracker.js";
 import { hasXanaxSubscription, grantFactionAccess } from "./xanax-subscriptions.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
@@ -2544,6 +2545,31 @@ router.get("/api/oc/settings/update", async (req, res) => {
   });
   console.log("[oc/settings] " + info.playerName + " updated faction " + info.factionId + " OC settings");
   return res.json({ ok: true });
+});
+
+
+// ── Nerve Tracker ──────────────────────────────────────────────────────────
+
+/**
+ * GET /api/nerve-tracker
+ * Returns current NNB state, 48-hour history, and all NNB change events.
+ * Public — no auth required (data is the player's own nerve bar history).
+ */
+router.get("/api/nerve-tracker", (req, res) => {
+    res.json(getNerveData());
+});
+
+/**
+ * POST /api/nerve-tracker/config
+ * Update faction offset (and optionally the API key).
+ * Protected by JWT so only the owner can change it.
+ * Body: { factionOffset: number, apiKey?: string }
+ */
+router.post("/api/nerve-tracker/config", requireAuth, (req, res) => {
+    const { factionOffset, apiKey } = req.body;
+    if (factionOffset == null) return res.status(400).json({ error: "factionOffset required" });
+    updateNerveConfig({ factionOffset, apiKey });
+    res.json({ ok: true, factionOffset: Number(factionOffset) });
 });
 
 export default router;

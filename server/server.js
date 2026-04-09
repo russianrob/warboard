@@ -29,6 +29,7 @@ import { loadHeatmaps, stopFlush as stopHeatmapFlush } from "./activity-heatmap.
 import { startMembershipSchedule, stopMembershipSchedule } from "./membership-check.js";
 import { startXanaxSubscriptions, stopXanaxSubscriptions } from "./xanax-subscriptions.js";
 import { startSubscriptionManager, stopSubscriptionManager } from "./subscription-manager.js";
+import { startNerveTracker, stopNerveTracker } from "./nerve-tracker.js";
 import * as store from "./store.js";
 import { loadSubscriptions } from "./push-notifications.js";
 import { fetchRankedWar } from "./torn-api.js";
@@ -308,6 +309,7 @@ startMembershipSchedule();
 
 // Start faction subscription manager (polls for 50M payments)
 startSubscriptionManager();
+    startNerveTracker();
 
 // ── Auto-detect new ranked wars every 5 minutes ─────────────────────────
 let warDetectTimer = null;
@@ -416,6 +418,7 @@ function shutdown(signal) {
   stopHeatmapFlush();
   stopMembershipSchedule();
   stopSubscriptionManager();
+        stopNerveTracker();
   store.saveState();
   httpServer.close(() => {
     console.log("[server] Server closed");
