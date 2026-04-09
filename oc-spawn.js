@@ -56,10 +56,17 @@ function buildCprCache(completedCrimes) {
       const rawRate = slot.checkpoint_pass_rate ?? slot.success_chance ?? null;
       if (rawRate === null) continue;
 
-      if (!cache[uid]) cache[uid] = { rateSum: 0, count: 0, entries: [] };
+      if (!cache[uid]) cache[uid] = { rateSum: 0, count: 0, entries: [], byPosition: {} };
       cache[uid].rateSum += rawRate;
       cache[uid].count += 1;
-      cache[uid].entries.push({ diff, rate: rawRate });
+      const posKey  = slot.position_id || slot.position || 'unknown';
+      const posName = slot.position    || 'Unknown';
+      cache[uid].entries.push({ diff, rate: rawRate, position: posName });
+      if (!cache[uid].byPosition[posKey]) {
+        cache[uid].byPosition[posKey] = { position: posName, rateSum: 0, count: 0 };
+      }
+      cache[uid].byPosition[posKey].rateSum += rawRate;
+      cache[uid].byPosition[posKey].count   += 1;
     }
   }
 
@@ -70,13 +77,16 @@ function buildCprCache(completedCrimes) {
     const cpr = d.count > 0 ? d.rateSum / d.count : 0;
     const topLevel = highestLevel[uid] || 0;
     const joinable = cpr >= MINCPR + CPR_BOOST ? Math.min(topLevel + 1, 10) : topLevel;
-    result[uid] = { cpr: Math.round(cpr * 10) / 10, highestLevel: topLevel, joinable, entries: d.entries };
+    const byPosition = {};
+    for (const [posKey, pd] of Object.entries(d.byPosition || {})) {
+      byPosition[posKey] = { position: pd.position, cpr: Math.round(pd.rateSum / pd.count * 10) / 10, count: pd.count };
+    }
+    result[uid] = { cpr: Math.round(cpr * 10) / 10, highestLevel: topLevel, joinable, entries: d.entries, byPosition };
   }
   return result;
 }
 
 
-// ── Level-based CPR estimate (fallback for members with no faction crime history) ──
 function estimateCprFromLevel(level) {
     if      (level <= 15)  return { cpr: 40, highestLevel: 1, entries: [], estimated: true };
     else if (level <= 30)  return { cpr: 55, highestLevel: 3, entries: [], estimated: true };
@@ -101,13 +111,9 @@ export async function getOcSpawnData(factionId, apiKey) {
   const basicData = await fetchFactionBasic(factionId, apiKey);
   const members = Object.entries(basicData.members || {}).map(([id, m]) => ({ id, ...m }));
 
-  // Fill in level-based estimates for members with no completed crime history
   for (const m of members) {
     const uid = String(m.id);
-    if (!cprCache[uid] && m.level) {
-      cprCache[uid] = estimateCprFromLevel(m.level);
-    }
+    if (!cprCache[uid] && m.level) cprCache[uid] = estimateCprFromLevel(m.level);
   }
-
   return { members, availableCrimes, cprCache };
 }
