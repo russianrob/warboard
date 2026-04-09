@@ -2480,7 +2480,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
 
   try {
     const data = await getOcSpawnData(playerInfo.factionId, key);
-    return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName } });
+    return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId) } });
   } catch (err) {
     console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
     return res.status(500).json({ error: "Failed to fetch OC data: " + err.message });
@@ -2528,12 +2528,14 @@ router.get("/api/oc/settings/update", async (req, res) => {
   if (!info || (Date.now() - info.ts) > 5 * 60_000) {
     try {
       const tornInfo = await verifyTornApiKey(key);
-      if (!isFactionAllowed(tornInfo.factionId) && !PARTNER_FACTIONS.includes(String(tornInfo.factionId)) && !hasXanaxSubscription(tornInfo.factionId)) {
-        return res.status(403).json({ error: "Access restricted" });
+      if (!isFactionAllowed(tornInfo.factionId)) {
+        return res.status(403).json({ error: "Settings can only be changed by faction members." });
       }
       info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName };
       _spawnKeyCache.set(suffix, info);
     } catch (err) { return res.status(401).json({ error: err.message }); }
+  } else if (!isFactionAllowed(info.factionId)) {
+    return res.status(403).json({ error: "Settings can only be changed by faction members." });
   }
   const num = (k, d) => { const v = parseInt(req.query[k], 10); return isNaN(v) ? d : v; };
   const scopeRaw = parseInt(req.query.scope, 10);
