@@ -474,7 +474,7 @@
         document.getElementById('cfg-forecast-hours').value = CONFIG.FORECAST_HOURS;
         document.getElementById('cfg-mincpr').value         = CONFIG.MINCPR;
         document.getElementById('cfg-cpr-boost').value      = CONFIG.CPR_BOOST;
-        document.getElementById('cfg-lookback-days').value  = CONFIG.LOOKBACK_DAYS;
+        document.getElementById('cfg-lookback-days').value  = CONFIG.CPR_LOOKBACK_DAYS;
     }
 
     function checkKeyRow() {
