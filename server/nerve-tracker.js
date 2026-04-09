@@ -40,6 +40,7 @@ let state = {
     crimeChain:    0,           // current chain calculated from crime logs
     bustStats:     null,        // bust CE stats from cat=29 logs
     crimeHistoryStats: null,   // historical CE stats per crime type
+    lastNNBIncreaseAt: 1768866000, // Unix timestamp of last confirmed NNB +5 (Jan 19 2026)
 };
 
 let pollTimer = null;
@@ -120,7 +121,7 @@ function crimeTypeFromAction(action) {
 
 // ── Historical crime stats from log ─────────────────────────────────────────
 // Fetches up to `pages` pages of cat=136 crime log and aggregates per crime type.
-async function getCrimeHistoryStats(apiKey, pages = 30) {
+async function getCrimeHistoryStats(apiKey, sinceTs) {
     const fetchPage = async (to) => {
         const p = new URLSearchParams({ selections: 'log', cat: '136', key: apiKey });
         if (to) p.set('to', String(to));
@@ -134,11 +135,21 @@ async function getCrimeHistoryStats(apiKey, pages = 30) {
     const stats = {};  // { typeName: { name, attempts, successes, failures, criticals, totalNerveSpent } }
     let toTs = null;
 
-    for (let i = 0; i < pages; i++) {
+    for (let i = 0; i < 200; i++) {  // hard cap 200 pages (~20k crimes)
         const batch = await fetchPage(toTs);
         if (!batch.length) break;
 
+        // Stop once all entries in this page are older than sinceTs
+        const newest = batch.reduce((max, e) => Math.max(max, e.timestamp), 0);
+        const oldest = batch.reduce((min, e) => Math.min(min, e.timestamp), Infinity);
+        if (sinceTs && oldest < sinceTs) {
+            // Process only entries within range, then stop
+            const inRange = batch.filter(e => e.timestamp >= sinceTs);
+            if (!inRange.length) break;
+        }
+
         for (const e of batch) {
+            if (sinceTs && e.timestamp < sinceTs) continue;  // skip older entries
             const d      = e.data || {};
             const action = d.crime_action;
             const nerve  = d.nerve;
@@ -163,7 +174,9 @@ async function getCrimeHistoryStats(apiKey, pages = 30) {
         }
 
         const sorted = batch.sort((a, b) => a.timestamp - b.timestamp);
-        toTs = sorted[0].timestamp - 1;
+        const oldestInBatch = sorted[0].timestamp;
+        if (sinceTs && oldestInBatch < sinceTs) break;  // gone past the cutoff
+        toTs = oldestInBatch - 1;
         await new Promise(r => setTimeout(r, 350));
     }
 
@@ -323,7 +336,7 @@ async function poll() {
         if (!state.crimeHistoryStats) {
             try {
                 console.log('[NerveTracker] Loading crime history stats (30 pages)...');
-                state.crimeHistoryStats = await getCrimeHistoryStats(state.apiKey, 30);
+                state.crimeHistoryStats = await getCrimeHistoryStats(state.apiKey, state.lastNNBIncreaseAt);
                 const types = Object.keys(state.crimeHistoryStats).join(', ');
                 console.log(`[NerveTracker] Crime history loaded: ${types}`);
             } catch (histErr) {
@@ -370,19 +383,23 @@ export function getData() {
         crimeChain:    state.crimeChain,
         bustStats:          state.bustStats,
         crimeHistoryStats:  state.crimeHistoryStats,
+        lastNNBIncreaseAt:  state.lastNNBIncreaseAt,
         // All NNB change events (compact — full history)
         nnbChanges: state.nnbChanges,
     };
 }
 
 /** Update config from the API endpoint. Called from routes.js. */
-export function updateConfig({ apiKey, factionOffset }) {
-    if (apiKey        != null) state.apiKey        = apiKey;
-    if (factionOffset != null) state.factionOffset = Number(factionOffset);
-    // Recalculate baseNNB with new offset
+export function updateConfig({ apiKey, factionOffset, lastNNBIncreaseAt }) {
+    if (apiKey             != null) state.apiKey             = apiKey;
+    if (factionOffset      != null) state.factionOffset      = Number(factionOffset);
+    if (lastNNBIncreaseAt  != null) {
+        state.lastNNBIncreaseAt  = Number(lastNNBIncreaseAt);
+        state.crimeHistoryStats  = null; // force recalculation with new cutoff
+    }
     if (state.nerveMax != null) state.baseNNB = state.nerveMax - state.factionOffset;
     save();
-    console.log(`[NerveTracker] Config updated — factionOffset=${state.factionOffset}`);
+    console.log(`[NerveTracker] Config updated — factionOffset=${state.factionOffset} lastNNBIncreaseAt=${new Date(state.lastNNBIncreaseAt*1000).toISOString()}`);
 }
 
 /** Start the polling loop. Called from server.js on startup. */
