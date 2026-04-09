@@ -2480,8 +2480,10 @@ router.get("/api/oc/spawn-key", async (req, res) => {
 
   try {
     const data = await getOcSpawnData(playerInfo.factionId, key);
-    const isAdmin = String(playerInfo.playerId) === String(OWNER_PLAYER_ID);
-    return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), isAdmin } });
+    // Look up viewer's faction position from the members list
+    const viewerMember = (data.members || []).find(m => String(m.id) === String(playerInfo.playerId));
+    const viewerPosition = viewerMember?.position || '';
+    return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: viewerPosition } });
   } catch (err) {
     console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
     return res.status(500).json({ error: "Failed to fetch OC data: " + err.message });
