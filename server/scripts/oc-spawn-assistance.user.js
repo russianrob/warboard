@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.5.2
+// @version      1.5.4
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -48,7 +48,7 @@
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
             MAX_LEVEL:         Number(GM_getValue('cfg_max_level',    10)),
-            VERSION:           '1.5.3',
+            VERSION:           '1.5.4',
         };
     }
     let CONFIG = loadConfig();
@@ -341,6 +341,8 @@
         .oc-member-id   { color: #6b7280; font-size: 10px; }
         .oc-cpr-click, .oc-proj-click { cursor: pointer; border-bottom: 1px dotted currentColor; }
         .oc-cpr-click:hover, .oc-proj-click:hover { opacity: 0.75; }
+        .oc-plan-btn { margin-left: 6px; padding: 2px 6px; background: #2d6a4f; color: #fff; border: none; border-radius: 3px; font-size: 9px; cursor: pointer; font-weight: bold; }
+        .oc-plan-btn:hover { background: #1b4332; }
         /* Tooltips */
         #oc-cpr-tooltip, #oc-scope-tooltip { position: fixed; z-index: 10001; background: #131f18; border: 1px solid #2d4a3e; border-radius: 8px; padding: 10px 12px; font-size: 11px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #d1d5db; box-shadow: 0 4px 20px rgba(0,0,0,.7); min-width: 220px; max-width: 300px; display: none; pointer-events: none; }
         #oc-cpr-tooltip .oc-tt-title, #oc-scope-tooltip .oc-tt-title { font-weight: 600; color: #f3f4f6; margin-bottom: 5px; font-size: 12px; }
@@ -610,8 +612,31 @@
     panel.addEventListener('click', e => {
         const t = e.target.closest('.oc-cpr-click');
         if (t) { e.stopPropagation(); hideScopeTooltip(); showCprTooltip(t); return; }
+        
         const ps = e.target.closest('.oc-proj-click');
         if (ps) { e.stopPropagation(); hideCprTooltip(); showScopeTooltip(ps); return; }
+
+        const plan = e.target.closest('.oc-plan-btn');
+        if (plan && plan.dataset.lvl) {
+            e.stopPropagation();
+            const lvl = parseInt(plan.dataset.lvl);
+            const crimeRows = document.querySelectorAll('.crimes-list > li');
+            let found = false;
+            for (const row of crimeRows) {
+                const planLink = row.querySelector('a[data-action="planOrganizedCrime"]');
+                if (planLink) {
+                    const crimeID = parseInt(planLink.getAttribute('data-crimeid'));
+                    if (crimeID === lvl) {
+                        planLink.click();
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (!found) alert(`Could not find native 'Plan' button for Level ${lvl}. Please try clicking it manually on the page.`);
+            return;
+        }
+
         hideCprTooltip(); hideScopeTooltip();
     });
     document.addEventListener('click', () => { if (cprTipOpen) hideCprTooltip(); if (scopeTipOpen) hideScopeTooltip(); });
@@ -810,12 +835,20 @@
         const visible = recs.filter(r => r.action !== 'none');
         if (!visible.length) return '<p class="oc-tag-none">No eligible members found for any level.</p>';
 
+        const onCrimesPage = window.location.href.includes('tab=crimes') || window.location.hash.includes('crimes');
+
         const rows = visible.map(r => {
             let actionHtml;
-            if (r.action === 'spawn') {
-                actionHtml = `<span class="oc-tag-spawn">Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''}</span>`;
-            } else if (r.action === 'spawn_partial') {
-                actionHtml = `<span class="oc-tag-spawn-partial">Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''} <span style="font-size:9px;opacity:.8">(need +${r.deficit} roles)</span></span>`;
+            if (r.action === 'spawn' || r.action === 'spawn_partial') {
+                const label = r.action === 'spawn' ? `Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''}` : `Spawn ${r.numOcsToSpawn} OC${r.numOcsToSpawn > 1 ? 's' : ''} <span style="font-size:9px;opacity:.8">(need +${r.deficit} roles)</span>`;
+                const tagClass = r.action === 'spawn' ? 'oc-tag-spawn' : 'oc-tag-spawn-partial';
+                
+                // Add the Plan button if we need to spawn
+                const planBtn = onCrimesPage 
+                    ? `<button class="oc-plan-btn" data-lvl="${r.level}">Plan</button>` 
+                    : `<button class="oc-plan-btn" onclick="window.location.href='factions.php?step=your_crimes#/crimes'">Go to Crimes</button>`;
+                
+                actionHtml = `<span class="${tagClass}">${label}</span>${planBtn}`;
             } else if (r.action === 'deferred') {
                 actionHtml = `<span class="oc-tag-deferred">Deferred — no scope</span>`;
             } else if (r.action === 'ok') {
