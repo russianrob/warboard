@@ -38,6 +38,7 @@ let state = {
     nnbChanges: [],
     totalCrimes:   null,        // personalstats.criminaloffenses at last poll
     crimeChain:    0,           // current chain calculated from crime logs
+    bustStats:     null,        // bust CE stats from cat=29 logs
 };
 
 let pollTimer = null;
@@ -86,6 +87,59 @@ async function fetchNerveData(apiKey) {
     };
 }
 
+
+
+// ── Bust stats ──────────────────────────────────────────────────────────────
+// Busts appear in cat=29 (Nerve) log with logtype 5360 (success) / 5362 (failure)
+async function getBustStats(apiKey) {
+    const fetchPage = async (to) => {
+        const p = new URLSearchParams({ selections: 'log', cat: '29', key: apiKey });
+        if (to) p.set('to', String(to));
+        const res  = await fetch(`https://api.torn.com/user/?${p}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error.error);
+        if (!data.log) return [];
+        return Object.values(data.log)
+            .filter(e => e.log === 5360 || e.log === 5362);
+    };
+
+    // Fetch last 5 pages (~500 busts) — enough for a reliable sample
+    let all = [];
+    let toTs = null;
+    for (let i = 0; i < 5; i++) {
+        const batch = await fetchPage(toTs);
+        if (!batch.length) break;
+        all = [...all, ...batch];
+        toTs = batch.reduce((min, e) => Math.min(min, e.timestamp), Infinity) - 1;
+        await new Promise(r => setTimeout(r, 350));
+    }
+
+    if (!all.length) return null;
+
+    let successes = 0, failures = 0, totalNerve = 0;
+    for (const e of all) {
+        const nerve = e.data?.nerve_used ?? e.data?.nerve ?? 5;
+        totalNerve += nerve;
+        if (e.log === 5360) successes++;
+        else failures++;
+    }
+    const attempts = successes + failures;
+    const sr       = successes / attempts;
+    const avgNerve = totalNerve / attempts;
+    return {
+        typeID:          'busting',
+        name:            'Busting',
+        attempts,
+        successes,
+        failures,
+        criticals:       0,
+        totalNerveSpent: totalNerve,
+        sr,
+        avgNerve,
+        ceScore:         sr * avgNerve,
+    };
+}
 
 // ── Chain calculation ──────────────────────────────────────────────────────
 async function calculateChain(apiKey) {
@@ -177,6 +231,17 @@ async function poll() {
             console.warn("[NerveTracker] Chain calc failed:", chainErr.message);
         }
 
+        // Recalculate bust stats
+        try {
+            state.bustStats = await getBustStats(state.apiKey);
+            if (state.bustStats) {
+                const { successes, attempts, ceScore } = state.bustStats;
+                console.log(`[NerveTracker] Busts: ${successes}/${attempts} (CE score ${ceScore.toFixed(2)})`);
+            }
+        } catch (bustErr) {
+            console.warn("[NerveTracker] Bust stats failed:", bustErr.message);
+        }
+
         // Append to rolling history (keep last 2016 entries = ~6 weeks)
         state.history.push({ ts: now, nerveMax, baseNNB, crimes: totalCrimes });
         if (state.history.length > 2016) state.history.splice(0, state.history.length - 2016);
@@ -203,6 +268,7 @@ export function getData() {
         // Last 48 hours of history (96 entries at 30-min intervals)
         recentHistory: state.history.slice(-96),
         crimeChain:    state.crimeChain,
+        bustStats:     state.bustStats,
         // All NNB change events (compact — full history)
         nnbChanges: state.nnbChanges,
     };
