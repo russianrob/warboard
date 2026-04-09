@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.7.5
+// @version      1.7.8
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -53,6 +53,7 @@
     let CONFIG = loadConfig();
 
     let cprBreakdownMap = {};
+    let recMap = {}; // uid → { crime, position, cpr, count }
     let lastScopeProjection = null;
     let scopePushTimer  = null;
     const SERVER = 'https://tornwar.com';
@@ -159,16 +160,79 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  API KEY
+    //  API KEY  — AES-256-GCM encrypted in storage, cached plaintext in memory
     // ═══════════════════════════════════════════════════════════════════════
-    function getApiKey() {
-        const saved = GM_getValue('oc_spawn_api_key', '');
-        if (saved) return saved;
-        if (typeof window.localAPIkey === 'string' && window.localAPIkey.length > 0)
-            return window.localAPIkey;
+    const _KEY_CONTEXT = 'oc-spawn-aes-256-v1'; // public app context string
+    let _derivedKey    = null; // cached CryptoKey (derived once per session)
+    let _cachedPlainKey = null; // cached decrypted key
+
+    async function _getDerivedKey() {
+        if (_derivedKey) return _derivedKey;
+        let salt = GM_getValue('oc_enc_salt', null);
+        if (!salt) {
+            salt = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+                .map(b => b.toString(16).padStart(2, '0')).join('');
+            GM_setValue('oc_enc_salt', salt);
+        }
+        const material = await crypto.subtle.importKey(
+            'raw', new TextEncoder().encode(_KEY_CONTEXT + salt),
+            'PBKDF2', false, ['deriveKey']
+        );
+        _derivedKey = await crypto.subtle.deriveKey(
+            { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: 100000, hash: 'SHA-256' },
+            material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+        );
+        return _derivedKey;
+    }
+
+    async function _encryptKey(plaintext) {
+        const k  = await _getDerivedKey();
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const enc = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, k, new TextEncoder().encode(plaintext));
+        const buf = new Uint8Array(12 + enc.byteLength);
+        buf.set(iv); buf.set(new Uint8Array(enc), 12);
+        return btoa(String.fromCharCode(...buf));
+    }
+
+    async function _decryptKey(cipher) {
+        const k   = await _getDerivedKey();
+        const buf = Uint8Array.from(atob(cipher), c => c.charCodeAt(0));
+        const dec = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: buf.slice(0, 12) }, k, buf.slice(12));
+        return new TextDecoder().decode(dec);
+    }
+
+    async function getApiKey() {
+        if (_cachedPlainKey) return _cachedPlainKey;
+        // TornPDA injection takes highest priority
+        if (typeof window.localAPIkey === 'string' && window.localAPIkey.length > 0) {
+            _cachedPlainKey = window.localAPIkey; return _cachedPlainKey;
+        }
+        // Try encrypted storage
+        try {
+            const enc = GM_getValue('oc_spawn_key_enc', '');
+            if (enc) { _cachedPlainKey = await _decryptKey(enc); return _cachedPlainKey; }
+        } catch (e) { console.warn('[OC Spawn] Key decrypt failed:', e); }
+        // Migrate legacy plaintext key
+        const plain = GM_getValue('oc_spawn_api_key', '');
+        if (plain && plain !== 'YOUR_API_KEY_HERE') {
+            _cachedPlainKey = plain;
+            await saveApiKey(plain); // re-save encrypted
+            return _cachedPlainKey;
+        }
         return CONFIG.API_KEY;
     }
-    function saveApiKey(key) { GM_setValue('oc_spawn_api_key', key.trim()); }
+
+    async function saveApiKey(key) {
+        const trimmed = key.trim();
+        _cachedPlainKey = trimmed;
+        try {
+            GM_setValue('oc_spawn_key_enc', await _encryptKey(trimmed));
+            GM_setValue('oc_spawn_api_key', ''); // clear any legacy plaintext
+        } catch (e) {
+            console.warn('[OC Spawn] Key encryption failed, storing plaintext:', e);
+            GM_setValue('oc_spawn_api_key', trimmed);
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     //  GENERIC REQUEST  — GM_xmlhttpRequest (TornPDA) or fetch
@@ -361,6 +425,24 @@
             padding: 2px 8px; font-size: 10px;
         }
         .oc-viewer-none { color: #6b7280; font-size: 10px; font-style: italic; }
+        /* Per-member OC recommendation */
+        .oc-rec-btn {
+            cursor: pointer; display: inline-block;
+            background: rgba(116,198,157,.12); color: #74c69d;
+            border: 1px solid rgba(116,198,157,.25); border-radius: 4px;
+            padding: 2px 7px; font-size: 10px; font-weight: 600;
+        }
+        .oc-rec-btn:hover { background: rgba(116,198,157,.22); }
+        #oc-rec-tooltip {
+            position: fixed; z-index: 10001; background: #131f18;
+            border: 1px solid #2d4a3e; border-radius: 8px;
+            padding: 10px 12px; font-size: 11px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: #d1d5db; box-shadow: 0 4px 20px rgba(0,0,0,.7);
+            min-width: 180px; max-width: 260px; display: none; pointer-events: none;
+        }
+        #oc-rec-tooltip .oc-tt-title { font-weight: 600; color: #f3f4f6; margin-bottom: 5px; font-size: 12px; }
+        #oc-rec-tooltip .oc-tt-note  { color: #6b7280; font-size: 10px; margin-top: 5px; }
     `);
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -530,6 +612,10 @@
     cprTooltipEl.id = 'oc-cpr-tooltip';
     document.body.appendChild(cprTooltipEl);
 
+    const recTooltipEl = document.createElement('div');
+    recTooltipEl.id = 'oc-rec-tooltip';
+    document.body.appendChild(recTooltipEl);
+
     const scopeTooltipEl = document.createElement('div');
     scopeTooltipEl.id = 'oc-scope-tooltip';
     document.body.appendChild(scopeTooltipEl);
@@ -538,7 +624,11 @@
 
     // Draggable toggle button — tap to open/close, drag to reposition
     makeDraggable(toggleBtn, {
-        onClickFn:  () => { panelVisible = !panelVisible; panel.style.display = panelVisible ? 'block' : 'none'; },
+        onClickFn:  () => {
+            panelVisible = !panelVisible;
+            panel.style.display = panelVisible ? 'block' : 'none';
+            if (panelVisible) GM_setValue('oc_panel_closed', false); // clear the closed flag
+        },
         storageKey: 'oc_btn_pos',
     });
 
@@ -552,7 +642,10 @@
         _lastRefresh = Date.now();
         runAnalysis();
     });
-    document.getElementById('oc-spawn-close').addEventListener('click', () => { panelVisible = false; panel.style.display = 'none'; });
+    document.getElementById('oc-spawn-close').addEventListener('click', () => {
+        panelVisible = false; panel.style.display = 'none';
+        GM_setValue('oc_panel_closed', true); // stay closed until user taps button
+    });
     document.getElementById('oc-spawn-settings').addEventListener('click', () => {
         const sp = document.getElementById('oc-settings-panel');
         const opening = sp.style.display === 'none' || sp.style.display === '';
@@ -560,8 +653,8 @@
         if (opening) populateSettings();
     });
 
-    function populateSettings() {
-        const key = getApiKey();
+    async function populateSettings() {
+        const key = await getApiKey();
         const inp = document.getElementById('oc-spawn-key-input');
         inp.value = '';
         inp.placeholder = (key && key !== 'YOUR_API_KEY_HERE') ? '••••••••' + key.slice(-4) : 'Paste API key…';
@@ -575,8 +668,8 @@
         document.getElementById('cfg-lookback-days').value  = CONFIG.CPR_LOOKBACK_DAYS;
     }
 
-    function checkKeyRow() {
-        const key = getApiKey();
+    async function checkKeyRow() {
+        const key = await getApiKey();
         if (!key || key === 'YOUR_API_KEY_HERE') {
             document.getElementById('oc-settings-panel').style.display = 'block';
             populateSettings();
@@ -584,14 +677,14 @@
     }
     checkKeyRow();
 
-    document.getElementById('oc-spawn-key-save').addEventListener('click', () => {
+    document.getElementById('oc-spawn-key-save').addEventListener('click', async () => {
         const val = document.getElementById('oc-spawn-key-input').value.trim();
         if (val.length < 10) return;
-        saveApiKey(val);
+        await saveApiKey(val);
         GM_setValue('oc_srv_token', null);
         document.getElementById('oc-spawn-key-input').value = '';
         document.getElementById('oc-spawn-key-input').placeholder = '••••••••' + val.slice(-4);
-        setStatus('API key saved. Click Refresh.');
+        setStatus('API key saved — encrypted in storage. Click Refresh.');
     });
 
     document.getElementById('oc-spawn-cfg-save').addEventListener('click', async () => {
@@ -614,7 +707,7 @@
 
         document.getElementById('oc-settings-panel').style.display = 'none';
         setStatus('Saving settings for all faction members…');
-        const apiKey = getApiKey();
+        const apiKey = await getApiKey();
         if (apiKey && apiKey !== 'YOUR_API_KEY_HERE') await pushFactionSettings(apiKey, CONFIG);
         setStatus('Settings saved for all faction members. Click Refresh.');
     });
@@ -656,6 +749,37 @@
     function hideCprTooltip() { cprTooltipEl.style.display = 'none'; cprTipOpen = false; }
 
     // ═══════════════════════════════════════════════════════════════════════
+    //  REC TOOLTIP
+    // ═══════════════════════════════════════════════════════════════════════
+    function showRecTooltip(el) {
+        const uid = parseInt(el.dataset.uid);
+        const rec = recMap[uid];
+        if (!rec) return;
+        let html;
+        if (rec.type === 'inoc') {
+            html = `<div class="oc-tt-title">Currently in OC</div><div class="oc-tt-avg">${rec.text}</div>`;
+        } else if (rec.type === 'none') {
+            html = `<div class="oc-tt-title">No OCs Available</div><div class="oc-tt-avg">${rec.text}</div>`;
+        } else {
+            const cprStr = rec.cpr > 0 ? ` <span style="color:#74c69d">${rec.cpr}%</span>` : '';
+            const posStr = rec.position ? `<br><span style="color:#9ca3af">Role: ${rec.position}${cprStr}</span>` : '';
+            const moreStr = rec.count > 1 ? `<div class="oc-tt-note">${rec.count - 1} other Lvl ${rec.level} OC${rec.count > 2 ? 's' : ''} also open</div>` : '';
+            html = `<div class="oc-tt-title">${rec.crime}</div><div class="oc-tt-avg">Lvl ${rec.level} OC${posStr}</div>${moreStr}`;
+        }
+        recTooltipEl.innerHTML = html;
+        recTooltipEl.style.display = 'block';
+        const r = el.getBoundingClientRect();
+        recTooltipEl.style.top  = (r.bottom + 6) + 'px';
+        recTooltipEl.style.left = r.left + 'px';
+        requestAnimationFrame(() => {
+            const tr = recTooltipEl.getBoundingClientRect();
+            if (tr.right  > window.innerWidth  - 8) recTooltipEl.style.left = (window.innerWidth  - tr.width  - 8) + 'px';
+            if (tr.bottom > window.innerHeight - 8) recTooltipEl.style.top  = (r.top - tr.height - 6) + 'px';
+        });
+    }
+    function hideRecTooltip() { recTooltipEl.style.display = 'none'; }
+
+    // ═══════════════════════════════════════════════════════════════════════
     //  SCOPE TOOLTIP
     // ═══════════════════════════════════════════════════════════════════════
     function showScopeTooltip(el) {
@@ -694,12 +818,14 @@
 
     panel.addEventListener('click', e => {
         const t = e.target.closest('.oc-cpr-click');
-        if (t) { e.stopPropagation(); hideScopeTooltip(); showCprTooltip(t); return; }
+        if (t) { e.stopPropagation(); hideScopeTooltip(); hideRecTooltip(); showCprTooltip(t); return; }
         const ps = e.target.closest('.oc-proj-click');
-        if (ps) { e.stopPropagation(); hideCprTooltip(); showScopeTooltip(ps); return; }
-        hideCprTooltip(); hideScopeTooltip();
+        if (ps) { e.stopPropagation(); hideCprTooltip(); hideRecTooltip(); showScopeTooltip(ps); return; }
+        const rb = e.target.closest('.oc-rec-btn');
+        if (rb) { e.stopPropagation(); hideCprTooltip(); hideScopeTooltip(); showRecTooltip(rb); return; }
+        hideCprTooltip(); hideScopeTooltip(); hideRecTooltip();
     });
-    document.addEventListener('click', () => { if (cprTipOpen) hideCprTooltip(); if (scopeTipOpen) hideScopeTooltip(); });
+    document.addEventListener('click', () => { if (cprTipOpen) hideCprTooltip(); if (scopeTipOpen) hideScopeTooltip(); hideRecTooltip(); });
 
     // ═══════════════════════════════════════════════════════════════════════
     //  UTILITY
@@ -934,8 +1060,32 @@
         </table>`;
     }
 
-    function renderEligibleMembers(eligible) {
+    function buildMemberRec(m, availableCrimes) {
+        if (m.inOC) {
+            const readyLabel = (m.ocReadyAt && m.ocReadyAt > now()) ? fmtTs(m.ocReadyAt) : 'active (paused)';
+            return { type: 'inoc', text: `In OC — free ${readyLabel}` };
+        }
+        const byPos = m.byPosition || {};
+        const openOCs = normArr(availableCrimes).filter(c =>
+            c.status === 'Recruiting' &&
+            c.difficulty === m.joinable &&
+            (c.slots || []).some(s => !s.user_id && !s.user?.id)
+        );
+        if (!openOCs.length) return { type: 'none', text: `No Lvl ${m.joinable} OCs open` };
+        let bestCrime = openOCs[0], bestPos = null, bestCPR = -1;
+        for (const c of openOCs) {
+            for (const slot of (c.slots || []).filter(s => !s.user_id && !s.user?.id)) {
+                const key = slot.position_id || slot.position;
+                const pd  = byPos[key];
+                if (pd && pd.cpr > bestCPR) { bestCPR = pd.cpr; bestPos = pd.position; bestCrime = c; }
+            }
+        }
+        return { type: 'rec', crime: bestCrime.name, position: bestPos, cpr: bestCPR > 0 ? bestCPR : null, level: m.joinable, count: openOCs.length };
+    }
+
+    function renderEligibleMembers(eligible, availableCrimes) {
         cprBreakdownMap = {};
+        recMap = {};
         // Sort by joinable level desc, then name
         const sorted = [...eligible].sort((a, b) => (b.joinable - a.joinable) || a.name.localeCompare(b.name));
         const rows = sorted.map(m => {
@@ -954,15 +1104,22 @@
             } else if (m.cprEstimated) {
                 cs = `<span class="oc-cpr-est" title="Estimated from level — no faction crime history yet">~${m.cpr}%</span>`;
             } else { cs = '<span class="oc-cpr-low">—</span>'; }
+            // Build rec for this member
+            const rec = buildMemberRec(m, availableCrimes);
+            recMap[m.id] = rec;
+            const recBtn = rec.type === 'rec'
+                ? `<span class="oc-rec-btn" data-uid="${m.id}">→ ${rec.crime.length > 14 ? rec.crime.slice(0,13) + '…' : rec.crime}</span>`
+                : `<span class="oc-rec-btn" data-uid="${m.id}" style="background:rgba(55,65,81,.2);color:#6b7280;border-color:rgba(55,65,81,.3);">${rec.type === 'inoc' ? 'In OC' : 'None open'}</span>`;
+
             return `<tr>
                 <td><span class="oc-member-name">${m.name}</span> <span class="oc-member-id">[${m.id}]</span></td>
                 <td>${sb}</td><td>${cs}</td>
                 <td style="color:#6b7280">${m.highestLevel > 0 ? m.highestLevel : '—'}</td>
-                <td><b style="color:#74c69d">Lvl ${m.joinable}</b></td>
+                <td>${recBtn}</td>
             </tr>`;
         }).join('');
         return `<table class="oc-table">
-            <thead><tr><th>Member</th><th>Status</th><th>CPR</th><th>Highest</th><th>Joinable</th></tr></thead>
+            <thead><tr><th>Member</th><th>Status</th><th>CPR</th><th>Highest</th><th>Join</th></tr></thead>
             <tbody>${rows}</tbody>
         </table>`;
     }
@@ -1065,7 +1222,7 @@
             <h3>Spawn Recommendations — High Priority First</h3>
             ${renderRecommendations(recs, scopeProjection)}
             <h3>Eligible Members</h3>
-            ${renderEligibleMembers(eligible)}
+            ${renderEligibleMembers(eligible, availableCrimes)}
             ${skippedHtml}
             <p style="color:#374151;font-size:10px;margin-top:10px;">
                 Active=${CONFIG.ACTIVE_DAYS}d · Forecast=${CONFIG.FORECAST_HOURS}h · MinCPR=${CONFIG.MINCPR}% · Boost=${CONFIG.CPR_BOOST}%
@@ -1078,7 +1235,7 @@
     //  MAIN
     // ═══════════════════════════════════════════════════════════════════════
     async function runAnalysis() {
-        const apiKey = getApiKey();
+        const apiKey = await getApiKey();
         if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
             document.getElementById('oc-settings-panel').style.display = 'block';
             populateSettings();
@@ -1165,7 +1322,7 @@
 
     if (window.location.href.includes('tab=crimes') || window.location.hash.includes('crimes')) {
         panelVisible = true; panel.style.display = 'block';
-        if (getApiKey()) setTimeout(runAnalysis, 500);
+        getApiKey().then(k => { if (k && k !== 'YOUR_API_KEY_HERE') setTimeout(runAnalysis, 500); });
     }
 
     // Start DOM scope reader (runs whenever recruiting tab is visible)
