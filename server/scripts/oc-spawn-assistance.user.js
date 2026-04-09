@@ -47,7 +47,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.5.10',
+            VERSION:           '1.5.11',
         };
     }
     let CONFIG = loadConfig();
@@ -850,11 +850,12 @@
     }
 
     function renderRecommendations(recs, scopeProjection) {
-        if (!recs.length) return '<p class="oc-tag-none">No recommendations available.</p>';
+        const visible = recs.filter(r => r.action !== 'none');
+        if (!visible.length) return '<p class="oc-tag-none">No eligible members found for any level.</p>';
 
         const onCrimesPage = window.location.href.includes('tab=crimes') || window.location.hash.includes('crimes');
 
-        const rows = recs.map(r => {
+        const rows = visible.map(r => {
             let actionHtml;
             const planBtn = onCrimesPage 
                 ? `<button class="oc-plan-btn" data-lvl="${r.level}">Plan</button>` 
