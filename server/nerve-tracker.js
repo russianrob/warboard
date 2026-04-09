@@ -39,6 +39,7 @@ let state = {
     totalCrimes:   null,        // personalstats.criminaloffenses at last poll
     crimeChain:    0,           // current chain calculated from crime logs
     bustStats:     null,        // bust CE stats from cat=29 logs
+    crimeHistoryStats: null,   // historical CE stats per crime type
 };
 
 let pollTimer = null;
@@ -88,6 +89,93 @@ async function fetchNerveData(apiKey) {
 }
 
 
+
+
+// ── Crime type from action keyword ──────────────────────────────────────────
+function crimeTypeFromAction(action) {
+    const a = (action || '').toLowerCase();
+    if (a.includes('passport') || a.includes('forgery') || a.includes('forging'))  return 'Forgery';
+    if (a.includes('graffiti') || a.includes('spray') || a.includes('tag'))        return 'Graffiti';
+    if (a.includes('bury') || a.includes('sink') || a.includes('general waste') ||
+        a.includes('building debris') || a.includes('old furniture') ||
+        a.includes('dead body') || a.includes('body parts') ||
+        a.includes('firearm') || a.includes('murder weapon') ||
+        a.includes('dispose') || a.includes('vehicle'))                            return 'Disposal';
+    if (a.includes('crack') || a.includes('password') ||
+        a.includes('safe') || a.includes('lock'))                                  return 'Cracking';
+    if (a.includes('shoplift') || a.includes('jacket') || a.includes('shop'))      return 'Shoplifting';
+    if (a.includes('arson') || a.includes('torch') ||
+        a.includes('fire') || a.includes('warehouse'))                             return 'Arson';
+    if (a.includes('scam') || a.includes('fraud'))                                 return 'Scamming';
+    if (a.includes('pickpocket') || a.includes('pocket') || a.includes('wallet'))  return 'Pickpocketing';
+    if (a.includes('hustle') || a.includes('hustling'))                            return 'Hustling';
+    if (a.includes('bootleg'))                                                     return 'Bootlegging';
+    if (a.includes('search') || a.includes('look for cash'))                       return 'Search for Cash';
+    if (a.includes('burglar') || a.includes('burglary') || a.includes('break in')) return 'Burglary';
+    if (a.includes('card') || a.includes('skim'))                                  return 'Card Skimming';
+    if (a.includes('murder') || a.includes('kill') || a.includes('assassin'))      return 'Murder';
+    if (a.includes('vandal') || a.includes('vandalism'))                           return 'Vandalism';
+    return null;
+}
+
+// ── Historical crime stats from log ─────────────────────────────────────────
+// Fetches up to `pages` pages of cat=136 crime log and aggregates per crime type.
+async function getCrimeHistoryStats(apiKey, pages = 30) {
+    const fetchPage = async (to) => {
+        const p = new URLSearchParams({ selections: 'log', cat: '136', key: apiKey });
+        if (to) p.set('to', String(to));
+        const res  = await fetch(`https://api.torn.com/user/?${p}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error.error);
+        return data.log ? Object.values(data.log) : [];
+    };
+
+    const stats = {};  // { typeName: { name, attempts, successes, failures, criticals, totalNerveSpent } }
+    let toTs = null;
+
+    for (let i = 0; i < pages; i++) {
+        const batch = await fetchPage(toTs);
+        if (!batch.length) break;
+
+        for (const e of batch) {
+            const d      = e.data || {};
+            const action = d.crime_action;
+            const nerve  = d.nerve;
+            const title  = (e.title || '').toLowerCase();
+
+            if (!action || nerve == null) continue;
+            if (title.includes('use items')) continue;  // skip material-use events
+
+            const typeName = crimeTypeFromAction(action);
+            if (!typeName) continue;
+
+            if (!stats[typeName]) stats[typeName] = {
+                name: typeName, attempts: 0, successes: 0,
+                failures: 0, criticals: 0, totalNerveSpent: 0,
+            };
+            const s = stats[typeName];
+            s.attempts++;
+            s.totalNerveSpent += nerve;
+            if (title.includes('critical fail'))    s.criticals++;
+            else if (title.includes('fail'))         s.failures++;
+            else if (title.includes('success'))      s.successes++;
+        }
+
+        const sorted = batch.sort((a, b) => a.timestamp - b.timestamp);
+        toTs = sorted[0].timestamp - 1;
+        await new Promise(r => setTimeout(r, 350));
+    }
+
+    // Add CE score to each entry
+    for (const s of Object.values(stats)) {
+        s.sr      = s.attempts > 0 ? s.successes / s.attempts : 0;
+        s.avgNerve = s.attempts > 0 ? s.totalNerveSpent / s.attempts : 0;
+        s.ceScore  = s.sr * s.avgNerve;
+    }
+
+    return stats;
+}
 
 // ── Bust stats ──────────────────────────────────────────────────────────────
 // Busts appear in cat=29 (Nerve) log with logtype 5360 (success) / 5362 (failure)
@@ -231,6 +319,18 @@ async function poll() {
             console.warn("[NerveTracker] Chain calc failed:", chainErr.message);
         }
 
+        // Recalculate historical crime stats (only when not yet loaded, expensive call)
+        if (!state.crimeHistoryStats) {
+            try {
+                console.log('[NerveTracker] Loading crime history stats (30 pages)...');
+                state.crimeHistoryStats = await getCrimeHistoryStats(state.apiKey, 30);
+                const types = Object.keys(state.crimeHistoryStats).join(', ');
+                console.log(`[NerveTracker] Crime history loaded: ${types}`);
+            } catch (histErr) {
+                console.warn("[NerveTracker] Crime history failed:", histErr.message);
+            }
+        }
+
         // Recalculate bust stats
         try {
             state.bustStats = await getBustStats(state.apiKey);
@@ -268,7 +368,8 @@ export function getData() {
         // Last 48 hours of history (96 entries at 30-min intervals)
         recentHistory: state.history.slice(-96),
         crimeChain:    state.crimeChain,
-        bustStats:     state.bustStats,
+        bustStats:          state.bustStats,
+        crimeHistoryStats:  state.crimeHistoryStats,
         // All NNB change events (compact — full history)
         nnbChanges: state.nnbChanges,
     };
