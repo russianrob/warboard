@@ -1,11 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-<<<<<<< Updated upstream
-// @version      1.5.4
-=======
-// @version      1.5.5
->>>>>>> Stashed changes
+// @version      1.7.1
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -200,13 +196,15 @@
                     onload(r) {
                         try {
                             const data = JSON.parse(r.responseText);
-                            resolve({ ok: r.status < 400, status: r.status, data });
+                            resolve({ ok: r.status >= 200 && r.status < 300, status: r.status, data });
                         } catch (e) {
-                            const snippet = (r.responseText || '').substring(0, 100).replace(/<[^>]*>/g, '');
-                            reject(new Error(`Bad JSON (${r.status}): ${snippet}...`));
+                            const msg = r.status === 502 || r.status === 503
+                                ? 'Server temporarily unavailable — wait a moment and try again'
+                                : `Unexpected server response (${r.status})`;
+                            resolve({ ok: false, status: r.status, data: { error: msg } });
                         }
                     },
-                    onerror(err) { reject(new Error('Network error: ' + (err.statusText || 'check console'))); },
+                    onerror() { reject(new Error('Network error — could not reach tornwar.com')); },
                 });
             });
         }
@@ -214,8 +212,10 @@
             const text = await r.text();
             try { return { ok: r.ok, status: r.status, data: JSON.parse(text) }; }
             catch (e) {
-                const snippet = text.substring(0, 100).replace(/<[^>]*>/g, '');
-                throw new Error(`Bad JSON (${r.status}): ${snippet}...`);
+                const msg = r.status === 502 || r.status === 503
+                    ? 'Server temporarily unavailable — wait a moment and try again'
+                    : `Unexpected server response (${r.status})`;
+                return { ok: false, status: r.status, data: { error: msg } };
             }
         });
     }
@@ -361,6 +361,21 @@
         .oc-error { color: #f87171; font-weight: 600; }
         .oc-hdr-btn { background: #1a2a1f; color: #9ca3af; border: 1px solid #2d4a3e; border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer; line-height: 1; font-family: inherit; }
         .oc-hdr-btn:hover { background: #253525; color: #d1d5db; }
+        /* Viewer personal card */
+        .oc-viewer-card {
+            background: #111f18; border: 1px solid #2d4a3e;
+            border-left: 3px solid #74c69d;
+            border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; font-size: 11px;
+        }
+        .oc-viewer-name { font-weight: 600; color: #f3f4f6; margin-bottom: 4px; }
+        .oc-viewer-meta { color: #9ca3af; margin-bottom: 5px; font-size: 10px; }
+        .oc-viewer-crimes { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+        .oc-viewer-crime {
+            background: rgba(116,198,157,.12); color: #74c69d;
+            border: 1px solid rgba(116,198,157,.25); border-radius: 4px;
+            padding: 2px 8px; font-size: 10px;
+        }
+        .oc-viewer-none { color: #6b7280; font-size: 10px; font-style: italic; }
     `);
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -373,26 +388,36 @@
             const saved = GM_getValue(storageKey, null);
             if (saved) {
                 el.style.bottom = 'auto'; el.style.right = 'auto';
-                el.style.top    = saved.top  + 'px';
-                el.style.left   = saved.left + 'px';
+                el.style.top  = saved.top  + 'px';
+                el.style.left = saved.left + 'px';
             }
         }
 
-        let sx, sy, sl, st, moved;
+        let sx, sy, sl, st, moved, suppressClick = false;
 
         function evtPos(e) {
             return e.touches ? [e.touches[0].clientX, e.touches[0].clientY]
                              : [e.clientX, e.clientY];
         }
 
+        // Click is handled via a dedicated listener so it works reliably after drags
+        if (onClickFn) {
+            handle.addEventListener('click', e => {
+                if (suppressClick) { suppressClick = false; return; }
+                // Only fire if no drag happened (mousedown case — touch fires click natively)
+                onClickFn();
+            });
+        }
+
         function onStart(e) {
-            if (e.target.closest('button, input, select, a')) return;
+            // Skip interactive children (but not the handle element itself)
+            const interactive = e.target.closest('button, input, select, a');
+            if (interactive && interactive !== handle) return;
             const [x, y] = evtPos(e);
             sx = x; sy = y;
             const r = el.getBoundingClientRect();
             sl = r.left; st = r.top;
             moved = false;
-            // Switch to absolute top/left so dragging works from any starting position
             el.style.bottom = 'auto'; el.style.right = 'auto';
             el.style.top  = st + 'px';
             el.style.left = sl + 'px';
@@ -400,7 +425,6 @@
             document.addEventListener('touchmove', onMove, { passive: false });
             document.addEventListener('mouseup',   onEnd);
             document.addEventListener('touchend',  onEnd);
-            e.preventDefault();
         }
 
         function onMove(e) {
@@ -419,9 +443,10 @@
             document.removeEventListener('touchmove', onMove);
             document.removeEventListener('mouseup',   onEnd);
             document.removeEventListener('touchend',  onEnd);
-            if (!moved && onClickFn) onClickFn();
-            if (moved && storageKey) {
-                GM_setValue(storageKey, {
+            if (moved) {
+                suppressClick = true;
+                setTimeout(() => { suppressClick = false; }, 300); // reset if no synthetic click arrives
+                if (storageKey) GM_setValue(storageKey, {
                     top:  parseInt(el.style.top),
                     left: parseInt(el.style.left),
                 });
@@ -430,7 +455,7 @@
 
         handle.style.cursor = 'grab';
         handle.addEventListener('mousedown',  onStart);
-        handle.addEventListener('touchstart', onStart, { passive: false });
+        handle.addEventListener('touchstart', onStart, { passive: true });
     }
 
     //  DOM SETUP
@@ -523,11 +548,6 @@
     const scopeTooltipEl = document.createElement('div');
     scopeTooltipEl.id = 'oc-scope-tooltip';
     document.body.appendChild(scopeTooltipEl);
-<<<<<<< Updated upstream
-
-    let panelVisible = false, cprTipOpen = false, scopeTipOpen = false;
-=======
->>>>>>> Stashed changes
 
     let panelVisible = false, cprTipOpen = false, scopeTipOpen = false;
 
@@ -537,12 +557,16 @@
         storageKey: 'oc_btn_pos',
     });
 
-    // Draggable panel — drag the header to reposition
+    // Draggable panel — drag the header to reposition (position not saved)
     makeDraggable(panel, {
-        handle:     panel.querySelector('h2'),
-        storageKey: 'oc_panel_pos',
+        handle: panel.querySelector('h2'),
     });
-    document.getElementById('oc-spawn-refresh').addEventListener('click', runAnalysis);
+    let _lastRefresh = 0;
+    document.getElementById('oc-spawn-refresh').addEventListener('click', () => {
+        if (Date.now() - _lastRefresh < 3000) return; // 3s cooldown between refreshes
+        _lastRefresh = Date.now();
+        runAnalysis();
+    });
     document.getElementById('oc-spawn-close').addEventListener('click', () => { panelVisible = false; panel.style.display = 'none'; });
     document.getElementById('oc-spawn-settings').addEventListener('click', () => {
         const sp = document.getElementById('oc-settings-panel');
@@ -733,7 +757,9 @@
                 ocCrimeName: inOC ? ocInfo.crimeName : null, ocStatus: inOC ? ocInfo.crimeStatus : null,
                 currentCrimeDiff: inOC ? ocInfo.crimeDifficulty : null,
                 cpr: cprValue, highestLevel: highestLvl, joinable,
-                noCrimeHistory: cprValue === null, cprEntries: cpr?.entries ?? [],
+                noCrimeHistory: cprValue === null,
+                cprEstimated:  cpr?.estimated || false,
+                cprEntries:    cpr?.entries ?? [],
             });
         }
         return { eligible, skipped };
@@ -904,7 +930,7 @@
             } else if (r.action === 'waiting') {
                 actionHtml = `<span class="oc-tag-deferred">${r.deficit} waiting</span>`;
             } else {
-                actionHtml = `<span class="oc-tag-surplus">+${Math.abs(r.deficit)} extra</span>`;
+                actionHtml = `<span class="oc-tag-surplus">None needed</span>`;
             }
             const soonBadge = r.soonMembers > 0 ? ` <span class="oc-badge oc-badge-soon">+${r.soonMembers}</span>` : '';
             const costBadge = scopeProjection ? `<span class="oc-range-chip">R${r.scopeRange} · ${r.scopeCost}sp</span>` : '';
@@ -934,9 +960,11 @@
             if (m.cpr !== null && m.cpr >= 80)                cc = 'oc-cpr-high';
             else if (m.cpr !== null && m.cpr >= CONFIG.MINCPR) cc = 'oc-cpr-mid';
             let cs;
-            if (m.cpr !== null) {
+            if (m.cpr !== null && !m.cprEstimated) {
                 cprBreakdownMap[m.id] = { name: m.name, cpr: m.cpr, entries: m.cprEntries };
                 cs = `<span class="oc-cpr-click ${cc}" data-uid="${m.id}">${m.cpr}%</span>`;
+            } else if (m.cprEstimated) {
+                cs = `<span class="oc-cpr-est" title="Estimated from level — no faction crime history yet">~${m.cpr}%</span>`;
             } else { cs = '<span class="oc-cpr-low">—</span>'; }
             return `<tr>
                 <td><span class="oc-member-name">${m.name}</span> <span class="oc-member-id">[${m.id}]</span></td>
@@ -951,7 +979,60 @@
         </table>`;
     }
 
-    function renderBody(recs, eligible, skipped, scopeProjection) {
+    function renderViewerCard(viewer, eligible, skipped, availableCrimes) {
+        if (!viewer || !viewer.playerId) return '';
+        const vid = String(viewer.playerId);
+
+        // Find viewer — match on ID (string or number) or name as fallback
+        const idMatch  = m => String(m.id) === vid || Number(m.id) === Number(vid);
+        const nameMatch = m => m.name === viewer.playerName;
+        const me = eligible.find(m => idMatch(m) || nameMatch(m))
+                || skipped.find(m => idMatch(m) || nameMatch(m));
+
+        const cprText  = me?.cpr != null
+            ? (me.cprEstimated ? `~${me.cpr}% est.` : `${me.cpr}% CPR`)
+            : 'No CPR data';
+        const cprColor = me?.cprEstimated ? '#6b7280'
+            : me?.cpr >= 80 ? '#74c69d' : me?.cpr >= 60 ? '#f4a261' : '#9ca3af';
+        const joinable = me?.joinable || 1;
+
+        let statusHtml;
+        if (!me) {
+            statusHtml = `<span style="color:#6b7280">Not found in eligible members</span>`;
+        } else if (me.inOC) {
+            statusHtml = `<span class="oc-badge oc-badge-in">In OC → free ${fmtTs(me.ocReadyAt)}</span>`;
+        } else {
+            statusHtml = `<span class="oc-badge oc-badge-free">Free now</span>`;
+        }
+
+        // Find recruiting OCs the viewer can join (at their joinable level, with open slots)
+        const myOcs = normArr(availableCrimes).filter(c => {
+            if (c.status !== 'Recruiting') return false;
+            if (c.difficulty !== joinable) return false;
+            return (c.slots || []).some(s => !s.user_id && !s.user?.id);
+        });
+
+        let recsHtml;
+        if (me?.inOC) {
+            recsHtml = `<div class="oc-viewer-none">You\'re already in an OC.</div>`;
+        } else if (myOcs.length === 0) {
+            recsHtml = `<div class="oc-viewer-none">No open Lvl ${joinable} OCs recruiting right now.</div>`;
+        } else {
+            const chips = myOcs.map(c => {
+                const open = (c.slots || []).filter(s => !s.user_id && !s.user?.id).length;
+                return `<span class="oc-viewer-crime">${c.name} (${open} slot${open > 1 ? 's' : ''})</span>`;
+            }).join('');
+            recsHtml = `<div class="oc-viewer-crimes">${chips}</div>`;
+        }
+
+        return `<div class="oc-viewer-card">
+            <div class="oc-viewer-name">${viewer.playerName} • Lvl ${joinable} • <span style="color:${cprColor}">${cprText}</span></div>
+            <div class="oc-viewer-meta">${statusHtml}</div>
+            ${recsHtml}
+        </div>`;
+    }
+
+    function renderBody(recs, eligible, skipped, scopeProjection, viewer, availableCrimes) {
         const total = eligible.length + skipped.length;
         const eli   = eligible.length;
         const free  = eligible.filter(m => !m.inOC).length;
@@ -977,6 +1058,7 @@
                 <span class="oc-stat-chip"><b>${free}</b> free now</span>
                 <span class="oc-stat-chip"><b>${soon}</b> soon</span>
             </div>
+            ${renderViewerCard(viewer, eligible, skipped, availableCrimes)}
             ${renderScopeStrip(scopeProjection)}
             ${banner}
             <h3>Spawn Recommendations — High Priority First</h3>
@@ -1033,9 +1115,9 @@
 
             // Fetch OC data from server
             setStatus('Fetching OC data…');
-            let members, availableCrimes, rawCprCache;
+            let members, availableCrimes, rawCprCache, viewer;
             try {
-                ({ members, availableCrimes, cprCache: rawCprCache } = await fetchServerOcData(apiKey));
+                ({ members, availableCrimes, cprCache: rawCprCache, viewer } = await fetchServerOcData(apiKey));
             } catch (err) {
                 if (err.status === 403) {
                     document.getElementById('oc-spawn-body').innerHTML =
@@ -1063,7 +1145,7 @@
             lastScopeProjection         = scopeProjection; // cache for tooltip
             const recs                  = buildRecommendations(eligible, slotMap, scopeProjection);
 
-            renderBody(recs, eligible, skipped, scopeProjection);
+            renderBody(recs, eligible, skipped, scopeProjection, viewer, availableCrimes);
             setStatus(`Last updated: ${new Date().toLocaleTimeString()} · ${normArr(members).length} members`);
 
         } catch (err) {
