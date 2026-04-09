@@ -1,13 +1,1 @@
-server/node_modules/
-server/.env
-server/data/wars.json
-server/package-lock.json
-server/data/faction-keys.json
-server/data/player-keys.json
-server/data/push-subscriptions.json
-server/data/subscriptions.json
-server/data/heatmap-*.json
-server/scripts/*.bak
-server/scripts/*.orig
-server/scripts/temp_download.js
-client/factionops.user.js.bak
+.env
