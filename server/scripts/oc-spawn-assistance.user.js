@@ -49,7 +49,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.6.3',
+            VERSION:           '1.6.4',
         };
     }
     let CONFIG = loadConfig();
@@ -570,13 +570,25 @@
     makeDraggable(toggleBtn, toggleBtn, 'oc_toggle');
     makeDraggable(panel, document.getElementById('oc-spawn-hdr'), 'oc_panel');
 
+    function togglePanel(forceState) {
+        if (typeof forceState === 'boolean') {
+            panelVisible = forceState;
+        } else {
+            panelVisible = !panelVisible;
+        }
+        panel.style.display = panelVisible ? 'flex' : 'none';
+        if (panelVisible && getApiKey()) runAnalysis();
+    }
+
     toggleBtn.addEventListener('click', (e) => { 
-        if (toggleBtn.dataset.wasDragged === 'true') return;
-        panelVisible = !panelVisible; 
-        panel.style.display = panelVisible ? 'flex' : 'none'; 
+        if (toggleBtn.dataset.wasDragged === 'true') {
+            toggleBtn.dataset.wasDragged = 'false';
+            return;
+        }
+        togglePanel();
     });
     document.getElementById('oc-spawn-refresh').addEventListener('click', runAnalysis);
-    document.getElementById('oc-spawn-close').addEventListener('click', () => { panelVisible = false; panel.style.display = 'none'; });
+    document.getElementById('oc-spawn-close').addEventListener('click', () => togglePanel(false));
     document.getElementById('oc-spawn-settings').addEventListener('click', () => {
         const sp = document.getElementById('oc-settings-panel');
         const opening = sp.style.display === 'none' || sp.style.display === '';
@@ -1223,8 +1235,7 @@
     setupAjaxInterceptor();
 
     if (window.location.href.includes('tab=crimes') || window.location.hash.includes('crimes')) {
-        panelVisible = true; panel.style.display = 'flex';
-        if (getApiKey()) setTimeout(runAnalysis, 500);
+        togglePanel(true);
     }
 
     // Start DOM scope reader (runs whenever recruiting tab is visible)
