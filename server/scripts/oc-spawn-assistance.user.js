@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.6.4
+// @version      1.6.0
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering. Draggable UI.
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -10,8 +10,6 @@
 // @grant        GM_getValue
 // @grant        GM_xmlhttpRequest
 // @connect      tornwar.com
-// @downloadURL  https://tornwar.com/scripts/oc-spawn-assistance.user.js
-// @updateURL    https://tornwar.com/scripts/oc-spawn-assistance.meta.js
 // ==/UserScript==
 
 (function () {
@@ -49,7 +47,7 @@
             CPR_BOOST:         Number(GM_getValue('cfg_cpr_boost',      15)),
             CPR_LOOKBACK_DAYS: Number(GM_getValue('cfg_lookback_days',  90)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
-            VERSION:           '1.6.4',
+            VERSION:           '1.6.0',
         };
     }
     let CONFIG = loadConfig();
@@ -271,7 +269,6 @@
             background: #2d6a4f; color: #fff; border: none; border-radius: 6px;
             padding: 7px 13px; font-size: 12px; font-weight: bold; cursor: move;
             box-shadow: 0 2px 8px rgba(0,0,0,.4); touch-action: none;
-            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.2s ease;
         }
         #oc-spawn-toggle:hover { background: #1b4332; }
         #oc-spawn-panel {
@@ -364,7 +361,6 @@
         .oc-error { color: #f87171; font-weight: 600; }
         .oc-hdr-btn { background: #1a2a1f; color: #9ca3af; border: 1px solid #2d4a3e; border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer; line-height: 1; font-family: inherit; }
         .oc-hdr-btn:hover { background: #253525; color: #d1d5db; }
-        .oc-dragging { user-select: none !important; }
     `);
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -467,15 +463,8 @@
     // ═══════════════════════════════════════════════════════════════════════
     //  DRAGGABLE LOGIC
     // ═══════════════════════════════════════════════════════════════════════
-    const getClientPos = (e) => {
-        if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-        return { x: e.clientX, y: e.clientY };
-    };
-
     function makeDraggable(el, handle, keyPrefix) {
-        let isDragging = false, wasDragged = false;
-        let dragStartX, dragStartY, elStartX, elStartY;
-        const DRAG_THRESHOLD = 5;
+        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
 
         // Load saved position
         const savedPos = GM_getValue(keyPrefix + '_pos', null);
@@ -490,105 +479,45 @@
             else { el.style.bottom = '115px'; el.style.right = '16px'; }
         }
 
-        handle.addEventListener('mousedown', dragStart, false);
-        handle.addEventListener('touchstart', dragStart, { passive: false });
+        handle.onmousedown = dragMouseDown;
 
-        function dragStart(e) {
-            // If clicking a button/input INSIDE the handle (but not the handle itself), ignore drag
-            if (e.target !== handle && (e.target.tagName === 'BUTTON' || e.target.closest('button') || e.target.tagName === 'INPUT')) return;
-            
-            const pos = getClientPos(e);
-            dragStartX = pos.x;
-            dragStartY = pos.y;
-            
-            const rect = el.getBoundingClientRect();
-            elStartX = rect.left;
-            elStartY = rect.top;
-            
-            isDragging = true;
-            wasDragged = false;
-            el.dataset.wasDragged = 'false';
-            
-            if (el.id === 'oc-spawn-toggle') {
-                el.style.transform = 'scale(0.95)';
-            }
-            
-            if (e.type === 'mousedown') {
-                document.addEventListener('mousemove', dragMove, false);
-                document.addEventListener('mouseup', dragEnd, false);
-            } else {
-                document.addEventListener('touchmove', dragMove, { passive: false });
-                document.addEventListener('touchend', dragEnd, false);
-            }
-            
-            document.body.classList.add('oc-dragging');
+        function dragMouseDown(e) {
+            e = e || window.event;
+            if (e.target.tagName === 'BUTTON' || e.target.closest('button') || e.target.tagName === 'INPUT') return;
+            e.preventDefault();
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            document.onmouseup = closeDragElement;
+            document.onmousemove = elementDrag;
         }
 
-        function dragMove(e) {
-            if (!isDragging) return;
-            const pos = getClientPos(e);
-            const dx = pos.x - dragStartX;
-            const dy = pos.y - dragStartY;
-
-            if (!wasDragged && Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
-            wasDragged = true;
-            el.dataset.wasDragged = 'true';
-
-            if (e.cancelable) e.preventDefault();
-
-            const ew = el.offsetWidth, eh = el.offsetHeight;
-            const newX = Math.max(0, Math.min(window.innerWidth - ew, elStartX + dx));
-            const newY = Math.max(0, Math.min(window.innerHeight - eh, elStartY + dy));
-
-            el.style.top = newY + "px";
-            el.style.left = newX + "px";
+        function elementDrag(e) {
+            e = e || window.event;
+            e.preventDefault();
+            pos1 = pos3 - e.clientX;
+            pos2 = pos4 - e.clientY;
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            el.style.top = (el.offsetTop - pos2) + "px";
+            el.style.left = (el.offsetLeft - pos1) + "px";
             el.style.bottom = 'auto';
             el.style.right = 'auto';
         }
 
-        function dragEnd() {
-            if (!isDragging) return;
-            isDragging = false;
-            
-            if (el.id === 'oc-spawn-toggle') {
-                el.style.transform = 'scale(1)';
-            }
-
-            document.removeEventListener('mousemove', dragMove);
-            document.removeEventListener('mouseup', dragEnd);
-            document.removeEventListener('touchmove', dragMove);
-            document.removeEventListener('touchend', dragEnd);
-            
-            document.body.classList.remove('oc-dragging');
-            
-            if (wasDragged) {
-                GM_setValue(keyPrefix + '_pos', { top: el.style.top, left: el.style.left });
-            }
+        function closeDragElement() {
+            document.onmouseup = null;
+            document.onmousemove = null;
+            // Save position
+            GM_setValue(keyPrefix + '_pos', { top: el.style.top, left: el.style.left });
         }
     }
 
     makeDraggable(toggleBtn, toggleBtn, 'oc_toggle');
     makeDraggable(panel, document.getElementById('oc-spawn-hdr'), 'oc_panel');
 
-    function togglePanel(forceState) {
-        if (typeof forceState === 'boolean') {
-            panelVisible = forceState;
-        } else {
-            panelVisible = !panelVisible;
-        }
-        panel.style.display = panelVisible ? 'flex' : 'none';
-        if (panelVisible && getApiKey()) runAnalysis();
-    }
-
-    toggleBtn.addEventListener('click', (e) => { 
-        if (toggleBtn.dataset.wasDragged === 'true') {
-            toggleBtn.dataset.wasDragged = 'false';
-            return;
-        }
-        togglePanel();
-    });
+    toggleBtn.addEventListener('click', () => { panelVisible = !panelVisible; panel.style.display = panelVisible ? 'flex' : 'none'; });
     document.getElementById('oc-spawn-refresh').addEventListener('click', runAnalysis);
-    document.getElementById('oc-spawn-close').addEventListener('click', () => togglePanel(false));
+    document.getElementById('oc-spawn-close').addEventListener('click', () => { panelVisible = false; panel.style.display = 'none'; });
     document.getElementById('oc-spawn-settings').addEventListener('click', () => {
         const sp = document.getElementById('oc-settings-panel');
         const opening = sp.style.display === 'none' || sp.style.display === '';
@@ -1235,7 +1164,8 @@
     setupAjaxInterceptor();
 
     if (window.location.href.includes('tab=crimes') || window.location.hash.includes('crimes')) {
-        togglePanel(true);
+        panelVisible = true; panel.style.display = 'flex';
+        if (getApiKey()) setTimeout(runAnalysis, 500);
     }
 
     // Start DOM scope reader (runs whenever recruiting tab is visible)

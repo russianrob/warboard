@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.6.4
+// @version      1.6.0
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering. Draggable UI.
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -10,6 +10,4 @@
 // @grant        GM_getValue
 // @grant        GM_xmlhttpRequest
 // @connect      tornwar.com
-// @downloadURL  https://tornwar.com/scripts/oc-spawn-assistance.user.js
-// @updateURL    https://tornwar.com/scripts/oc-spawn-assistance.meta.js
 // ==/UserScript==
