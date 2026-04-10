@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.36
+// @version      4.8.37
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -5970,6 +5970,16 @@ body.wb-chain-active {
                 const urgency = pct >= 80 ? 'safe' : pct >= 50 ? 'warning' : 'danger';
                 warTimerEl.className = 'fo-war-timer ' + urgency;
                 warTimerValue.textContent = pct + '%';
+                // Populate tooltip from server data
+                const detail = document.getElementById('fo-war-timer-detail');
+                if (detail && state.warScores) {
+                    detail.innerHTML =
+                        warTimerDetailRow('Custom Target', state.warTarget.value.toLocaleString())
+                        + warTimerDetailRow('Our Score', (state.warScores.myScore || 0).toLocaleString())
+                        + warTimerDetailRow('Enemy Score', (state.warScores.enemyScore || 0).toLocaleString())
+                        + warTimerDetailRow('Progress', pct + '%')
+                        + warTimerDetailRow('Phase', 'Pre-24h (no decay yet)');
+                }
                 return;
             }
             warTimerEl.className = 'fo-war-timer waiting';
