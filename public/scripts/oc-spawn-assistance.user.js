@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      1.7.31
+// @version      1.7.32
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -1215,7 +1215,7 @@
 
         let statusHtml;
         if (!me) {
-            statusHtml = `<span style="color:#6b7280">Not found in eligible members</span>`;
+            statusHtml = `<span style="color:#6b7280">Not found (ID:${vid || '?'} | ${eligible.length}e/${skipped.length}s | IDs:${eligible.slice(0,2).map(m=>m.id).join(',')})</span>`;
         } else if (me.inOC) {
             const readyLabel = (me.ocReadyAt && me.ocReadyAt > now())
                 ? `free ${fmtTs(me.ocReadyAt)}`
