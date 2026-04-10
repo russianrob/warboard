@@ -85,12 +85,29 @@ function buildCprCache(completedCrimes) {
   for (const [uid, d] of Object.entries(cache)) {
     const cpr = d.count > 0 ? d.rateSum / d.count : 0;
     const topLevel = highestLevel[uid] || 0;
-    const joinable = cpr >= MINCPR + CPR_BOOST ? Math.min(topLevel + 1, 10) : topLevel;
+
+    // Calculate per-level CPR to avoid recommending levels where the member performs poorly
+    const levelCprs = {};
+    for (const e of d.entries) {
+      if (!levelCprs[e.diff]) levelCprs[e.diff] = { sum: 0, count: 0 };
+      levelCprs[e.diff].sum += e.rate;
+      levelCprs[e.diff].count += 1;
+    }
+
+    // Find the highest level where per-level CPR >= MINCPR (drop down if top level is bad)
+    let effectiveTop = topLevel;
+    for (let lvl = topLevel; lvl >= 1; lvl--) {
+      const lc = levelCprs[lvl];
+      if (!lc) continue; // no data at this level, keep looking
+      if ((lc.sum / lc.count) >= MINCPR) { effectiveTop = lvl; break; }
+    }
+
+    const joinable = cpr >= MINCPR + CPR_BOOST ? Math.min(effectiveTop + 1, 10) : effectiveTop;
     const byPosition = {};
     for (const [posKey, pd] of Object.entries(d.byPosition || {})) {
       byPosition[posKey] = { position: pd.position, crimeName: pd.crimeName || '', cpr: Math.round(pd.rateSum / pd.count * 10) / 10, count: pd.count };
     }
-    result[uid] = { cpr: Math.round(cpr * 10) / 10, highestLevel: topLevel, joinable, entries: d.entries, byPosition };
+    result[uid] = { cpr: Math.round(cpr * 10) / 10, highestLevel: topLevel, effectiveTop, joinable, entries: d.entries, byPosition };
   }
   return result;
 }
