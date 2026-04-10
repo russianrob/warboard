@@ -2447,9 +2447,26 @@ const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
 const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
 
 
+const OC_MIN_VERSION = '1.7.39';
+function versionTooOld(v) {
+  if (!v) return true; // no version param = old script
+  const a = v.split('.').map(Number), b = OC_MIN_VERSION.split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i]||0) < (b[i]||0)) return true;
+    if ((a[i]||0) > (b[i]||0)) return false;
+  }
+  return false; // equal = ok
+}
+
 router.get("/api/oc/spawn-key", async (req, res) => {
   // Explicit wildcard CORS: WebKit (TornPDA) sends Origin: null which cors middleware skips
   res.set("Access-Control-Allow-Origin", "*");
+
+  // Block outdated script versions with a helpful update message
+  if (versionTooOld(req.query.v)) {
+    return res.status(426).json({ error: "Your OC Spawn script is outdated. Please update at tornwar.com/scripts/oc-spawn-assistance.user.js" });
+  }
+
   const key = req.query.key;
   if (!key || typeof key !== "string" || key.length < 10) {
     return res.status(400).json({ error: "Invalid key" });
