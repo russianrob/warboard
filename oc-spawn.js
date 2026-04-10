@@ -2,7 +2,7 @@ import { fetchFactionBasic } from "./torn-api.js";
 import * as store from "./store.js";
 
 const CPR_LOOKBACK_DAYS = 90;
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const CACHE_TTL_MS = 1 * 60 * 60 * 1000; // 1 hour
 
 const factionOcsCache = new Map(); // factionId -> { timestamp, cprCache }
 
