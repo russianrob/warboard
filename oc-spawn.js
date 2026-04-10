@@ -68,8 +68,8 @@ function buildCprCache(completedCrimes) {
       cache[uid].count += 1;
       const crimeName = crime.name || '';
       const posName   = slot.position || 'Unknown';
-      // Scope to crime type so "Cleaner" in "Break the Bank" is separate from "Blast from the Past"
-      const posKey    = `${crimeName}::${slot.position_id || slot.position || 'unknown'}`;
+      // Key by role NAME (not position_id which is a generic slot number)
+      const posKey    = `${crimeName}::${slot.position || 'unknown'}`;
       cache[uid].entries.push({ diff, rate: rawRate, position: posName, crimeName });
       if (!cache[uid].byPosition[posKey]) {
         cache[uid].byPosition[posKey] = { position: posName, crimeName, rateSum: 0, count: 0 };
