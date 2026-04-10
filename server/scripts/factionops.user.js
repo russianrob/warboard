@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.34
+// @version      4.8.35
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -5961,14 +5961,13 @@ body.wb-chain-active {
         }
 
         if (eta?.preDropPhase) {
-            // If a custom war target is set, skip pre-24h display and show percentage instead
-            if (state.warTarget && state.warTarget.value && warTimerEtaMs !== null) {
-                // Fall through to the countdown/percentage display below
-            } else {
-                warTimerEl.className = 'fo-war-timer waiting';
-                warTimerValue.textContent = 'Pre-24h';
-                return;
+            // If a custom war target is set, don't overwrite — let updateWarTimer handle percentage
+            if (state.warTarget && state.warTarget.value) {
+                return; // preserve percentage set by updateWarTimer
             }
+            warTimerEl.className = 'fo-war-timer waiting';
+            warTimerValue.textContent = 'Pre-24h';
+            return;
         }
 
         const msLeft = etaMs - Date.now();
