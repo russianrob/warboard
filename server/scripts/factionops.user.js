@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.32
+// @version      4.8.33
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -5877,6 +5877,18 @@ body.wb-chain-active {
                     const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
                     const mm = (totalMin % 60).toString().padStart(2, '0');
                     warTimerValue.textContent = pct + '% (' + hh + ':' + mm + ')';
+                }
+                // Populate tooltip with custom war target details
+                if (warTimerDetail) {
+                    const ourScore = state.warScores ? state.warScores.myScore : (lead || 0);
+                    const enemyScore = state.warScores ? state.warScores.enemyScore : 0;
+                    warTimerDetail.innerHTML =
+                        warTimerDetailRow('Custom Target', goal.toLocaleString())
+                        + warTimerDetailRow('Our Score', ourScore.toLocaleString())
+                        + warTimerDetailRow('Enemy Score', enemyScore.toLocaleString())
+                        + warTimerDetailRow('Progress', pct + '%')
+                        + warTimerDetailRow('War Target', currentTarget ? currentTarget.toLocaleString() : '\u2014')
+                        + warTimerDetailRow('Elapsed', elapsedStr || '\u2014');
                 }
             }
         } else {
