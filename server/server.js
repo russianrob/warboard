@@ -323,8 +323,9 @@ async function detectNewWars() {
     const utcHour = now.getUTCHours();
     const hasActiveWar = [...store.getAllWars()].some(([, w]) => w.enemyFactionId && !w.warEnded);
 
-    // Skip unless: Tuesday before 14:00 UTC, or active war tracking
-    if (day !== 2 && !hasActiveWar) return;
+    // Always check if there's an active war (war spans multiple days)
+    // On non-Tuesday days with no active war, skip to save API calls
+    if (!hasActiveWar && day !== 2) return;
     // if (day === 2 && utcHour >= 14 && !hasActiveWar) return; // no match this week, stop polling
 
     // On Tuesdays, poll every 1 min between 11:45-12:30 UTC (war start window)
@@ -382,7 +383,7 @@ async function detectNewWars() {
           if (rw.warStart) war.warStart = rw.warStart;
           if (rw.warTarget) war.warOrigTarget = rw.warTarget;
           store.saveState();
-          if (!enemyChanged) startWarStatusMonitor(io, warId);
+          startWarStatusMonitor(io, warId);
           console.log(`[war-detect] Detected war: ${factionId} vs ${rw.enemyFactionName} (${rw.enemyFactionId}), starts: ${new Date(rw.warStart * 1000).toISOString()}`);
         }
       } catch (_) {
