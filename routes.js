@@ -2573,6 +2573,16 @@ router.get("/api/oc/settings", async (req, res) => {
   });
 });
 
+// -- GET /api/oc/version (lightweight version check for update notifications)
+router.get("/api/oc/version", (req, res) => {
+  try {
+    const fs = require('fs');
+    const script = fs.readFileSync('/opt/warboard/server/public/scripts/oc-spawn-assistance.user.js', 'utf-8');
+    const match = script.match(/@version\s+([\d.]+)/);
+    return res.json({ version: match ? match[1] : '0' });
+  } catch (e) { return res.json({ version: '0' }); }
+});
+
 // -- GET /api/oc/scope  (lightweight scope-only update — no other settings touched)
 router.get("/api/oc/scope", async (req, res) => {
   const key = req.query.key;
