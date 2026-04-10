@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.29
+// @version      4.8.31
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // v4.8.26  - Fix: Chain notifications (bonus hits, panics, alerts) will no longer fire when the chain is in Cooldown.
 // v4.8.25  - Feature: Upgraded OC Spawn Assistant with tooltips and detailed member CPR breakdowns (synced with standalone v1.1.4).
 // v4.8.24  - Fix: Rewrote button injection logic to ensure Spawn Assistant appears on Crimes tab dynamically.
+// v4.8.30  - Fix: Custom War Target percentage goal display was being overwritten by the real-time ETA display loop.
 // v4.8.23  - Fix: Improved injection logic for the OC Spawn Assistant button so it properly appears on the Crimes tab.
 // v4.8.20  - Feature: Integrated "OC Spawn Assistant" directly into FactionOps (Crimes Tab). Uses backend caching to save Torn API calls!
 // v4.8.19  - Fix: Faction Leaders can now reset the Enemy Activity Heatmap, and the server auto-wipes it when a new enemy is detected.
@@ -5864,6 +5865,8 @@ body.wb-chain-active {
             } else {
                 // Custom goal NOT reached, show progress + prediction to goal
                 const hoursRemainingFloat = calculateHoursRemaining(goal, false);
+                warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
+                warTimerLastCalc = Date.now();
                 const totalMin = Math.floor(hoursRemainingFloat * 60);
                 const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
                 const mm = (totalMin % 60).toString().padStart(2, '0');
@@ -5936,9 +5939,14 @@ body.wb-chain-active {
         }
 
         if (eta?.preDropPhase) {
-            warTimerEl.className = 'fo-war-timer waiting';
-            warTimerValue.textContent = 'Pre-24h';
-            return;
+            // If a custom war target is set, skip pre-24h display and show percentage instead
+            if (state.warTarget && state.warTarget.value && warTimerEtaMs !== null) {
+                // Fall through to the countdown/percentage display below
+            } else {
+                warTimerEl.className = 'fo-war-timer waiting';
+                warTimerValue.textContent = 'Pre-24h';
+                return;
+            }
         }
 
         const msLeft = etaMs - Date.now();
@@ -5964,13 +5972,24 @@ body.wb-chain-active {
         const hrs = Math.floor(totalSec / 3600);
         const mins = Math.floor((totalSec % 3600) / 60);
         const secs = totalSec % 60;
+        
+        let timeStr = '';
         if (hrs > 0) {
-            warTimerValue.textContent = hrs.toString().padStart(2, '0') + ':' + mins.toString().padStart(2, '0');
+            timeStr = hrs.toString().padStart(2, '0') + ':' + mins.toString().padStart(2, '0');
         } else {
-            warTimerValue.textContent = mins + 'm ' + secs.toString().padStart(2, '0') + 's';
+            timeStr = mins + 'm ' + secs.toString().padStart(2, '0') + 's';
         }
+
+        if (state.warTarget && state.warTarget.value && state.warPercentage !== null && state.warPercentage < 100) {
+            warTimerValue.textContent = state.warPercentage + '% (' + timeStr + ')';
+        } else {
+            warTimerValue.textContent = timeStr;
+        }
+
         const hrsLeft = totalSec / 3600;
-        const urg = hrsLeft <= 2 ? 'danger' : hrsLeft <= 6 ? 'warning' : 'safe';
+        const urg = state.warPercentage !== null && state.warPercentage < 100 
+            ? (state.warPercentage >= 80 ? 'safe' : state.warPercentage >= 50 ? 'warning' : 'danger')
+            : (hrsLeft <= 2 ? 'danger' : hrsLeft <= 6 ? 'warning' : 'safe');
         warTimerEl.className = 'fo-war-timer ' + urg;
     }
 
