@@ -2573,6 +2573,26 @@ router.get("/api/oc/settings", async (req, res) => {
   });
 });
 
+// -- GET /api/oc/scope  (lightweight scope-only update — no other settings touched)
+router.get("/api/oc/scope", async (req, res) => {
+  const key = req.query.key;
+  if (!key) return res.status(400).json({ error: "Missing key" });
+  const suffix = key.slice(-8);
+  let info = _spawnKeyCache.get(suffix);
+  if (!info || (Date.now() - info.ts) > 5 * 60_000) {
+    try {
+      const tornInfo = await verifyTornApiKey(key);
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition };
+      _spawnKeyCache.set(suffix, info);
+    } catch (err) { return res.status(401).json({ error: err.message }); }
+  }
+  const scopeRaw = parseInt(req.query.scope, 10);
+  if (isNaN(scopeRaw)) return res.status(400).json({ error: "Missing scope" });
+  const current = store.getFactionSettings(info.factionId);
+  store.updateFactionSettings(info.factionId, { ...current, oc_scope: Math.max(0, Math.min(100, scopeRaw)) });
+  return res.json({ ok: true });
+});
+
 // -- GET /api/oc/settings/update --------------------------------------------
 router.get("/api/oc/settings/update", async (req, res) => {
   res.set("Access-Control-Allow-Origin", "*");
