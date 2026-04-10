@@ -2492,6 +2492,26 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     const data = await getOcSpawnData(playerInfo.factionId, key);
     // Success: this key has Limited+ access — cache it to help future Minimal-access members
     if (fid !== ownerFid) _factionKeyCache.set(fid, key);
+
+    // Apply faction's MINCPR/CPR_BOOST to recalculate joinable (server cache uses hardcoded defaults)
+    const fSettings = store.getFactionSettings(playerInfo.factionId);
+    const fMincpr = fSettings.oc_mincpr ?? 60;
+    const fBoost  = fSettings.oc_cpr_boost ?? 15;
+    for (const [uid, d] of Object.entries(data.cprCache || {})) {
+      const lc = {};
+      for (const e of (d.entries || [])) {
+        if (!lc[e.diff]) lc[e.diff] = { sum: 0, count: 0 };
+        lc[e.diff].sum += e.rate; lc[e.diff].count += 1;
+      }
+      let effTop = d.highestLevel || 0;
+      for (let lvl = effTop; lvl >= 1; lvl--) {
+        const lv = lc[lvl]; if (!lv) continue;
+        if ((lv.sum / lv.count) >= fMincpr) { effTop = lvl; break; }
+      }
+      d.effectiveTop = effTop;
+      d.joinable = d.cpr >= fMincpr + fBoost ? Math.min(effTop + 1, 10) : effTop;
+    }
+
     return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '' } });
   } catch (err) {
     // If member's own key failed (likely Minimal access), retry with cached faction key
@@ -2500,6 +2520,17 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     if (cachedKey && cachedKey !== key) {
       try {
         const data = await getOcSpawnData(playerInfo.factionId, cachedKey);
+        // Apply faction settings to retry path too
+        const fS2 = store.getFactionSettings(playerInfo.factionId);
+        const fM2 = fS2.oc_mincpr ?? 60, fB2 = fS2.oc_cpr_boost ?? 15;
+        for (const [uid, d] of Object.entries(data.cprCache || {})) {
+          const lc = {};
+          for (const e of (d.entries || [])) { if (!lc[e.diff]) lc[e.diff] = { sum: 0, count: 0 }; lc[e.diff].sum += e.rate; lc[e.diff].count += 1; }
+          let effTop = d.highestLevel || 0;
+          for (let lvl = effTop; lvl >= 1; lvl--) { const lv = lc[lvl]; if (!lv) continue; if ((lv.sum / lv.count) >= fM2) { effTop = lvl; break; } }
+          d.effectiveTop = effTop;
+          d.joinable = d.cpr >= fM2 + fB2 ? Math.min(effTop + 1, 10) : effTop;
+        }
         return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '' } });
       } catch (retryErr) {
         console.error("[oc/spawn-key] retry with cached faction key also failed:", retryErr.message);
