@@ -290,32 +290,38 @@ async function poll() {
         const baseNNB = nerveMax - state.factionOffset;
         const prevNNB = state.baseNNB;
 
-        // Detect NNB change
-        if (prevNNB !== null && baseNNB !== prevNNB) {
-            const crimesSinceLast = (totalCrimes != null && state.totalCrimes != null)
-                ? totalCrimes - state.totalCrimes
-                : null;
+        // Detect nerve max change and determine if it's NNB (CE) or faction perk
+        const rawDiff = nerveMax - (state.nerveMax ?? nerveMax);
+        if (rawDiff !== 0 && state.nerveMax !== null) {
+            if (rawDiff % 5 === 0) {
+                // Multiple of 5 — likely a real NNB change from CE
+                const crimesSinceLast = (totalCrimes != null && state.totalCrimes != null)
+                    ? totalCrimes - state.totalCrimes : null;
 
-            const change = {
-                timestamp:       now,
-                date:            new Date(now * 1000).toISOString(),
-                from:            prevNNB,
-                to:              baseNNB,
-                diff:            baseNNB - prevNNB,
-                nerveMaxBefore:  nerveMax - (baseNNB - prevNNB),
-                nerveMaxAfter:   nerveMax,
-                crimesSinceLast,
-                totalCrimesAtChange: totalCrimes,
-            };
+                const nnbDiff = rawDiff > 0 ? 5 : -5;
+                const change = {
+                    timestamp:       now,
+                    date:            new Date(now * 1000).toISOString(),
+                    from:            prevNNB,
+                    to:              prevNNB + nnbDiff,
+                    diff:            nnbDiff,
+                    nerveMaxBefore:  state.nerveMax,
+                    nerveMaxAfter:   nerveMax,
+                    crimesSinceLast,
+                    totalCrimesAtChange: totalCrimes,
+                };
+                state.nnbChanges.push(change);
 
-            state.nnbChanges.push(change);
-
-            const tag = change.diff === 5  ? "🎉 NNB +5 (CE threshold!)" :
-                        change.diff === -5 ? "⚠️ NNB -5 (CE lost!)"      :
-                        `NNB changed ${change.diff > 0 ? "+" : ""}${change.diff} (faction perk?)`;
-
-            console.log(`[NerveTracker] ${tag} ${prevNNB} → ${baseNNB}` +
-                (crimesSinceLast != null ? ` after ${crimesSinceLast} crimes` : ""));
+                const tag = nnbDiff === 5
+                    ? "🎉 NNB +5 (CE threshold!)"
+                    : "⚠️ NNB -5 (CE lost!)";
+                console.log(`[NerveTracker] ${tag} ${prevNNB} → ${prevNNB + nnbDiff} after ${crimesSinceLast ?? '?'} crimes`);
+            } else {
+                // Not a multiple of 5 — faction perk changed, auto-adjust offset
+                const oldOffset = state.factionOffset;
+                state.factionOffset += rawDiff;
+                console.log(`[NerveTracker] Faction perk change detected: nerve max ${state.nerveMax} → ${nerveMax} (+${rawDiff}). Faction offset auto-adjusted: ${oldOffset} → ${state.factionOffset}. Base NNB unchanged at ${prevNNB}.`);
+            }
         }
 
         // Update state
