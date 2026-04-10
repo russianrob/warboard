@@ -66,11 +66,13 @@ function buildCprCache(completedCrimes) {
       if (!cache[uid]) cache[uid] = { rateSum: 0, count: 0, entries: [], byPosition: {} };
       cache[uid].rateSum += rawRate;
       cache[uid].count += 1;
-      const posKey  = slot.position_id || slot.position || 'unknown';
-      const posName = slot.position    || 'Unknown';
-      cache[uid].entries.push({ diff, rate: rawRate, position: posName });
+      const crimeName = crime.name || '';
+      const posName   = slot.position || 'Unknown';
+      // Scope to crime type so "Cleaner" in "Break the Bank" is separate from "Blast from the Past"
+      const posKey    = `${crimeName}::${slot.position_id || slot.position || 'unknown'}`;
+      cache[uid].entries.push({ diff, rate: rawRate, position: posName, crimeName });
       if (!cache[uid].byPosition[posKey]) {
-        cache[uid].byPosition[posKey] = { position: posName, rateSum: 0, count: 0 };
+        cache[uid].byPosition[posKey] = { position: posName, crimeName, rateSum: 0, count: 0 };
       }
       cache[uid].byPosition[posKey].rateSum += rawRate;
       cache[uid].byPosition[posKey].count   += 1;
@@ -86,7 +88,7 @@ function buildCprCache(completedCrimes) {
     const joinable = cpr >= MINCPR + CPR_BOOST ? Math.min(topLevel + 1, 10) : topLevel;
     const byPosition = {};
     for (const [posKey, pd] of Object.entries(d.byPosition || {})) {
-      byPosition[posKey] = { position: pd.position, cpr: Math.round(pd.rateSum / pd.count * 10) / 10, count: pd.count };
+      byPosition[posKey] = { position: pd.position, crimeName: pd.crimeName || '', cpr: Math.round(pd.rateSum / pd.count * 10) / 10, count: pd.count };
     }
     result[uid] = { cpr: Math.round(cpr * 10) / 10, highestLevel: topLevel, joinable, entries: d.entries, byPosition };
   }
