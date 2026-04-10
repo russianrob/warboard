@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.33
+// @version      4.8.34
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -5865,8 +5865,13 @@ body.wb-chain-active {
             } else {
                 // Custom goal NOT reached, show progress + prediction to goal
                 const hoursRemainingFloat = calculateHoursRemaining(goal, false);
-                warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
-                warTimerLastCalc = Date.now();
+                // Only set ETA if estimate is reasonable (< 96h) — otherwise display loop would show nonsense
+                if (hoursRemainingFloat <= 96) {
+                    warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
+                    warTimerLastCalc = Date.now();
+                } else {
+                    warTimerEtaMs = null;
+                }
                 const totalMin = Math.floor(hoursRemainingFloat * 60);
                 const urgency = pct >= 80 ? 'safe' : pct >= 50 ? 'warning' : 'danger';
                 warTimerEl.className = 'fo-war-timer ' + urgency;
