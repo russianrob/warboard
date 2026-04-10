@@ -2441,7 +2441,8 @@ router.get("/api/oc-verify", async (req, res) => {
 // Accepts API key as query param (no CORS preflight needed).
 // Verifies faction membership, then returns spawn data with 6h CPR cache.
 
-const _spawnKeyCache = new Map(); // keySuffix → { ts, factionId, playerName }
+const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition }
+const _factionKeyCache = new Map(); // factionId  → apiKey (best working key seen for that faction)
 const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
 const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
 
@@ -2479,9 +2480,31 @@ router.get("/api/oc/spawn-key", async (req, res) => {
   }
 
   try {
+    // oc-spawn.js already picks OWNER_API_KEY for faction 42055.
+    // For other factions: use cached faction key (from a previous Limited+ member) so
+    // Minimal-access members can still get their faction's OC data.
+    const fid = String(playerInfo.factionId);
+    const ownerFid = String(process.env.OWNER_FACTION_ID || '42055');
+    if (fid !== ownerFid && !_factionKeyCache.has(fid)) {
+      // No cached key yet — seed with member's own key as best attempt
+      _factionKeyCache.set(fid, key);
+    }
     const data = await getOcSpawnData(playerInfo.factionId, key);
+    // Success: this key has Limited+ access — cache it to help future Minimal-access members
+    if (fid !== ownerFid) _factionKeyCache.set(fid, key);
     return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '' } });
   } catch (err) {
+    // If member's own key failed (likely Minimal access), retry with cached faction key
+    const fid = String(playerInfo.factionId);
+    const cachedKey = _factionKeyCache.get(fid);
+    if (cachedKey && cachedKey !== key) {
+      try {
+        const data = await getOcSpawnData(playerInfo.factionId, cachedKey);
+        return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '' } });
+      } catch (retryErr) {
+        console.error("[oc/spawn-key] retry with cached faction key also failed:", retryErr.message);
+      }
+    }
     console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
     return res.status(500).json({ error: "Failed to fetch OC data: " + err.message });
   }
