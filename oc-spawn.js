@@ -122,9 +122,13 @@ async function getOcWeights() {
 }
 
 export async function getOcSpawnData(factionId, apiKey) {
-  // Always use the owner key for faction data — member keys may have Minimal access
-  // which cannot query /v2/faction/* endpoints.
-  const fetchKey = process.env.OWNER_API_KEY || apiKey;
+  // Use OWNER_API_KEY only for the owner's own faction (42055).
+  // v2 /faction/crimes has no faction ID param — it returns the key holder's faction.
+  // For other factions, we must use the member's own key so crimes come from the right faction.
+  const ownerFactionId = String(process.env.OWNER_FACTION_ID || '42055');
+  const fetchKey = (String(factionId) === ownerFactionId && process.env.OWNER_API_KEY)
+    ? process.env.OWNER_API_KEY
+    : apiKey;
 
   let cprCache = null;
   const cached = factionOcsCache.get(factionId);
