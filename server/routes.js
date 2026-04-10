@@ -71,6 +71,13 @@ function broadcastSSE(warId, data) {
  * Called after any state mutation so connected clients get instant updates.
  */
 /** Compute a fresh warEta using currently stored war scores/target — no API call needed. */
+/** Compute war percentage from server-side scores + custom target */
+function computeWarPercentage(war) {
+  if (!war || !war.warTarget || !war.warTarget.value || !war.warScores) return null;
+  const pct = Math.floor((war.warScores.myScore / war.warTarget.value) * 100);
+  return Math.min(pct, 100);
+}
+
 function computeFreshWarEta(war) {
   if (!war || war.warEnded) return war?.warEta || null;
 
@@ -145,6 +152,7 @@ function broadcastWarUpdate(warId) {
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
     warEta: computeFreshWarEta(war),
+    warPercentage: computeWarPercentage(war),
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
   };
@@ -471,6 +479,7 @@ router.get("/api/stream", (req, res, next) => {
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
     warEta: computeFreshWarEta(war),
+    warPercentage: computeWarPercentage(war),
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
   };
@@ -629,6 +638,7 @@ router.get("/api/poll", (req, res, next) => {
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
     warEta: computeFreshWarEta(war),
+    warPercentage: computeWarPercentage(war),
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
     strategy: war.strategy || null,
