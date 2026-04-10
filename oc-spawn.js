@@ -7,13 +7,20 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const factionOcsCache = new Map(); // factionId -> { timestamp, cprCache }
 
 // Helper to fetch from Torn API directly if not in torn-api.js
+function _tornError(data) {
+  if (!data.error) return null;
+  if (data.error.code === 8 || /incorrect.*id|id.*entity/i.test(data.error.error))
+    return new Error('Forbidden — please use a faction API access key (Limited or higher).');
+  return new Error(data.error.error);
+}
+
 async function fetchCompletedCrimes(factionId, apiKey) {
   const fromTs = Math.floor(Date.now() / 1000) - (CPR_LOOKBACK_DAYS * 86400);
   const url = `https://api.torn.com/v2/faction/crimes?cat=completed&sort=DESC&from=${fromTs}&key=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Torn API HTTP ${res.status}`);
   const data = await res.json();
-  if (data.error) throw new Error(data.error.error);
+  const err = _tornError(data); if (err) throw err;
   
   if (Array.isArray(data.crimes)) return data.crimes;
   return Object.values(data.crimes || {});
@@ -24,7 +31,7 @@ async function fetchAvailableCrimes(factionId, apiKey) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Torn API HTTP ${res.status}`);
   const data = await res.json();
-  if (data.error) throw new Error(data.error.error);
+  const err = _tornError(data); if (err) throw err;
   
   if (Array.isArray(data.crimes)) return data.crimes;
   return Object.values(data.crimes || {});
