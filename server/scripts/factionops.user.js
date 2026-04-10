@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.31
+// @version      4.8.32
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -5868,11 +5868,16 @@ body.wb-chain-active {
                 warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
                 warTimerLastCalc = Date.now();
                 const totalMin = Math.floor(hoursRemainingFloat * 60);
-                const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
-                const mm = (totalMin % 60).toString().padStart(2, '0');
                 const urgency = pct >= 80 ? 'safe' : pct >= 50 ? 'warning' : 'danger';
                 warTimerEl.className = 'fo-war-timer ' + urgency;
-                warTimerValue.textContent = pct + '% (' + hh + ':' + mm + ')';
+                // Hide time estimate if it exceeds 96h (longer than any war) — rate is too unreliable
+                if (hoursRemainingFloat > 96) {
+                    warTimerValue.textContent = pct + '%';
+                } else {
+                    const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
+                    const mm = (totalMin % 60).toString().padStart(2, '0');
+                    warTimerValue.textContent = pct + '% (' + hh + ':' + mm + ')';
+                }
             }
         } else {
             // Main Ranked War Block (Target Decay + Our Rate)
@@ -5981,7 +5986,8 @@ body.wb-chain-active {
         }
 
         if (state.warTarget && state.warTarget.value && state.warPercentage !== null && state.warPercentage < 100) {
-            warTimerValue.textContent = state.warPercentage + '% (' + timeStr + ')';
+            // Hide time if estimate exceeds 96h (rate too unreliable early in war)
+            warTimerValue.textContent = hrs > 96 ? state.warPercentage + '%' : state.warPercentage + '% (' + timeStr + ')';
         } else {
             warTimerValue.textContent = timeStr;
         }
