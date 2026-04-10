@@ -97,7 +97,7 @@ function computeFreshWarEta(war) {
   if (war.warStart) {
     const nowSec = Math.floor(Date.now() / 1000);
     const bothZero = !war.warScores || (war.warScores.myScore === 0 && war.warScores.enemyScore === 0);
-    if (war.warStart > nowSec || bothZero) {
+    if (war.warStart > nowSec) {
       return {
         etaTimestamp: war.warStart * 1000,
         hoursRemaining: Math.max(0, (war.warStart - nowSec) / 3600),
@@ -2441,7 +2441,8 @@ router.get("/api/oc-verify", async (req, res) => {
 // Accepts API key as query param (no CORS preflight needed).
 // Verifies faction membership, then returns spawn data with 6h CPR cache.
 
-const _spawnKeyCache = new Map(); // keySuffix → { ts, factionId, playerName }
+const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition }
+const _factionKeyCache = new Map(); // factionId  → apiKey (best working key seen for that faction)
 const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
 const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
 
@@ -2457,8 +2458,8 @@ router.get("/api/oc/spawn-key", async (req, res) => {
   const suffix = key.slice(-8);
   let playerInfo = _spawnKeyCache.get(suffix);
 
-  // Re-verify identity max once per 5 minutes
-  if (!playerInfo || (Date.now() - playerInfo.ts) > 5 * 60_000) {
+  // Re-verify if missing, stale, or populated by another route without playerId
+  if (!playerInfo || (Date.now() - playerInfo.ts) > 5 * 60_000 || !playerInfo.playerId) {
     try {
       const info = await verifyTornApiKey(key);
       if (!isFactionAllowed(info.factionId) && !PARTNER_FACTIONS.includes(String(info.factionId)) && !hasXanaxSubscription(info.factionId)) {
@@ -2469,7 +2470,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
         }
       }
       store.storeApiKey(info.playerId, key);
-      playerInfo = { ts: Date.now(), factionId: info.factionId, playerName: info.playerName };
+      playerInfo = { ts: Date.now(), factionId: info.factionId, playerName: info.playerName, playerId: info.playerId, factionPosition: info.factionPosition };
       _spawnKeyCache.set(suffix, playerInfo);
       console.log(`[oc/spawn-key] Verified ${info.playerName} (faction ${info.factionId})`);
     } catch (err) {
@@ -2479,9 +2480,62 @@ router.get("/api/oc/spawn-key", async (req, res) => {
   }
 
   try {
+    // oc-spawn.js already picks OWNER_API_KEY for faction 42055.
+    // For other factions: use cached faction key (from a previous Limited+ member) so
+    // Minimal-access members can still get their faction's OC data.
+    const fid = String(playerInfo.factionId);
+    const ownerFid = String(process.env.OWNER_FACTION_ID || '42055');
+    if (fid !== ownerFid && !_factionKeyCache.has(fid)) {
+      // No cached key yet — seed with member's own key as best attempt
+      _factionKeyCache.set(fid, key);
+    }
     const data = await getOcSpawnData(playerInfo.factionId, key);
-    return res.json(data);
+    // Success: this key has Limited+ access — cache it to help future Minimal-access members
+    if (fid !== ownerFid) _factionKeyCache.set(fid, key);
+
+    // Apply faction's MINCPR/CPR_BOOST to recalculate joinable (server cache uses hardcoded defaults)
+    const fSettings = store.getFactionSettings(playerInfo.factionId);
+    const fMincpr = fSettings.oc_mincpr ?? 60;
+    const fBoost  = fSettings.oc_cpr_boost ?? 15;
+    for (const [uid, d] of Object.entries(data.cprCache || {})) {
+      const lc = {};
+      for (const e of (d.entries || [])) {
+        if (!lc[e.diff]) lc[e.diff] = { sum: 0, count: 0 };
+        lc[e.diff].sum += e.rate; lc[e.diff].count += 1;
+      }
+      let effTop = d.highestLevel || 0;
+      for (let lvl = effTop; lvl >= 1; lvl--) {
+        const lv = lc[lvl]; if (!lv) continue;
+        if ((lv.sum / lv.count) >= fMincpr) { effTop = lvl; break; }
+      }
+      d.effectiveTop = effTop;
+      d.joinable = d.cpr >= fMincpr + fBoost ? Math.min(effTop + 1, 10) : effTop;
+    }
+
+    return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '' } });
   } catch (err) {
+    // If member's own key failed (likely Minimal access), retry with cached faction key
+    const fid = String(playerInfo.factionId);
+    const cachedKey = _factionKeyCache.get(fid);
+    if (cachedKey && cachedKey !== key) {
+      try {
+        const data = await getOcSpawnData(playerInfo.factionId, cachedKey);
+        // Apply faction settings to retry path too
+        const fS2 = store.getFactionSettings(playerInfo.factionId);
+        const fM2 = fS2.oc_mincpr ?? 60, fB2 = fS2.oc_cpr_boost ?? 15;
+        for (const [uid, d] of Object.entries(data.cprCache || {})) {
+          const lc = {};
+          for (const e of (d.entries || [])) { if (!lc[e.diff]) lc[e.diff] = { sum: 0, count: 0 }; lc[e.diff].sum += e.rate; lc[e.diff].count += 1; }
+          let effTop = d.highestLevel || 0;
+          for (let lvl = effTop; lvl >= 1; lvl--) { const lv = lc[lvl]; if (!lv) continue; if ((lv.sum / lv.count) >= fM2) { effTop = lvl; break; } }
+          d.effectiveTop = effTop;
+          d.joinable = d.cpr >= fM2 + fB2 ? Math.min(effTop + 1, 10) : effTop;
+        }
+        return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '' } });
+      } catch (retryErr) {
+        console.error("[oc/spawn-key] retry with cached faction key also failed:", retryErr.message);
+      }
+    }
     console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
     return res.status(500).json({ error: "Failed to fetch OC data: " + err.message });
   }
@@ -2501,18 +2555,21 @@ router.get("/api/oc/settings", async (req, res) => {
       if (!isFactionAllowed(tornInfo.factionId) && !PARTNER_FACTIONS.includes(String(tornInfo.factionId)) && !hasXanaxSubscription(tornInfo.factionId)) {
         return res.status(403).json({ error: "Access restricted" });
       }
-      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName };
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition };
       _spawnKeyCache.set(suffix, info);
     } catch (err) { return res.status(401).json({ error: err.message }); }
   }
   const s = store.getFactionSettings(info.factionId);
   return res.json({
-    active_days:    s.oc_active_days    ?? 7,
-    forecast_hours: s.oc_forecast_hours ?? 24,
-    mincpr:         s.oc_mincpr         ?? 60,
-    cpr_boost:      s.oc_cpr_boost      ?? 15,
-    lookback_days:  s.oc_lookback_days  ?? 90,
-    scope:          s.oc_scope          ?? null,
+    active_days:         s.oc_active_days          ?? 7,
+    forecast_hours:      s.oc_forecast_hours       ?? 24,
+    mincpr:              s.oc_mincpr               ?? 60,
+    cpr_boost:           s.oc_cpr_boost            ?? 15,
+    lookback_days:       s.oc_lookback_days        ?? 90,
+    scope:               s.oc_scope                ?? null,
+    high_weight_pct:     s.oc_high_weight_pct      ?? 25,
+    high_weight_mincpr:  s.oc_high_weight_mincpr   ?? 75,
+    admin_roles:         s.oc_admin_roles           ?? 'Leader,Co-leader',
   });
 });
 
@@ -2526,22 +2583,27 @@ router.get("/api/oc/settings/update", async (req, res) => {
   if (!info || (Date.now() - info.ts) > 5 * 60_000) {
     try {
       const tornInfo = await verifyTornApiKey(key);
-      if (!isFactionAllowed(tornInfo.factionId) && !PARTNER_FACTIONS.includes(String(tornInfo.factionId)) && !hasXanaxSubscription(tornInfo.factionId)) {
-        return res.status(403).json({ error: "Access restricted" });
+      if (!isFactionAllowed(tornInfo.factionId)) {
+        return res.status(403).json({ error: "Settings can only be changed by faction members." });
       }
-      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName };
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition };
       _spawnKeyCache.set(suffix, info);
     } catch (err) { return res.status(401).json({ error: err.message }); }
+  } else if (!isFactionAllowed(info.factionId)) {
+    return res.status(403).json({ error: "Settings can only be changed by faction members." });
   }
   const num = (k, d) => { const v = parseInt(req.query[k], 10); return isNaN(v) ? d : v; };
   const scopeRaw = parseInt(req.query.scope, 10);
   store.updateFactionSettings(info.factionId, {
-    oc_active_days:    num("active_days",    7),
-    oc_forecast_hours: num("forecast_hours", 24),
-    oc_mincpr:         num("mincpr",         60),
-    oc_cpr_boost:      num("cpr_boost",      15),
-    oc_lookback_days:  num("lookback_days",  90),
-    oc_scope:          isNaN(scopeRaw) ? null : Math.max(0, Math.min(100, scopeRaw)),
+    oc_active_days:         num("active_days",         7),
+    oc_forecast_hours:      num("forecast_hours",      24),
+    oc_mincpr:              num("mincpr",               60),
+    oc_cpr_boost:           num("cpr_boost",            15),
+    oc_lookback_days:       num("lookback_days",        90),
+    oc_high_weight_pct:     num("high_weight_pct",      25),
+    oc_high_weight_mincpr:  num("high_weight_mincpr",   75),
+    oc_admin_roles:         (req.query.admin_roles || '').trim() || 'Leader,Co-leader',
+    oc_scope:               isNaN(scopeRaw) ? null : Math.max(0, Math.min(100, scopeRaw)),
   });
   console.log("[oc/settings] " + info.playerName + " updated faction " + info.factionId + " OC settings");
   return res.json({ ok: true });
