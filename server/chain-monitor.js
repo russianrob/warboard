@@ -22,7 +22,7 @@ const CHAIN_PANIC_THRESHOLD = 30; // seconds — fire panic when chain timer <= 
 const CHAIN_MIN_HITS = 10;        // only alert when chain >= 10 (real chain)
 const CHAIN_ALERT_COOLDOWN_MS = 30_000; // max one alert push per 30s per war
 const CHAIN_PANIC_COOLDOWN_MS = 20_000; // max one panic push per 20s per war
-const WAR_SCORE_CHECK_INTERVAL = 60_000; // check war score every 60s
+const WAR_SCORE_CHECK_INTERVAL = 30_000; // check war score every 30s
 
 /** Bonus hit thresholds in Torn chain mechanics. */
 const BONUS_HITS = [
@@ -196,6 +196,18 @@ export function startChainMonitor(io, warId) {
             }
 
             store.saveState();
+
+            // Broadcast updated scores to all connected clients (Socket.IO)
+            if (io) {
+              const pct = (war.warTarget && war.warTarget.value && war.warScores)
+                ? Math.min(100, Math.floor((war.warScores.myScore / war.warTarget.value) * 100))
+                : null;
+              io.to(`war_${warId}`).emit('war_update', {
+                warScores: war.warScores,
+                warEta: war.warEta,
+                warPercentage: pct,
+              });
+            }
 
             // Check if custom war target reached
             if (war.warTarget && war.warTarget.value && !war.warTarget.notifiedAt && !warTargetNotified.get(warId)) {
