@@ -2586,7 +2586,7 @@ router.get("/api/oc/settings", async (req, res) => {
     scope:               s.oc_scope                ?? null,
     high_weight_pct:     s.oc_high_weight_pct      ?? 25,
     high_weight_mincpr:  s.oc_high_weight_mincpr   ?? 75,
-    admin_roles:         s.oc_admin_roles           ?? 'Leader,Co-leader',
+    admin_roles:         s.oc_admin_roles           ?? 'Leader,Co-leader,Councilor',
   });
 });
 
@@ -2649,7 +2649,7 @@ router.get("/api/oc/settings/update", async (req, res) => {
     oc_lookback_days:       num("lookback_days",        90),
     oc_high_weight_pct:     num("high_weight_pct",      25),
     oc_high_weight_mincpr:  num("high_weight_mincpr",   75),
-    oc_admin_roles:         (req.query.admin_roles || '').trim() || 'Leader,Co-leader',
+    oc_admin_roles:         (req.query.admin_roles || '').trim() || 'Leader,Co-leader,Councilor',
     oc_scope:               isNaN(scopeRaw) ? null : Math.max(0, Math.min(100, scopeRaw)),
   });
   console.log("[oc/settings] " + info.playerName + " updated faction " + info.factionId + " OC settings");
