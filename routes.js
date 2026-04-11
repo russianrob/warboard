@@ -2448,6 +2448,36 @@ const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Fac
 
 
 const OC_MIN_VERSION = '2.1.3';
+
+// Instant Xanax check: when a non-subscribed member refreshes, check THEIR events
+// for a recent Xanax send to RussianRob. If found, grant access immediately.
+async function checkInstantXanax(apiKey, playerInfo) {
+  try {
+    const res = await fetch(`https://api.torn.com/v2/user/events?limit=20&key=${encodeURIComponent(apiKey)}`);
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (data.error) return false;
+    const events = data.events || [];
+    // Look for "You sent 2 x Xanax to RussianRob" or similar
+    for (const ev of events) {
+      const txt = ev.event || '';
+      const match = txt.match(/sent\s+(\d+)\s*x\s*Xanax.*?(\d{4,})/i);
+      if (!match) continue;
+      const qty = parseInt(match[1], 10);
+      const targetId = match[2];
+      // Must be sent to RussianRob (137558)
+      if (String(targetId) !== String(OWNER_PLAYER_ID)) continue;
+      // Must be recent (within last 30 minutes)
+      const age = Math.floor(Date.now() / 1000) - (ev.timestamp || 0);
+      if (age > 1800) continue;
+      // Grant access
+      const { grantFactionAccess } = await import('./xanax-subscriptions.js');
+      const granted = grantFactionAccess(playerInfo.factionId, playerInfo.playerName + "'s faction", qty, playerInfo.playerName);
+      if (granted) return true;
+    }
+  } catch (e) { console.warn('[oc/spawn-key] Instant Xanax check failed:', e.message); }
+  return false;
+}
 function versionTooOld(v) {
   if (!v) return true; // no version param = old script
   const a = v.split('.').map(Number), b = OC_MIN_VERSION.split('.').map(Number);
@@ -2480,7 +2510,11 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     try {
       const info = await verifyTornApiKey(key);
       if (!isFactionAllowed(info.factionId) && !PARTNER_FACTIONS.includes(String(info.factionId)) && !hasXanaxSubscription(info.factionId)) {
-        return res.status(403).json({ error: "Access restricted. Send 2 Xanax for a 7-day trial or 20 Xanax for 30 days to RussianRob." });
+        // Check if they just sent Xanax (instant grant)
+        const granted = await checkInstantXanax(key, { factionId: info.factionId, playerName: info.playerName });
+        if (!granted) {
+          return res.status(403).json({ error: "Access restricted. Send 2 Xanax for a 7-day trial or 20 Xanax for 30 days to RussianRob." });
+        }
       }
       store.storeApiKey(info.playerId, key);
       playerInfo = { ts: Date.now(), factionId: info.factionId, playerName: info.playerName, playerId: info.playerId, factionPosition: info.factionPosition };
