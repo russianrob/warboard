@@ -2447,7 +2447,7 @@ const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
 const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
 
 
-const OC_MIN_VERSION = '1.7.38';
+const OC_MIN_VERSION = '2.0.0';
 function versionTooOld(v) {
   if (!v) return true; // no version param = old script
   const a = v.split('.').map(Number), b = OC_MIN_VERSION.split('.').map(Number);
