@@ -2447,7 +2447,7 @@ const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
 const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
 
 
-const OC_MIN_VERSION = '2.1.3';
+const OC_MIN_VERSION = '2.1.6';
 
 // Instant Xanax check: when a non-subscribed member refreshes, check THEIR events
 // for a recent Xanax send to RussianRob. If found, grant access immediately.
