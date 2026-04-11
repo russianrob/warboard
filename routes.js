@@ -2480,7 +2480,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     try {
       const info = await verifyTornApiKey(key);
       if (!isFactionAllowed(info.factionId) && !PARTNER_FACTIONS.includes(String(info.factionId)) && !hasXanaxSubscription(info.factionId)) {
-        return res.status(403).json({ error: "Forbidden — faction doesn't have access." });
+        return res.status(403).json({ error: "Access restricted. Send 2 Xanax for a 7-day trial or 20 Xanax for 30 days to RussianRob." });
       }
       store.storeApiKey(info.playerId, key);
       playerInfo = { ts: Date.now(), factionId: info.factionId, playerName: info.playerName, playerId: info.playerId, factionPosition: info.factionPosition };
