@@ -2464,7 +2464,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
 
   // Block outdated script versions with a helpful update message
   if (versionTooOld(req.query.v)) {
-    return res.status(426).json({ error: "Your OC Spawn script is outdated. Please update in your script manager." });
+    return res.status(426).json({ error: 'Your OC Spawn script is outdated. <a href="https://tornwar.com/scripts/oc-spawn-assistance.user.js" target="_blank" style="color:#74c69d;text-decoration:underline;">Click here to update</a>' });
   }
 
   const key = req.query.key;
