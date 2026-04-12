@@ -2584,7 +2584,8 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       }
     }
     console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
-    return res.status(500).json({ error: "Failed to fetch OC data: " + err.message });
+    // No cached faction key available — return partial data so the script can show viewer card
+    return res.json({ crimes: [], members: {}, cprCache: {}, pendingFactionData: true, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '', hasFactionAccess: playerInfo.hasFactionAccess || false } });
   }
 });
 
