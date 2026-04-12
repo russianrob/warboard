@@ -2528,17 +2528,17 @@ router.get("/api/oc/spawn-key", async (req, res) => {
 
   try {
     // oc-spawn.js already picks OWNER_API_KEY for faction 42055.
-    // For other factions: use cached faction key (from a previous Limited+ member) so
-    // Minimal-access members can still get their faction's OC data.
+    // For other factions: use cached faction key (from a member with faction access) so
+    // members without faction access can still get their faction's OC data.
     const fid = String(playerInfo.factionId);
     const ownerFid = String(process.env.OWNER_FACTION_ID || '42055');
-    if (fid !== ownerFid && !_factionKeyCache.has(fid)) {
-      // No cached key yet — seed with member's own key as best attempt
+    if (fid !== ownerFid && !_factionKeyCache.has(fid) && playerInfo.hasFactionAccess) {
+      // No cached key yet — seed with this member's key (confirmed faction access)
       _factionKeyCache.set(fid, key);
     }
     const data = await getOcSpawnData(playerInfo.factionId, key);
-    // Success: this key has Limited+ access — cache it to help future Minimal-access members
-    if (fid !== ownerFid) _factionKeyCache.set(fid, key);
+    // Success + faction access confirmed — cache this key for future members without access
+    if (fid !== ownerFid && playerInfo.hasFactionAccess) _factionKeyCache.set(fid, key);
 
     // Apply faction's MINCPR/CPR_BOOST to recalculate joinable (server cache uses hardcoded defaults)
     const fSettings = store.getFactionSettings(playerInfo.factionId);
