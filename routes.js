@@ -2517,7 +2517,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
         }
       }
       store.storeApiKey(info.playerId, key);
-      playerInfo = { ts: Date.now(), factionId: info.factionId, playerName: info.playerName, playerId: info.playerId, factionPosition: info.factionPosition };
+      playerInfo = { ts: Date.now(), factionId: info.factionId, playerName: info.playerName, playerId: info.playerId, factionPosition: info.factionPosition, hasFactionAccess: info.hasFactionAccess };
       _spawnKeyCache.set(suffix, playerInfo);
       console.log(`[oc/spawn-key] Verified ${info.playerName} (faction ${info.factionId})`);
     } catch (err) {
@@ -2559,7 +2559,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       d.joinable = d.cpr >= fMincpr + fBoost ? Math.min(effTop + 1, 10) : effTop;
     }
 
-    return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '' } });
+    return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '', hasFactionAccess: playerInfo.hasFactionAccess || false } });
   } catch (err) {
     // If member's own key failed (likely Minimal access), retry with cached faction key
     const fid = String(playerInfo.factionId);
@@ -2578,7 +2578,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
           d.effectiveTop = effTop;
           d.joinable = d.cpr >= fM2 + fB2 ? Math.min(effTop + 1, 10) : effTop;
         }
-        return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '' } });
+        return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '', hasFactionAccess: playerInfo.hasFactionAccess || false } });
       } catch (retryErr) {
         console.error("[oc/spawn-key] retry with cached faction key also failed:", retryErr.message);
       }
