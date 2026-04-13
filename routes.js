@@ -15,7 +15,7 @@ const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { getOcSpawnData } from "./oc-spawn.js";
 import { getData as getNerveData, updateConfig as updateNerveConfig } from "./nerve-tracker.js";
-import { hasXanaxSubscription, grantFactionAccess } from "./xanax-subscriptions.js";
+import { hasXanaxSubscription, grantFactionAccess, getXanaxSubscription } from "./xanax-subscriptions.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
 import { isFactionAllowed, getAllSubscriptions, getOwnerFactionId, getSubscriptionRejectionMessage } from "./subscription-manager.js";
@@ -2492,6 +2492,25 @@ router.get("/api/oc/spawn-key", async (req, res) => {
   // Explicit wildcard CORS: WebKit (TornPDA) sends Origin: null which cors middleware skips
   res.set("Access-Control-Allow-Origin", "*");
 
+  // Build viewer object with subscription info
+  function buildViewer(playerInfo) {
+    const fid = String(playerInfo.factionId);
+    const ownerFid = String(process.env.OWNER_FACTION_ID || '42055');
+    let subscriptionExpiresAt = null;
+    if (fid === ownerFid || PARTNER_FACTIONS.includes(fid)) {
+      subscriptionExpiresAt = 'permanent';
+    } else {
+      const xSub = getXanaxSubscription(fid);
+      if (xSub && xSub.expiresAt) subscriptionExpiresAt = xSub.expiresAt;
+      if (!subscriptionExpiresAt) {
+        const allSubs = getAllSubscriptions();
+        const match = allSubs.find(s => String(s.factionId) === fid);
+        if (match && match.expiresAt) subscriptionExpiresAt = match.expiresAt;
+      }
+    }
+    return { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(fid), position: playerInfo.factionPosition || '', hasFactionAccess: playerInfo.hasFactionAccess || false, subscriptionExpiresAt };
+  }
+
   // Block outdated script versions with a helpful update message
   if (versionTooOld(req.query.v)) {
     return res.status(426).json({ error: 'Your OC Spawn script is outdated.', updateUrl: 'https://tornwar.com/scripts/oc-spawn-assistance.user.js' });
@@ -2559,7 +2578,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       d.joinable = d.cpr >= fMincpr + fBoost ? Math.min(effTop + 1, 10) : effTop;
     }
 
-    return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '', hasFactionAccess: playerInfo.hasFactionAccess || false } });
+    return res.json({ ...data, viewer: buildViewer(playerInfo) });
   } catch (err) {
     // If member's own key failed (likely Minimal access), retry with cached faction key
     const fid = String(playerInfo.factionId);
@@ -2578,14 +2597,14 @@ router.get("/api/oc/spawn-key", async (req, res) => {
           d.effectiveTop = effTop;
           d.joinable = d.cpr >= fM2 + fB2 ? Math.min(effTop + 1, 10) : effTop;
         }
-        return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '', hasFactionAccess: playerInfo.hasFactionAccess || false } });
+        return res.json({ ...data, viewer: buildViewer(playerInfo) });
       } catch (retryErr) {
         console.error("[oc/spawn-key] retry with cached faction key also failed:", retryErr.message);
       }
     }
     console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
     // No cached faction key available — return partial data so the script can show viewer card
-    return res.json({ crimes: [], members: {}, cprCache: {}, pendingFactionData: true, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '', hasFactionAccess: playerInfo.hasFactionAccess || false } });
+    return res.json({ crimes: [], members: {}, cprCache: {}, pendingFactionData: true, viewer: buildViewer(playerInfo) });
   }
 });
 
