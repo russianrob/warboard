@@ -2441,7 +2441,7 @@ router.get("/api/oc-verify", async (req, res) => {
 // Accepts API key as query param (no CORS preflight needed).
 // Verifies faction membership, then returns spawn data with 6h CPR cache.
 
-const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition }
+const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
 const _factionKeyCache = new Map(); // factionId  → apiKey (best working key seen for that faction)
 const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
 const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
@@ -2624,7 +2624,7 @@ router.get("/api/oc/settings", async (req, res) => {
       if (!isFactionAllowed(tornInfo.factionId) && !PARTNER_FACTIONS.includes(String(tornInfo.factionId)) && !hasXanaxSubscription(tornInfo.factionId)) {
         return res.status(403).json({ error: "Access restricted" });
       }
-      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition };
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition, hasFactionAccess: tornInfo.hasFactionAccess };
       _spawnKeyCache.set(suffix, info);
     } catch (err) { return res.status(401).json({ error: err.message }); }
   }
@@ -2661,7 +2661,7 @@ router.get("/api/oc/scope", async (req, res) => {
   if (!info || (Date.now() - info.ts) > 5 * 60_000) {
     try {
       const tornInfo = await verifyTornApiKey(key);
-      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition };
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition, hasFactionAccess: tornInfo.hasFactionAccess };
       _spawnKeyCache.set(suffix, info);
     } catch (err) { return res.status(401).json({ error: err.message }); }
   }
@@ -2685,7 +2685,7 @@ router.get("/api/oc/settings/update", async (req, res) => {
       if (!isFactionAllowed(tornInfo.factionId)) {
         return res.status(403).json({ error: "Settings can only be changed by faction members." });
       }
-      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition };
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition, hasFactionAccess: tornInfo.hasFactionAccess };
       _spawnKeyCache.set(suffix, info);
     } catch (err) { return res.status(401).json({ error: err.message }); }
   } else if (!isFactionAllowed(info.factionId)) {
