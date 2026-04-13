@@ -2442,6 +2442,22 @@ router.get("/api/oc-verify", async (req, res) => {
 // Verifies faction membership, then returns spawn data with 6h CPR cache.
 
 const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
+const _rateLimitMap   = new Map(); // keySuffix  → { count, windowStart }
+const RATE_LIMIT_MAX  = 10;        // max requests per window
+const RATE_LIMIT_WINDOW = 60_000;  // 1 minute window
+
+function isRateLimited(keySuffix) {
+  const now = Date.now();
+  let entry = _rateLimitMap.get(keySuffix);
+  if (!entry || (now - entry.windowStart) > RATE_LIMIT_WINDOW) {
+    entry = { count: 1, windowStart: now };
+    _rateLimitMap.set(keySuffix, entry);
+    return false;
+  }
+  entry.count++;
+  if (entry.count > RATE_LIMIT_MAX) return true;
+  return false;
+}
 const _factionKeyCache = new Map(); // factionId  → { keys: [apiKey, ...], lastIndex: 0 } — pool of up to 10 verified faction-access keys
 const FACTION_KEY_POOL_MAX = 10;
 
@@ -2517,6 +2533,13 @@ function versionTooOld(v) {
 router.get("/api/oc/spawn-key", async (req, res) => {
   // Explicit wildcard CORS: WebKit (TornPDA) sends Origin: null which cors middleware skips
   res.set("Access-Control-Allow-Origin", "*");
+
+  // Rate limit: 10 requests per minute per API key
+  const key = (req.query.key || '').trim();
+  const rlSuffix = key.slice(-8);
+  if (isRateLimited(rlSuffix)) {
+    return res.status(429).json({ error: 'Too many requests. Please wait a moment before refreshing.' });
+  }
 
   // Build viewer object with subscription info
   function buildViewer(playerInfo) {
