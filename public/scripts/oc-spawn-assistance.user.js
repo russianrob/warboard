@@ -2504,7 +2504,7 @@
     // Admin tab: dev OR has faction API access
     function canViewAdmin(viewer) {
         if (!viewer) return false;
-        // if (isDev(viewer)) return true; // temporarily disabled for debugging
+        if (isDev(viewer)) return true;
         return viewer.hasFactionAccess === true;
     }
 
