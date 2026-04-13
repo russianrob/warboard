@@ -2578,7 +2578,9 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       d.joinable = d.cpr >= fMincpr + fBoost ? Math.min(effTop + 1, 10) : effTop;
     }
 
-    return res.json({ ...data, viewer: buildViewer(playerInfo) });
+    const viewerObj = buildViewer(playerInfo);
+    console.log(`[oc/spawn-key] Sending viewer for ${playerInfo.playerName} (${playerInfo.playerId}): hasFactionAccess=${viewerObj.hasFactionAccess}`);
+    return res.json({ ...data, viewer: viewerObj });
   } catch (err) {
     // If member's own key failed (likely Minimal access), retry with cached faction key
     const fid = String(playerInfo.factionId);
