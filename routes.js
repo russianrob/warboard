@@ -2442,7 +2442,33 @@ router.get("/api/oc-verify", async (req, res) => {
 // Verifies faction membership, then returns spawn data with 6h CPR cache.
 
 const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
-const _factionKeyCache = new Map(); // factionId  → apiKey (best working key seen for that faction)
+const _factionKeyCache = new Map(); // factionId  → { keys: [apiKey, ...], lastIndex: 0 } — pool of up to 10 verified faction-access keys
+const FACTION_KEY_POOL_MAX = 10;
+
+function addFactionKey(fid, key) {
+  fid = String(fid);
+  let pool = _factionKeyCache.get(fid);
+  if (!pool) { pool = { keys: [], lastIndex: 0 }; _factionKeyCache.set(fid, pool); }
+  // Don't add duplicates
+  if (pool.keys.includes(key)) return;
+  // If full, replace the oldest
+  if (pool.keys.length >= FACTION_KEY_POOL_MAX) pool.keys.shift();
+  pool.keys.push(key);
+}
+
+function getNextFactionKey(fid) {
+  const pool = _factionKeyCache.get(String(fid));
+  if (!pool || pool.keys.length === 0) return null;
+  pool.lastIndex = (pool.lastIndex + 1) % pool.keys.length;
+  return pool.keys[pool.lastIndex];
+}
+
+function removeFactionKey(fid, key) {
+  const pool = _factionKeyCache.get(String(fid));
+  if (!pool) return;
+  pool.keys = pool.keys.filter(k => k !== key);
+  if (pool.lastIndex >= pool.keys.length) pool.lastIndex = 0;
+}
 const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
 const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
 
@@ -2549,13 +2575,8 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     // Use requesting member's key. For members without faction access,
     // this will fail and fall back to the cached faction key below.
     const fid = String(playerInfo.factionId);
-    if (!_factionKeyCache.has(fid) && playerInfo.hasFactionAccess) {
-      // No cached key yet — seed with this member's key (confirmed faction access)
-      _factionKeyCache.set(fid, key);
-    }
+    if (playerInfo.hasFactionAccess) addFactionKey(fid, key);
     const data = await getOcSpawnData(playerInfo.factionId, key);
-    // Success + faction access confirmed — cache this key for future members without access
-    if (playerInfo.hasFactionAccess) _factionKeyCache.set(fid, key);
 
     // Apply faction's MINCPR/CPR_BOOST to recalculate joinable (server cache uses hardcoded defaults)
     const fSettings = store.getFactionSettings(playerInfo.factionId);
@@ -2580,26 +2601,30 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     console.log(`[oc/spawn-key] Sending viewer for ${playerInfo.playerName} (${playerInfo.playerId}): hasFactionAccess=${viewerObj.hasFactionAccess}`);
     return res.json({ ...data, viewer: viewerObj });
   } catch (err) {
-    // If member's own key failed (likely Minimal access), retry with cached faction key
+    // If member's own key failed, try keys from the faction pool
     const fid = String(playerInfo.factionId);
-    const cachedKey = _factionKeyCache.get(fid);
-    if (cachedKey && cachedKey !== key) {
-      try {
-        const data = await getOcSpawnData(playerInfo.factionId, cachedKey);
-        // Apply faction settings to retry path too
-        const fS2 = store.getFactionSettings(playerInfo.factionId);
-        const fM2 = fS2.oc_mincpr ?? 60, fB2 = fS2.oc_cpr_boost ?? 15;
-        for (const [uid, d] of Object.entries(data.cprCache || {})) {
-          const lc = {};
-          for (const e of (d.entries || [])) { if (!lc[e.diff]) lc[e.diff] = { sum: 0, count: 0 }; lc[e.diff].sum += e.rate; lc[e.diff].count += 1; }
-          let effTop = d.highestLevel || 0;
-          for (let lvl = effTop; lvl >= 1; lvl--) { const lv = lc[lvl]; if (!lv) continue; if ((lv.sum / lv.count) >= fM2) { effTop = lvl; break; } }
-          d.effectiveTop = effTop;
-          d.joinable = d.cpr >= fM2 + fB2 ? Math.min(effTop + 1, 10) : effTop;
+    const pool = _factionKeyCache.get(fid);
+    if (pool && pool.keys.length > 0) {
+      const keysToTry = pool.keys.filter(k => k !== key);
+      for (const poolKey of keysToTry) {
+        try {
+          const data = await getOcSpawnData(playerInfo.factionId, poolKey);
+          // Apply faction settings to retry path too
+          const fS2 = store.getFactionSettings(playerInfo.factionId);
+          const fM2 = fS2.oc_mincpr ?? 60, fB2 = fS2.oc_cpr_boost ?? 15;
+          for (const [uid, d] of Object.entries(data.cprCache || {})) {
+            const lc = {};
+            for (const e of (d.entries || [])) { if (!lc[e.diff]) lc[e.diff] = { sum: 0, count: 0 }; lc[e.diff].sum += e.rate; lc[e.diff].count += 1; }
+            let effTop = d.highestLevel || 0;
+            for (let lvl = effTop; lvl >= 1; lvl--) { const lv = lc[lvl]; if (!lv) continue; if ((lv.sum / lv.count) >= fM2) { effTop = lvl; break; } }
+            d.effectiveTop = effTop;
+            d.joinable = d.cpr >= fM2 + fB2 ? Math.min(effTop + 1, 10) : effTop;
+          }
+          return res.json({ ...data, viewer: buildViewer(playerInfo) });
+        } catch (retryErr) {
+          console.error(`[oc/spawn-key] pool key failed for faction ${fid}:`, retryErr.message);
+          removeFactionKey(fid, poolKey); // Remove dead key from pool
         }
-        return res.json({ ...data, viewer: buildViewer(playerInfo) });
-      } catch (retryErr) {
-        console.error("[oc/spawn-key] retry with cached faction key also failed:", retryErr.message);
       }
     }
     console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
