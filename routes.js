@@ -2555,6 +2555,10 @@ function runFailureRisk(data) {
   const crimes = data.crimes || data.availableCrimes || [];
   const cprCache = data.cprCache || {};
   const weights = data.weights || {};
+  const members = data.members || {};
+  const memberArr = Array.isArray(members) ? members : Object.values(members);
+  const nameMap = {};
+  for (const m of memberArr) { nameMap[String(m.id || m.playerId || m.uid)] = m.name || m.playerName || ''; }
   const results = [];
 
   // Helper: convert crime name to camelCase key used in weights
@@ -2587,7 +2591,7 @@ function runFailureRisk(data) {
       // Risk = high weight + low CPR
       const riskScore = weight > 0 ? Math.round((1 - posCpr / 100) * weight) : 0;
       slotRisks.push({
-        uid, name: s.user?.name || uid,
+        uid, name: nameMap[uid] || s.user?.name || uid,
         position: s.position, cpr: posCpr, weight,
         riskScore, successProb: posCpr / 100,
       });
