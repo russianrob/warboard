@@ -2443,6 +2443,10 @@ router.get("/api/oc-verify", async (req, res) => {
 // Verifies faction membership, then returns spawn data with 6h CPR cache.
 
 const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
+const _engineCache    = new Map(); // factionId  → { ts, engines, settingsHash }
+function engineSettingsHash(s) {
+  return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}`;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  SLOT OPTIMIZER ENGINE
@@ -2974,17 +2978,15 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     // Collect OC history (piggybacks on existing data, no extra API calls)
     collectOcHistory(playerInfo.factionId, data);
 
-    // Run engines if enabled
-    const engines = {};
-    if (fSettings.engine_slot_optimizer) {
-      engines.slotOptimizer = runSlotOptimizer(data);
+    // Run engines if enabled — cached per faction for 1 hour (same TTL as CPR cache)
+    if (!_engineCache.has(fid) || (Date.now() - _engineCache.get(fid).ts) > 3600_000 || _engineCache.get(fid).settingsHash !== engineSettingsHash(fSettings)) {
+      const engines = {};
+      if (fSettings.engine_slot_optimizer) engines.slotOptimizer = runSlotOptimizer(data);
+      if (fSettings.engine_failure_risk) engines.failureRisk = runFailureRisk(data);
+      if (fSettings.engine_cpr_forecaster) engines.cprForecaster = runCprForecaster(fid, data);
+      _engineCache.set(fid, { ts: Date.now(), engines, settingsHash: engineSettingsHash(fSettings) });
     }
-    if (fSettings.engine_failure_risk) {
-      engines.failureRisk = runFailureRisk(data);
-    }
-    if (fSettings.engine_cpr_forecaster) {
-      engines.cprForecaster = runCprForecaster(playerInfo.factionId, data);
-    }
+    const engines = _engineCache.get(fid).engines;
 
     return res.json({ ...data, viewer: viewerObj, engines });
   } catch (err) {
