@@ -2554,13 +2554,20 @@ function runSlotOptimizer(data) {
 function runFailureRisk(data) {
   const crimes = data.crimes || data.availableCrimes || [];
   const cprCache = data.cprCache || {};
+  const weights = data.weights || {};
   const results = [];
+
+  // Helper: convert crime name to camelCase key used in weights
+  function toCamelKey(name) {
+    return name.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+(.)/g, (_, c) => c.toUpperCase()).replace(/^(.)/, (_, c) => c.toUpperCase());
+  }
 
   for (const crime of crimes) {
     if (crime.status !== 'Recruiting') continue;
     const slots = crime.slots || [];
     const slotRisks = [];
     let hasEmpty = false;
+    const crimeWeights = weights[toCamelKey(crime.name)] || {};
 
     for (const s of slots) {
       const uid = String(s.user_id || s.user?.id || '');
@@ -2568,7 +2575,15 @@ function runFailureRisk(data) {
       const cpr = cprCache[uid];
       const posKey = `${crime.name}::${s.position}`;
       const posCpr = cpr?.byPosition?.[posKey]?.cpr || cpr?.cpr || 0;
-      const weight = s.checkpoint_pass_rate || 0;
+      // Look up weight from weights object using position label
+      const posLabel = s.position_info?.label || s.position || '';
+      const posBase = posLabel.replace(/\s*#\d+$/, ''); // strip "#1" etc
+      // Try exact label first, then numbered variants
+      let weight = crimeWeights[posLabel] || crimeWeights[posBase] || crimeWeights[posLabel.replace(/\s/g, '')] || crimeWeights[posBase.replace(/\s/g, '')] || 0;
+      // Also try with number suffix: Looter1, Looter2 etc
+      if (!weight && s.position_info?.number) {
+        weight = crimeWeights[posBase.replace(/\s/g, '') + s.position_info.number] || 0;
+      }
       // Risk = high weight + low CPR
       const riskScore = weight > 0 ? Math.round((1 - posCpr / 100) * weight) : 0;
       slotRisks.push({
