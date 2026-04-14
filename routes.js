@@ -2818,6 +2818,38 @@ router.get("/api/oc/scope", async (req, res) => {
   return res.json({ ok: true });
 });
 
+// -- GET /api/oc/engines/update — engine toggles only, separate from main settings
+router.get("/api/oc/engines/update", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const key = req.query.key;
+  if (!key || key.length < 10) return res.status(400).json({ error: "Invalid key" });
+  const suffix = key.slice(-8);
+  let info = _spawnKeyCache.get(suffix);
+  if (!info || (Date.now() - info.ts) > 5 * 60_000) {
+    try {
+      const tornInfo = await verifyTornApiKey(key);
+      if (!isFactionAllowed(tornInfo.factionId)) return res.status(403).json({ error: "Access restricted" });
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition, hasFactionAccess: tornInfo.hasFactionAccess };
+      _spawnKeyCache.set(suffix, info);
+    } catch (err) { return res.status(401).json({ error: err.message }); }
+  }
+  const bool = (k) => req.query[k] === 'true' || req.query[k] === '1';
+  store.updateFactionSettings(info.factionId, {
+    engine_slot_optimizer:   bool('engine_slot_optimizer'),
+    engine_cpr_forecaster:   bool('engine_cpr_forecaster'),
+    engine_failure_risk:     bool('engine_failure_risk'),
+    engine_expiry_risk:      bool('engine_expiry_risk'),
+    engine_member_reliability: bool('engine_member_reliability'),
+    engine_payout_optimizer: bool('engine_payout_optimizer'),
+    engine_item_roi:         bool('engine_item_roi'),
+    engine_nerve_efficiency: bool('engine_nerve_efficiency'),
+    engine_gap_analyzer:     bool('engine_gap_analyzer'),
+    engine_member_projector: bool('engine_member_projector'),
+  });
+  console.log(`[oc/engines] ${info.playerName} updated engines for faction ${info.factionId}`);
+  return res.json({ ok: true });
+});
+
 // -- GET /api/oc/settings/update --------------------------------------------
 router.get("/api/oc/settings/update", async (req, res) => {
   res.set("Access-Control-Allow-Origin", "*");
@@ -2849,17 +2881,6 @@ router.get("/api/oc/settings/update", async (req, res) => {
     oc_high_weight_pct:     num("high_weight_pct",      25),
     oc_high_weight_mincpr:  num("high_weight_mincpr",   75),
     oc_scope:               isNaN(scopeRaw) ? null : Math.max(0, Math.min(100, scopeRaw)),
-    // Engine toggles (always update when settings are saved)
-    engine_slot_optimizer:   bool('engine_slot_optimizer'),
-    engine_cpr_forecaster:   bool('engine_cpr_forecaster'),
-    engine_failure_risk:     bool('engine_failure_risk'),
-    engine_expiry_risk:      bool('engine_expiry_risk'),
-    engine_member_reliability: bool('engine_member_reliability'),
-    engine_payout_optimizer: bool('engine_payout_optimizer'),
-    engine_item_roi:         bool('engine_item_roi'),
-    engine_nerve_efficiency: bool('engine_nerve_efficiency'),
-    engine_gap_analyzer:     bool('engine_gap_analyzer'),
-    engine_member_projector: bool('engine_member_projector'),
   });
   console.log("[oc/settings] " + info.playerName + " updated faction " + info.factionId + " OC settings");
   return res.json({ ok: true });
