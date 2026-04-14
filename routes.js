@@ -2452,10 +2452,24 @@ function engineSettingsHash(s) {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  SLOT OPTIMIZER ENGINE
 // ═══════════════════════════════════════════════════════════════════════════════
-function runSlotOptimizer(data) {
+function runSlotOptimizer(factionId, data) {
   const crimes = data.crimes || data.availableCrimes || [];
   const members = data.members || {};
   const cprCache = data.cprCache || {};
+
+  // Enrich byPosition with historical data from OC history
+  const allHistory = loadOcHistory(factionId);
+  const histByPos = {}; // "uid::crimeName::position" -> { rateSum, count }
+  for (const h of allHistory) {
+    if (!Array.isArray(h.slots)) continue;
+    for (const slot of h.slots) {
+      if (!slot.userId || !slot.weight) continue;
+      const key = `${slot.userId}::${h.crimeName}::${slot.position}`;
+      if (!histByPos[key]) histByPos[key] = { rateSum: 0, count: 0 };
+      histByPos[key].rateSum += slot.weight;
+      histByPos[key].count++;
+    }
+  }
 
   // 1. Collect all open slots across all recruiting OCs
   const openSlots = [];
@@ -2512,8 +2526,15 @@ function runSlotOptimizer(data) {
       // Position CPR (best indicator of fit)
       // Strip "#1", "#2" suffix to match byPosition keys (e.g. "Thief" not "Thief #1")
       const posBase = slot.position.replace(/\s*#\d+$/, '');
-      const posCpr = mem.byPosition?.[`${slot.crimeName}::${posBase}`]?.cpr
-                  || mem.byPosition?.[`${slot.crimeName}::${slot.position}`]?.cpr;
+      let posCpr = mem.byPosition?.[`${slot.crimeName}::${posBase}`]?.cpr
+                  || mem.byPosition?.[`${slot.crimeName}::${slot.position}`]?.cpr
+                  || null;
+      // Fallback: historical position CPR from OC history (covers older data + returning members)
+      if (!posCpr) {
+        const hKey = `${mem.uid}::${slot.crimeName}::${posBase}`;
+        const hData = histByPos[hKey];
+        if (hData && hData.count >= 1) posCpr = Math.round(hData.rateSum / hData.count * 10) / 10;
+      }
       // Fallback: use level-specific CPR for this OC's difficulty, not overall average
       const levelCpr = mem.levelCprs[slot.difficulty]
         ? Math.round(mem.levelCprs[slot.difficulty].sum / mem.levelCprs[slot.difficulty].count * 10) / 10
@@ -2545,9 +2566,15 @@ function runSlotOptimizer(data) {
     usedMembers.add(p.member.uid);
     usedSlots.add(slotKey);
     const pb = p.slot.position.replace(/\s*#\d+$/, '');
-    const exactPosCpr = p.member.byPosition?.[`${p.slot.crimeName}::${pb}`]?.cpr
+    let exactPosCpr = p.member.byPosition?.[`${p.slot.crimeName}::${pb}`]?.cpr
                      || p.member.byPosition?.[`${p.slot.crimeName}::${p.slot.position}`]?.cpr
                      || null;
+    // Fallback: historical position CPR
+    if (!exactPosCpr) {
+      const hKey2 = `${p.member.uid}::${p.slot.crimeName}::${pb}`;
+      const hData2 = histByPos[hKey2];
+      if (hData2 && hData2.count >= 1) exactPosCpr = Math.round(hData2.rateSum / hData2.count * 10) / 10;
+    }
     const lvlCpr = p.member.levelCprs[p.slot.difficulty]
       ? Math.round(p.member.levelCprs[p.slot.difficulty].sum / p.member.levelCprs[p.slot.difficulty].count * 10) / 10
       : null;
@@ -2643,9 +2670,83 @@ function collectOcHistory(factionId, data) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  SHARED OC HISTORY LOADER — merges API completedCrimes + on-disk history
+// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * Returns a unified array of completed OC entries from two sources:
+ *  1. getCachedCompletedCrimes(factionId) — recent Torn API data (has checkpoint_pass_rate per slot)
+ *  2. /opt/warboard/server/data/oc-history/{factionId}.json — our long-term collected history
+ *
+ * Deduplicates by crimeId. API data wins on conflicts (fresher CPR values).
+ * Each entry normalised to: { crimeId, crimeName, difficulty, status, executedAt, slots: [{ userId, position, weight }] }
+ */
+function loadOcHistory(factionId) {
+  const apiCrimes = getCachedCompletedCrimes(factionId) || [];
+
+  // Load on-disk history
+  let diskHistory = [];
+  try {
+    const histFile = pathJoin(OC_HISTORY_DIR, `${factionId}.json`);
+    if (existsSync(histFile)) {
+      diskHistory = JSON.parse(readFileSync(histFile, 'utf-8'));
+    }
+  } catch (_) { /* file missing or corrupt — skip */ }
+
+  // Index API crimes by crimeId for fast dedup
+  const seen = new Set();
+  const merged = [];
+
+  // API crimes first (higher fidelity — have checkpoint_pass_rate per slot)
+  for (const c of apiCrimes) {
+    const cid = String(c.id);
+    if (seen.has(cid)) continue;
+    seen.add(cid);
+    merged.push({
+      crimeId: cid,
+      crimeName: c.name,
+      difficulty: c.difficulty || 0,
+      status: c.status,
+      executedAt: c.executed_at || c.planning_at || c.created_at || 0,
+      slots: (c.slots || []).map(s => ({
+        userId: String(s.user_id ?? s.user?.id ?? ''),
+        position: (s.position || '').replace(/\s*#\d+$/, ''),
+        weight: s.checkpoint_pass_rate ?? s.success_chance ?? 0,
+        userName: s.user?.name || '',
+      })),
+      source: 'api',
+    });
+  }
+
+  // Disk history second (older entries the API no longer returns)
+  for (const h of diskHistory) {
+    const cid = String(h.crimeId);
+    if (seen.has(cid)) continue;
+    seen.add(cid);
+    merged.push({
+      crimeId: cid,
+      crimeName: h.crimeName,
+      difficulty: h.difficulty || 0,
+      status: h.status,
+      executedAt: h.completedAt ? Math.floor(h.completedAt / 1000) : 0, // disk stores ms, normalise to seconds
+      slots: (h.slots || []).map(s => ({
+        userId: String(s.userId || ''),
+        position: (s.position || '').replace(/\s*#\d+$/, ''),
+        weight: s.weight || 0,
+        userName: s.userName || '',
+      })),
+      source: 'disk',
+    });
+  }
+
+  // Sort oldest → newest
+  merged.sort((a, b) => a.executedAt - b.executedAt);
+  return merged;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  FAILURE RISK ENGINE
 // ═══════════════════════════════════════════════════════════════════════════════
-function runFailureRisk(data) {
+function runFailureRisk(factionId, data) {
   const crimes = data.crimes || data.availableCrimes || [];
   const cprCache = data.cprCache || {};
   const weights = data.weights || {};
@@ -2653,6 +2754,28 @@ function runFailureRisk(data) {
   const memberArr = Array.isArray(members) ? members : Object.values(members);
   const nameMap = {};
   for (const m of memberArr) { nameMap[String(m.id || m.playerId || m.uid)] = m.name || m.playerName || ''; }
+
+  // Build historical failure rates per crime+position from OC history
+  const allHistory = loadOcHistory(factionId);
+  const histRates = {}; // "crimeName::position" -> { succeeded, failed }
+  const memberHistRates = {}; // "uid::crimeName::position" -> { succeeded, failed }
+  for (const h of allHistory) {
+    if (h.status !== 'Successful' && h.status !== 'Failed') continue;
+    for (const slot of (h.slots || [])) {
+      const posKey = `${h.crimeName}::${slot.position}`;
+      if (!histRates[posKey]) histRates[posKey] = { succeeded: 0, failed: 0 };
+      if (h.status === 'Successful') histRates[posKey].succeeded++;
+      else histRates[posKey].failed++;
+      // Per-member rates
+      if (slot.userId) {
+        const mKey = `${slot.userId}::${posKey}`;
+        if (!memberHistRates[mKey]) memberHistRates[mKey] = { succeeded: 0, failed: 0 };
+        if (h.status === 'Successful') memberHistRates[mKey].succeeded++;
+        else memberHistRates[mKey].failed++;
+      }
+    }
+  }
+
   const results = [];
 
   // Helper: convert crime name to camelCase key used in weights
@@ -2682,13 +2805,30 @@ function runFailureRisk(data) {
       if (!weight && s.position_info?.number) {
         weight = crimeWeights[posBase.replace(/\s/g, '') + s.position_info.number] || 0;
       }
+
+      // Check historical failure rate for this member+crime+position
+      const posKeyBase = `${crime.name}::${posBase}`;
+      const mHist = memberHistRates[`${uid}::${posKeyBase}`];
+      const pHist = histRates[posKeyBase];
+      // Historical success rate: prefer member-specific, fall back to position-wide
+      const histSuccessRate = mHist && (mHist.succeeded + mHist.failed) >= 3
+        ? mHist.succeeded / (mHist.succeeded + mHist.failed)
+        : pHist && (pHist.succeeded + pHist.failed) >= 3
+          ? pHist.succeeded / (pHist.succeeded + pHist.failed)
+          : null;
+
       // Members at or above 60% CPR are near-certain success; only below 60% is real risk
-      const effectiveSuccessProb = posCpr >= 60 ? 0.98 : posCpr / 100;
-      const riskScore = weight > 0 && posCpr < 60 ? Math.round((1 - posCpr / 100) * weight) : 0;
+      // Blend with historical rate when available (70% CPR-based, 30% historical)
+      let effectiveSuccessProb = posCpr >= 60 ? 0.98 : posCpr / 100;
+      if (histSuccessRate !== null) {
+        effectiveSuccessProb = effectiveSuccessProb * 0.7 + histSuccessRate * 0.3;
+      }
+      const riskScore = weight > 0 && posCpr < 60 ? Math.round((1 - effectiveSuccessProb) * weight) : 0;
       slotRisks.push({
         uid, name: nameMap[uid] || s.user?.name || uid,
         position: s.position, cpr: posCpr, weight,
         riskScore, successProb: effectiveSuccessProb,
+        histRate: histSuccessRate !== null ? Math.round(histSuccessRate * 100) : null,
       });
     }
 
@@ -2726,8 +2866,8 @@ function runFailureRisk(data) {
 //  CPR FORECASTER ENGINE
 // ═══════════════════════════════════════════════════════════════════════════════
 function runCprForecaster(factionId, data) {
-  const completedCrimes = getCachedCompletedCrimes(factionId);
-  if (!completedCrimes || completedCrimes.length === 0) return { members: [] };
+  const allHistory = loadOcHistory(factionId);
+  if (!allHistory || allHistory.length === 0) return { members: [] };
 
   const members = data.members || {};
   const memberArr = Array.isArray(members) ? members : Object.values(members);
@@ -2744,18 +2884,18 @@ function runCprForecaster(factionId, data) {
     { label: '7d',  from: now - 7 * DAY,  days: 7 },
   ];
 
-  // Build per-member, per-level, per-role entries
+  // Build per-member, per-level, per-role entries from merged history
   const memberData = {}; // uid -> [{ execAt, diff, role, rate }]
-  for (const crime of completedCrimes) {
-    const execAt = crime.executed_at || crime.planning_at || crime.created_at || 0;
+  for (const crime of allHistory) {
+    const execAt = crime.executedAt || 0;
     if (!execAt || !Array.isArray(crime.slots)) continue;
     const diff = crime.difficulty || 0;
     for (const slot of crime.slots) {
-      const uid = String(slot.user_id ?? slot.user?.id ?? '');
+      const uid = String(slot.userId || '');
       if (!uid) continue;
-      const rate = slot.checkpoint_pass_rate ?? slot.success_chance ?? null;
-      if (rate === null) continue;
-      const role = (slot.position || '').replace(/\s*#\d+$/, ''); // strip #1 etc
+      const rate = slot.weight ?? null;
+      if (rate === null || rate === 0) continue;
+      const role = slot.position || '';
       if (!memberData[uid]) memberData[uid] = [];
       memberData[uid].push({ execAt, diff, role, rate });
     }
@@ -2865,7 +3005,7 @@ function runCprForecaster(factionId, data) {
 //  MEMBER PROJECTOR ENGINE
 // ═══════════════════════════════════════════════════════════════════════════════
 function runMemberProjector(factionId, data) {
-  const completedCrimes = getCachedCompletedCrimes(factionId);
+  const allHistory = loadOcHistory(factionId);
   const members = data.members || {};
   const cprCache = data.cprCache || {};
   const memberArr = Array.isArray(members) ? members : Object.values(members);
@@ -2874,18 +3014,18 @@ function runMemberProjector(factionId, data) {
     nameMap[String(m.id || m.playerId || m.uid)] = m.name || m.playerName || '';
   }
 
-  // Build per-member OC participation stats from completed crimes
+  // Build per-member OC participation stats from merged history (API + disk)
   const memberHistory = {}; // uid -> { totalOCs, firstOCAt, lastOCAt, byLevel: { [diff]: { count, avgCpr, roles } } }
-  for (const crime of completedCrimes) {
-    const execAt = crime.executed_at || crime.planning_at || crime.created_at || 0;
+  for (const crime of allHistory) {
+    const execAt = crime.executedAt || 0;
     if (!execAt || !Array.isArray(crime.slots)) continue;
     const diff = crime.difficulty || 0;
     for (const slot of crime.slots) {
-      const uid = String(slot.user_id ?? slot.user?.id ?? '');
+      const uid = String(slot.userId || '');
       if (!uid) continue;
-      const rate = slot.checkpoint_pass_rate ?? slot.success_chance ?? null;
-      if (rate === null) continue;
-      const role = (slot.position || '').replace(/\s*#\d+$/, '');
+      const rate = slot.weight ?? null;
+      if (rate === null || rate === 0) continue;
+      const role = slot.position || '';
 
       if (!memberHistory[uid]) memberHistory[uid] = { totalOCs: 0, firstOCAt: execAt, lastOCAt: execAt, byLevel: {} };
       const h = memberHistory[uid];
@@ -2930,12 +3070,12 @@ function runMemberProjector(factionId, data) {
       // Find earliest OC at toLvl and latest OC at fromLvl before that
       const fromEntries = [];
       const toEntries = [];
-      for (const crime of completedCrimes) {
-        const execAt = crime.executed_at || crime.planning_at || 0;
+      for (const crime of allHistory) {
+        const execAt = crime.executedAt || 0;
         if (!execAt || !Array.isArray(crime.slots)) continue;
         const diff = crime.difficulty || 0;
         for (const slot of crime.slots) {
-          if (String(slot.user_id ?? slot.user?.id ?? '') !== uid) continue;
+          if (String(slot.userId || '') !== uid) continue;
           if (diff === fromLvl) fromEntries.push(execAt);
           if (diff === toLvl) toEntries.push(execAt);
         }
@@ -3089,7 +3229,7 @@ function runMemberProjector(factionId, data) {
 //  MEMBER RELIABILITY ENGINE
 // ═══════════════════════════════════════════════════════════════════════════════
 function runMemberReliability(factionId, data) {
-  const completedCrimes = getCachedCompletedCrimes(factionId);
+  const allHistory = loadOcHistory(factionId);
   const members = data.members || {};
   const cprCache = data.cprCache || {};
   const memberArr = Array.isArray(members) ? members : Object.values(members);
@@ -3103,10 +3243,10 @@ function runMemberReliability(factionId, data) {
   const LOOKBACK = 90 * DAY;
   const cutoff = now - LOOKBACK;
 
-  // Build per-member participation stats from completed crimes
+  // Build per-member participation stats from merged history (API + disk)
   const memberStats = {}; // uid -> { total, succeeded, failed, entries: [{ execAt, diff, status, role }] }
-  for (const crime of completedCrimes) {
-    const execAt = crime.executed_at || crime.planning_at || crime.created_at || 0;
+  for (const crime of allHistory) {
+    const execAt = crime.executedAt || 0;
     if (!execAt || execAt < cutoff || !Array.isArray(crime.slots)) continue;
     const diff = crime.difficulty || 0;
     const status = crime.status || '';
@@ -3115,9 +3255,9 @@ function runMemberReliability(factionId, data) {
     if (!isSuccess && !isFailed) continue;
 
     for (const slot of crime.slots) {
-      const uid = String(slot.user_id ?? slot.user?.id ?? '');
+      const uid = String(slot.userId || '');
       if (!uid) continue;
-      const role = (slot.position || '').replace(/\s*#\d+$/, '');
+      const role = slot.position || '';
 
       if (!memberStats[uid]) memberStats[uid] = { total: 0, succeeded: 0, failed: 0, entries: [] };
       memberStats[uid].total++;
@@ -3484,8 +3624,8 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     // Run engines if enabled — cached per faction for 1 hour (same TTL as CPR cache)
     if (!_engineCache.has(fid) || (Date.now() - _engineCache.get(fid).ts) > 3600_000 || _engineCache.get(fid).settingsHash !== engineSettingsHash(fSettings)) {
       const engines = {};
-      if (fSettings.engine_slot_optimizer) engines.slotOptimizer = runSlotOptimizer(data);
-      if (fSettings.engine_failure_risk) engines.failureRisk = runFailureRisk(data);
+      if (fSettings.engine_slot_optimizer) engines.slotOptimizer = runSlotOptimizer(fid, data);
+      if (fSettings.engine_failure_risk) engines.failureRisk = runFailureRisk(fid, data);
       if (fSettings.engine_cpr_forecaster) engines.cprForecaster = runCprForecaster(fid, data);
       if (fSettings.engine_member_projector) engines.memberProjector = runMemberProjector(fid, data);
       if (fSettings.engine_member_reliability) engines.memberReliability = runMemberReliability(fid, data);
