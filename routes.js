@@ -2707,8 +2707,8 @@ function runCprForecaster(factionId, data) {
     { label: '7d',  from: now - 7 * DAY,  days: 7 },
   ];
 
-  // Build per-member, per-level entries
-  const memberData = {}; // uid -> [{ execAt, diff, rate }]
+  // Build per-member, per-level, per-role entries
+  const memberData = {}; // uid -> [{ execAt, diff, role, rate }]
   for (const crime of completedCrimes) {
     const execAt = crime.executed_at || crime.planning_at || crime.created_at || 0;
     if (!execAt || !Array.isArray(crime.slots)) continue;
@@ -2718,63 +2718,81 @@ function runCprForecaster(factionId, data) {
       if (!uid) continue;
       const rate = slot.checkpoint_pass_rate ?? slot.success_chance ?? null;
       if (rate === null) continue;
+      const role = (slot.position || '').replace(/\s*#\d+$/, ''); // strip #1 etc
       if (!memberData[uid]) memberData[uid] = [];
-      memberData[uid].push({ execAt, diff, rate });
+      memberData[uid].push({ execAt, diff, role, rate });
     }
+  }
+
+  function calcTrend(entries) {
+    entries.sort((a, b) => a.execAt - b.execAt);
+    const mid = Math.floor(entries.length / 2);
+    const firstHalf = entries.slice(0, mid);
+    const secondHalf = entries.slice(mid);
+    const firstAvg = firstHalf.reduce((s, e) => s + e.rate, 0) / firstHalf.length;
+    const secondAvg = secondHalf.reduce((s, e) => s + e.rate, 0) / secondHalf.length;
+    const timeSpanDays = (entries[entries.length - 1].execAt - entries[0].execAt) / DAY;
+    const change = secondAvg - firstAvg;
+    const changePerMonth = timeSpanDays > 7 ? Math.round((change / timeSpanDays) * 30 * 10) / 10 : 0;
+    const projected30d = Math.round(Math.min(100, Math.max(0, secondAvg + changePerMonth)) * 10) / 10;
+    let trend = 'stable';
+    if (changePerMonth >= 2) trend = 'improving';
+    else if (changePerMonth <= -2) trend = 'declining';
+    return {
+      currentCpr: Math.round(secondAvg * 10) / 10, trend, changePerMonth, projected30d,
+      projectedMin: Math.round(Math.max(0, projected30d - 3) * 10) / 10,
+      projectedMax: Math.round(Math.min(100, projected30d + 3) * 10) / 10,
+      count: entries.length,
+    };
   }
 
   const results = [];
   for (const [uid, entries] of Object.entries(memberData)) {
     if (entries.length < 2) continue;
 
-    // Group entries by difficulty level
+    // Group by level, then by role within each level
     const byLevel = {};
     for (const e of entries) {
-      if (!byLevel[e.diff]) byLevel[e.diff] = [];
-      byLevel[e.diff].push(e);
+      const key = e.diff;
+      if (!byLevel[key]) byLevel[key] = {};
+      if (!byLevel[key][e.role]) byLevel[key][e.role] = [];
+      byLevel[key][e.role].push(e);
     }
 
-    // Calculate trend per level
     const levels = [];
-    for (const [lvl, lvlEntries] of Object.entries(byLevel)) {
-      if (lvlEntries.length < 2) continue;
-      // Sort by time
-      lvlEntries.sort((a, b) => a.execAt - b.execAt);
-      // Split into first half and second half for trend
-      const mid = Math.floor(lvlEntries.length / 2);
-      const firstHalf = lvlEntries.slice(0, mid);
-      const secondHalf = lvlEntries.slice(mid);
-      const firstAvg = firstHalf.reduce((s, e) => s + e.rate, 0) / firstHalf.length;
-      const secondAvg = secondHalf.reduce((s, e) => s + e.rate, 0) / secondHalf.length;
-      const currentAvg = secondAvg;
+    for (const [lvl, roles] of Object.entries(byLevel)) {
+      const roleBreakdown = [];
+      for (const [role, roleEntries] of Object.entries(roles)) {
+        if (roleEntries.length < 2) {
+          // Still show single-entry roles but without trend
+          const avg = roleEntries.reduce((s, e) => s + e.rate, 0) / roleEntries.length;
+          roleBreakdown.push({
+            role, currentCpr: Math.round(avg * 10) / 10, trend: 'stable',
+            changePerMonth: 0, projected30d: Math.round(avg * 10) / 10,
+            projectedMin: Math.round(Math.max(0, avg - 3) * 10) / 10,
+            projectedMax: Math.round(Math.min(100, avg + 3) * 10) / 10,
+            count: roleEntries.length,
+          });
+          continue;
+        }
+        const t = calcTrend(roleEntries);
+        roleBreakdown.push({ role, ...t });
+      }
+      roleBreakdown.sort((a, b) => b.count - a.count); // most OCs first
 
-      // Time span between first and last entry
-      const timeSpanDays = (lvlEntries[lvlEntries.length - 1].execAt - lvlEntries[0].execAt) / DAY;
-      const change = secondAvg - firstAvg;
-      const changePerMonth = timeSpanDays > 7 ? Math.round((change / timeSpanDays) * 30 * 10) / 10 : 0;
-
-      const projected30d = Math.round(Math.min(100, Math.max(0, currentAvg + changePerMonth)) * 10) / 10;
-      const projectedMin = Math.round(Math.max(0, projected30d - 3) * 10) / 10;
-      const projectedMax = Math.round(Math.min(100, projected30d + 3) * 10) / 10;
-
-      let trend = 'stable';
-      if (changePerMonth >= 2) trend = 'improving';
-      else if (changePerMonth <= -2) trend = 'declining';
-
-      levels.push({
-        level: Number(lvl), currentCpr: Math.round(currentAvg * 10) / 10,
-        trend, changePerMonth, projected30d, projectedMin, projectedMax,
-        count: lvlEntries.length,
-      });
+      // Level-wide average from all roles combined
+      const allLvlEntries = Object.values(roles).flat();
+      if (allLvlEntries.length >= 2) {
+        const lvlTrend = calcTrend(allLvlEntries);
+        levels.push({ level: Number(lvl), ...lvlTrend, roles: roleBreakdown });
+      }
     }
 
     if (levels.length === 0) continue;
-    levels.sort((a, b) => b.level - a.level); // highest level first
+    levels.sort((a, b) => b.level - a.level);
 
     const mainCpr = data.cprCache?.[uid]?.cpr ?? levels[0].currentCpr;
     const joinable = data.cprCache?.[uid]?.joinable ?? 1;
-
-    // Overall trend = trend at their highest active level
     const primaryLevel = levels[0];
 
     results.push({
