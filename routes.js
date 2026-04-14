@@ -2502,8 +2502,9 @@ function runSlotOptimizer(data) {
       } else {
         score += mem.cpr; // fallback to general CPR
       }
-      // Exact level match bonus (prefer members at the right level)
+      // Level fit: prefer members at the right level, penalize downranking
       if (mem.joinable === slot.difficulty) score += 20;
+      else if (mem.joinable > slot.difficulty) score -= (mem.joinable - slot.difficulty) * 15; // penalize overqualified
       // Expiry urgency bonus (prioritize slots expiring soon)
       const hoursToExpiry = (slot.expiredAt - Date.now() / 1000) / 3600;
       if (hoursToExpiry < 6) score += 30;
