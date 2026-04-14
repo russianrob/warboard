@@ -443,6 +443,19 @@ router.get("/api/stream", (req, res, next) => {
     return res.status(403).json({ error: "Not a member of this war's faction" });
   }
 
+  // Full reset if enemy changed (new war)
+  if (enemyFactionId && war.enemyFactionId && war.enemyFactionId !== enemyFactionId) {
+    console.log(`[sse] Enemy changed: ${war.enemyFactionId} → ${enemyFactionId}. Full reset.`);
+    war.enemyFactionId = enemyFactionId;
+    war.enemyFactionName = null;
+    war.warScores = null; war.warStart = null; war.warOrigTarget = null;
+    war.warEta = null; war.clientTimerReport = null;
+    war.warEnded = false; war.warResult = null; war.warEndedAt = null;
+    war.enemyStatuses = {}; war.calls = {}; war.priorities = {};
+    war.enemyActivityLog = []; war.enemyActivityByHour = {}; war.strategy = null;
+    store.saveState();
+  }
+
   // Track player as online
   store.setPlayer(playerId, {
     socketId: `sse_${playerId}`,
@@ -550,13 +563,25 @@ router.get("/api/poll", (req, res, next) => {
     return res.status(403).json({ error: "You are not a member of this war's faction" });
   }
 
-  // WIPE STALE WAR DATA if enemy faction ID changed (bug fix)
+  // FULL RESET if enemy faction ID changed — new war started
   if (enemyFactionId && war.enemyFactionId !== enemyFactionId) {
-    console.log(`[api] War ${warId} enemy changed from ${war.enemyFactionId} to ${enemyFactionId}. Wiping stale state.`);
+    console.log(`[api] War ${warId} enemy changed from ${war.enemyFactionId} to ${enemyFactionId}. Full war state reset.`);
     war.enemyFactionId = enemyFactionId;
+    war.enemyFactionName = null; // will be auto-detected
     war.enemyStatuses = {};
     war.calls = {};
     war.priorities = {};
+    war.warScores = null;
+    war.warStart = null;
+    war.warOrigTarget = null;
+    war.warEta = null;
+    war.clientTimerReport = null;
+    war.warEnded = false;
+    war.warResult = null;
+    war.warEndedAt = null;
+    war.enemyActivityLog = [];
+    war.enemyActivityByHour = {};
+    war.strategy = null;
 
     // Clear call timers for this war
     for (const [key, timeoutId] of callTimers.entries()) {
@@ -568,6 +593,22 @@ router.get("/api/poll", (req, res, next) => {
 
     store.saveState();
     broadcastWarUpdate(warId);
+
+    // Fetch fresh war data from Torn API
+    const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
+    if (apiKey) {
+      fetchRankedWar(factionId, apiKey).then(rw => {
+        if (rw) {
+          if (rw.warStart) war.warStart = rw.warStart;
+          if (rw.warTarget) war.warOrigTarget = rw.warTarget;
+          if (rw.enemyFactionName) war.enemyFactionName = rw.enemyFactionName;
+          war.warScores = { myScore: rw.myScore || 0, enemyScore: rw.enemyScore || 0 };
+          store.saveState();
+          broadcastWarUpdate(warId);
+          console.log(`[api] Fresh war data: ${rw.enemyFactionName}, target=${rw.warTarget}, start=${rw.warStart}`);
+        }
+      }).catch(() => {});
+    }
   }
 
   // Auto-detect ranked war enemy if not set
