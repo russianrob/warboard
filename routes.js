@@ -2534,18 +2534,18 @@ function runSlotOptimizer(data) {
     if (usedMembers.has(p.member.uid) || usedSlots.has(slotKey)) continue;
     usedMembers.add(p.member.uid);
     usedSlots.add(slotKey);
+    const pb = p.slot.position.replace(/\s*#\d+$/, '');
+    const exactPosCpr = p.member.byPosition?.[`${p.slot.crimeName}::${pb}`]?.cpr
+                     || p.member.byPosition?.[`${p.slot.crimeName}::${p.slot.position}`]?.cpr
+                     || null;
     assignments.push({
       memberId: p.member.uid, memberName: p.member.name,
       memberCpr: p.member.cpr, memberJoinable: p.member.joinable,
       crimeId: p.slot.crimeId, crimeName: p.slot.crimeName,
       difficulty: p.slot.difficulty, position: p.slot.position,
       score: Math.round(p.score * 10) / 10,
-      positionCpr: (() => {
-        const pb = p.slot.position.replace(/\s*#\d+$/, '');
-        return p.member.byPosition?.[`${p.slot.crimeName}::${pb}`]?.cpr
-            || p.member.byPosition?.[`${p.slot.crimeName}::${p.slot.position}`]?.cpr
-            || null;
-      })(),
+      positionCpr: exactPosCpr,
+      isEstimatedCpr: !exactPosCpr, // true if we're using overall CPR, not position-specific
       hoursToExpiry: Math.round(((p.slot.expiredAt || Infinity) - Date.now() / 1000) / 3600 * 10) / 10,
     });
   }
