@@ -3555,14 +3555,15 @@ function runPayoutTracker(factionId, data) {
 //  ITEM ROI ENGINE — tracks item costs vs OC payout returns
 // ═══════════════════════════════════════════════════════════════════════════════
 function runItemRoi(factionId, data) {
-  const completedCrimes = getCachedCompletedCrimes(factionId) || [];
   const allHistory = loadOcHistory(factionId);
+  const completedCrimes = getCachedCompletedCrimes(factionId) || [];
 
   // Build per-crime-type data: item requirements, payouts, success rates
   const crimeData = {}; // crimeName -> { difficulty, itemSlots, successMoney, successCount, failCount }
 
-  for (const c of completedCrimes) {
-    const name = c.name || 'Unknown';
+  // Use merged history for counts and payout data
+  for (const c of allHistory) {
+    const name = c.crimeName || 'Unknown';
     if (!crimeData[name]) crimeData[name] = {
       crimeName: name, difficulty: c.difficulty || 0,
       itemSlots: [], successMoney: 0, successRespect: 0, successCount: 0, failCount: 0, totalRuns: 0,
@@ -3577,12 +3578,16 @@ function runItemRoi(factionId, data) {
     } else if (c.status === 'Failed') {
       cd.failCount++;
     }
+  }
 
-    // Collect item slot data from crime slots
+  // Collect item slot data from raw API crimes (has item_requirement details)
+  for (const c of completedCrimes) {
+    const name = c.name || 'Unknown';
+    if (!crimeData[name]) continue; // already counted above
+    const cd = crimeData[name];
     for (const slot of (c.slots || [])) {
       if (slot.item_requirement) {
         const itemId = slot.item_requirement.id || null;
-        const itemKey = `item_${itemId}`;
         const existing = cd.itemSlots.find(i => i.itemId === itemId);
         if (existing) {
           existing.timesNeeded++;
@@ -3592,23 +3597,11 @@ function runItemRoi(factionId, data) {
             itemId,
             position: (slot.position || '').replace(/\s*#\d+$/, ''),
             timesNeeded: 1,
-            isConsumed: !slot.item_requirement.is_reusable, // reusable items are not consumed
+            isConsumed: !slot.item_requirement.is_reusable,
           });
         }
       }
     }
-  }
-
-  // Add failures from disk history
-  for (const h of allHistory) {
-    if (h.status !== 'Failed') continue;
-    const name = h.crimeName || 'Unknown';
-    if (!crimeData[name]) crimeData[name] = {
-      crimeName: name, difficulty: h.difficulty || 0,
-      itemSlots: [], successMoney: 0, successRespect: 0, successCount: 0, failCount: 0, totalRuns: 0,
-    };
-    crimeData[name].failCount++;
-    crimeData[name].totalRuns++;
   }
 
   // Calculate ROI for each crime type
