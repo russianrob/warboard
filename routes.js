@@ -3,7 +3,8 @@
  */
 
 import { Router } from "express";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { join as pathJoin } from "node:path";
 import axios from "axios";
 import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.js";
 import * as store from "./store.js";
@@ -2549,6 +2550,62 @@ function runSlotOptimizer(data) {
   };
 }
 // ═══════════════════════════════════════════════════════════════════════════════
+//  OC HISTORY COLLECTOR — logs completed OC results for future failure rate analysis
+// ═══════════════════════════════════════════════════════════════════════════════
+const OC_HISTORY_DIR = pathJoin(process.env.DATA_DIR || './data', 'oc-history');
+const _seenCrimeIds = new Set(); // prevent duplicate logging per restart
+
+function collectOcHistory(factionId, data) {
+  try {
+    const crimes = data.crimes || data.availableCrimes || [];
+    const members = data.members || {};
+    const memberArr = Array.isArray(members) ? members : Object.values(members);
+    const nameMap = {};
+    for (const m of memberArr) { nameMap[String(m.id || m.playerId || m.uid)] = m.name || m.playerName || ''; }
+
+    const completed = crimes.filter(c => c.status === 'Successful' || c.status === 'Failed');
+    if (completed.length === 0) return;
+
+    if (!existsSync(OC_HISTORY_DIR)) mkdirSync(OC_HISTORY_DIR, { recursive: true });
+    const histFile = pathJoin(OC_HISTORY_DIR, `${factionId}.json`);
+    let history = [];
+    try { history = JSON.parse(readFileSync(histFile, 'utf-8')); } catch (_) {}
+
+    let added = 0;
+    for (const c of completed) {
+      const cid = String(c.id);
+      if (_seenCrimeIds.has(cid)) continue;
+      // Check if already in history file
+      if (history.some(h => String(h.crimeId) === cid)) { _seenCrimeIds.add(cid); continue; }
+      _seenCrimeIds.add(cid);
+
+      const slots = (c.slots || []).map(s => ({
+        position: s.position,
+        userId: String(s.user_id || s.user?.id || ''),
+        userName: nameMap[String(s.user_id || s.user?.id || '')] || '',
+        weight: s.checkpoint_pass_rate || 0,
+      }));
+
+      history.push({
+        crimeId: cid, crimeName: c.name, difficulty: c.difficulty || 0,
+        status: c.status, completedAt: Date.now(),
+        slots,
+      });
+      added++;
+    }
+
+    if (added > 0) {
+      // Keep last 500 entries per faction
+      if (history.length > 500) history = history.slice(-500);
+      writeFileSync(histFile, JSON.stringify(history, null, 2));
+      console.log(`[oc-history] Logged ${added} completed OC(s) for faction ${factionId}`);
+    }
+  } catch (e) {
+    console.error('[oc-history] Error:', e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  FAILURE RISK ENGINE
 // ═══════════════════════════════════════════════════════════════════════════════
 function runFailureRisk(data) {
@@ -2588,12 +2645,13 @@ function runFailureRisk(data) {
       if (!weight && s.position_info?.number) {
         weight = crimeWeights[posBase.replace(/\s/g, '') + s.position_info.number] || 0;
       }
-      // Risk = high weight + low CPR
-      const riskScore = weight > 0 ? Math.round((1 - posCpr / 100) * weight) : 0;
+      // Members at or above 60% CPR are near-certain success; only below 60% is real risk
+      const effectiveSuccessProb = posCpr >= 60 ? 0.98 : posCpr / 100;
+      const riskScore = weight > 0 && posCpr < 60 ? Math.round((1 - posCpr / 100) * weight) : 0;
       slotRisks.push({
         uid, name: nameMap[uid] || s.user?.name || uid,
         position: s.position, cpr: posCpr, weight,
-        riskScore, successProb: posCpr / 100,
+        riskScore, successProb: effectiveSuccessProb,
       });
     }
 
@@ -2609,8 +2667,8 @@ function runFailureRisk(data) {
     slotRisks.sort((a, b) => b.riskScore - a.riskScore);
     const weakestLink = slotRisks[0] || null;
 
-    // Flag high-weight + low CPR combos
-    const dangerSlots = slotRisks.filter(s => s.weight >= 20 && s.cpr < 70);
+    // Flag high-weight + low CPR combos (below 60% MINCPR threshold)
+    const dangerSlots = slotRisks.filter(s => s.weight >= 20 && s.cpr < 60);
 
     results.push({
       crimeId: crime.id, crimeName: crime.name, difficulty: crime.difficulty || 0,
@@ -2785,6 +2843,9 @@ router.get("/api/oc/spawn-key", async (req, res) => {
 
     const viewerObj = buildViewer(playerInfo);
     console.log(`[oc/spawn-key] Sending viewer for ${playerInfo.playerName} (${playerInfo.playerId}): hasFactionAccess=${viewerObj.hasFactionAccess}`);
+
+    // Collect OC history (piggybacks on existing data, no extra API calls)
+    collectOcHistory(playerInfo.factionId, data);
 
     // Run engines if enabled
     const engines = {};
