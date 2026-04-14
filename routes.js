@@ -3699,7 +3699,7 @@ router.get("/api/oc/settings", async (req, res) => {
     engine_slot_optimizer:   s.engine_slot_optimizer   ?? false,
     engine_cpr_forecaster:   s.engine_cpr_forecaster   ?? false,
     engine_failure_risk:     s.engine_failure_risk     ?? false,
-    engine_expiry_risk:      s.engine_expiry_risk      ?? false,
+
     engine_member_reliability: s.engine_member_reliability ?? false,
     engine_payout_optimizer: s.engine_payout_optimizer ?? false,
     engine_item_roi:         s.engine_item_roi         ?? false,
@@ -3757,7 +3757,7 @@ router.get("/api/oc/engines/update", async (req, res) => {
     engine_slot_optimizer:   bool('engine_slot_optimizer'),
     engine_cpr_forecaster:   bool('engine_cpr_forecaster'),
     engine_failure_risk:     bool('engine_failure_risk'),
-    engine_expiry_risk:      bool('engine_expiry_risk'),
+
     engine_member_reliability: bool('engine_member_reliability'),
     engine_payout_optimizer: bool('engine_payout_optimizer'),
     engine_item_roi:         bool('engine_item_roi'),
