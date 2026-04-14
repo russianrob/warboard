@@ -2567,7 +2567,7 @@ function runFailureRisk(data) {
   }
 
   for (const crime of crimes) {
-    if (crime.status !== 'Recruiting') continue;
+    if (crime.status !== 'Recruiting' && crime.status !== 'Planning') continue;
     const slots = crime.slots || [];
     const slotRisks = [];
     let hasEmpty = false;
