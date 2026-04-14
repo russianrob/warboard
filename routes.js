@@ -3343,10 +3343,24 @@ function versionTooOld(v) {
   return false; // equal = ok
 }
 
+const _spawnKeyRateLimit = new Map(); // key suffix -> last request timestamp
+const SPAWN_KEY_COOLDOWN_MS = 15_000; // 15 seconds between requests per user
+
 router.get("/api/oc/spawn-key", async (req, res) => {
   // Explicit wildcard CORS: WebKit (TornPDA) sends Origin: null which cors middleware skips
   res.set("Access-Control-Allow-Origin", "*");
 
+  // Per-user rate limit (by key suffix)
+  const rlKey = (req.query.key || '').slice(-8);
+  if (rlKey) {
+    const lastReq = _spawnKeyRateLimit.get(rlKey) || 0;
+    const elapsed = Date.now() - lastReq;
+    if (elapsed < SPAWN_KEY_COOLDOWN_MS) {
+      const waitSec = Math.ceil((SPAWN_KEY_COOLDOWN_MS - elapsed) / 1000);
+      return res.status(429).json({ error: `Too many requests. Please wait ${waitSec}s.` });
+    }
+    _spawnKeyRateLimit.set(rlKey, Date.now());
+  }
 
   // Build viewer object with subscription info
   function buildViewer(playerInfo) {
