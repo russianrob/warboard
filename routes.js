@@ -2528,7 +2528,7 @@ function runSlotOptimizer(data) {
       difficulty: p.slot.difficulty, position: p.slot.position,
       score: Math.round(p.score * 10) / 10,
       positionCpr: p.slot.crimeName && p.member.byPosition?.[`${p.slot.crimeName}::${p.slot.position}`]?.cpr || null,
-      hoursToExpiry: Math.round(((p.slot.expiredAt || Infinity) - Date.now() / 1000) / 360) / 10,
+      hoursToExpiry: Math.round(((p.slot.expiredAt || Infinity) - Date.now() / 1000) / 3600 * 10) / 10,
     });
   }
 
