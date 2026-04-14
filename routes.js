@@ -2578,11 +2578,11 @@ function runFailureRisk(data) {
       });
     }
 
-    // Overall success = product of all filled members' success probabilities
+    // Skip OCs with no filled slots — nothing to assess
     const filledSlots = slotRisks.filter(s => s.successProb > 0);
+    if (filledSlots.length === 0) continue;
     const totalSlots = slots.length;
-    const emptySlots = totalSlots - filledSlots.length - (hasEmpty ? 0 : 0);
-    let overallSuccess = filledSlots.length > 0 ? filledSlots.reduce((acc, s) => acc * s.successProb, 1) : 0;
+    let overallSuccess = filledSlots.reduce((acc, s) => acc * s.successProb, 1);
     const failureRisk = Math.round((1 - overallSuccess) * 1000) / 10;
 
     // Find weakest link: highest risk score
