@@ -2568,7 +2568,7 @@ function runFailureRisk(data) {
       const cpr = cprCache[uid];
       const posKey = `${crime.name}::${s.position}`;
       const posCpr = cpr?.byPosition?.[posKey]?.cpr || cpr?.cpr || 0;
-      const weight = s.crime_pass_rate || 0;
+      const weight = s.checkpoint_pass_rate || 0;
       // Risk = high weight + low CPR
       const riskScore = weight > 0 ? Math.round((1 - posCpr / 100) * weight) : 0;
       slotRisks.push({
