@@ -2699,28 +2699,25 @@ function runCprForecaster(factionId, data) {
 
   const now = Date.now() / 1000;
   const DAY = 86400;
-  // Time windows: 90d ago, 60d, 30d, 14d, 7d
   const windows = [
-    { label: '90d', from: now - 90 * DAY },
-    { label: '60d', from: now - 60 * DAY },
-    { label: '30d', from: now - 30 * DAY },
-    { label: '14d', from: now - 14 * DAY },
-    { label: '7d',  from: now - 7 * DAY },
+    { label: '90d', from: now - 90 * DAY, days: 90 },
+    { label: '60d', from: now - 60 * DAY, days: 60 },
+    { label: '30d', from: now - 30 * DAY, days: 30 },
+    { label: '14d', from: now - 14 * DAY, days: 14 },
+    { label: '7d',  from: now - 7 * DAY,  days: 7 },
   ];
 
-  // Build per-member CPR at each time window
-  const memberData = {};
+  // Build per-member, per-level entries
+  const memberData = {}; // uid -> [{ execAt, diff, rate }]
   for (const crime of completedCrimes) {
     const execAt = crime.executed_at || crime.planning_at || crime.created_at || 0;
     if (!execAt || !Array.isArray(crime.slots)) continue;
     const diff = crime.difficulty || 0;
-
     for (const slot of crime.slots) {
       const uid = String(slot.user_id ?? slot.user?.id ?? '');
       if (!uid) continue;
       const rate = slot.checkpoint_pass_rate ?? slot.success_chance ?? null;
       if (rate === null) continue;
-
       if (!memberData[uid]) memberData[uid] = [];
       memberData[uid].push({ execAt, diff, rate });
     }
@@ -2728,53 +2725,66 @@ function runCprForecaster(factionId, data) {
 
   const results = [];
   for (const [uid, entries] of Object.entries(memberData)) {
-    if (entries.length < 2) continue; // need at least 2 data points
+    if (entries.length < 2) continue;
 
-    // Calculate CPR at each window (using only crimes from that window onward)
-    const windowCprs = [];
-    for (const w of windows) {
-      const windowEntries = entries.filter(e => e.execAt >= w.from);
-      if (windowEntries.length === 0) continue;
-      const avg = windowEntries.reduce((s, e) => s + e.rate, 0) / windowEntries.length;
-      windowCprs.push({ label: w.label, cpr: Math.round(avg * 10) / 10, count: windowEntries.length });
+    // Group entries by difficulty level
+    const byLevel = {};
+    for (const e of entries) {
+      if (!byLevel[e.diff]) byLevel[e.diff] = [];
+      byLevel[e.diff].push(e);
     }
-    if (windowCprs.length < 2) continue;
 
-    // Current CPR = most recent window with data
-    const currentCpr = windowCprs[windowCprs.length - 1].cpr;
-    // Oldest CPR = earliest window with data
-    const oldestCpr = windowCprs[0].cpr;
-    const oldestLabel = windowCprs[0].label;
+    // Calculate trend per level
+    const levels = [];
+    for (const [lvl, lvlEntries] of Object.entries(byLevel)) {
+      if (lvlEntries.length < 2) continue;
+      // Sort by time
+      lvlEntries.sort((a, b) => a.execAt - b.execAt);
+      // Split into first half and second half for trend
+      const mid = Math.floor(lvlEntries.length / 2);
+      const firstHalf = lvlEntries.slice(0, mid);
+      const secondHalf = lvlEntries.slice(mid);
+      const firstAvg = firstHalf.reduce((s, e) => s + e.rate, 0) / firstHalf.length;
+      const secondAvg = secondHalf.reduce((s, e) => s + e.rate, 0) / secondHalf.length;
+      const currentAvg = secondAvg;
 
-    // Trend: change per 30 days
-    const daysSpan = parseInt(oldestLabel) - parseInt(windowCprs[windowCprs.length - 1].label) || 30;
-    const totalChange = currentCpr - oldestCpr;
-    const changePerMonth = daysSpan > 0 ? Math.round((totalChange / daysSpan) * 30 * 10) / 10 : 0;
+      // Time span between first and last entry
+      const timeSpanDays = (lvlEntries[lvlEntries.length - 1].execAt - lvlEntries[0].execAt) / DAY;
+      const change = secondAvg - firstAvg;
+      const changePerMonth = timeSpanDays > 7 ? Math.round((change / timeSpanDays) * 30 * 10) / 10 : 0;
 
-    // Project 30 days forward
-    const projected30d = Math.round((currentCpr + changePerMonth) * 10) / 10;
-    const projectedMin = Math.round(Math.max(0, projected30d - 3) * 10) / 10;
-    const projectedMax = Math.round(Math.min(100, projected30d + 3) * 10) / 10;
+      const projected30d = Math.round(Math.min(100, Math.max(0, currentAvg + changePerMonth)) * 10) / 10;
+      const projectedMin = Math.round(Math.max(0, projected30d - 3) * 10) / 10;
+      const projectedMax = Math.round(Math.min(100, projected30d + 3) * 10) / 10;
 
-    // Trend direction
-    let trend = 'stable';
-    if (changePerMonth >= 2) trend = 'improving';
-    else if (changePerMonth <= -2) trend = 'declining';
+      let trend = 'stable';
+      if (changePerMonth >= 2) trend = 'improving';
+      else if (changePerMonth <= -2) trend = 'declining';
 
-    // Current CPR from the main cache (more accurate)
-    const mainCpr = data.cprCache?.[uid]?.cpr ?? currentCpr;
+      levels.push({
+        level: Number(lvl), currentCpr: Math.round(currentAvg * 10) / 10,
+        trend, changePerMonth, projected30d, projectedMin, projectedMax,
+        count: lvlEntries.length,
+      });
+    }
+
+    if (levels.length === 0) continue;
+    levels.sort((a, b) => b.level - a.level); // highest level first
+
+    const mainCpr = data.cprCache?.[uid]?.cpr ?? levels[0].currentCpr;
     const joinable = data.cprCache?.[uid]?.joinable ?? 1;
+
+    // Overall trend = trend at their highest active level
+    const primaryLevel = levels[0];
 
     results.push({
       uid, name: nameMap[uid] || uid,
       currentCpr: mainCpr, joinable,
-      trend, changePerMonth,
-      projected30d, projectedMin, projectedMax,
-      windowCprs, totalEntries: entries.length,
+      trend: primaryLevel.trend, changePerMonth: primaryLevel.changePerMonth,
+      levels, totalEntries: entries.length,
     });
   }
 
-  // Sort: declining first (most urgent), then improving, then stable
   const trendOrder = { declining: 0, improving: 1, stable: 2 };
   results.sort((a, b) => {
     if (trendOrder[a.trend] !== trendOrder[b.trend]) return trendOrder[a.trend] - trendOrder[b.trend];
