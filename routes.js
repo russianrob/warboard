@@ -2446,7 +2446,7 @@ router.get("/api/oc-verify", async (req, res) => {
 const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
 const _engineCache    = new Map(); // factionId  → { ts, engines, settingsHash }
 function engineSettingsHash(s) {
-  return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}|${!!s.engine_member_projector}|${!!s.engine_member_reliability}|${!!s.engine_gap_analyzer}|${!!s.engine_payout_optimizer}|${!!s.engine_item_roi}`;
+  return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}|${!!s.engine_member_projector}|${!!s.engine_member_reliability}|${!!s.engine_payout_optimizer}|${!!s.engine_item_roi}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2650,10 +2650,19 @@ function collectOcHistory(factionId, data) {
         weight: s.checkpoint_pass_rate || 0,
       }));
 
+      // Store rewards data for payout tracking (only present on successful crimes)
+      const rewards = c.rewards ? {
+        money: c.rewards.money || 0,
+        respect: c.rewards.respect || 0,
+        items: c.rewards.items || [],
+      } : null;
+
       history.push({
         crimeId: cid, crimeName: c.name, difficulty: c.difficulty || 0,
         status: c.status, completedAt: Date.now(),
-        slots,
+        executedAt: c.executed_at || 0,
+        planningAt: c.planning_at || 0,
+        slots, rewards,
       });
       added++;
     }
@@ -2713,6 +2722,7 @@ function loadOcHistory(factionId) {
         weight: s.checkpoint_pass_rate ?? s.success_chance ?? 0,
         userName: s.user?.name || '',
       })),
+      rewards: c.rewards ? { money: c.rewards.money || 0, respect: c.rewards.respect || 0, items: c.rewards.items || [] } : null,
       source: 'api',
     });
   }
@@ -2727,13 +2737,14 @@ function loadOcHistory(factionId) {
       crimeName: h.crimeName,
       difficulty: h.difficulty || 0,
       status: h.status,
-      executedAt: h.completedAt ? Math.floor(h.completedAt / 1000) : 0, // disk stores ms, normalise to seconds
+      executedAt: h.completedAt ? Math.floor(h.completedAt / 1000) : (h.executedAt || 0),
       slots: (h.slots || []).map(s => ({
         userId: String(s.userId || ''),
         position: (s.position || '').replace(/\s*#\d+$/, ''),
         weight: s.weight || 0,
         userName: s.userName || '',
       })),
+      rewards: h.rewards || null,
       source: 'disk',
     });
   }
@@ -3446,173 +3457,18 @@ function runMemberReliability(factionId, data) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  GAP ANALYZER ENGINE — identifies role/level coverage gaps in faction OC lineup
-// ═══════════════════════════════════════════════════════════════════════════════
-function runGapAnalyzer(factionId, data) {
-  const crimes = data.crimes || data.availableCrimes || [];
-  const members = data.members || {};
-  const cprCache = data.cprCache || {};
-  const memberArr = Array.isArray(members) ? members : Object.values(members);
-  const allHistory = loadOcHistory(factionId);
-
-  // 1. Build roster: what each member can do (level + positions they've played)
-  const roster = {}; // uid -> { name, joinable, effectiveLevel, positions: Set, levelCprs: {} }
-  for (const m of memberArr) {
-    const uid = String(m.id || m.playerId || m.uid);
-    const cpr = cprCache[uid];
-    if (!cpr) continue;
-    const joinable = cpr.joinable || 1;
-    const levelCprs = {};
-    for (const e of (cpr.entries || [])) {
-      if (!levelCprs[e.diff]) levelCprs[e.diff] = { sum: 0, count: 0 };
-      levelCprs[e.diff].sum += e.rate; levelCprs[e.diff].count += 1;
-    }
-    const topLevelCpr = levelCprs[joinable] ? levelCprs[joinable].sum / levelCprs[joinable].count : (cpr.cpr || 0);
-    const effectiveLevel = topLevelCpr >= 75 ? joinable + 1 : joinable;
-    roster[uid] = {
-      name: m.name || m.playerName || uid,
-      joinable, effectiveLevel, levelCprs,
-      cpr: cpr.cpr || 0,
-      positions: new Set(),
-      inOC: !!(m.inOC || m.status === 'inOC'),
-      active: !['hospitalized', 'jail', 'traveling'].includes((m.status?.state || '').toLowerCase()),
-    };
-  }
-
-  // Enrich positions from history
-  for (const h of allHistory) {
-    for (const slot of (h.slots || [])) {
-      if (slot.userId && roster[slot.userId]) {
-        roster[slot.userId].positions.add(`${h.crimeName}::${slot.position}`);
-      }
-    }
-  }
-  // Also from cprCache byPosition
-  for (const [uid, cpr] of Object.entries(cprCache)) {
-    if (roster[uid] && cpr.byPosition) {
-      for (const posKey of Object.keys(cpr.byPosition)) {
-        roster[uid].positions.add(posKey);
-      }
-    }
-  }
-
-  // 2. Demand: what positions are needed across active OCs
-  const demand = {}; // "crimeName::position" -> { needed, filled, difficulty }
-  for (const crime of crimes) {
-    if (crime.status !== 'Recruiting' && crime.status !== 'Planning') continue;
-    for (const s of (crime.slots || [])) {
-      const posBase = (s.position || '').replace(/\s*#\d+$/, '');
-      const key = `${crime.name}::${posBase}`;
-      if (!demand[key]) demand[key] = { crimeName: crime.name, position: posBase, difficulty: crime.difficulty || 0, needed: 0, filled: 0 };
-      demand[key].needed++;
-      if (s.user_id || s.user?.id) demand[key].filled++;
-    }
-  }
-
-  // 3. Supply: how many members can fill each position at each level
-  const supply = {}; // "crimeName::position" -> { qualified: [uid], depth }
-  for (const [key, d] of Object.entries(demand)) {
-    supply[key] = { qualified: [], activeQualified: 0, depth: 0 };
-    for (const [uid, r] of Object.entries(roster)) {
-      if (r.effectiveLevel < d.difficulty) continue; // can't do this level
-      // Has position experience OR is at right level (can learn)
-      const hasExp = r.positions.has(key);
-      if (hasExp || r.effectiveLevel >= d.difficulty) {
-        supply[key].qualified.push({ uid, name: r.name, hasExperience: hasExp, inOC: r.inOC });
-        if (r.active && !r.inOC) supply[key].activeQualified++;
-        supply[key].depth++;
-      }
-    }
-  }
-
-  // 4. Build gap analysis
-  const gaps = [];
-  for (const [key, d] of Object.entries(demand)) {
-    const s = supply[key] || { qualified: [], activeQualified: 0, depth: 0 };
-    const open = d.needed - d.filled;
-    if (open <= 0) continue; // fully filled
-    const coverageRatio = s.activeQualified / Math.max(1, open);
-    let severity = 'ok';
-    if (s.activeQualified === 0) severity = 'critical';
-    else if (coverageRatio < 1) severity = 'high';
-    else if (coverageRatio < 2) severity = 'medium';
-    else severity = 'low';
-    gaps.push({
-      crimeName: d.crimeName, position: d.position, difficulty: d.difficulty,
-      openSlots: open, totalNeeded: d.needed, filled: d.filled,
-      qualifiedMembers: s.depth, activeAvailable: s.activeQualified,
-      severity,
-      coverageRatio: Math.round(coverageRatio * 10) / 10,
-      candidates: s.qualified.filter(q => !q.inOC).slice(0, 5).map(q => ({ name: q.name, hasExperience: q.hasExperience })),
-    });
-  }
-
-  // Sort: critical > high > medium > low
-  const sevOrder = { critical: 0, high: 1, medium: 2, low: 3 };
-  gaps.sort((a, b) => (sevOrder[a.severity] ?? 9) - (sevOrder[b.severity] ?? 9));
-
-  // 5. Level coverage summary: how many members can operate at each level
-  const levelCoverage = {};
-  for (const [uid, r] of Object.entries(roster)) {
-    for (let lvl = 1; lvl <= r.effectiveLevel; lvl++) {
-      if (!levelCoverage[lvl]) levelCoverage[lvl] = { total: 0, active: 0, inOC: 0 };
-      levelCoverage[lvl].total++;
-      if (r.inOC) levelCoverage[lvl].inOC++;
-      else if (r.active) levelCoverage[lvl].active++;
-    }
-  }
-
-  // 6. Cross-training suggestions: members who could learn gap positions based on similar roles
-  const crossTrain = [];
-  for (const g of gaps.filter(g => g.severity === 'critical' || g.severity === 'high')) {
-    const posType = g.position; // e.g. "Driver", "Hacker"
-    for (const [uid, r] of Object.entries(roster)) {
-      if (r.effectiveLevel < g.difficulty || r.inOC) continue;
-      // Check if they have ANY experience at this position in other crimes
-      const hasRelated = [...r.positions].some(p => p.endsWith(`::${posType}`));
-      if (hasRelated && !r.positions.has(`${g.crimeName}::${posType}`)) {
-        crossTrain.push({
-          memberName: r.name, memberId: uid,
-          targetCrime: g.crimeName, targetPosition: posType, difficulty: g.difficulty,
-          relatedExperience: [...r.positions].filter(p => p.endsWith(`::${posType}`)).map(p => p.split('::')[0]),
-        });
-      }
-    }
-  }
-
-  return {
-    gaps,
-    levelCoverage,
-    crossTraining: crossTrain.slice(0, 15),
-    summary: {
-      totalGaps: gaps.length,
-      criticalGaps: gaps.filter(g => g.severity === 'critical').length,
-      highGaps: gaps.filter(g => g.severity === 'high').length,
-    },
-  };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 //  OC PAYOUT TRACKER ENGINE — tracks money/respect earned per OC type over time
 // ═══════════════════════════════════════════════════════════════════════════════
 function runPayoutTracker(factionId, data) {
+  // Use merged history (API + disk) — has rewards from both sources
   const allHistory = loadOcHistory(factionId);
-  const completedCrimes = getCachedCompletedCrimes(factionId) || [];
 
-  // Build payout data from completed crimes (API has money_gain/respect_gain)
+  // Build payout data from all history entries (rewards field available on API and new disk entries)
   const byType = {}; // crimeName -> { level, count, successCount, totalMoney, totalRespect, avgDurationHrs, entries: [] }
 
-  for (const c of completedCrimes) {
-    if (c.status !== 'Successful') continue;
-    const name = c.name || 'Unknown';
+  for (const c of allHistory) {
+    const name = c.crimeName || 'Unknown';
     const diff = c.difficulty || 0;
-    const money = c.money_gain || 0;
-    const respect = c.respect_gain || 0;
-    const initiated = c.initiated_at || c.planning_at || 0;
-    const executed = c.executed_at || 0;
-    const durationHrs = (initiated && executed && executed > initiated)
-      ? Math.round((executed - initiated) / 3600 * 10) / 10
-      : null;
 
     if (!byType[name]) byType[name] = {
       crimeName: name, difficulty: diff, count: 0, successCount: 0,
@@ -3620,25 +3476,16 @@ function runPayoutTracker(factionId, data) {
     };
     const t = byType[name];
     t.count++;
-    t.successCount++;
-    t.totalMoney += money;
-    t.totalRespect += respect;
-    if (durationHrs !== null && durationHrs > 0) {
-      t.durationSum += durationHrs;
-      t.durationCount++;
-    }
-    t.entries.push({ money, respect, durationHrs, executedAt: executed });
-  }
 
-  // Also count failures from history for success rate
-  for (const h of allHistory) {
-    if (h.status !== 'Failed') continue;
-    const name = h.crimeName || 'Unknown';
-    if (!byType[name]) byType[name] = {
-      crimeName: name, difficulty: h.difficulty || 0, count: 0, successCount: 0,
-      totalMoney: 0, totalRespect: 0, durationSum: 0, durationCount: 0, entries: [],
-    };
-    byType[name].count++;
+    if (c.status === 'Successful') {
+      const money = c.rewards?.money || 0;
+      const respect = c.rewards?.respect || 0;
+      t.successCount++;
+      t.totalMoney += money;
+      t.totalRespect += respect;
+      t.entries.push({ money, respect, executedAt: c.executedAt || 0 });
+    }
+    // Failed crimes counted for success rate but no payout
   }
 
   const crimeTypes = [];
@@ -3667,20 +3514,20 @@ function runPayoutTracker(factionId, data) {
     return b.moneyPerHour - a.moneyPerHour;
   });
 
-  // Member payout leaderboard
+  // Member payout leaderboard (from merged history with rewards)
   const memberPayouts = {}; // uid -> { name, totalMoney, totalRespect, ocCount }
-  for (const c of completedCrimes) {
+  for (const c of allHistory) {
     if (c.status !== 'Successful') continue;
-    const money = c.money_gain || 0;
-    const respect = c.respect_gain || 0;
-    const slotCount = (c.slots || []).filter(s => s.user_id || s.user?.id).length;
+    const money = c.rewards?.money || 0;
+    const respect = c.rewards?.respect || 0;
+    const slotCount = (c.slots || []).filter(s => s.userId).length;
     if (slotCount === 0) continue;
     const perMember = Math.round(money / slotCount);
     const perMemberResp = respect / slotCount;
     for (const slot of (c.slots || [])) {
-      const uid = String(slot.user_id ?? slot.user?.id ?? '');
+      const uid = String(slot.userId || '');
       if (!uid) continue;
-      if (!memberPayouts[uid]) memberPayouts[uid] = { name: slot.user?.name || uid, totalMoney: 0, totalRespect: 0, ocCount: 0 };
+      if (!memberPayouts[uid]) memberPayouts[uid] = { name: slot.userName || uid, totalMoney: 0, totalRespect: 0, ocCount: 0 };
       memberPayouts[uid].totalMoney += perMember;
       memberPayouts[uid].totalRespect += Math.round(perMemberResp * 10) / 10;
       memberPayouts[uid].ocCount++;
@@ -3725,8 +3572,8 @@ function runItemRoi(factionId, data) {
 
     if (c.status === 'Successful') {
       cd.successCount++;
-      cd.successMoney += c.money_gain || 0;
-      cd.successRespect += c.respect_gain || 0;
+      cd.successMoney += c.rewards?.money || 0;
+      cd.successRespect += c.rewards?.respect || 0;
     } else if (c.status === 'Failed') {
       cd.failCount++;
     }
@@ -3734,16 +3581,18 @@ function runItemRoi(factionId, data) {
     // Collect item slot data from crime slots
     for (const slot of (c.slots || [])) {
       if (slot.item_requirement) {
-        const existing = cd.itemSlots.find(i => i.itemName === slot.item_requirement.name);
+        const itemId = slot.item_requirement.id || null;
+        const itemKey = `item_${itemId}`;
+        const existing = cd.itemSlots.find(i => i.itemId === itemId);
         if (existing) {
           existing.timesNeeded++;
         } else {
           cd.itemSlots.push({
-            itemName: slot.item_requirement.name,
-            itemId: slot.item_requirement.id || null,
+            itemName: itemId ? `Item #${itemId}` : 'Unknown',
+            itemId,
             position: (slot.position || '').replace(/\s*#\d+$/, ''),
             timesNeeded: 1,
-            isConsumed: slot.item_requirement.is_consumed !== false, // assume consumed unless told otherwise
+            isConsumed: !slot.item_requirement.is_reusable, // reusable items are not consumed
           });
         }
       }
@@ -4002,7 +3851,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       if (fSettings.engine_cpr_forecaster) engines.cprForecaster = runCprForecaster(fid, data);
       if (fSettings.engine_member_projector) engines.memberProjector = runMemberProjector(fid, data);
       if (fSettings.engine_member_reliability) engines.memberReliability = runMemberReliability(fid, data);
-      if (fSettings.engine_gap_analyzer) engines.gapAnalyzer = runGapAnalyzer(fid, data);
+
       if (fSettings.engine_payout_optimizer) engines.payoutTracker = runPayoutTracker(fid, data);
       if (fSettings.engine_item_roi) engines.itemRoi = runItemRoi(fid, data);
       _engineCache.set(fid, { ts: Date.now(), engines, settingsHash: engineSettingsHash(fSettings) });
@@ -4079,7 +3928,7 @@ router.get("/api/oc/settings", async (req, res) => {
     engine_member_reliability: s.engine_member_reliability ?? false,
     engine_payout_optimizer: s.engine_payout_optimizer ?? false,
     engine_item_roi:         s.engine_item_roi         ?? false,
-    engine_gap_analyzer:     s.engine_gap_analyzer     ?? false,
+
     engine_member_projector: s.engine_member_projector ?? false,
   });
 });
@@ -4137,7 +3986,7 @@ router.get("/api/oc/engines/update", async (req, res) => {
     engine_member_reliability: bool('engine_member_reliability'),
     engine_payout_optimizer: bool('engine_payout_optimizer'),
     engine_item_roi:         bool('engine_item_roi'),
-    engine_gap_analyzer:     bool('engine_gap_analyzer'),
+
     engine_member_projector: bool('engine_member_projector'),
   });
   console.log(`[oc/engines] ${info.playerName} updated engines for faction ${info.factionId}`);
