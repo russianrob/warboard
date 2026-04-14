@@ -2446,7 +2446,7 @@ router.get("/api/oc-verify", async (req, res) => {
 const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
 const _engineCache    = new Map(); // factionId  → { ts, engines, settingsHash }
 function engineSettingsHash(s) {
-  return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}|${!!s.engine_member_projector}|${!!s.engine_member_reliability}`;
+  return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}|${!!s.engine_member_projector}|${!!s.engine_member_reliability}|${!!s.engine_gap_analyzer}|${!!s.engine_payout_optimizer}|${!!s.engine_item_roi}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3445,6 +3445,379 @@ function runMemberReliability(factionId, data) {
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  GAP ANALYZER ENGINE — identifies role/level coverage gaps in faction OC lineup
+// ═══════════════════════════════════════════════════════════════════════════════
+function runGapAnalyzer(factionId, data) {
+  const crimes = data.crimes || data.availableCrimes || [];
+  const members = data.members || {};
+  const cprCache = data.cprCache || {};
+  const memberArr = Array.isArray(members) ? members : Object.values(members);
+  const allHistory = loadOcHistory(factionId);
+
+  // 1. Build roster: what each member can do (level + positions they've played)
+  const roster = {}; // uid -> { name, joinable, effectiveLevel, positions: Set, levelCprs: {} }
+  for (const m of memberArr) {
+    const uid = String(m.id || m.playerId || m.uid);
+    const cpr = cprCache[uid];
+    if (!cpr) continue;
+    const joinable = cpr.joinable || 1;
+    const levelCprs = {};
+    for (const e of (cpr.entries || [])) {
+      if (!levelCprs[e.diff]) levelCprs[e.diff] = { sum: 0, count: 0 };
+      levelCprs[e.diff].sum += e.rate; levelCprs[e.diff].count += 1;
+    }
+    const topLevelCpr = levelCprs[joinable] ? levelCprs[joinable].sum / levelCprs[joinable].count : (cpr.cpr || 0);
+    const effectiveLevel = topLevelCpr >= 75 ? joinable + 1 : joinable;
+    roster[uid] = {
+      name: m.name || m.playerName || uid,
+      joinable, effectiveLevel, levelCprs,
+      cpr: cpr.cpr || 0,
+      positions: new Set(),
+      inOC: !!(m.inOC || m.status === 'inOC'),
+      active: !['hospitalized', 'jail', 'traveling'].includes((m.status?.state || '').toLowerCase()),
+    };
+  }
+
+  // Enrich positions from history
+  for (const h of allHistory) {
+    for (const slot of (h.slots || [])) {
+      if (slot.userId && roster[slot.userId]) {
+        roster[slot.userId].positions.add(`${h.crimeName}::${slot.position}`);
+      }
+    }
+  }
+  // Also from cprCache byPosition
+  for (const [uid, cpr] of Object.entries(cprCache)) {
+    if (roster[uid] && cpr.byPosition) {
+      for (const posKey of Object.keys(cpr.byPosition)) {
+        roster[uid].positions.add(posKey);
+      }
+    }
+  }
+
+  // 2. Demand: what positions are needed across active OCs
+  const demand = {}; // "crimeName::position" -> { needed, filled, difficulty }
+  for (const crime of crimes) {
+    if (crime.status !== 'Recruiting' && crime.status !== 'Planning') continue;
+    for (const s of (crime.slots || [])) {
+      const posBase = (s.position || '').replace(/\s*#\d+$/, '');
+      const key = `${crime.name}::${posBase}`;
+      if (!demand[key]) demand[key] = { crimeName: crime.name, position: posBase, difficulty: crime.difficulty || 0, needed: 0, filled: 0 };
+      demand[key].needed++;
+      if (s.user_id || s.user?.id) demand[key].filled++;
+    }
+  }
+
+  // 3. Supply: how many members can fill each position at each level
+  const supply = {}; // "crimeName::position" -> { qualified: [uid], depth }
+  for (const [key, d] of Object.entries(demand)) {
+    supply[key] = { qualified: [], activeQualified: 0, depth: 0 };
+    for (const [uid, r] of Object.entries(roster)) {
+      if (r.effectiveLevel < d.difficulty) continue; // can't do this level
+      // Has position experience OR is at right level (can learn)
+      const hasExp = r.positions.has(key);
+      if (hasExp || r.effectiveLevel >= d.difficulty) {
+        supply[key].qualified.push({ uid, name: r.name, hasExperience: hasExp, inOC: r.inOC });
+        if (r.active && !r.inOC) supply[key].activeQualified++;
+        supply[key].depth++;
+      }
+    }
+  }
+
+  // 4. Build gap analysis
+  const gaps = [];
+  for (const [key, d] of Object.entries(demand)) {
+    const s = supply[key] || { qualified: [], activeQualified: 0, depth: 0 };
+    const open = d.needed - d.filled;
+    if (open <= 0) continue; // fully filled
+    const coverageRatio = s.activeQualified / Math.max(1, open);
+    let severity = 'ok';
+    if (s.activeQualified === 0) severity = 'critical';
+    else if (coverageRatio < 1) severity = 'high';
+    else if (coverageRatio < 2) severity = 'medium';
+    else severity = 'low';
+    gaps.push({
+      crimeName: d.crimeName, position: d.position, difficulty: d.difficulty,
+      openSlots: open, totalNeeded: d.needed, filled: d.filled,
+      qualifiedMembers: s.depth, activeAvailable: s.activeQualified,
+      severity,
+      coverageRatio: Math.round(coverageRatio * 10) / 10,
+      candidates: s.qualified.filter(q => !q.inOC).slice(0, 5).map(q => ({ name: q.name, hasExperience: q.hasExperience })),
+    });
+  }
+
+  // Sort: critical > high > medium > low
+  const sevOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+  gaps.sort((a, b) => (sevOrder[a.severity] ?? 9) - (sevOrder[b.severity] ?? 9));
+
+  // 5. Level coverage summary: how many members can operate at each level
+  const levelCoverage = {};
+  for (const [uid, r] of Object.entries(roster)) {
+    for (let lvl = 1; lvl <= r.effectiveLevel; lvl++) {
+      if (!levelCoverage[lvl]) levelCoverage[lvl] = { total: 0, active: 0, inOC: 0 };
+      levelCoverage[lvl].total++;
+      if (r.inOC) levelCoverage[lvl].inOC++;
+      else if (r.active) levelCoverage[lvl].active++;
+    }
+  }
+
+  // 6. Cross-training suggestions: members who could learn gap positions based on similar roles
+  const crossTrain = [];
+  for (const g of gaps.filter(g => g.severity === 'critical' || g.severity === 'high')) {
+    const posType = g.position; // e.g. "Driver", "Hacker"
+    for (const [uid, r] of Object.entries(roster)) {
+      if (r.effectiveLevel < g.difficulty || r.inOC) continue;
+      // Check if they have ANY experience at this position in other crimes
+      const hasRelated = [...r.positions].some(p => p.endsWith(`::${posType}`));
+      if (hasRelated && !r.positions.has(`${g.crimeName}::${posType}`)) {
+        crossTrain.push({
+          memberName: r.name, memberId: uid,
+          targetCrime: g.crimeName, targetPosition: posType, difficulty: g.difficulty,
+          relatedExperience: [...r.positions].filter(p => p.endsWith(`::${posType}`)).map(p => p.split('::')[0]),
+        });
+      }
+    }
+  }
+
+  return {
+    gaps,
+    levelCoverage,
+    crossTraining: crossTrain.slice(0, 15),
+    summary: {
+      totalGaps: gaps.length,
+      criticalGaps: gaps.filter(g => g.severity === 'critical').length,
+      highGaps: gaps.filter(g => g.severity === 'high').length,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  OC PAYOUT TRACKER ENGINE — tracks money/respect earned per OC type over time
+// ═══════════════════════════════════════════════════════════════════════════════
+function runPayoutTracker(factionId, data) {
+  const allHistory = loadOcHistory(factionId);
+  const completedCrimes = getCachedCompletedCrimes(factionId) || [];
+
+  // Build payout data from completed crimes (API has money_gain/respect_gain)
+  const byType = {}; // crimeName -> { level, count, successCount, totalMoney, totalRespect, avgDurationHrs, entries: [] }
+
+  for (const c of completedCrimes) {
+    if (c.status !== 'Successful') continue;
+    const name = c.name || 'Unknown';
+    const diff = c.difficulty || 0;
+    const money = c.money_gain || 0;
+    const respect = c.respect_gain || 0;
+    const initiated = c.initiated_at || c.planning_at || 0;
+    const executed = c.executed_at || 0;
+    const durationHrs = (initiated && executed && executed > initiated)
+      ? Math.round((executed - initiated) / 3600 * 10) / 10
+      : null;
+
+    if (!byType[name]) byType[name] = {
+      crimeName: name, difficulty: diff, count: 0, successCount: 0,
+      totalMoney: 0, totalRespect: 0, durationSum: 0, durationCount: 0, entries: [],
+    };
+    const t = byType[name];
+    t.count++;
+    t.successCount++;
+    t.totalMoney += money;
+    t.totalRespect += respect;
+    if (durationHrs !== null && durationHrs > 0) {
+      t.durationSum += durationHrs;
+      t.durationCount++;
+    }
+    t.entries.push({ money, respect, durationHrs, executedAt: executed });
+  }
+
+  // Also count failures from history for success rate
+  for (const h of allHistory) {
+    if (h.status !== 'Failed') continue;
+    const name = h.crimeName || 'Unknown';
+    if (!byType[name]) byType[name] = {
+      crimeName: name, difficulty: h.difficulty || 0, count: 0, successCount: 0,
+      totalMoney: 0, totalRespect: 0, durationSum: 0, durationCount: 0, entries: [],
+    };
+    byType[name].count++;
+  }
+
+  const crimeTypes = [];
+  for (const [name, t] of Object.entries(byType)) {
+    const avgMoney = t.successCount > 0 ? Math.round(t.totalMoney / t.successCount) : 0;
+    const avgRespect = t.successCount > 0 ? Math.round(t.totalRespect / t.successCount * 10) / 10 : 0;
+    const avgDuration = t.durationCount > 0 ? Math.round(t.durationSum / t.durationCount * 10) / 10 : null;
+    const moneyPerHour = avgDuration && avgDuration > 0 ? Math.round(avgMoney / avgDuration) : null;
+    const respectPerHour = avgDuration && avgDuration > 0 ? Math.round(avgRespect / avgDuration * 10) / 10 : null;
+    const successRate = t.count > 0 ? Math.round(t.successCount / t.count * 100) : 0;
+
+    crimeTypes.push({
+      crimeName: name, difficulty: t.difficulty,
+      completed: t.count, succeeded: t.successCount, successRate,
+      avgMoney, avgRespect, avgDurationHrs: avgDuration,
+      moneyPerHour, respectPerHour,
+      totalMoney: t.totalMoney, totalRespect: t.totalRespect,
+    });
+  }
+
+  // Sort by money per hour descending (most profitable first), nulls last
+  crimeTypes.sort((a, b) => {
+    if (a.moneyPerHour === null && b.moneyPerHour === null) return b.totalMoney - a.totalMoney;
+    if (a.moneyPerHour === null) return 1;
+    if (b.moneyPerHour === null) return -1;
+    return b.moneyPerHour - a.moneyPerHour;
+  });
+
+  // Member payout leaderboard
+  const memberPayouts = {}; // uid -> { name, totalMoney, totalRespect, ocCount }
+  for (const c of completedCrimes) {
+    if (c.status !== 'Successful') continue;
+    const money = c.money_gain || 0;
+    const respect = c.respect_gain || 0;
+    const slotCount = (c.slots || []).filter(s => s.user_id || s.user?.id).length;
+    if (slotCount === 0) continue;
+    const perMember = Math.round(money / slotCount);
+    const perMemberResp = respect / slotCount;
+    for (const slot of (c.slots || [])) {
+      const uid = String(slot.user_id ?? slot.user?.id ?? '');
+      if (!uid) continue;
+      if (!memberPayouts[uid]) memberPayouts[uid] = { name: slot.user?.name || uid, totalMoney: 0, totalRespect: 0, ocCount: 0 };
+      memberPayouts[uid].totalMoney += perMember;
+      memberPayouts[uid].totalRespect += Math.round(perMemberResp * 10) / 10;
+      memberPayouts[uid].ocCount++;
+    }
+  }
+
+  const leaderboard = Object.entries(memberPayouts)
+    .map(([uid, d]) => ({ uid, ...d }))
+    .sort((a, b) => b.totalMoney - a.totalMoney)
+    .slice(0, 15);
+
+  return {
+    crimeTypes,
+    leaderboard,
+    summary: {
+      totalMoney: crimeTypes.reduce((s, c) => s + c.totalMoney, 0),
+      totalRespect: Math.round(crimeTypes.reduce((s, c) => s + c.totalRespect, 0) * 10) / 10,
+      totalCompleted: crimeTypes.reduce((s, c) => s + c.completed, 0),
+      bestMoneyPerHour: crimeTypes.find(c => c.moneyPerHour !== null) || null,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  ITEM ROI ENGINE — tracks item costs vs OC payout returns
+// ═══════════════════════════════════════════════════════════════════════════════
+function runItemRoi(factionId, data) {
+  const completedCrimes = getCachedCompletedCrimes(factionId) || [];
+  const allHistory = loadOcHistory(factionId);
+
+  // Build per-crime-type data: item requirements, payouts, success rates
+  const crimeData = {}; // crimeName -> { difficulty, itemSlots, successMoney, successCount, failCount }
+
+  for (const c of completedCrimes) {
+    const name = c.name || 'Unknown';
+    if (!crimeData[name]) crimeData[name] = {
+      crimeName: name, difficulty: c.difficulty || 0,
+      itemSlots: [], successMoney: 0, successRespect: 0, successCount: 0, failCount: 0, totalRuns: 0,
+    };
+    const cd = crimeData[name];
+    cd.totalRuns++;
+
+    if (c.status === 'Successful') {
+      cd.successCount++;
+      cd.successMoney += c.money_gain || 0;
+      cd.successRespect += c.respect_gain || 0;
+    } else if (c.status === 'Failed') {
+      cd.failCount++;
+    }
+
+    // Collect item slot data from crime slots
+    for (const slot of (c.slots || [])) {
+      if (slot.item_requirement) {
+        const existing = cd.itemSlots.find(i => i.itemName === slot.item_requirement.name);
+        if (existing) {
+          existing.timesNeeded++;
+        } else {
+          cd.itemSlots.push({
+            itemName: slot.item_requirement.name,
+            itemId: slot.item_requirement.id || null,
+            position: (slot.position || '').replace(/\s*#\d+$/, ''),
+            timesNeeded: 1,
+            isConsumed: slot.item_requirement.is_consumed !== false, // assume consumed unless told otherwise
+          });
+        }
+      }
+    }
+  }
+
+  // Add failures from disk history
+  for (const h of allHistory) {
+    if (h.status !== 'Failed') continue;
+    const name = h.crimeName || 'Unknown';
+    if (!crimeData[name]) crimeData[name] = {
+      crimeName: name, difficulty: h.difficulty || 0,
+      itemSlots: [], successMoney: 0, successRespect: 0, successCount: 0, failCount: 0, totalRuns: 0,
+    };
+    crimeData[name].failCount++;
+    crimeData[name].totalRuns++;
+  }
+
+  // Calculate ROI for each crime type
+  const results = [];
+  for (const [name, cd] of Object.entries(crimeData)) {
+    if (cd.totalRuns === 0) continue;
+    const successRate = Math.round(cd.successCount / cd.totalRuns * 100);
+    const avgPayout = cd.successCount > 0 ? Math.round(cd.successMoney / cd.successCount) : 0;
+    const avgRespect = cd.successCount > 0 ? Math.round(cd.successRespect / cd.successCount * 10) / 10 : 0;
+
+    // Expected payout per run = avgPayout * successRate/100
+    const expectedPayout = Math.round(avgPayout * successRate / 100);
+
+    // Item cost info (we don't have market prices, but we track what's needed)
+    const uniqueItems = cd.itemSlots.filter(i => i.isConsumed);
+    const itemCount = uniqueItems.length;
+
+    results.push({
+      crimeName: name, difficulty: cd.difficulty,
+      totalRuns: cd.totalRuns, successCount: cd.successCount, failCount: cd.failCount, successRate,
+      avgPayout, avgRespect, expectedPayout,
+      consumedItems: uniqueItems.map(i => ({ name: i.itemName, position: i.position, timesNeeded: i.timesNeeded })),
+      itemsPerRun: itemCount,
+      // ROI indicator: expected payout relative to item cost risk
+      // More items consumed = higher cost risk = lower ROI score
+      roiScore: itemCount === 0 ? expectedPayout : Math.round(expectedPayout / (1 + itemCount * 0.3)),
+    });
+  }
+
+  // Sort by ROI score descending
+  results.sort((a, b) => b.roiScore - a.roiScore);
+
+  // Item frequency: which items are consumed most across all crime types
+  const itemFreq = {};
+  for (const cd of Object.values(crimeData)) {
+    for (const i of cd.itemSlots) {
+      if (!i.isConsumed) continue;
+      if (!itemFreq[i.itemName]) itemFreq[i.itemName] = { itemName: i.itemName, totalNeeded: 0, crimeTypes: new Set() };
+      itemFreq[i.itemName].totalNeeded += i.timesNeeded;
+      itemFreq[i.itemName].crimeTypes.add(cd.crimeName);
+    }
+  }
+  const topItems = Object.values(itemFreq)
+    .map(i => ({ itemName: i.itemName, totalNeeded: i.totalNeeded, usedIn: [...i.crimeTypes] }))
+    .sort((a, b) => b.totalNeeded - a.totalNeeded)
+    .slice(0, 10);
+
+  return {
+    crimes: results,
+    topItems,
+    summary: {
+      totalCrimeTypes: results.length,
+      bestRoi: results[0] || null,
+      totalItemTypes: topItems.length,
+    },
+  };
+}
+
 const _factionKeyCache = new Map(); // factionId  → { keys: [apiKey, ...], lastIndex: 0 } — pool of up to 10 verified faction-access keys
 const FACTION_KEY_POOL_MAX = 10;
 
@@ -3629,6 +4002,9 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       if (fSettings.engine_cpr_forecaster) engines.cprForecaster = runCprForecaster(fid, data);
       if (fSettings.engine_member_projector) engines.memberProjector = runMemberProjector(fid, data);
       if (fSettings.engine_member_reliability) engines.memberReliability = runMemberReliability(fid, data);
+      if (fSettings.engine_gap_analyzer) engines.gapAnalyzer = runGapAnalyzer(fid, data);
+      if (fSettings.engine_payout_optimizer) engines.payoutTracker = runPayoutTracker(fid, data);
+      if (fSettings.engine_item_roi) engines.itemRoi = runItemRoi(fid, data);
       _engineCache.set(fid, { ts: Date.now(), engines, settingsHash: engineSettingsHash(fSettings) });
     }
     const engines = _engineCache.get(fid).engines;
