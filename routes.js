@@ -2815,8 +2815,7 @@ router.get("/api/oc/scope", async (req, res) => {
   }
   const scopeRaw = parseInt(req.query.scope, 10);
   if (isNaN(scopeRaw)) return res.status(400).json({ error: "Missing scope" });
-  const current = store.getFactionSettings(info.factionId);
-  store.updateFactionSettings(info.factionId, { ...current, oc_scope: Math.max(0, Math.min(100, scopeRaw)) });
+  store.updateFactionSettings(info.factionId, { oc_scope: Math.max(0, Math.min(100, scopeRaw)) });
   return res.json({ ok: true });
 });
 
