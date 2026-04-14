@@ -362,6 +362,7 @@ async function detectNewWars() {
         }
 
         const enemyChanged = existing && String(existing.enemyFactionId) !== String(rw.enemyFactionId);
+        console.log(`[war-detect] Check: existing=${existing?.enemyFactionId || 'none'}, api=${rw.enemyFactionId}, changed=${enemyChanged}, ended=${existing?.warEnded}`);
 
         // If no existing war, enemy changed, or war ended — reset and create fresh entry
         if (!existing || !existing.enemyFactionId || existing.warEnded || enemyChanged) {
