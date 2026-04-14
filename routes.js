@@ -2481,11 +2481,19 @@ function runSlotOptimizer(data) {
     if (!cpr) continue;
     const joinable = cpr.joinable || 1;
     const cprVal = cpr.cpr || 0;
-    // If CPR >= 75%, they're ready for next level (boost pushes them to ~90%)
-    const effectiveLevel = cprVal >= 75 ? joinable + 1 : joinable;
+    // Build per-level CPR from entries
+    const levelCprs = {};
+    for (const e of (cpr.entries || [])) {
+      if (!levelCprs[e.diff]) levelCprs[e.diff] = { sum: 0, count: 0 };
+      levelCprs[e.diff].sum += e.rate;
+      levelCprs[e.diff].count += 1;
+    }
+    // If CPR at current level >= 75%, they're ready for next level (boost pushes them to ~90%)
+    const topLevelCpr = levelCprs[joinable] ? levelCprs[joinable].sum / levelCprs[joinable].count : cprVal;
+    const effectiveLevel = topLevelCpr >= 75 ? joinable + 1 : joinable;
     freeMems.push({
       uid, name: m.name || m.playerName || uid,
-      cpr: cprVal, joinable, effectiveLevel,
+      cpr: cprVal, joinable, effectiveLevel, levelCprs,
       byPosition: cpr.byPosition || {},
       level: m.level || 0,
     });
@@ -2505,11 +2513,12 @@ function runSlotOptimizer(data) {
       const posBase = slot.position.replace(/\s*#\d+$/, '');
       const posCpr = mem.byPosition?.[`${slot.crimeName}::${posBase}`]?.cpr
                   || mem.byPosition?.[`${slot.crimeName}::${slot.position}`]?.cpr;
-      if (posCpr) {
-        score += posCpr * 2; // weight position-specific CPR heavily
-      } else {
-        score += mem.cpr; // fallback to general CPR
-      }
+      // Fallback: use level-specific CPR for this OC's difficulty, not overall average
+      const levelCpr = mem.levelCprs[slot.difficulty]
+        ? Math.round(mem.levelCprs[slot.difficulty].sum / mem.levelCprs[slot.difficulty].count * 10) / 10
+        : null;
+      const usedCpr = posCpr || levelCpr || mem.cpr;
+      score += usedCpr * 2;
       // Level fit: prefer members at their effective level
       if (mem.effectiveLevel === slot.difficulty) score += 20;
       else if (mem.effectiveLevel > slot.difficulty) score -= 30; // 1 effective level above: penalty
@@ -2538,14 +2547,20 @@ function runSlotOptimizer(data) {
     const exactPosCpr = p.member.byPosition?.[`${p.slot.crimeName}::${pb}`]?.cpr
                      || p.member.byPosition?.[`${p.slot.crimeName}::${p.slot.position}`]?.cpr
                      || null;
+    const lvlCpr = p.member.levelCprs[p.slot.difficulty]
+      ? Math.round(p.member.levelCprs[p.slot.difficulty].sum / p.member.levelCprs[p.slot.difficulty].count * 10) / 10
+      : null;
+    // Best CPR to display: position-specific > level-specific > overall
+    const displayCpr = exactPosCpr || lvlCpr || p.member.cpr;
     assignments.push({
       memberId: p.member.uid, memberName: p.member.name,
-      memberCpr: p.member.cpr, memberJoinable: p.member.joinable,
+      memberCpr: displayCpr, memberJoinable: p.member.joinable,
       crimeId: p.slot.crimeId, crimeName: p.slot.crimeName,
       difficulty: p.slot.difficulty, position: p.slot.position,
       score: Math.round(p.score * 10) / 10,
       positionCpr: exactPosCpr,
-      isEstimatedCpr: !exactPosCpr, // true if we're using overall CPR, not position-specific
+      levelCpr: lvlCpr,
+      isEstimatedCpr: !exactPosCpr && !lvlCpr, // only estimated if no position OR level data
       hoursToExpiry: Math.round(((p.slot.expiredAt || Infinity) - Date.now() / 1000) / 3600 * 10) / 10,
     });
   }
