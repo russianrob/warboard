@@ -4,7 +4,8 @@
 
 import { Router } from "express";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join as pathJoin } from "node:path";
+import { join as pathJoin, dirname as pathDirname } from "node:path";
+import { fileURLToPath } from 'node:url';
 import axios from "axios";
 import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.js";
 import * as store from "./store.js";
@@ -2585,7 +2586,8 @@ function runSlotOptimizer(data) {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  OC HISTORY COLLECTOR — logs completed OC results for future failure rate analysis
 // ═══════════════════════════════════════════════════════════════════════════════
-const OC_HISTORY_DIR = pathJoin(process.env.DATA_DIR || './data', 'oc-history');
+const __routes_dir = pathDirname(fileURLToPath(import.meta.url));
+const OC_HISTORY_DIR = pathJoin(process.env.DATA_DIR || pathJoin(__routes_dir, 'data'), 'oc-history');
 const _seenCrimeIds = new Set(); // prevent duplicate logging per restart
 
 function collectOcHistory(factionId, data) {
@@ -2596,7 +2598,9 @@ function collectOcHistory(factionId, data) {
     const nameMap = {};
     for (const m of memberArr) { nameMap[String(m.id || m.playerId || m.uid)] = m.name || m.playerName || ''; }
 
-    const completed = crimes.filter(c => c.status === 'Successful' || c.status === 'Failed');
+    // Use completedCrimes from oc-spawn cache if available, else filter from crimes array
+    const completedSrc = data.completedCrimes || crimes;
+    const completed = completedSrc.filter(c => c.status === 'Successful' || c.status === 'Failed');
     if (completed.length === 0) return;
 
     if (!existsSync(OC_HISTORY_DIR)) mkdirSync(OC_HISTORY_DIR, { recursive: true });
