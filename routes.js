@@ -2492,6 +2492,7 @@ function runSlotOptimizer(data) {
   for (const slot of openSlots) {
     for (const mem of freeMems) {
       if (mem.joinable < slot.difficulty) continue; // can't join this level
+      if (mem.joinable > slot.difficulty + 1) continue; // don't recommend members 2+ levels above the OC
       // Score: position CPR match + level proximity + expiry urgency
       let score = 0;
       // Position CPR (best indicator of fit)
@@ -2502,9 +2503,9 @@ function runSlotOptimizer(data) {
       } else {
         score += mem.cpr; // fallback to general CPR
       }
-      // Level fit: prefer members at the right level, penalize downranking
+      // Level fit: prefer members at the right level, penalize 1-level downrank
       if (mem.joinable === slot.difficulty) score += 20;
-      else if (mem.joinable > slot.difficulty) score -= (mem.joinable - slot.difficulty) * 15; // penalize overqualified
+      else if (mem.joinable > slot.difficulty) score -= 30; // 1 level above: significant penalty
       // Expiry urgency bonus (prioritize slots expiring soon)
       const hoursToExpiry = (slot.expiredAt - Date.now() / 1000) / 3600;
       if (hoursToExpiry < 6) score += 30;
