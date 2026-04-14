@@ -2445,7 +2445,7 @@ router.get("/api/oc-verify", async (req, res) => {
 const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
 const _engineCache    = new Map(); // factionId  → { ts, engines, settingsHash }
 function engineSettingsHash(s) {
-  return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}|${!!s.engine_member_projector}`;
+  return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}|${!!s.engine_member_projector}|${!!s.engine_member_reliability}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3051,6 +3051,212 @@ function runMemberProjector(factionId, data) {
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  MEMBER RELIABILITY ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+function runMemberReliability(factionId, data) {
+  const completedCrimes = getCachedCompletedCrimes(factionId);
+  const members = data.members || {};
+  const cprCache = data.cprCache || {};
+  const memberArr = Array.isArray(members) ? members : Object.values(members);
+  const nameMap = {};
+  for (const m of memberArr) {
+    nameMap[String(m.id || m.playerId || m.uid)] = m.name || m.playerName || '';
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const DAY = 86400;
+  const LOOKBACK = 90 * DAY;
+  const cutoff = now - LOOKBACK;
+
+  // Build per-member participation stats from completed crimes
+  const memberStats = {}; // uid -> { total, succeeded, failed, entries: [{ execAt, diff, status, role }] }
+  for (const crime of completedCrimes) {
+    const execAt = crime.executed_at || crime.planning_at || crime.created_at || 0;
+    if (!execAt || execAt < cutoff || !Array.isArray(crime.slots)) continue;
+    const diff = crime.difficulty || 0;
+    const status = crime.status || '';
+    const isSuccess = status === 'Successful';
+    const isFailed = status === 'Failed';
+    if (!isSuccess && !isFailed) continue;
+
+    for (const slot of crime.slots) {
+      const uid = String(slot.user_id ?? slot.user?.id ?? '');
+      if (!uid) continue;
+      const role = (slot.position || '').replace(/\s*#\d+$/, '');
+
+      if (!memberStats[uid]) memberStats[uid] = { total: 0, succeeded: 0, failed: 0, entries: [] };
+      memberStats[uid].total++;
+      if (isSuccess) memberStats[uid].succeeded++;
+      if (isFailed) memberStats[uid].failed++;
+      memberStats[uid].entries.push({ execAt, diff, status, role });
+    }
+  }
+
+  // Calculate consistency: split 90 days into 6 windows of 15 days each
+  // A consistent member participates in most windows
+  const WINDOW_SIZE = 15 * DAY;
+  const NUM_WINDOWS = 6;
+
+  function calcConsistency(entries) {
+    if (entries.length < 2) return 0;
+    const windows = new Set();
+    for (const e of entries) {
+      const windowIdx = Math.floor((e.execAt - cutoff) / WINDOW_SIZE);
+      windows.add(Math.min(windowIdx, NUM_WINDOWS - 1));
+    }
+    return Math.round(windows.size / NUM_WINDOWS * 100);
+  }
+
+  // Calculate streak: current streak of successive successful OCs
+  function calcStreak(entries) {
+    const sorted = [...entries].sort((a, b) => b.execAt - a.execAt); // newest first
+    let streak = 0;
+    for (const e of sorted) {
+      if (e.status === 'Successful') streak++;
+      else break;
+    }
+    return streak;
+  }
+
+  const results = [];
+
+  for (const m of memberArr) {
+    const uid = String(m.id || m.playerId || m.uid);
+    const stats = memberStats[uid];
+    const cpr = cprCache[uid];
+
+    // Activity score based on current status
+    let activityScore = 0;
+    let activityLabel = 'Unknown';
+    const lastActionStatus = (m.last_action?.status || 'Offline').toLowerCase();
+    const lastActionTs = m.last_action?.timestamp || 0;
+    const statusState = (m.status?.state || 'Okay').toLowerCase();
+    const daysSinceAction = lastActionTs > 0 ? Math.round((now - lastActionTs) / DAY) : 999;
+
+    if (statusState === 'hospitalized' || statusState === 'jail') {
+      activityScore = 30;
+      activityLabel = statusState === 'hospitalized' ? 'Hospitalized' : 'Jailed';
+    } else if (statusState === 'traveling') {
+      activityScore = 50;
+      activityLabel = 'Traveling';
+    } else if (lastActionStatus === 'online') {
+      activityScore = 100;
+      activityLabel = 'Online';
+    } else if (lastActionStatus === 'idle') {
+      activityScore = 75;
+      activityLabel = 'Idle';
+    } else if (daysSinceAction <= 1) {
+      activityScore = 60;
+      activityLabel = 'Recent';
+    } else if (daysSinceAction <= 3) {
+      activityScore = 40;
+      activityLabel = 'Away';
+    } else if (daysSinceAction <= 7) {
+      activityScore = 20;
+      activityLabel = 'Inactive';
+    } else {
+      activityScore = 5;
+      activityLabel = daysSinceAction > 30 ? 'Gone' : 'Inactive';
+    }
+
+    // If no OC history, still include with activity data
+    const successRate = stats && stats.total > 0 ? Math.round(stats.succeeded / stats.total * 100) : null;
+    const participationCount = stats?.total || 0;
+    const consistency = stats ? calcConsistency(stats.entries) : 0;
+    const currentStreak = stats ? calcStreak(stats.entries) : 0;
+
+    // Participation rate: OCs per 30 days
+    const ocsPerMonth = stats && stats.entries.length > 0
+      ? Math.round(stats.total / ((now - Math.min(...stats.entries.map(e => e.execAt))) / (30 * DAY)) * 10) / 10
+      : 0;
+
+    // Days since last OC
+    const lastOcAt = stats?.entries.length > 0 ? Math.max(...stats.entries.map(e => e.execAt)) : 0;
+    const daysSinceLastOC = lastOcAt > 0 ? Math.round((now - lastOcAt) / DAY) : null;
+
+    // Overall reliability score (0-100): weighted composite
+    // 35% success rate, 25% consistency, 20% activity, 20% participation frequency
+    let reliabilityScore = 0;
+    if (stats && stats.total >= 2) {
+      const successComponent = (successRate || 0) * 0.35;
+      const consistencyComponent = consistency * 0.25;
+      const activityComponent = activityScore * 0.20;
+      // Participation frequency: cap at 4+ OCs/month = 100%
+      const freqComponent = Math.min(100, ocsPerMonth / 4 * 100) * 0.20;
+      reliabilityScore = Math.round(successComponent + consistencyComponent + activityComponent + freqComponent);
+    } else if (stats && stats.total === 1) {
+      // Single OC: can't really judge, give partial credit
+      reliabilityScore = Math.round(activityScore * 0.5 + (successRate || 0) * 0.5);
+    } else {
+      // No OC history: score purely on activity
+      reliabilityScore = Math.round(activityScore * 0.3);
+    }
+
+    // Tier label
+    let tier, tierColor;
+    if (reliabilityScore >= 80) { tier = 'Reliable'; tierColor = '#4ade80'; }
+    else if (reliabilityScore >= 60) { tier = 'Dependable'; tierColor = '#60a5fa'; }
+    else if (reliabilityScore >= 40) { tier = 'Inconsistent'; tierColor = '#e5b567'; }
+    else if (reliabilityScore >= 20) { tier = 'Unreliable'; tierColor = '#f97316'; }
+    else { tier = 'Inactive'; tierColor = '#ef4444'; }
+
+    // Most common role
+    let topRole = null;
+    if (stats?.entries.length > 0) {
+      const roleCounts = {};
+      for (const e of stats.entries) {
+        roleCounts[e.role] = (roleCounts[e.role] || 0) + 1;
+      }
+      const sorted = Object.entries(roleCounts).sort((a, b) => b[1] - a[1]);
+      topRole = sorted[0] ? { role: sorted[0][0], count: sorted[0][1] } : null;
+    }
+
+    results.push({
+      uid,
+      name: nameMap[uid] || uid,
+      level: m.level || 0,
+      daysInFaction: m.days_in_faction || 0,
+      reliabilityScore,
+      tier,
+      tierColor,
+      successRate,
+      totalOCs: participationCount,
+      succeeded: stats?.succeeded || 0,
+      failed: stats?.failed || 0,
+      ocsPerMonth,
+      consistency,
+      currentStreak,
+      activityScore,
+      activityLabel,
+      daysSinceAction,
+      daysSinceLastOC,
+      topRole,
+    });
+  }
+
+  // Sort by reliability score descending
+  results.sort((a, b) => b.reliabilityScore - a.reliabilityScore);
+
+  // Faction-wide summary
+  const withHistory = results.filter(r => r.totalOCs >= 2);
+  const avgReliability = withHistory.length > 0
+    ? Math.round(withHistory.reduce((s, r) => s + r.reliabilityScore, 0) / withHistory.length)
+    : 0;
+  const tierCounts = { Reliable: 0, Dependable: 0, Inconsistent: 0, Unreliable: 0, Inactive: 0 };
+  for (const r of results) tierCounts[r.tier] = (tierCounts[r.tier] || 0) + 1;
+
+  return {
+    members: results,
+    summary: {
+      avgReliability,
+      totalMembers: results.length,
+      withHistory: withHistory.length,
+      tierCounts,
+    },
+  };
+}
+
 const _factionKeyCache = new Map(); // factionId  → { keys: [apiKey, ...], lastIndex: 0 } — pool of up to 10 verified faction-access keys
 const FACTION_KEY_POOL_MAX = 10;
 
@@ -3220,6 +3426,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       if (fSettings.engine_failure_risk) engines.failureRisk = runFailureRisk(data);
       if (fSettings.engine_cpr_forecaster) engines.cprForecaster = runCprForecaster(fid, data);
       if (fSettings.engine_member_projector) engines.memberProjector = runMemberProjector(fid, data);
+      if (fSettings.engine_member_reliability) engines.memberReliability = runMemberReliability(fid, data);
       _engineCache.set(fid, { ts: Date.now(), engines, settingsHash: engineSettingsHash(fSettings) });
     }
     const engines = _engineCache.get(fid).engines;
