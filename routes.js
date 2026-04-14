@@ -2777,7 +2777,6 @@ router.get("/api/oc/settings", async (req, res) => {
     high_weight_mincpr:  s.oc_high_weight_mincpr   ?? 75,
     // Engine toggles
     engine_slot_optimizer:   s.engine_slot_optimizer   ?? false,
-    engine_spawn_predictor:  s.engine_spawn_predictor  ?? false,
     engine_cpr_forecaster:   s.engine_cpr_forecaster   ?? false,
     engine_failure_risk:     s.engine_failure_risk     ?? false,
     engine_expiry_risk:      s.engine_expiry_risk      ?? false,
@@ -2852,7 +2851,6 @@ router.get("/api/oc/settings/update", async (req, res) => {
     oc_scope:               isNaN(scopeRaw) ? null : Math.max(0, Math.min(100, scopeRaw)),
     // Engine toggles (always update when settings are saved)
     engine_slot_optimizer:   bool('engine_slot_optimizer'),
-    engine_spawn_predictor:  bool('engine_spawn_predictor'),
     engine_cpr_forecaster:   bool('engine_cpr_forecaster'),
     engine_failure_risk:     bool('engine_failure_risk'),
     engine_expiry_risk:      bool('engine_expiry_risk'),
