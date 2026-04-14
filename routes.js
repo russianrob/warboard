@@ -2979,18 +2979,19 @@ function runMemberProjector(factionId, data) {
         readiness = 'ready';
         readinessLabel = 'Ready Now';
         estimatedDays = 0;
-      } else if (currentLevelCpr >= MINCPR) {
+      } else if (currentLevelCpr >= 70) {
         readiness = 'developing';
         readinessLabel = 'Developing';
         if (progression) {
-          // Use faction's historical progression time as baseline
           estimatedDays = progression.median;
-          // Adjust based on how far above/below MINCPR they are
-          const cprAboveMin = currentLevelCpr - MINCPR;
-          const cprNeeded = 75 - MINCPR; // 15 points needed to go from min to ready
-          const progress = Math.min(1, Math.max(0, cprAboveMin / cprNeeded));
+          const cprAboveThresh = currentLevelCpr - 70;
+          const cprNeeded = 75 - 70; // 5 points from developing to ready
+          const progress = Math.min(1, Math.max(0, cprAboveThresh / cprNeeded));
           estimatedDays = Math.round(progression.median * (1 - progress * 0.7));
         }
+      } else if (currentLevelCpr >= MINCPR) {
+        readiness = 'building';
+        readinessLabel = 'Building';
       } else {
         readiness = 'not_ready';
         readinessLabel = 'Not Ready';
@@ -3035,7 +3036,7 @@ function runMemberProjector(factionId, data) {
   }
 
   // Sort: ready first, then developing, then not ready. Within each group, by next level desc then CPR desc.
-  const readinessOrder = { ready: 0, developing: 1, not_ready: 2 };
+  const readinessOrder = { ready: 0, developing: 1, building: 2, not_ready: 3 };
   results.sort((a, b) => {
     const aR = readinessOrder[a.projection?.readiness] ?? 2;
     const bR = readinessOrder[b.projection?.readiness] ?? 2;
