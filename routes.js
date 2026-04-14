@@ -2442,6 +2442,112 @@ router.get("/api/oc-verify", async (req, res) => {
 // Verifies faction membership, then returns spawn data with 6h CPR cache.
 
 const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SLOT OPTIMIZER ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+function runSlotOptimizer(data) {
+  const crimes = data.crimes || data.availableCrimes || [];
+  const members = data.members || {};
+  const cprCache = data.cprCache || {};
+
+  // 1. Collect all open slots across all recruiting OCs
+  const openSlots = [];
+  for (const crime of crimes) {
+    if (crime.status !== 'Recruiting') continue;
+    const slots = crime.slots || [];
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      if (s.user_id || s.user?.id) continue; // filled
+      openSlots.push({
+        crimeId: crime.id, crimeName: crime.name, difficulty: crime.difficulty || 0,
+        position: s.position, slotIndex: i, expiredAt: crime.expired_at || Infinity,
+      });
+    }
+  }
+
+  // 2. Collect all free members with their CPR data
+  const freeMems = [];
+  const memberArr = Array.isArray(members) ? members : Object.values(members);
+  for (const m of memberArr) {
+    if (m.inOC || m.status === 'inOC') continue; // already in an OC
+    const uid = String(m.id || m.playerId || m.uid);
+    const cpr = cprCache[uid];
+    if (!cpr) continue;
+    freeMems.push({
+      uid, name: m.name || m.playerName || uid,
+      cpr: cpr.cpr || 0, joinable: cpr.joinable || 1,
+      byPosition: cpr.byPosition || {},
+      level: m.level || 0,
+    });
+  }
+
+  // 3. Score every (member, slot) pair
+  const pairs = [];
+  for (const slot of openSlots) {
+    for (const mem of freeMems) {
+      if (mem.joinable < slot.difficulty) continue; // can't join this level
+      // Score: position CPR match + level proximity + expiry urgency
+      let score = 0;
+      // Position CPR (best indicator of fit)
+      const posKey = `${slot.crimeName}::${slot.position}`;
+      const posCpr = mem.byPosition?.[posKey]?.cpr;
+      if (posCpr) {
+        score += posCpr * 2; // weight position-specific CPR heavily
+      } else {
+        score += mem.cpr; // fallback to general CPR
+      }
+      // Exact level match bonus (prefer members at the right level)
+      if (mem.joinable === slot.difficulty) score += 20;
+      // Expiry urgency bonus (prioritize slots expiring soon)
+      const hoursToExpiry = (slot.expiredAt - Date.now() / 1000) / 3600;
+      if (hoursToExpiry < 6) score += 30;
+      else if (hoursToExpiry < 12) score += 15;
+      else if (hoursToExpiry < 24) score += 5;
+
+      pairs.push({ slot, member: mem, score });
+    }
+  }
+
+  // 4. Greedy assignment: pick highest-scoring pairs, no member or slot used twice
+  pairs.sort((a, b) => b.score - a.score);
+  const usedMembers = new Set();
+  const usedSlots = new Set();
+  const assignments = [];
+
+  for (const p of pairs) {
+    const slotKey = `${p.slot.crimeId}:${p.slot.slotIndex}`;
+    if (usedMembers.has(p.member.uid) || usedSlots.has(slotKey)) continue;
+    usedMembers.add(p.member.uid);
+    usedSlots.add(slotKey);
+    assignments.push({
+      memberId: p.member.uid, memberName: p.member.name,
+      memberCpr: p.member.cpr, memberJoinable: p.member.joinable,
+      crimeId: p.slot.crimeId, crimeName: p.slot.crimeName,
+      difficulty: p.slot.difficulty, position: p.slot.position,
+      score: Math.round(p.score * 10) / 10,
+      positionCpr: p.slot.crimeName && p.member.byPosition?.[`${p.slot.crimeName}::${p.slot.position}`]?.cpr || null,
+      hoursToExpiry: Math.round(((p.slot.expiredAt || Infinity) - Date.now() / 1000) / 360) / 10,
+    });
+  }
+
+  // Sort assignments by crime urgency then difficulty
+  assignments.sort((a, b) => {
+    if (a.hoursToExpiry !== b.hoursToExpiry) return a.hoursToExpiry - b.hoursToExpiry;
+    return b.difficulty - a.difficulty;
+  });
+
+  return {
+    assignments,
+    stats: {
+      openSlots: openSlots.length,
+      freeMembers: freeMems.length,
+      assigned: assignments.length,
+      unfilledSlots: openSlots.length - assignments.length,
+      unassignedMembers: freeMems.length - assignments.length,
+    }
+  };
+}
 const _factionKeyCache = new Map(); // factionId  → { keys: [apiKey, ...], lastIndex: 0 } — pool of up to 10 verified faction-access keys
 const FACTION_KEY_POOL_MAX = 10;
 
@@ -2600,7 +2706,14 @@ router.get("/api/oc/spawn-key", async (req, res) => {
 
     const viewerObj = buildViewer(playerInfo);
     console.log(`[oc/spawn-key] Sending viewer for ${playerInfo.playerName} (${playerInfo.playerId}): hasFactionAccess=${viewerObj.hasFactionAccess}`);
-    return res.json({ ...data, viewer: viewerObj });
+
+    // Run engines if enabled
+    const engines = {};
+    if (fSettings.engine_slot_optimizer) {
+      engines.slotOptimizer = runSlotOptimizer(data);
+    }
+
+    return res.json({ ...data, viewer: viewerObj, engines });
   } catch (err) {
     // If member's own key failed, try keys from the faction pool
     const fid = String(playerInfo.factionId);
