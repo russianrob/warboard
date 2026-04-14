@@ -3464,34 +3464,39 @@ function runPayoutTracker(factionId, data) {
   const allHistory = loadOcHistory(factionId);
 
   // Build payout data from all history entries (rewards field available on API and new disk entries)
-  const byType = {}; // crimeName -> { level, count, successCount, totalMoney, totalRespect, avgDurationHrs, entries: [] }
+  // Old disk entries lack rewards data — only average over entries that have it
+  const byType = {}; // crimeName -> { level, count, successCount, totalMoney, totalRespect, ... }
 
   for (const c of allHistory) {
     const name = c.crimeName || 'Unknown';
     const diff = c.difficulty || 0;
 
     if (!byType[name]) byType[name] = {
-      crimeName: name, difficulty: diff, count: 0, successCount: 0,
+      crimeName: name, difficulty: diff, count: 0, successCount: 0, paidCount: 0,
       totalMoney: 0, totalRespect: 0, durationSum: 0, durationCount: 0, entries: [],
     };
     const t = byType[name];
     t.count++;
 
     if (c.status === 'Successful') {
-      const money = c.rewards?.money || 0;
-      const respect = c.rewards?.respect || 0;
       t.successCount++;
-      t.totalMoney += money;
-      t.totalRespect += respect;
-      t.entries.push({ money, respect, executedAt: c.executedAt || 0 });
+      // Only tally rewards from entries that actually have reward data
+      if (c.rewards) {
+        const money = c.rewards.money || 0;
+        const respect = c.rewards.respect || 0;
+        t.paidCount++;
+        t.totalMoney += money;
+        t.totalRespect += respect;
+        t.entries.push({ money, respect, executedAt: c.executedAt || 0 });
+      }
     }
     // Failed crimes counted for success rate but no payout
   }
 
   const crimeTypes = [];
   for (const [name, t] of Object.entries(byType)) {
-    const avgMoney = t.successCount > 0 ? Math.round(t.totalMoney / t.successCount) : 0;
-    const avgRespect = t.successCount > 0 ? Math.round(t.totalRespect / t.successCount * 10) / 10 : 0;
+    const avgMoney = t.paidCount > 0 ? Math.round(t.totalMoney / t.paidCount) : 0;
+    const avgRespect = t.paidCount > 0 ? Math.round(t.totalRespect / t.paidCount * 10) / 10 : 0;
     const avgDuration = t.durationCount > 0 ? Math.round(t.durationSum / t.durationCount * 10) / 10 : null;
     const moneyPerHour = avgDuration && avgDuration > 0 ? Math.round(avgMoney / avgDuration) : null;
     const respectPerHour = avgDuration && avgDuration > 0 ? Math.round(avgRespect / avgDuration * 10) / 10 : null;
@@ -3514,12 +3519,12 @@ function runPayoutTracker(factionId, data) {
     return b.moneyPerHour - a.moneyPerHour;
   });
 
-  // Member payout leaderboard (from merged history with rewards)
+  // Member payout leaderboard (only from entries with reward data)
   const memberPayouts = {}; // uid -> { name, totalMoney, totalRespect, ocCount }
   for (const c of allHistory) {
-    if (c.status !== 'Successful') continue;
-    const money = c.rewards?.money || 0;
-    const respect = c.rewards?.respect || 0;
+    if (c.status !== 'Successful' || !c.rewards) continue;
+    const money = c.rewards.money || 0;
+    const respect = c.rewards.respect || 0;
     const slotCount = (c.slots || []).filter(s => s.userId).length;
     if (slotCount === 0) continue;
     const perMember = Math.round(money / slotCount);
@@ -3566,15 +3571,19 @@ function runItemRoi(factionId, data) {
     const name = c.crimeName || 'Unknown';
     if (!crimeData[name]) crimeData[name] = {
       crimeName: name, difficulty: c.difficulty || 0,
-      itemSlots: [], successMoney: 0, successRespect: 0, successCount: 0, failCount: 0, totalRuns: 0,
+      itemSlots: [], successMoney: 0, successRespect: 0, successCount: 0, paidCount: 0, failCount: 0, totalRuns: 0,
     };
     const cd = crimeData[name];
     cd.totalRuns++;
 
     if (c.status === 'Successful') {
       cd.successCount++;
-      cd.successMoney += c.rewards?.money || 0;
-      cd.successRespect += c.rewards?.respect || 0;
+      // Only tally rewards from entries that actually have reward data
+      if (c.rewards) {
+        cd.paidCount++;
+        cd.successMoney += c.rewards.money || 0;
+        cd.successRespect += c.rewards.respect || 0;
+      }
     } else if (c.status === 'Failed') {
       cd.failCount++;
     }
@@ -3609,8 +3618,8 @@ function runItemRoi(factionId, data) {
   for (const [name, cd] of Object.entries(crimeData)) {
     if (cd.totalRuns === 0) continue;
     const successRate = Math.round(cd.successCount / cd.totalRuns * 100);
-    const avgPayout = cd.successCount > 0 ? Math.round(cd.successMoney / cd.successCount) : 0;
-    const avgRespect = cd.successCount > 0 ? Math.round(cd.successRespect / cd.successCount * 10) / 10 : 0;
+    const avgPayout = cd.paidCount > 0 ? Math.round(cd.successMoney / cd.paidCount) : 0;
+    const avgRespect = cd.paidCount > 0 ? Math.round(cd.successRespect / cd.paidCount * 10) / 10 : 0;
 
     // Expected payout per run = avgPayout * successRate/100
     const expectedPayout = Math.round(avgPayout * successRate / 100);
