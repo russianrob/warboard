@@ -3178,6 +3178,7 @@ function runMemberReliability(factionId, data) {
     // Overall reliability score (0-100): weighted composite
     // 35% success rate, 25% consistency, 20% activity, 20% participation frequency
     let reliabilityScore = 0;
+    let isNewMember = false;
     if (stats && stats.total >= 2) {
       const successComponent = (successRate || 0) * 0.35;
       const consistencyComponent = consistency * 0.25;
@@ -3189,13 +3190,22 @@ function runMemberReliability(factionId, data) {
       // Single OC: can't really judge, give partial credit
       reliabilityScore = Math.round(activityScore * 0.5 + (successRate || 0) * 0.5);
     } else {
-      // No OC history: score purely on activity
-      reliabilityScore = Math.round(activityScore * 0.3);
+      // No OC history: predict based on activity + days in faction
+      // Active + established members get benefit of the doubt
+      const daysInFac = m.days_in_faction || 0;
+      const tenureBonus = Math.min(20, Math.round(daysInFac / 7 * 5)); // up to 20 pts for 4+ weeks
+      reliabilityScore = Math.round(activityScore * 0.6 + tenureBonus);
+      isNewMember = true;
     }
 
     // Tier label
     let tier, tierColor;
-    if (reliabilityScore >= 80) { tier = 'Reliable'; tierColor = '#4ade80'; }
+    if (isNewMember) {
+      // New members get a special tier -- predicted, not earned
+      if (reliabilityScore >= 60) { tier = 'New - Promising'; tierColor = '#818cf8'; }
+      else if (reliabilityScore >= 40) { tier = 'New'; tierColor = '#a78bfa'; }
+      else { tier = 'New - Unknown'; tierColor = '#6b7280'; }
+    } else if (reliabilityScore >= 80) { tier = 'Reliable'; tierColor = '#4ade80'; }
     else if (reliabilityScore >= 60) { tier = 'Dependable'; tierColor = '#60a5fa'; }
     else if (reliabilityScore >= 40) { tier = 'Inconsistent'; tierColor = '#e5b567'; }
     else if (reliabilityScore >= 20) { tier = 'Unreliable'; tierColor = '#f97316'; }
@@ -3220,6 +3230,7 @@ function runMemberReliability(factionId, data) {
       reliabilityScore,
       tier,
       tierColor,
+      isNewMember,
       successRate,
       totalOCs: participationCount,
       succeeded: stats?.succeeded || 0,
@@ -3243,8 +3254,11 @@ function runMemberReliability(factionId, data) {
   const avgReliability = withHistory.length > 0
     ? Math.round(withHistory.reduce((s, r) => s + r.reliabilityScore, 0) / withHistory.length)
     : 0;
-  const tierCounts = { Reliable: 0, Dependable: 0, Inconsistent: 0, Unreliable: 0, Inactive: 0 };
-  for (const r of results) tierCounts[r.tier] = (tierCounts[r.tier] || 0) + 1;
+  const tierCounts = { Reliable: 0, Dependable: 0, Inconsistent: 0, Unreliable: 0, Inactive: 0, New: 0 };
+  for (const r of results) {
+    if (r.isNewMember) tierCounts.New++;
+    else tierCounts[r.tier] = (tierCounts[r.tier] || 0) + 1;
+  }
 
   return {
     members: results,
