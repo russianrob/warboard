@@ -2548,6 +2548,65 @@ function runSlotOptimizer(data) {
     }
   };
 }
+// ═══════════════════════════════════════════════════════════════════════════════
+//  FAILURE RISK ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+function runFailureRisk(data) {
+  const crimes = data.crimes || data.availableCrimes || [];
+  const cprCache = data.cprCache || {};
+  const results = [];
+
+  for (const crime of crimes) {
+    if (crime.status !== 'Recruiting') continue;
+    const slots = crime.slots || [];
+    const slotRisks = [];
+    let hasEmpty = false;
+
+    for (const s of slots) {
+      const uid = String(s.user_id || s.user?.id || '');
+      if (!uid) { hasEmpty = true; continue; }
+      const cpr = cprCache[uid];
+      const posKey = `${crime.name}::${s.position}`;
+      const posCpr = cpr?.byPosition?.[posKey]?.cpr || cpr?.cpr || 0;
+      const weight = s.crime_pass_rate || 0;
+      // Risk = high weight + low CPR
+      const riskScore = weight > 0 ? Math.round((1 - posCpr / 100) * weight) : 0;
+      slotRisks.push({
+        uid, name: s.user?.name || uid,
+        position: s.position, cpr: posCpr, weight,
+        riskScore, successProb: posCpr / 100,
+      });
+    }
+
+    // Overall success = product of all filled members' success probabilities
+    const filledSlots = slotRisks.filter(s => s.successProb > 0);
+    const totalSlots = slots.length;
+    const emptySlots = totalSlots - filledSlots.length - (hasEmpty ? 0 : 0);
+    let overallSuccess = filledSlots.length > 0 ? filledSlots.reduce((acc, s) => acc * s.successProb, 1) : 0;
+    const failureRisk = Math.round((1 - overallSuccess) * 1000) / 10;
+
+    // Find weakest link: highest risk score
+    slotRisks.sort((a, b) => b.riskScore - a.riskScore);
+    const weakestLink = slotRisks[0] || null;
+
+    // Flag high-weight + low CPR combos
+    const dangerSlots = slotRisks.filter(s => s.weight >= 20 && s.cpr < 70);
+
+    results.push({
+      crimeId: crime.id, crimeName: crime.name, difficulty: crime.difficulty || 0,
+      failureRisk, overallSuccess: Math.round(overallSuccess * 1000) / 10,
+      totalSlots, filledSlots: filledSlots.length, emptySlots: slots.filter(s => !s.user_id && !s.user?.id).length,
+      weakestLink: weakestLink ? { name: weakestLink.name, position: weakestLink.position, cpr: weakestLink.cpr, weight: weakestLink.weight } : null,
+      dangerSlots: dangerSlots.map(s => ({ name: s.name, position: s.position, cpr: s.cpr, weight: s.weight })),
+      slotRisks,
+    });
+  }
+
+  // Sort by failure risk descending (riskiest OCs first)
+  results.sort((a, b) => b.failureRisk - a.failureRisk);
+  return { crimes: results };
+}
+
 const _factionKeyCache = new Map(); // factionId  → { keys: [apiKey, ...], lastIndex: 0 } — pool of up to 10 verified faction-access keys
 const FACTION_KEY_POOL_MAX = 10;
 
@@ -2711,6 +2770,9 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     const engines = {};
     if (fSettings.engine_slot_optimizer) {
       engines.slotOptimizer = runSlotOptimizer(data);
+    }
+    if (fSettings.engine_failure_risk) {
+      engines.failureRisk = runFailureRisk(data);
     }
 
     return res.json({ ...data, viewer: viewerObj, engines });
