@@ -147,6 +147,11 @@ async function getOcWeights() {
     return _weightsCache || {};
 }
 
+export function getCachedCompletedCrimes(factionId) {
+  const cached = factionOcsCache.get(factionId);
+  return cached?.completedCrimes || [];
+}
+
 export async function getOcSpawnData(factionId, apiKey) {
   // v2 /faction/crimes has no faction ID param — it returns the key holder's faction.
   // Always use the requesting member's key so crimes come from the right faction.
@@ -160,7 +165,7 @@ export async function getOcSpawnData(factionId, apiKey) {
   } else {
     const completedCrimes = await fetchCompletedCrimes(factionId, fetchKey);
     cprCache = buildCprCache(completedCrimes);
-    factionOcsCache.set(factionId, { timestamp: Date.now(), cprCache });
+    factionOcsCache.set(factionId, { timestamp: Date.now(), cprCache, completedCrimes });
   }
 
   const availableCrimes = await fetchAvailableCrimes(factionId, fetchKey);

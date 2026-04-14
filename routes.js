@@ -14,7 +14,7 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 /** Mask an API key for safe logging — shows only last 4 chars. */
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
-import { getOcSpawnData } from "./oc-spawn.js";
+import { getOcSpawnData, getCachedCompletedCrimes } from "./oc-spawn.js";
 import { getData as getNerveData, updateConfig as updateNerveConfig } from "./nerve-tracker.js";
 import { hasXanaxSubscription, grantFactionAccess, getXanaxSubscription } from "./xanax-subscriptions.js";
 import { startChainMonitor } from "./chain-monitor.js";
@@ -2685,6 +2685,105 @@ function runFailureRisk(data) {
   return { crimes: results };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CPR FORECASTER ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+function runCprForecaster(factionId, data) {
+  const completedCrimes = getCachedCompletedCrimes(factionId);
+  if (!completedCrimes || completedCrimes.length === 0) return { members: [] };
+
+  const members = data.members || {};
+  const memberArr = Array.isArray(members) ? members : Object.values(members);
+  const nameMap = {};
+  for (const m of memberArr) { nameMap[String(m.id || m.playerId || m.uid)] = m.name || m.playerName || ''; }
+
+  const now = Date.now() / 1000;
+  const DAY = 86400;
+  // Time windows: 90d ago, 60d, 30d, 14d, 7d
+  const windows = [
+    { label: '90d', from: now - 90 * DAY },
+    { label: '60d', from: now - 60 * DAY },
+    { label: '30d', from: now - 30 * DAY },
+    { label: '14d', from: now - 14 * DAY },
+    { label: '7d',  from: now - 7 * DAY },
+  ];
+
+  // Build per-member CPR at each time window
+  const memberData = {};
+  for (const crime of completedCrimes) {
+    const execAt = crime.executed_at || crime.planning_at || crime.created_at || 0;
+    if (!execAt || !Array.isArray(crime.slots)) continue;
+    const diff = crime.difficulty || 0;
+
+    for (const slot of crime.slots) {
+      const uid = String(slot.user_id ?? slot.user?.id ?? '');
+      if (!uid) continue;
+      const rate = slot.checkpoint_pass_rate ?? slot.success_chance ?? null;
+      if (rate === null) continue;
+
+      if (!memberData[uid]) memberData[uid] = [];
+      memberData[uid].push({ execAt, diff, rate });
+    }
+  }
+
+  const results = [];
+  for (const [uid, entries] of Object.entries(memberData)) {
+    if (entries.length < 2) continue; // need at least 2 data points
+
+    // Calculate CPR at each window (using only crimes from that window onward)
+    const windowCprs = [];
+    for (const w of windows) {
+      const windowEntries = entries.filter(e => e.execAt >= w.from);
+      if (windowEntries.length === 0) continue;
+      const avg = windowEntries.reduce((s, e) => s + e.rate, 0) / windowEntries.length;
+      windowCprs.push({ label: w.label, cpr: Math.round(avg * 10) / 10, count: windowEntries.length });
+    }
+    if (windowCprs.length < 2) continue;
+
+    // Current CPR = most recent window with data
+    const currentCpr = windowCprs[windowCprs.length - 1].cpr;
+    // Oldest CPR = earliest window with data
+    const oldestCpr = windowCprs[0].cpr;
+    const oldestLabel = windowCprs[0].label;
+
+    // Trend: change per 30 days
+    const daysSpan = parseInt(oldestLabel) - parseInt(windowCprs[windowCprs.length - 1].label) || 30;
+    const totalChange = currentCpr - oldestCpr;
+    const changePerMonth = daysSpan > 0 ? Math.round((totalChange / daysSpan) * 30 * 10) / 10 : 0;
+
+    // Project 30 days forward
+    const projected30d = Math.round((currentCpr + changePerMonth) * 10) / 10;
+    const projectedMin = Math.round(Math.max(0, projected30d - 3) * 10) / 10;
+    const projectedMax = Math.round(Math.min(100, projected30d + 3) * 10) / 10;
+
+    // Trend direction
+    let trend = 'stable';
+    if (changePerMonth >= 2) trend = 'improving';
+    else if (changePerMonth <= -2) trend = 'declining';
+
+    // Current CPR from the main cache (more accurate)
+    const mainCpr = data.cprCache?.[uid]?.cpr ?? currentCpr;
+    const joinable = data.cprCache?.[uid]?.joinable ?? 1;
+
+    results.push({
+      uid, name: nameMap[uid] || uid,
+      currentCpr: mainCpr, joinable,
+      trend, changePerMonth,
+      projected30d, projectedMin, projectedMax,
+      windowCprs, totalEntries: entries.length,
+    });
+  }
+
+  // Sort: declining first (most urgent), then improving, then stable
+  const trendOrder = { declining: 0, improving: 1, stable: 2 };
+  results.sort((a, b) => {
+    if (trendOrder[a.trend] !== trendOrder[b.trend]) return trendOrder[a.trend] - trendOrder[b.trend];
+    return Math.abs(b.changePerMonth) - Math.abs(a.changePerMonth);
+  });
+
+  return { members: results };
+}
+
 const _factionKeyCache = new Map(); // factionId  → { keys: [apiKey, ...], lastIndex: 0 } — pool of up to 10 verified faction-access keys
 const FACTION_KEY_POOL_MAX = 10;
 
@@ -2854,6 +2953,9 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     }
     if (fSettings.engine_failure_risk) {
       engines.failureRisk = runFailureRisk(data);
+    }
+    if (fSettings.engine_cpr_forecaster) {
+      engines.cprForecaster = runCprForecaster(playerInfo.factionId, data);
     }
 
     return res.json({ ...data, viewer: viewerObj, engines });
