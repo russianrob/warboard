@@ -2479,9 +2479,13 @@ function runSlotOptimizer(data) {
     const uid = String(m.id || m.playerId || m.uid);
     const cpr = cprCache[uid];
     if (!cpr) continue;
+    const joinable = cpr.joinable || 1;
+    const cprVal = cpr.cpr || 0;
+    // If CPR >= 75%, they're ready for next level (boost pushes them to ~90%)
+    const effectiveLevel = cprVal >= 75 ? joinable + 1 : joinable;
     freeMems.push({
       uid, name: m.name || m.playerName || uid,
-      cpr: cpr.cpr || 0, joinable: cpr.joinable || 1,
+      cpr: cprVal, joinable, effectiveLevel,
       byPosition: cpr.byPosition || {},
       level: m.level || 0,
     });
@@ -2492,7 +2496,8 @@ function runSlotOptimizer(data) {
   for (const slot of openSlots) {
     for (const mem of freeMems) {
       if (mem.joinable < slot.difficulty) continue; // can't join this level
-      if (mem.joinable > slot.difficulty + 1) continue; // don't recommend members 2+ levels above the OC
+      if (mem.effectiveLevel < slot.difficulty) continue; // CPR too low for this level
+      if (mem.effectiveLevel > slot.difficulty + 1) continue; // don't recommend members 2+ effective levels above
       // Score: position CPR match + level proximity + expiry urgency
       let score = 0;
       // Position CPR (best indicator of fit)
@@ -2503,9 +2508,9 @@ function runSlotOptimizer(data) {
       } else {
         score += mem.cpr; // fallback to general CPR
       }
-      // Level fit: prefer members at the right level, penalize 1-level downrank
-      if (mem.joinable === slot.difficulty) score += 20;
-      else if (mem.joinable > slot.difficulty) score -= 30; // 1 level above: significant penalty
+      // Level fit: prefer members at their effective level
+      if (mem.effectiveLevel === slot.difficulty) score += 20;
+      else if (mem.effectiveLevel > slot.difficulty) score -= 30; // 1 effective level above: penalty
       // Expiry urgency bonus (prioritize slots expiring soon)
       const hoursToExpiry = (slot.expiredAt - Date.now() / 1000) / 3600;
       if (hoursToExpiry < 6) score += 30;
