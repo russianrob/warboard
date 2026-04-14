@@ -2783,7 +2783,6 @@ router.get("/api/oc/settings", async (req, res) => {
     engine_member_reliability: s.engine_member_reliability ?? false,
     engine_payout_optimizer: s.engine_payout_optimizer ?? false,
     engine_item_roi:         s.engine_item_roi         ?? false,
-    engine_nerve_efficiency: s.engine_nerve_efficiency ?? false,
     engine_gap_analyzer:     s.engine_gap_analyzer     ?? false,
     engine_member_projector: s.engine_member_projector ?? false,
   });
@@ -2842,7 +2841,6 @@ router.get("/api/oc/engines/update", async (req, res) => {
     engine_member_reliability: bool('engine_member_reliability'),
     engine_payout_optimizer: bool('engine_payout_optimizer'),
     engine_item_roi:         bool('engine_item_roi'),
-    engine_nerve_efficiency: bool('engine_nerve_efficiency'),
     engine_gap_analyzer:     bool('engine_gap_analyzer'),
     engine_member_projector: bool('engine_member_projector'),
   });
