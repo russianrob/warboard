@@ -2597,10 +2597,11 @@ function runFailureRisk(data) {
       });
     }
 
-    // Skip OCs with no filled slots — nothing to assess
+    // Only analyze fully filled OCs — no empty slots
     const filledSlots = slotRisks.filter(s => s.successProb > 0);
-    if (filledSlots.length === 0) continue;
     const totalSlots = slots.length;
+    const emptyCount = slots.filter(s => !s.user_id && !s.user?.id).length;
+    if (emptyCount > 0 || filledSlots.length === 0) continue;
     let overallSuccess = filledSlots.reduce((acc, s) => acc * s.successProb, 1);
     const failureRisk = Math.round((1 - overallSuccess) * 1000) / 10;
 
