@@ -2446,7 +2446,7 @@ router.get("/api/oc-verify", async (req, res) => {
 const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
 const _engineCache    = new Map(); // factionId  → { ts, engines, settingsHash }
 function engineSettingsHash(s) {
-  return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}|${!!s.engine_member_projector}|${!!s.engine_member_reliability}`;
+  return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}|${!!s.engine_member_projector}|${!!s.engine_member_reliability}|${!!s.engine_auto_dispatcher}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2610,6 +2610,190 @@ function runSlotOptimizer(factionId, data) {
     }
   };
 }
+// ═══════════════════════════════════════════════════════════════════════════════
+//  AUTO-DISPATCHER ENGINE — personalized "join this OC" recommendation per member
+//  Unlike other engines (faction-wide cache), this runs per-request since it's
+//  personalized to the requesting player.
+// ═══════════════════════════════════════════════════════════════════════════════
+function runAutoDispatcher(factionId, data, requestingPlayerId) {
+  const crimes = data.crimes || data.availableCrimes || [];
+  const members = data.members || {};
+  const cprCache = data.cprCache || {};
+  const weights = data.weights || {};  // tornprobability.com role weights
+  const pid = String(requestingPlayerId);
+
+  // Find the requesting player's info
+  const memberArr = Array.isArray(members) ? members : Object.values(members);
+  const me = memberArr.find(m => String(m.id || m.playerId || m.uid) === pid);
+  if (!me) return { recommendation: null, fallbacks: [], reason: 'Player not found in faction members' };
+
+  const myCpr = cprCache[pid];
+  if (!myCpr) return { recommendation: null, fallbacks: [], reason: 'No CPR data for player' };
+
+  // If player is already in an OC, return that info
+  if (me.inOC || me.status === 'inOC') {
+    return { recommendation: null, fallbacks: [], reason: 'Already in an OC', inOC: true };
+  }
+
+  // Load OC history for historical position CPR
+  const allHistory = loadOcHistory(factionId);
+  const histByPos = {};
+  for (const h of allHistory) {
+    if (!Array.isArray(h.slots)) continue;
+    for (const slot of h.slots) {
+      if (!slot.userId || !slot.weight) continue;
+      const key = `${slot.userId}::${h.crimeName}::${slot.position}`;
+      if (!histByPos[key]) histByPos[key] = { rateSum: 0, count: 0 };
+      histByPos[key].rateSum += slot.weight;
+      histByPos[key].count++;
+    }
+  }
+
+  // Build player's per-level CPR map
+  const myLevelCprs = {};
+  for (const e of (myCpr.entries || [])) {
+    if (!myLevelCprs[e.diff]) myLevelCprs[e.diff] = { sum: 0, count: 0 };
+    myLevelCprs[e.diff].sum += e.rate;
+    myLevelCprs[e.diff].count++;
+  }
+  const myJoinable = myCpr.joinable || 1;
+  const myOverallCpr = myCpr.cpr || 0;
+  const myByPosition = myCpr.byPosition || {};
+
+  // Collect all open slots in recruiting OCs
+  const candidates = [];
+  for (const crime of crimes) {
+    if (crime.status !== 'Recruiting') continue;
+    const slots = crime.slots || [];
+    const totalSlots = slots.length;
+    const filledSlots = slots.filter(s => s.user_id || s.user?.id);
+    const emptySlots = totalSlots - filledSlots.length;
+
+    // Count how many unplanned/recent joins are stacked (for overstacking penalty)
+    // "Unplanned" = joined but progress is 0 or very low, meaning they just joined
+    const recentJoins = filledSlots.filter(s => {
+      const prog = s.user?.progress ?? 100;
+      return prog < 10; // progress < 10% = just joined, not yet contributing
+    }).length;
+
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      if (s.user_id || s.user?.id) continue; // slot already filled
+
+      // Can I join this level?
+      if (myJoinable < (crime.difficulty || 0)) continue;
+
+      const posBase = s.position.replace(/\s*#\d+$/, '');
+
+      // ── Factor 1: CPR x Role Weight (weighted contribution) ──
+      // Get my CPR for this specific position
+      let posCpr = myByPosition?.[`${crime.name}::${posBase}`]?.cpr
+                || myByPosition?.[`${crime.name}::${s.position}`]?.cpr
+                || null;
+      // Fallback: historical position CPR
+      if (!posCpr) {
+        const hKey = `${pid}::${crime.name}::${posBase}`;
+        const hData = histByPos[hKey];
+        if (hData && hData.count >= 1) posCpr = Math.round(hData.rateSum / hData.count * 10) / 10;
+      }
+      // Fallback: level-specific CPR
+      const lvlCpr = myLevelCprs[crime.difficulty]
+        ? Math.round(myLevelCprs[crime.difficulty].sum / myLevelCprs[crime.difficulty].count * 10) / 10
+        : null;
+      const effectiveCpr = posCpr || lvlCpr || myOverallCpr;
+
+      // Get role weight from tornprobability.com data
+      const crimeWeights = weights[crime.name] || {};
+      const roleWeight = crimeWeights[posBase] || crimeWeights[s.position] || 0;
+      // Normalize weight: tornprobability returns % (sum ~100), convert to 0-1 scale
+      const normalizedWeight = roleWeight / 100;
+
+      // Weighted contribution: how much this slot benefits from MY cpr
+      const weightedContribution = effectiveCpr * (normalizedWeight > 0 ? normalizedWeight : 0.15);
+
+      // ── Factor 2: Time priority (last slot = unblock execution) ──
+      let timePriority = 1.0;
+      if (emptySlots === 1) timePriority = 2.5;       // I'm the LAST slot — huge bonus
+      else if (emptySlots === 2) timePriority = 1.6;   // Near completion
+      else if (emptySlots <= 3) timePriority = 1.2;
+
+      // Expiry urgency stacks on top
+      const hoursToExpiry = ((crime.expired_at || Infinity) - Date.now() / 1000) / 3600;
+      if (hoursToExpiry < 4) timePriority *= 1.8;
+      else if (hoursToExpiry < 8) timePriority *= 1.4;
+      else if (hoursToExpiry < 16) timePriority *= 1.1;
+
+      // ── Factor 3: Overstacking penalty ──
+      // Don't recommend joining behind 2+ freshly-joined members (queue behind them)
+      let overstackPenalty = 1.0;
+      if (recentJoins >= 3) overstackPenalty = 0.4;
+      else if (recentJoins >= 2) overstackPenalty = 0.65;
+      else if (recentJoins >= 1) overstackPenalty = 0.85;
+
+      // ── Factor 4: Level matching ──
+      // Don't waste high-CPR players on low-level OCs
+      let levelMatch = 1.0;
+      const diff = crime.difficulty || 0;
+      if (myJoinable > diff + 1) levelMatch = 0.5;  // 2+ levels above = waste
+      else if (myJoinable > diff) levelMatch = 0.8;  // 1 level above = slight waste
+      else if (myJoinable === diff) levelMatch = 1.0; // perfect match
+
+      // ── Factor 5: Scope efficiency (crime progress) ──
+      // Prefer OCs that are further along in planning
+      const filledPct = filledSlots.length / totalSlots;
+      const scopeBonus = 1.0 + (filledPct * 0.4); // up to 1.4x for nearly-full OCs
+
+      // ── Final score ──
+      const score = weightedContribution * timePriority * overstackPenalty * levelMatch * scopeBonus;
+
+      // Estimate time to completion based on empty slots remaining
+      const estHours = emptySlots <= 1 ? 0.5 : emptySlots <= 3 ? Math.round(emptySlots * 1.5) : null;
+
+      candidates.push({
+        crimeId: crime.id,
+        crimeName: crime.name,
+        difficulty: diff,
+        position: s.position,
+        positionBase: posBase,
+        slotIndex: i,
+        score: Math.round(score * 100) / 100,
+        // Display data
+        cpr: effectiveCpr,
+        cprSource: posCpr ? 'position' : lvlCpr ? 'level' : 'overall',
+        roleWeight: Math.round(normalizedWeight * 100),
+        emptySlots,
+        totalSlots,
+        filledPct: Math.round(filledPct * 100),
+        hoursToExpiry: hoursToExpiry === Infinity ? null : Math.round(hoursToExpiry * 10) / 10,
+        estCompletionHours: estHours,
+        isLastSlot: emptySlots === 1,
+        // Scoring breakdown for transparency
+        breakdown: {
+          weightedContribution: Math.round(weightedContribution * 100) / 100,
+          timePriority: Math.round(timePriority * 100) / 100,
+          overstackPenalty: Math.round(overstackPenalty * 100) / 100,
+          levelMatch: Math.round(levelMatch * 100) / 100,
+          scopeBonus: Math.round(scopeBonus * 100) / 100,
+        },
+      });
+    }
+  }
+
+  // Sort by score descending
+  candidates.sort((a, b) => b.score - a.score);
+
+  // Top recommendation + 3 fallbacks
+  const top = candidates[0] || null;
+  const fallbacks = candidates.slice(1, 4);
+
+  return {
+    recommendation: top,
+    fallbacks,
+    totalCandidates: candidates.length,
+    player: { id: pid, name: me.name || me.playerName || pid, cpr: myOverallCpr, joinable: myJoinable },
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  OC HISTORY COLLECTOR — logs completed OC results for future failure rate analysis
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3644,7 +3828,12 @@ router.get("/api/oc/spawn-key", async (req, res) => {
 
       _engineCache.set(fid, { ts: Date.now(), engines, settingsHash: engineSettingsHash(fSettings) });
     }
-    const engines = _engineCache.get(fid).engines;
+    const engines = { ..._engineCache.get(fid).engines };
+
+    // Auto-Dispatcher is per-player (not faction-cached), runs every request
+    if (fSettings.engine_auto_dispatcher) {
+      engines.autoDispatcher = runAutoDispatcher(fid, data, playerInfo.playerId);
+    }
 
     return res.json({ ...data, viewer: viewerObj, engines });
   } catch (err) {
@@ -3717,6 +3906,7 @@ router.get("/api/oc/settings", async (req, res) => {
 
 
     engine_member_projector: s.engine_member_projector ?? false,
+    engine_auto_dispatcher:  s.engine_auto_dispatcher  ?? false,
   });
 });
 
@@ -3771,7 +3961,7 @@ router.get("/api/oc/engines/update", async (req, res) => {
     engine_failure_risk:     bool('engine_failure_risk'),
 
     engine_member_reliability: bool('engine_member_reliability'),
-
+    engine_auto_dispatcher:   bool('engine_auto_dispatcher'),
 
     engine_member_projector: bool('engine_member_projector'),
   });
