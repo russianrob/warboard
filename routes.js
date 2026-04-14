@@ -2851,18 +2851,18 @@ router.get("/api/oc/settings/update", async (req, res) => {
     oc_high_weight_pct:     num("high_weight_pct",      25),
     oc_high_weight_mincpr:  num("high_weight_mincpr",   75),
     oc_scope:               isNaN(scopeRaw) ? null : Math.max(0, Math.min(100, scopeRaw)),
-    // Engine toggles (only update if present in query)
-    ...(req.query.engine_slot_optimizer !== undefined    && { engine_slot_optimizer:   bool('engine_slot_optimizer') }),
-    ...(req.query.engine_spawn_predictor !== undefined   && { engine_spawn_predictor:  bool('engine_spawn_predictor') }),
-    ...(req.query.engine_cpr_forecaster !== undefined    && { engine_cpr_forecaster:   bool('engine_cpr_forecaster') }),
-    ...(req.query.engine_failure_risk !== undefined      && { engine_failure_risk:     bool('engine_failure_risk') }),
-    ...(req.query.engine_expiry_risk !== undefined       && { engine_expiry_risk:      bool('engine_expiry_risk') }),
-    ...(req.query.engine_member_reliability !== undefined && { engine_member_reliability: bool('engine_member_reliability') }),
-    ...(req.query.engine_payout_optimizer !== undefined  && { engine_payout_optimizer: bool('engine_payout_optimizer') }),
-    ...(req.query.engine_item_roi !== undefined          && { engine_item_roi:         bool('engine_item_roi') }),
-    ...(req.query.engine_nerve_efficiency !== undefined  && { engine_nerve_efficiency: bool('engine_nerve_efficiency') }),
-    ...(req.query.engine_gap_analyzer !== undefined      && { engine_gap_analyzer:     bool('engine_gap_analyzer') }),
-    ...(req.query.engine_member_projector !== undefined  && { engine_member_projector: bool('engine_member_projector') }),
+    // Engine toggles (always update when settings are saved)
+    engine_slot_optimizer:   bool('engine_slot_optimizer'),
+    engine_spawn_predictor:  bool('engine_spawn_predictor'),
+    engine_cpr_forecaster:   bool('engine_cpr_forecaster'),
+    engine_failure_risk:     bool('engine_failure_risk'),
+    engine_expiry_risk:      bool('engine_expiry_risk'),
+    engine_member_reliability: bool('engine_member_reliability'),
+    engine_payout_optimizer: bool('engine_payout_optimizer'),
+    engine_item_roi:         bool('engine_item_roi'),
+    engine_nerve_efficiency: bool('engine_nerve_efficiency'),
+    engine_gap_analyzer:     bool('engine_gap_analyzer'),
+    engine_member_projector: bool('engine_member_projector'),
   });
   console.log("[oc/settings] " + info.playerName + " updated faction " + info.factionId + " OC settings");
   return res.json({ ok: true });
