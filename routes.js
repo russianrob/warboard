@@ -2784,12 +2784,24 @@ function runCprForecaster(factionId, data) {
       }
       roleBreakdown.sort((a, b) => b.count - a.count); // most OCs first
 
-      // Level-wide average from all roles combined
-      const allLvlEntries = Object.values(roles).flat();
-      if (allLvlEntries.length >= 2) {
-        const lvlTrend = calcTrend(allLvlEntries);
-        levels.push({ level: Number(lvl), ...lvlTrend, roles: roleBreakdown });
-      }
+      // Level-wide: derive from role breakdowns (weighted by count)
+      if (roleBreakdown.length === 0) continue;
+      const totalCount = roleBreakdown.reduce((s, r) => s + r.count, 0);
+      const weightedCpr = roleBreakdown.reduce((s, r) => s + r.currentCpr * r.count, 0) / totalCount;
+      const weightedChange = roleBreakdown.reduce((s, r) => s + r.changePerMonth * r.count, 0) / totalCount;
+      const roundedChange = Math.round(weightedChange * 10) / 10;
+      let lvlTrend = 'stable';
+      if (roundedChange >= 2) lvlTrend = 'improving';
+      else if (roundedChange <= -2) lvlTrend = 'declining';
+      const lvlProjected = Math.round(Math.min(100, Math.max(0, weightedCpr + roundedChange)) * 10) / 10;
+      levels.push({
+        level: Number(lvl), currentCpr: Math.round(weightedCpr * 10) / 10,
+        trend: lvlTrend, changePerMonth: roundedChange,
+        projected30d: lvlProjected,
+        projectedMin: Math.round(Math.max(0, lvlProjected - 3) * 10) / 10,
+        projectedMax: Math.round(Math.min(100, lvlProjected + 3) * 10) / 10,
+        count: totalCount, roles: roleBreakdown,
+      });
     }
 
     if (levels.length === 0) continue;
