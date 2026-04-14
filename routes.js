@@ -2446,7 +2446,7 @@ router.get("/api/oc-verify", async (req, res) => {
 const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
 const _engineCache    = new Map(); // factionId  → { ts, engines, settingsHash }
 function engineSettingsHash(s) {
-  return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}|${!!s.engine_member_projector}|${!!s.engine_member_reliability}|${!!s.engine_payout_optimizer}|${!!s.engine_item_roi}`;
+  return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}|${!!s.engine_member_projector}|${!!s.engine_member_reliability}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3456,219 +3456,6 @@ function runMemberReliability(factionId, data) {
   };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  OC PAYOUT TRACKER ENGINE — tracks money/respect earned per OC type over time
-// ═══════════════════════════════════════════════════════════════════════════════
-function runPayoutTracker(factionId, data) {
-  // Use merged history (API + disk) — has rewards from both sources
-  const allHistory = loadOcHistory(factionId);
-
-  // Build payout data from all history entries (rewards field available on API and new disk entries)
-  // Old disk entries lack rewards data — only average over entries that have it
-  const byType = {}; // crimeName -> { level, count, successCount, totalMoney, totalRespect, ... }
-
-  for (const c of allHistory) {
-    const name = c.crimeName || 'Unknown';
-    const diff = c.difficulty || 0;
-
-    if (!byType[name]) byType[name] = {
-      crimeName: name, difficulty: diff, count: 0, successCount: 0, paidCount: 0,
-      totalMoney: 0, totalRespect: 0, durationSum: 0, durationCount: 0, entries: [],
-    };
-    const t = byType[name];
-    t.count++;
-
-    if (c.status === 'Successful') {
-      t.successCount++;
-      // Only tally rewards from entries that actually have reward data
-      if (c.rewards) {
-        const money = c.rewards.money || 0;
-        const respect = c.rewards.respect || 0;
-        t.paidCount++;
-        t.totalMoney += money;
-        t.totalRespect += respect;
-        t.entries.push({ money, respect, executedAt: c.executedAt || 0 });
-      }
-    }
-    // Failed crimes counted for success rate but no payout
-  }
-
-  const crimeTypes = [];
-  for (const [name, t] of Object.entries(byType)) {
-    const avgMoney = t.paidCount > 0 ? Math.round(t.totalMoney / t.paidCount) : 0;
-    const avgRespect = t.paidCount > 0 ? Math.round(t.totalRespect / t.paidCount * 10) / 10 : 0;
-    const avgDuration = t.durationCount > 0 ? Math.round(t.durationSum / t.durationCount * 10) / 10 : null;
-    const moneyPerHour = avgDuration && avgDuration > 0 ? Math.round(avgMoney / avgDuration) : null;
-    const respectPerHour = avgDuration && avgDuration > 0 ? Math.round(avgRespect / avgDuration * 10) / 10 : null;
-    const successRate = t.count > 0 ? Math.round(t.successCount / t.count * 100) : 0;
-
-    crimeTypes.push({
-      crimeName: name, difficulty: t.difficulty,
-      completed: t.count, succeeded: t.successCount, successRate,
-      avgMoney, avgRespect, avgDurationHrs: avgDuration,
-      moneyPerHour, respectPerHour,
-      totalMoney: t.totalMoney, totalRespect: t.totalRespect,
-    });
-  }
-
-  // Sort by money per hour descending (most profitable first), nulls last
-  crimeTypes.sort((a, b) => {
-    if (a.moneyPerHour === null && b.moneyPerHour === null) return b.totalMoney - a.totalMoney;
-    if (a.moneyPerHour === null) return 1;
-    if (b.moneyPerHour === null) return -1;
-    return b.moneyPerHour - a.moneyPerHour;
-  });
-
-  // Member payout leaderboard (only from entries with reward data)
-  const memberPayouts = {}; // uid -> { name, totalMoney, totalRespect, ocCount }
-  for (const c of allHistory) {
-    if (c.status !== 'Successful' || !c.rewards) continue;
-    const money = c.rewards.money || 0;
-    const respect = c.rewards.respect || 0;
-    const slotCount = (c.slots || []).filter(s => s.userId).length;
-    if (slotCount === 0) continue;
-    const perMember = Math.round(money / slotCount);
-    const perMemberResp = respect / slotCount;
-    for (const slot of (c.slots || [])) {
-      const uid = String(slot.userId || '');
-      if (!uid) continue;
-      if (!memberPayouts[uid]) memberPayouts[uid] = { name: slot.userName || uid, totalMoney: 0, totalRespect: 0, ocCount: 0 };
-      memberPayouts[uid].totalMoney += perMember;
-      memberPayouts[uid].totalRespect += Math.round(perMemberResp * 10) / 10;
-      memberPayouts[uid].ocCount++;
-    }
-  }
-
-  const leaderboard = Object.entries(memberPayouts)
-    .map(([uid, d]) => ({ uid, ...d }))
-    .sort((a, b) => b.totalMoney - a.totalMoney)
-    .slice(0, 15);
-
-  return {
-    crimeTypes,
-    leaderboard,
-    summary: {
-      totalMoney: crimeTypes.reduce((s, c) => s + c.totalMoney, 0),
-      totalRespect: Math.round(crimeTypes.reduce((s, c) => s + c.totalRespect, 0) * 10) / 10,
-      totalCompleted: crimeTypes.reduce((s, c) => s + c.completed, 0),
-      bestMoneyPerHour: crimeTypes.find(c => c.moneyPerHour !== null) || null,
-    },
-  };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  ITEM ROI ENGINE — tracks item costs vs OC payout returns
-// ═══════════════════════════════════════════════════════════════════════════════
-function runItemRoi(factionId, data) {
-  const allHistory = loadOcHistory(factionId);
-  const completedCrimes = getCachedCompletedCrimes(factionId) || [];
-
-  // Build per-crime-type data: item requirements, payouts, success rates
-  const crimeData = {}; // crimeName -> { difficulty, itemSlots, successMoney, successCount, failCount }
-
-  // Use merged history for counts and payout data
-  for (const c of allHistory) {
-    const name = c.crimeName || 'Unknown';
-    if (!crimeData[name]) crimeData[name] = {
-      crimeName: name, difficulty: c.difficulty || 0,
-      itemSlots: [], successMoney: 0, successRespect: 0, successCount: 0, paidCount: 0, failCount: 0, totalRuns: 0,
-    };
-    const cd = crimeData[name];
-    cd.totalRuns++;
-
-    if (c.status === 'Successful') {
-      cd.successCount++;
-      // Only tally rewards from entries that actually have reward data
-      if (c.rewards) {
-        cd.paidCount++;
-        cd.successMoney += c.rewards.money || 0;
-        cd.successRespect += c.rewards.respect || 0;
-      }
-    } else if (c.status === 'Failed') {
-      cd.failCount++;
-    }
-  }
-
-  // Collect item slot data from raw API crimes (has item_requirement details)
-  for (const c of completedCrimes) {
-    const name = c.name || 'Unknown';
-    if (!crimeData[name]) continue; // already counted above
-    const cd = crimeData[name];
-    for (const slot of (c.slots || [])) {
-      if (slot.item_requirement) {
-        const itemId = slot.item_requirement.id || null;
-        const existing = cd.itemSlots.find(i => i.itemId === itemId);
-        if (existing) {
-          existing.timesNeeded++;
-        } else {
-          cd.itemSlots.push({
-            itemName: itemId ? `Item #${itemId}` : 'Unknown',
-            itemId,
-            position: (slot.position || '').replace(/\s*#\d+$/, ''),
-            timesNeeded: 1,
-            isConsumed: !slot.item_requirement.is_reusable,
-          });
-        }
-      }
-    }
-  }
-
-  // Calculate ROI for each crime type
-  const results = [];
-  for (const [name, cd] of Object.entries(crimeData)) {
-    if (cd.totalRuns === 0) continue;
-    const successRate = Math.round(cd.successCount / cd.totalRuns * 100);
-    const avgPayout = cd.paidCount > 0 ? Math.round(cd.successMoney / cd.paidCount) : 0;
-    const avgRespect = cd.paidCount > 0 ? Math.round(cd.successRespect / cd.paidCount * 10) / 10 : 0;
-
-    // Expected payout per run = avgPayout * successRate/100
-    const expectedPayout = Math.round(avgPayout * successRate / 100);
-
-    // Item cost info (we don't have market prices, but we track what's needed)
-    const uniqueItems = cd.itemSlots.filter(i => i.isConsumed);
-    const itemCount = uniqueItems.length;
-
-    results.push({
-      crimeName: name, difficulty: cd.difficulty,
-      totalRuns: cd.totalRuns, successCount: cd.successCount, failCount: cd.failCount, successRate,
-      avgPayout, avgRespect, expectedPayout,
-      consumedItems: uniqueItems.map(i => ({ name: i.itemName, position: i.position, timesNeeded: i.timesNeeded })),
-      itemsPerRun: itemCount,
-      // ROI indicator: expected payout relative to item cost risk
-      // More items consumed = higher cost risk = lower ROI score
-      roiScore: itemCount === 0 ? expectedPayout : Math.round(expectedPayout / (1 + itemCount * 0.3)),
-    });
-  }
-
-  // Sort by ROI score descending
-  results.sort((a, b) => b.roiScore - a.roiScore);
-
-  // Item frequency: which items are consumed most across all crime types
-  const itemFreq = {};
-  for (const cd of Object.values(crimeData)) {
-    for (const i of cd.itemSlots) {
-      if (!i.isConsumed) continue;
-      if (!itemFreq[i.itemName]) itemFreq[i.itemName] = { itemName: i.itemName, totalNeeded: 0, crimeTypes: new Set() };
-      itemFreq[i.itemName].totalNeeded += i.timesNeeded;
-      itemFreq[i.itemName].crimeTypes.add(cd.crimeName);
-    }
-  }
-  const topItems = Object.values(itemFreq)
-    .map(i => ({ itemName: i.itemName, totalNeeded: i.totalNeeded, usedIn: [...i.crimeTypes] }))
-    .sort((a, b) => b.totalNeeded - a.totalNeeded)
-    .slice(0, 10);
-
-  return {
-    crimes: results,
-    topItems,
-    summary: {
-      totalCrimeTypes: results.length,
-      bestRoi: results[0] || null,
-      totalItemTypes: topItems.length,
-    },
-  };
-}
-
 const _factionKeyCache = new Map(); // factionId  → { keys: [apiKey, ...], lastIndex: 0 } — pool of up to 10 verified faction-access keys
 const FACTION_KEY_POOL_MAX = 10;
 
@@ -3854,8 +3641,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       if (fSettings.engine_member_projector) engines.memberProjector = runMemberProjector(fid, data);
       if (fSettings.engine_member_reliability) engines.memberReliability = runMemberReliability(fid, data);
 
-      if (fSettings.engine_payout_optimizer) engines.payoutTracker = runPayoutTracker(fid, data);
-      if (fSettings.engine_item_roi) engines.itemRoi = runItemRoi(fid, data);
+
       _engineCache.set(fid, { ts: Date.now(), engines, settingsHash: engineSettingsHash(fSettings) });
     }
     const engines = _engineCache.get(fid).engines;
@@ -3928,8 +3714,7 @@ router.get("/api/oc/settings", async (req, res) => {
     engine_failure_risk:     s.engine_failure_risk     ?? false,
 
     engine_member_reliability: s.engine_member_reliability ?? false,
-    engine_payout_optimizer: s.engine_payout_optimizer ?? false,
-    engine_item_roi:         s.engine_item_roi         ?? false,
+
 
     engine_member_projector: s.engine_member_projector ?? false,
   });
@@ -3986,8 +3771,7 @@ router.get("/api/oc/engines/update", async (req, res) => {
     engine_failure_risk:     bool('engine_failure_risk'),
 
     engine_member_reliability: bool('engine_member_reliability'),
-    engine_payout_optimizer: bool('engine_payout_optimizer'),
-    engine_item_roi:         bool('engine_item_roi'),
+
 
     engine_member_projector: bool('engine_member_projector'),
   });
