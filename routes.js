@@ -2501,8 +2501,10 @@ function runSlotOptimizer(data) {
       // Score: position CPR match + level proximity + expiry urgency
       let score = 0;
       // Position CPR (best indicator of fit)
-      const posKey = `${slot.crimeName}::${slot.position}`;
-      const posCpr = mem.byPosition?.[posKey]?.cpr;
+      // Strip "#1", "#2" suffix to match byPosition keys (e.g. "Thief" not "Thief #1")
+      const posBase = slot.position.replace(/\s*#\d+$/, '');
+      const posCpr = mem.byPosition?.[`${slot.crimeName}::${posBase}`]?.cpr
+                  || mem.byPosition?.[`${slot.crimeName}::${slot.position}`]?.cpr;
       if (posCpr) {
         score += posCpr * 2; // weight position-specific CPR heavily
       } else {
@@ -2538,7 +2540,12 @@ function runSlotOptimizer(data) {
       crimeId: p.slot.crimeId, crimeName: p.slot.crimeName,
       difficulty: p.slot.difficulty, position: p.slot.position,
       score: Math.round(p.score * 10) / 10,
-      positionCpr: p.slot.crimeName && p.member.byPosition?.[`${p.slot.crimeName}::${p.slot.position}`]?.cpr || null,
+      positionCpr: (() => {
+        const pb = p.slot.position.replace(/\s*#\d+$/, '');
+        return p.member.byPosition?.[`${p.slot.crimeName}::${pb}`]?.cpr
+            || p.member.byPosition?.[`${p.slot.crimeName}::${p.slot.position}`]?.cpr
+            || null;
+      })(),
       hoursToExpiry: Math.round(((p.slot.expiredAt || Infinity) - Date.now() / 1000) / 3600 * 10) / 10,
     });
   }
