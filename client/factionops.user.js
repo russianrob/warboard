@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.38
+// @version      4.8.39
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -3301,6 +3301,21 @@ body.wb-chain-active {
         if (data.warPercentage !== undefined && data.warPercentage !== null) {
             state.warPercentage = data.warPercentage;
         }
+        // Show toast for broadcasts received via polling
+        if (data.lastBroadcast && data.lastBroadcast.timestamp) {
+            const lb = data.lastBroadcast;
+            if (!state._lastBroadcastTs || lb.timestamp > state._lastBroadcastTs) {
+                // Only show if broadcast is less than 60 seconds old
+                if (Date.now() - lb.timestamp < 60000) {
+                    showToast(`\uD83D\uDCE3 ${lb.message}`, lb.type || 'info');
+                    if (typeof firePdaNotification === 'function') {
+                        firePdaNotification('admin_broadcast', 'FactionOps Broadcast', lb.message);
+                    }
+                }
+                state._lastBroadcastTs = lb.timestamp;
+            }
+        }
+
         if (data.warEnded !== undefined) {
             state.warEnded = data.warEnded;
             state.warResult = data.warResult;

@@ -153,6 +153,7 @@ function broadcastWarUpdate(warId) {
     warScores: war.warScores || null,
     warEta: computeFreshWarEta(war),
     warPercentage: computeWarPercentage(war),
+    lastBroadcast: war.lastBroadcast || null,
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
   };
@@ -493,6 +494,7 @@ router.get("/api/stream", (req, res, next) => {
     warScores: war.warScores || null,
     warEta: computeFreshWarEta(war),
     warPercentage: computeWarPercentage(war),
+    lastBroadcast: war.lastBroadcast || null,
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
   };
@@ -680,6 +682,7 @@ router.get("/api/poll", (req, res, next) => {
     warScores: war.warScores || null,
     warEta: computeFreshWarEta(war),
     warPercentage: computeWarPercentage(war),
+    lastBroadcast: war.lastBroadcast || null,
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
     strategy: war.strategy || null,
@@ -833,6 +836,13 @@ router.post("/api/broadcast", requireAuth, (req, res) => {
     message: message, 
     type: type || "info" 
   };
+
+  // Store last broadcast on war state for poll clients
+  const war2 = store.getWar(warId);
+  if (war2) {
+    war2.lastBroadcast = { message: payload.message, type: payload.type, timestamp: Date.now(), sender: playerName };
+    store.saveState();
+  }
 
   // 1. Broadcast to Socket.IO clients in this war room
   if (io) {
