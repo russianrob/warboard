@@ -2662,7 +2662,18 @@ router.get("/api/oc/settings", async (req, res) => {
     scope:               s.oc_scope                ?? null,
     high_weight_pct:     s.oc_high_weight_pct      ?? 25,
     high_weight_mincpr:  s.oc_high_weight_mincpr   ?? 75,
-    admin_roles:         s.oc_admin_roles           ?? 'Leader,Co-leader,Councilor',
+    // Engine toggles
+    engine_slot_optimizer:   s.engine_slot_optimizer   ?? false,
+    engine_spawn_predictor:  s.engine_spawn_predictor  ?? false,
+    engine_cpr_forecaster:   s.engine_cpr_forecaster   ?? false,
+    engine_failure_risk:     s.engine_failure_risk     ?? false,
+    engine_expiry_risk:      s.engine_expiry_risk      ?? false,
+    engine_member_reliability: s.engine_member_reliability ?? false,
+    engine_payout_optimizer: s.engine_payout_optimizer ?? false,
+    engine_item_roi:         s.engine_item_roi         ?? false,
+    engine_nerve_efficiency: s.engine_nerve_efficiency ?? false,
+    engine_gap_analyzer:     s.engine_gap_analyzer     ?? false,
+    engine_member_projector: s.engine_member_projector ?? false,
   });
 });
 
@@ -2716,6 +2727,7 @@ router.get("/api/oc/settings/update", async (req, res) => {
     return res.status(403).json({ error: "Settings can only be changed by faction members." });
   }
   const num = (k, d) => { const v = parseInt(req.query[k], 10); return isNaN(v) ? d : v; };
+  const bool = (k) => req.query[k] === 'true' || req.query[k] === '1';
   const scopeRaw = parseInt(req.query.scope, 10);
   store.updateFactionSettings(info.factionId, {
     oc_active_days:         num("active_days",         7),
@@ -2725,8 +2737,19 @@ router.get("/api/oc/settings/update", async (req, res) => {
     oc_lookback_days:       num("lookback_days",        90),
     oc_high_weight_pct:     num("high_weight_pct",      25),
     oc_high_weight_mincpr:  num("high_weight_mincpr",   75),
-    oc_admin_roles:         (req.query.admin_roles || '').trim() || 'Leader,Co-leader,Councilor',
     oc_scope:               isNaN(scopeRaw) ? null : Math.max(0, Math.min(100, scopeRaw)),
+    // Engine toggles (only update if present in query)
+    ...(req.query.engine_slot_optimizer !== undefined    && { engine_slot_optimizer:   bool('engine_slot_optimizer') }),
+    ...(req.query.engine_spawn_predictor !== undefined   && { engine_spawn_predictor:  bool('engine_spawn_predictor') }),
+    ...(req.query.engine_cpr_forecaster !== undefined    && { engine_cpr_forecaster:   bool('engine_cpr_forecaster') }),
+    ...(req.query.engine_failure_risk !== undefined      && { engine_failure_risk:     bool('engine_failure_risk') }),
+    ...(req.query.engine_expiry_risk !== undefined       && { engine_expiry_risk:      bool('engine_expiry_risk') }),
+    ...(req.query.engine_member_reliability !== undefined && { engine_member_reliability: bool('engine_member_reliability') }),
+    ...(req.query.engine_payout_optimizer !== undefined  && { engine_payout_optimizer: bool('engine_payout_optimizer') }),
+    ...(req.query.engine_item_roi !== undefined          && { engine_item_roi:         bool('engine_item_roi') }),
+    ...(req.query.engine_nerve_efficiency !== undefined  && { engine_nerve_efficiency: bool('engine_nerve_efficiency') }),
+    ...(req.query.engine_gap_analyzer !== undefined      && { engine_gap_analyzer:     bool('engine_gap_analyzer') }),
+    ...(req.query.engine_member_projector !== undefined  && { engine_member_projector: bool('engine_member_projector') }),
   });
   console.log("[oc/settings] " + info.playerName + " updated faction " + info.factionId + " OC settings");
   return res.json({ ok: true });
