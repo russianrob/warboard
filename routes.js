@@ -2630,9 +2630,21 @@ function runAutoDispatcher(factionId, data, requestingPlayerId) {
   const myCpr = cprCache[pid];
   if (!myCpr) return { recommendation: null, fallbacks: [], reason: 'No CPR data for player' };
 
-  // If player is already in an OC, return that info
-  if (me.inOC || me.status === 'inOC') {
-    return { recommendation: null, fallbacks: [], reason: 'Already in an OC', inOC: true };
+  // Check if player is already in an OC by scanning crime slots
+  let playerInOC = me.inOC || me.status === 'inOC';
+  let playerCrimeName = null;
+  if (!playerInOC) {
+    for (const crime of crimes) {
+      if (!Array.isArray(crime.slots)) continue;
+      for (const s of crime.slots) {
+        const slotUid = String(s.user_id ?? s.user?.id ?? '');
+        if (slotUid === pid) { playerInOC = true; playerCrimeName = crime.name || 'Unknown'; break; }
+      }
+      if (playerInOC) break;
+    }
+  }
+  if (playerInOC) {
+    return { recommendation: null, fallbacks: [], reason: 'Already in an OC', inOC: true, crimeName: playerCrimeName };
   }
 
   // Load OC history for historical position CPR
