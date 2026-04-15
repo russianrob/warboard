@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.39
+// @version      4.8.40
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -341,6 +341,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
             bonus_imminent: [400, 409],
             call_stolen:    [600, 699],
             war_target:     [800, 800],
+            assist_request: [900, 999],
         };
 
         const range = ranges[type];
@@ -1036,6 +1037,40 @@ html.wb-theme-light {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 6px;
+}
+#wb-assist-btn {
+    position: fixed;
+    bottom: 80px;
+    right: 16px;
+    z-index: 999998;
+    background: linear-gradient(135deg, #e17055, #d63031);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 20px;
+    font-family: 'Open Sans', Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(214, 48, 49, 0.4);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+#wb-assist-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(214, 48, 49, 0.5);
+}
+#wb-assist-btn:active {
+    transform: translateY(0);
+}
+#wb-assist-btn:disabled {
+    background: linear-gradient(135deg, #636e72, #2d3436);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    cursor: not-allowed;
 }
 
 /* ----- Animations ----- */
@@ -3315,6 +3350,21 @@ body.wb-chain-active {
                 state._lastBroadcastTs = lb.timestamp;
             }
         }
+        // Show toast for assist requests received via polling
+        if (data.lastAssistRequest && data.lastAssistRequest.timestamp) {
+            const ar = data.lastAssistRequest;
+            if (!state._lastAssistRequestTs || ar.timestamp > state._lastAssistRequestTs) {
+                if (Date.now() - ar.timestamp < 60000) {
+                    showAssistToast(ar.playerName, ar.targetName, ar.attackUrl);
+                    if (typeof firePdaNotification === 'function') {
+                        firePdaNotification('assist_request', '⚔️ Assist Needed!',
+                            `${ar.playerName} needs help attacking ${ar.targetName}!`,
+                            ar.attackUrl);
+                    }
+                }
+                state._lastAssistRequestTs = ar.timestamp;
+            }
+        }
 
         if (data.warEnded !== undefined) {
             state.warEnded = data.warEnded;
@@ -3431,6 +3481,16 @@ body.wb-chain-active {
             showToast(`📣 ${data.message}`, data.type);
             if (typeof firePdaNotification === 'function') {
                 firePdaNotification('admin_broadcast', 'FactionOps Broadcast', data.message);
+            }
+        });
+
+        // Listen for Assist Requests
+        realtimeSocket.on('assist_request', (data) => {
+            showAssistToast(data.playerName, data.targetName, data.attackUrl);
+            if (typeof firePdaNotification === 'function') {
+                firePdaNotification('assist_request', '⚔️ Assist Needed!',
+                    `${data.playerName} needs help attacking ${data.targetName}!`,
+                    data.attackUrl);
             }
         });
 
@@ -3560,6 +3620,13 @@ body.wb-chain-active {
                             showToast(`📣 ${data.message}`, data.type || 'info');
                             if (typeof firePdaNotification === 'function') {
                                 firePdaNotification('admin_broadcast', 'FactionOps Broadcast', data.message);
+                            }
+                        } else if (data && data.type === 'assist_request') {
+                            showAssistToast(data.playerName, data.targetName, data.attackUrl);
+                            if (typeof firePdaNotification === 'function') {
+                                firePdaNotification('assist_request', '⚔️ Assist Needed!',
+                                    `${data.playerName} needs help attacking ${data.targetName}!`,
+                                    data.attackUrl);
                             }
                         } else {
                             applyServerData(data);
@@ -7211,6 +7278,70 @@ body.wb-chain-active {
         }
     }
 
+    /**
+     * Create the floating ASSIST button on attack pages.
+     * Sends a request for backup to all faction members.
+     */
+    function createAssistButton() {
+        if (document.getElementById('wb-assist-btn')) return;
+
+        const targetId = getAttackTargetId();
+        if (!targetId) return;
+
+        const btn = document.createElement('button');
+        btn.id = 'wb-assist-btn';
+        btn.innerHTML = '⚔️ ASSIST';
+
+        let cooldownTimer = null;
+
+        btn.addEventListener('click', async () => {
+            if (btn.disabled) return;
+
+            const warId = deriveWarId();
+            if (!warId) {
+                showToast('Not connected to a war', 'warning');
+                return;
+            }
+
+            // Try to extract target name from page DOM
+            let targetName = null;
+            const defenderEl = document.querySelector('.defender .username, [class*="defender"] [class*="userName"], .playersModelWrap .right .username');
+            if (defenderEl) {
+                targetName = defenderEl.textContent.trim();
+            }
+
+            try {
+                await postAction('/api/assist-request', {
+                    warId,
+                    targetId,
+                    targetName: targetName || `Player [${targetId}]`,
+                });
+                showToast('Assist request sent!', 'success');
+            } catch (err) {
+                showToast('Failed to send assist request', 'error');
+                return;
+            }
+
+            // Disable for 30 seconds to prevent spam
+            btn.disabled = true;
+            let remaining = 30;
+            btn.innerHTML = `⏳ ${remaining}s`;
+            cooldownTimer = setInterval(() => {
+                remaining--;
+                if (remaining <= 0) {
+                    clearInterval(cooldownTimer);
+                    cooldownTimer = null;
+                    btn.disabled = false;
+                    btn.innerHTML = '⚔️ ASSIST';
+                } else {
+                    btn.innerHTML = `⏳ ${remaining}s`;
+                }
+            }, 1000);
+        });
+
+        document.body.appendChild(btn);
+    }
+
     // =========================================================================
     // SECTION 15: FETCH / XHR INTERCEPTION
     // =========================================================================
@@ -7754,6 +7885,9 @@ body.wb-chain-active {
         if (targetId) {
             reportViewing(targetId);
         }
+
+        // Show the floating Assist button
+        createAssistButton();
     }
 
     /** Report to the server which target we're currently viewing. */
@@ -8877,6 +9011,97 @@ body.wb-chain-active {
         toast.addEventListener('click', removeToast);
     }
 
+    /**
+     * Show a prominent assist request toast with an ATTACK button.
+     * Stays for 15 seconds and includes a direct attack link.
+     */
+    function showAssistToast(playerName, targetName, attackUrl) {
+        const container = getToastContainer();
+        const toast = document.createElement('div');
+
+        toast.style.cssText = `
+            background: rgba(214, 48, 49, 0.95);
+            border-left: 4px solid #e17055;
+            backdrop-filter: blur(4px);
+            padding: 10px 16px 10px 12px;
+            border-radius: 6px;
+            font-family: 'Open Sans', Arial, sans-serif;
+            font-size: 13px;
+            color: #fff;
+            box-shadow: 0 4px 16px rgba(214, 48, 49, 0.4);
+            opacity: 0;
+            transform: translateY(-15px) scale(0.95);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 280px;
+            max-width: 500px;
+            line-height: 1.4;
+            position: relative;
+            overflow: hidden;
+            box-sizing: border-box;
+        `;
+
+        const escapedPlayer = escapeHtml(playerName);
+        const escapedTarget = escapeHtml(targetName);
+        toast.innerHTML = `
+            <div style="font-size: 18px; display: flex; align-items: center; justify-content: center; width: 24px;">⚔️</div>
+            <div style="flex: 1; word-wrap: break-word;">
+                <strong>${escapedPlayer}</strong> needs assist on <strong>${escapedTarget}</strong>!
+            </div>
+            <a href="${escapeHtml(attackUrl)}" target="_blank" rel="noopener" style="
+                background: #fff;
+                color: #d63031;
+                font-weight: 700;
+                font-size: 12px;
+                padding: 6px 14px;
+                border-radius: 4px;
+                text-decoration: none;
+                white-space: nowrap;
+                flex-shrink: 0;
+            ">ATK</a>
+        `;
+
+        const duration = 15000;
+        const progressBar = document.createElement('div');
+        progressBar.style.cssText = `
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 3px;
+            background: rgba(255,255,255,0.4);
+            width: 100%;
+            transition: width ${duration}ms linear;
+        `;
+        toast.appendChild(progressBar);
+        container.appendChild(toast);
+
+        requestAnimationFrame(() => {
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateY(0) scale(1)';
+            requestAnimationFrame(() => {
+                progressBar.style.width = '0%';
+            });
+        });
+
+        let removeTimeout;
+        const removeToast = () => {
+            clearTimeout(removeTimeout);
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(-15px) scale(0.95)';
+            toast.style.marginTop = `-${toast.offsetHeight}px`;
+            setTimeout(() => toast.remove(), 300);
+        };
+
+        removeTimeout = setTimeout(removeToast, duration);
+        // Click anywhere except the ATK button to dismiss
+        toast.addEventListener('click', (e) => {
+            if (e.target.tagName !== 'A') removeToast();
+        });
+    }
+
     // Notifications are now driven by the polling diff logic in pollOnce() (Section 6).
 
     // =========================================================================
@@ -9320,6 +9545,8 @@ body.wb-chain-active {
             attackOverlay.remove();
             clearViewing(); // Tell server we left the attack page
         }
+        const assistBtn = document.getElementById('wb-assist-btn');
+        if (assistBtn) assistBtn.remove();
 
         // Restore Torn's chain bar to its original position before removing overlay
         restoreTornChainBar();

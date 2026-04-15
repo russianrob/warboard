@@ -154,6 +154,7 @@ function broadcastWarUpdate(warId) {
     warEta: computeFreshWarEta(war),
     warPercentage: computeWarPercentage(war),
     lastBroadcast: war.lastBroadcast || null,
+    lastAssistRequest: war.lastAssistRequest || null,
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
   };
@@ -495,6 +496,7 @@ router.get("/api/stream", (req, res, next) => {
     warEta: computeFreshWarEta(war),
     warPercentage: computeWarPercentage(war),
     lastBroadcast: war.lastBroadcast || null,
+    lastAssistRequest: war.lastAssistRequest || null,
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
   };
@@ -683,6 +685,7 @@ router.get("/api/poll", (req, res, next) => {
     warEta: computeFreshWarEta(war),
     warPercentage: computeWarPercentage(war),
     lastBroadcast: war.lastBroadcast || null,
+    lastAssistRequest: war.lastAssistRequest || null,
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
     strategy: war.strategy || null,
@@ -869,6 +872,77 @@ router.post("/api/broadcast", requireAuth, (req, res) => {
   }
 
   console.log(`[📣] Faction Broadcast sent to war ${warId} by ${playerName}: ${message}`);
+
+  return res.json({ success: true });
+});
+
+// ── POST /api/assist-request ─────────────────────────────────────────────
+// Request backup from faction members during an attack.
+
+const assistRateLimits = new Map(); // playerId -> lastTimestamp
+
+router.post("/api/assist-request", requireAuth, (req, res) => {
+  const { playerId, playerName, factionId } = req.user;
+  const { warId, targetId, targetName } = (req.body || {});
+
+  if (!warId || !targetId) {
+    return res.status(400).json({ error: "warId and targetId are required." });
+  }
+
+  const war = store.getWar(warId);
+  if (!war) {
+    return res.status(404).json({ error: "War not found." });
+  }
+
+  // Rate limit: 1 assist request per player per 30 seconds
+  const now = Date.now();
+  const lastRequest = assistRateLimits.get(playerId);
+  if (lastRequest && now - lastRequest < 30000) {
+    const remaining = Math.ceil((30000 - (now - lastRequest)) / 1000);
+    return res.status(429).json({ error: `Rate limited. Try again in ${remaining}s.` });
+  }
+  assistRateLimits.set(playerId, now);
+
+  const attackUrl = `https://www.torn.com/loader.php?sid=attack&user2ID=${targetId}`;
+  const payload = {
+    type: "assist_request",
+    playerId,
+    playerName,
+    targetId,
+    targetName: targetName || targetId,
+    attackUrl,
+    timestamp: now,
+  };
+
+  // 1. Broadcast to Socket.IO clients in this war room
+  if (io) {
+    io.to(`war_${warId}`).emit("assist_request", payload);
+  }
+
+  // 2. Broadcast to SSE clients
+  broadcastSSE(warId, payload);
+
+  // 3. Store for poll clients (same pattern as lastBroadcast)
+  war.lastAssistRequest = payload;
+  store.saveState();
+
+  // 4. Send push notifications to faction members (except requester)
+  const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
+  if (apiKey) {
+    fetchFactionMembers(factionId, apiKey).then(members => {
+      const memberIds = Object.keys(members).filter(id => String(id) !== String(playerId));
+      push.notifyAssistRequest(memberIds, warId, playerName, targetName || targetId, targetId);
+    }).catch(err => {
+      console.error(`[api] Failed to fetch members for assist push: ${err.message}`);
+    });
+  } else {
+    const onlinePlayers = store.getOnlinePlayersForWar(warId)
+      .map(p => p.id)
+      .filter(id => String(id) !== String(playerId));
+    push.notifyAssistRequest(onlinePlayers, warId, playerName, targetName || targetId, targetId);
+  }
+
+  console.log(`[⚔️] Assist request from ${playerName} for target ${targetName || targetId} in war ${warId}`);
 
   return res.json({ success: true });
 });

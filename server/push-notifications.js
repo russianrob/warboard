@@ -427,6 +427,24 @@ export async function notifyWarTargetReached(warPlayers, warId, targetValue, cur
 }
 
 /**
+ * Notify faction members that someone needs assist on an attack.
+ */
+export async function notifyAssistRequest(playerIds, warId, playerName, targetName, targetId) {
+  await sendToPlayers(
+    playerIds.filter((id) => isSubscribed(id)),
+    {
+      title: `⚔️ Assist Needed!`,
+      body: `${playerName} needs help attacking ${targetName}!`,
+      tag: "assist_request",
+      icon: "/icon-192.png",
+      data: { type: "assist_request", warId, targetId, url: `https://www.torn.com/loader.php?sid=attack&user2ID=${targetId}` },
+    },
+    null, // Force delivery, bypass preferences
+    { urgency: "high", TTL: 3600 },
+  );
+}
+
+/**
  * Notify faction members about a broadcast.
  */
 export async function notifyBroadcast(playerIds, warId, senderName, message) {

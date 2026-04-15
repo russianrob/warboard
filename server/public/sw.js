@@ -36,6 +36,9 @@ self.addEventListener("push", (event) => {
     options.actions = [{ action: "attack", title: "Attack" }];
   } else if (type === "chain-alert" || type === "bonus") {
     options.actions = [{ action: "attack", title: "Attack Now" }];
+  } else if (type === "assist_request") {
+    options.actions = [{ action: "attack", title: "Attack" }];
+    options.requireInteraction = true;
   }
 
   // For chain alerts, play alarm sound via any open client window
@@ -63,7 +66,9 @@ self.addEventListener("notificationclick", (event) => {
 
   // Determine URL to open
   let url = "https://www.torn.com/factions.php?step=your#/war/rank";
-  if (data.targetId) {
+  if (data.url) {
+    url = data.url;
+  } else if (data.targetId) {
     url = `https://www.torn.com/loader.php?sid=attack&user2ID=${data.targetId}`;
   }
 
