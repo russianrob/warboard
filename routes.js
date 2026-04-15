@@ -2746,8 +2746,13 @@ function runAutoDispatcher(factionId, data, requestingPlayerId) {
       // ── Final score ──
       const score = weightedContribution * timePriority * overstackPenalty * levelMatch * scopeBonus;
 
-      // Estimate time to completion based on empty slots remaining
-      const estHours = emptySlots <= 1 ? 0.5 : emptySlots <= 3 ? Math.round(emptySlots * 1.5) : null;
+      // Use ready_at from the API if available (actual execution timestamp)
+      // Otherwise estimate based on empty slots
+      let readyAtHours = null;
+      if (crime.ready_at) {
+        readyAtHours = Math.round(((crime.ready_at - Date.now() / 1000) / 3600) * 10) / 10;
+        if (readyAtHours < 0) readyAtHours = null; // already passed
+      }
 
       candidates.push({
         crimeId: crime.id,
@@ -2765,7 +2770,7 @@ function runAutoDispatcher(factionId, data, requestingPlayerId) {
         totalSlots,
         filledPct: Math.round(filledPct * 100),
         hoursToExpiry: hoursToExpiry === Infinity ? null : Math.round(hoursToExpiry * 10) / 10,
-        estCompletionHours: estHours,
+        readyAtHours, // actual execution countdown from Torn API
         isLastSlot: emptySlots === 1,
         // Scoring breakdown for transparency
         breakdown: {
