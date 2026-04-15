@@ -2476,12 +2476,16 @@ function runSlotOptimizer(factionId, data) {
   for (const crime of crimes) {
     if (crime.status !== 'Recruiting') continue;
     const slots = crime.slots || [];
+    const totalSlots = slots.length;
+    const filledSlots = slots.filter(s => (s.user_id ?? s.user?.id) != null).length;
+    const fillPct = totalSlots > 0 ? filledSlots / totalSlots : 0;
     for (let i = 0; i < slots.length; i++) {
       const s = slots[i];
       if (s.user_id || s.user?.id) continue; // filled
       openSlots.push({
         crimeId: crime.id, crimeName: crime.name, difficulty: crime.difficulty || 0,
         position: s.position, slotIndex: i, expiredAt: crime.expired_at || Infinity,
+        filledSlots, totalSlots, fillPct,
       });
     }
   }
@@ -2544,6 +2548,10 @@ function runSlotOptimizer(factionId, data) {
       // Level fit: prefer members at their effective level
       if (mem.effectiveLevel === slot.difficulty) score += 20;
       else if (mem.effectiveLevel > slot.difficulty) score -= 30; // 1 effective level above: penalty
+      // Fill priority: strongly prefer OCs that already have members (0-50 bonus)
+      // An OC with 5/6 filled gets 50 * (5/6) ≈ 42 bonus; empty OC gets 0
+      score += slot.fillPct * 50;
+
       // Expiry urgency bonus (prioritize slots expiring soon)
       const hoursToExpiry = (slot.expiredAt - Date.now() / 1000) / 3600;
       if (hoursToExpiry < 6) score += 30;
@@ -2588,8 +2596,9 @@ function runSlotOptimizer(factionId, data) {
       score: Math.round(p.score * 10) / 10,
       positionCpr: exactPosCpr,
       levelCpr: lvlCpr,
-      isEstimatedCpr: !exactPosCpr && !lvlCpr, // only estimated if no position OR level data
+      isEstimatedCpr: !exactPosCpr && !lvlCpr,
       hoursToExpiry: Math.round(((p.slot.expiredAt || Infinity) - Date.now() / 1000) / 3600 * 10) / 10,
+      fillInfo: `${p.slot.filledSlots}/${p.slot.totalSlots}`,
     });
   }
 
