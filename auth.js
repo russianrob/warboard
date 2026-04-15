@@ -34,10 +34,10 @@ export async function verifyTornApiKey(apiKey) {
     throw new Error(`Torn API error: ${data.error.error} (code ${data.error.code})`);
   }
 
-  // Check if key has faction API access
+  // Check if key has faction API access (use v1 faction basic — reliable and lightweight)
   let hasFactionAccess = false;
   try {
-    const fRes = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&limit=1&key=${encodeURIComponent(apiKey)}`, { signal: AbortSignal.timeout(5000) });
+    const fRes = await fetch(`https://api.torn.com/faction/?selections=basic&key=${encodeURIComponent(apiKey)}`, { signal: AbortSignal.timeout(5000) });
     const fData = await fRes.json();
     hasFactionAccess = !fData.error;
   } catch (_) {}
