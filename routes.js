@@ -3906,7 +3906,7 @@ router.get("/api/oc/settings", async (req, res) => {
 
 
     engine_member_projector: s.engine_member_projector ?? false,
-    engine_auto_dispatcher:  s.engine_auto_dispatcher  ?? false,
+    engine_auto_dispatcher:  s.engine_auto_dispatcher  ?? true,
   });
 });
 
