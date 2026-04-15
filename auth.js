@@ -34,13 +34,24 @@ export async function verifyTornApiKey(apiKey) {
     throw new Error(`Torn API error: ${data.error.error} (code ${data.error.code})`);
   }
 
-  // Check if key has faction API access (use v1 faction basic — reliable and lightweight)
-  let hasFactionAccess = false;
+  // Check if key has faction API access
+  // Use v2 faction/crimes (requires faction perms). If Torn returns a permission error
+  // (code 7 = not enough access), that's a real "no access". If it times out or 5xx,
+  // assume access is fine (benefit of the doubt) so the user isn't locked out.
+  let hasFactionAccess = true; // default true -- only set false on explicit permission denial
   try {
-    const fRes = await fetch(`https://api.torn.com/faction/?selections=basic&key=${encodeURIComponent(apiKey)}`, { signal: AbortSignal.timeout(5000) });
-    const fData = await fRes.json();
-    hasFactionAccess = !fData.error;
-  } catch (_) {}
+    const fRes = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&limit=1&key=${encodeURIComponent(apiKey)}`, { signal: AbortSignal.timeout(5000) });
+    if (fRes.ok) {
+      const fData = await fRes.json();
+      if (fData.error) {
+        const code = fData.error.code;
+        // Code 7 = insufficient permissions, code 16 = access level too low
+        if (code === 7 || code === 16) hasFactionAccess = false;
+        // Other errors (rate limit, server error) -- keep true
+      }
+    }
+    // HTTP 5xx / timeout -- keep hasFactionAccess = true
+  } catch (_) { /* network error / timeout -- keep true */ }
 
   return {
     playerId: String(data.player_id),

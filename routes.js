@@ -3856,7 +3856,21 @@ router.get("/api/oc/spawn-key", async (req, res) => {
             d.effectiveTop = effTop;
             d.joinable = d.cpr >= fM2 + fB2 ? Math.min(effTop + 1, 10) : effTop;
           }
-          return res.json({ ...data, viewer: buildViewer(playerInfo) });
+          // Run engines on fallback data too
+          const fS2engines = {};
+          if (!_engineCache.has(fid) || (Date.now() - _engineCache.get(fid).ts) > 3600_000) {
+            if (fS2.engine_slot_optimizer) fS2engines.slotOptimizer = runSlotOptimizer(fid, data);
+            if (fS2.engine_failure_risk) fS2engines.failureRisk = runFailureRisk(fid, data);
+            if (fS2.engine_cpr_forecaster) fS2engines.cprForecaster = runCprForecaster(fid, data);
+            if (fS2.engine_member_projector) fS2engines.memberProjector = runMemberProjector(fid, data);
+            if (fS2.engine_member_reliability) fS2engines.memberReliability = runMemberReliability(fid, data);
+            _engineCache.set(fid, { ts: Date.now(), engines: fS2engines, settingsHash: engineSettingsHash(fS2) });
+          }
+          const retryEngines = { ...(_engineCache.get(fid)?.engines || {}) };
+          if (fS2.engine_auto_dispatcher) {
+            retryEngines.autoDispatcher = runAutoDispatcher(fid, data, playerInfo.playerId);
+          }
+          return res.json({ ...data, viewer: buildViewer(playerInfo), engines: retryEngines });
         } catch (retryErr) {
           console.error(`[oc/spawn-key] pool key failed for faction ${fid}:`, retryErr.message);
           removeFactionKey(fid, poolKey); // Remove dead key from pool
@@ -3865,7 +3879,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     }
     console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
     // No cached faction key available — return partial data so the script can show viewer card
-    return res.json({ crimes: [], members: {}, cprCache: {}, pendingFactionData: true, viewer: buildViewer(playerInfo) });
+    return res.json({ crimes: [], members: {}, cprCache: {}, pendingFactionData: true, viewer: buildViewer(playerInfo), engines: {} });
   }
 });
 
