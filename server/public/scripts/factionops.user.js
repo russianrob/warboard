@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.1
+// @version      4.9.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.2   - Fix: Boost toast z-index to max to ensure visibility on attack pages; add assist toast debug log.
 // v4.9.1   - Feature: Added Test Toast Notification button in settings.
 // v4.9.0   - Feature: PDA Notification toggle and Test button now visible to all users (not PDA-only).
 // v4.8.47  - Fix: Remove settings gear and heatmap button from all attack page URLs (loader.php and page.php).
@@ -8968,7 +8969,7 @@ body.wb-chain-active {
                 top: ${state.ui && state.ui.chainBar ? '52px' : '10px'};
                 left: 50%;
                 transform: translateX(-50%);
-                z-index: 1000001;
+                z-index: 2147483647;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
@@ -9097,6 +9098,7 @@ body.wb-chain-active {
      * Stays for 15 seconds and includes a direct attack link.
      */
     function showAssistToast(playerName, targetName, attackUrl) {
+        log('[ASSIST-TOAST] Firing assist toast:', playerName, targetName, attackUrl);
         const container = getToastContainer();
         const toast = document.createElement('div');
 
