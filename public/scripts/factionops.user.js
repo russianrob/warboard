@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.40
+// @version      4.8.47
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -10,7 +10,12 @@
 // @require      https://tornwar.com/socket.io/socket.io.js
 // @match        https://www.torn.com/factions.php?step=your*
 // @match        https://www.torn.com/factions.php?step=profile*
-// @match        https://www.torn.com/loader.php?sid=attack&user*
+// @match        https://www.torn.com/loader.php?sid=attack*
+// @match        https://torn.com/loader.php?sid=attack*
+// @match        https://www.torn.com/page.php?sid=attack*
+// @match        https://torn.com/page.php?sid=attack*
+// @match        https://www.torn.com/profiles.php?XID=*
+// @match        https://torn.com/profiles.php?XID=*
 // @match        https://www.torn.com/war.php*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
@@ -40,6 +45,13 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.47  - Fix: Remove settings gear and heatmap button from all attack page URLs (loader.php and page.php).
+// v4.8.46  - Fix: Remove FactionOps overlay (heatmap/settings buttons) from attack pages when navigating from war pages.
+// v4.8.45  - Fix: Corrected malformed regex in target ID extraction that could prevent assist button from appearing.
+// v4.8.44  - Fix: Assist button now triggers correctly on the new Torn page.php?sid=attack URL format.
+// v4.8.43  - Fix: Assist button now extracts target ID from the DOM when resuming attacks (URL missing user ID) and waits for React to render.
+// v4.8.42  - Fix: Assist button match rules broadened to ensure it appears on all attack page variations.
+// v4.8.41  - Fix: Assist button fixed by updating target ID extraction regex to match all Torn URL formats.
 // v4.8.28  - Revert: Removed OC Spawn Assistant integration from FactionOps (keeping it as a standalone tool).
 // v4.8.27  - Fix: Tactical Battle Plan (Scout Report) now strictly sorts targets and hitters by highest/lowest stats properly.
 // v4.8.26  - Fix: Chain notifications (bonus hits, panics, alerts) will no longer fire when the chain is in Cooldown.
@@ -633,7 +645,7 @@ html.wb-theme-light {
     top: 0;
     left: 0;
     right: 0;
-    z-index: 999998;
+    z-index: 9999999 !important;
     padding: 8px 16px;
     background: linear-gradient(135deg, var(--wb-bg) 0%, var(--wb-accent) 100%);
     color: var(--wb-text);
@@ -1042,7 +1054,7 @@ html.wb-theme-light {
     position: fixed;
     bottom: 80px;
     right: 16px;
-    z-index: 999998;
+    z-index: 9999999 !important;
     background: linear-gradient(135deg, #e17055, #d63031);
     color: #fff;
     border: none;
@@ -2671,10 +2683,35 @@ body.wb-chain-active {
         return m ? m[1] : null;
     }
 
-    /** Extract target ID from the current attack page URL. */
+    /** Extract target ID from the current attack page URL or DOM. */
     function getAttackTargetId() {
-        const m = window.location.href.match(/user2ID=(\d+)/);
-        return m ? m[1] : null;
+        // 1. Try URL first
+        const m = window.location.href.match(/(?:user2ID=|XID=|user=|userId=|ID=)(\d+)/i);
+        if (m) return m[1];
+        
+        // 2. Try DOM (Torn React attack page hides ID from URL when resuming)
+        // Look for defender's profile link
+        const defenderLinks = document.querySelectorAll('[class*="defender"] a[href*="XID="], div[class^="playerArea"] a[href*="XID="]');
+        for (const link of defenderLinks) {
+            const href = link.getAttribute('href');
+            if (href) {
+                const domMatch = href.match(/XID=(\d+)/i);
+                if (domMatch) return domMatch[1];
+            }
+        }
+        
+        // 3. Fallback to extracting from the player image URL
+        const images = document.querySelectorAll('img[src*="images.torn.com/profile"]');
+        for (const img of images) {
+            // Usually attackers are on the left, defenders on the right. We just want any ID that isn't the user's
+            const src = img.getAttribute('src');
+            const imgMatch = src.match(/\/(\d+)\//);
+            if (imgMatch && imgMatch[1] !== state.myPlayerId) {
+                return imgMatch[1];
+            }
+        }
+
+        return null;
     }
 
     /** Safely parse JSON, returning null on failure. */
@@ -7212,7 +7249,10 @@ body.wb-chain-active {
      */
     function createAttackOverlay() {
         const targetId = getAttackTargetId();
-        if (!targetId) return;
+        if (!targetId) {
+            console.warn('[FactionOps] Could not find target ID in URL for Assist button.');
+            return;
+        }
 
         log('Attack page detected — target:', targetId);
 
@@ -7286,7 +7326,13 @@ body.wb-chain-active {
         if (document.getElementById('wb-assist-btn')) return;
 
         const targetId = getAttackTargetId();
-        if (!targetId) return;
+        if (!targetId) {
+            // Torn React takes a moment to render the DOM, retry a few times
+            if (window.location.href.includes('sid=attack') || window.location.href.includes('profiles.php')) {
+                setTimeout(createAssistButton, 1000);
+            }
+            return;
+        }
 
         const btn = document.createElement('button');
         btn.id = 'wb-assist-btn';
@@ -7857,7 +7903,7 @@ body.wb-chain-active {
     function detectPageAndInit() {
         const url = window.location.href;
 
-        if (url.includes('loader.php?sid=attack')) {
+        if (url.includes('sid=attack') || url.includes('profiles.php')) {
             log('Page: Attack');
             initAttackPage();
         } else if (url.includes('factions.php') || url.includes('war.php')) {
@@ -7865,6 +7911,9 @@ body.wb-chain-active {
             showActivateButton();
         } else {
             log('Page: Unknown — running in passive mode');
+            // Re-create settings/heatmap if they were removed on an attack page
+            if (!document.querySelector('.wb-settings-gear')) createSettingsGear();
+            if (!document.getElementById('wb-heatmap-toggle')) createHeatmapButton();
         }
     }
 
@@ -7878,6 +7927,30 @@ body.wb-chain-active {
 
     /** Initialise attack page enhancements. */
     function initAttackPage() {
+        // Remove FactionOps overlay if it exists (shouldn't be on attack pages)
+        const foOverlay = document.getElementById('fo-overlay');
+        if (foOverlay) {
+            foOverlay.remove();
+        }
+        const foActivateBtn = document.getElementById('fo-activate-btn');
+        if (foActivateBtn) {
+            foActivateBtn.remove();
+        }
+        // Remove settings gear and heatmap button from attack pages
+        const settingsGear = document.querySelector('.wb-settings-gear');
+        if (settingsGear) settingsGear.remove();
+        const heatmapBtn = document.getElementById('wb-heatmap-toggle');
+        if (heatmapBtn) heatmapBtn.remove();
+        const heatmapPanel = document.getElementById('wb-heatmap-panel');
+        if (heatmapPanel) heatmapPanel.remove();
+        // Restore Torn's main content if it was hidden
+        const mainContent = document.getElementById('mainContainer')
+            || document.querySelector('.content-wrapper');
+        if (mainContent && mainContent.dataset.foHidden === 'true') {
+            mainContent.style.display = '';
+            delete mainContent.dataset.foHidden;
+        }
+
         startStatusTimers();
 
         // Report viewing target to server (so war page shows who's on which attack)
@@ -9446,7 +9519,7 @@ body.wb-chain-active {
 
         // 3. Create settings gear (only on non-war, non-attack pages)
         const url = window.location.href;
-        const isWarOrAttack = url.includes('factions.php') || url.includes('war.php') || url.includes('loader.php?sid=attack');
+        const isWarOrAttack = url.includes('factions.php') || url.includes('war.php') || url.includes('sid=attack');
         if (!isWarOrAttack) {
             createSettingsGear();
         }
