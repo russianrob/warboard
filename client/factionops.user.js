@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.2
+// @version      4.9.3
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.3   - Fix: PDA connection no longer flips to Offline on a single poll hiccup (requires 3 consecutive failures); renamed 'Syncing' to 'Connected'.
 // v4.9.2   - Fix: Boost toast z-index to max to ensure visibility on attack pages; add assist toast debug log.
 // v4.9.1   - Feature: Added Test Toast Notification button in settings.
 // v4.9.0   - Feature: PDA Notification toggle and Test button now visible to all users (not PDA-only).
@@ -3166,10 +3167,13 @@ body.wb-chain-active {
 
         } catch (err) {
             pollErrorCount++;
-            if (state.connected) {
+            // Only flip to Offline after 3 consecutive failures to avoid flicker on PDA
+            if (state.connected && pollErrorCount >= 3) {
                 state.connected = false;
                 updateConnectionUI();
-                warn('Poll failed:', err.message);
+                warn('Poll failed (3+ consecutive):', err.message);
+            } else if (state.connected) {
+                log('Poll hiccup (' + pollErrorCount + '/3):', err.message);
             }
 
             // Re-authenticate on 401
@@ -4487,7 +4491,7 @@ body.wb-chain-active {
         if (dot && text) {
             dot.className = 'wb-status-dot ' +
                 (state.connected ? 'connected' : state.connecting ? 'connecting' : 'disconnected');
-            text.textContent = state.connected ? 'Syncing' : state.connecting ? 'Connecting...' : 'Offline';
+            text.textContent = state.connected ? 'Connected' : state.connecting ? 'Connecting...' : 'Offline';
         }
 
         // Gear icon color hint
