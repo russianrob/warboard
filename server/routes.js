@@ -3,7 +3,9 @@
  */
 
 import { Router } from "express";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { join as pathJoin, dirname as pathDirname } from "node:path";
+import { fileURLToPath } from 'node:url';
 import axios from "axios";
 import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.js";
 import * as store from "./store.js";
@@ -13,9 +15,9 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 /** Mask an API key for safe logging — shows only last 4 chars. */
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
-import { getOcSpawnData } from "./oc-spawn.js";
+import { getOcSpawnData, getCachedCompletedCrimes } from "./oc-spawn.js";
 import { getData as getNerveData, updateConfig as updateNerveConfig } from "./nerve-tracker.js";
-import { hasXanaxSubscription, grantFactionAccess } from "./xanax-subscriptions.js";
+import { hasXanaxSubscription, grantFactionAccess, getXanaxSubscription } from "./xanax-subscriptions.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
 import { isFactionAllowed, getAllSubscriptions, getOwnerFactionId, getSubscriptionRejectionMessage } from "./subscription-manager.js";
@@ -71,13 +73,6 @@ function broadcastSSE(warId, data) {
  * Called after any state mutation so connected clients get instant updates.
  */
 /** Compute a fresh warEta using currently stored war scores/target — no API call needed. */
-/** Compute war percentage from server-side scores + custom target */
-function computeWarPercentage(war) {
-  if (!war || !war.warTarget || !war.warTarget.value || !war.warScores) return null;
-  const pct = Math.floor((war.warScores.myScore / war.warTarget.value) * 100);
-  return Math.min(pct, 100);
-}
-
 function computeFreshWarEta(war) {
   if (!war || war.warEnded) return war?.warEta || null;
 
@@ -104,7 +99,7 @@ function computeFreshWarEta(war) {
   if (war.warStart) {
     const nowSec = Math.floor(Date.now() / 1000);
     const bothZero = !war.warScores || (war.warScores.myScore === 0 && war.warScores.enemyScore === 0);
-    if (war.warStart > nowSec) {
+    if (war.warStart > nowSec || bothZero) {
       return {
         etaTimestamp: war.warStart * 1000,
         hoursRemaining: Math.max(0, (war.warStart - nowSec) / 3600),
@@ -152,9 +147,6 @@ function broadcastWarUpdate(warId) {
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
     warEta: computeFreshWarEta(war),
-    warPercentage: computeWarPercentage(war),
-    lastBroadcast: war.lastBroadcast || null,
-    lastAssistRequest: war.lastAssistRequest || null,
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
   };
@@ -445,19 +437,6 @@ router.get("/api/stream", (req, res, next) => {
     return res.status(403).json({ error: "Not a member of this war's faction" });
   }
 
-  // Full reset if enemy changed (new war)
-  if (enemyFactionId && war.enemyFactionId && war.enemyFactionId !== enemyFactionId) {
-    console.log(`[sse] Enemy changed: ${war.enemyFactionId} → ${enemyFactionId}. Full reset.`);
-    war.enemyFactionId = enemyFactionId;
-    war.enemyFactionName = null;
-    war.warScores = null; war.warStart = null; war.warOrigTarget = null;
-    war.warEta = null; war.clientTimerReport = null;
-    war.warEnded = false; war.warResult = null; war.warEndedAt = null;
-    war.enemyStatuses = {}; war.calls = {}; war.priorities = {};
-    war.enemyActivityLog = []; war.enemyActivityByHour = {}; war.strategy = null;
-    store.saveState();
-  }
-
   // Track player as online
   store.setPlayer(playerId, {
     socketId: `sse_${playerId}`,
@@ -494,9 +473,6 @@ router.get("/api/stream", (req, res, next) => {
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
     warEta: computeFreshWarEta(war),
-    warPercentage: computeWarPercentage(war),
-    lastBroadcast: war.lastBroadcast || null,
-    lastAssistRequest: war.lastAssistRequest || null,
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
   };
@@ -567,25 +543,13 @@ router.get("/api/poll", (req, res, next) => {
     return res.status(403).json({ error: "You are not a member of this war's faction" });
   }
 
-  // FULL RESET if enemy faction ID changed — new war started
+  // WIPE STALE WAR DATA if enemy faction ID changed (bug fix)
   if (enemyFactionId && war.enemyFactionId !== enemyFactionId) {
-    console.log(`[api] War ${warId} enemy changed from ${war.enemyFactionId} to ${enemyFactionId}. Full war state reset.`);
+    console.log(`[api] War ${warId} enemy changed from ${war.enemyFactionId} to ${enemyFactionId}. Wiping stale state.`);
     war.enemyFactionId = enemyFactionId;
-    war.enemyFactionName = null; // will be auto-detected
     war.enemyStatuses = {};
     war.calls = {};
     war.priorities = {};
-    war.warScores = null;
-    war.warStart = null;
-    war.warOrigTarget = null;
-    war.warEta = null;
-    war.clientTimerReport = null;
-    war.warEnded = false;
-    war.warResult = null;
-    war.warEndedAt = null;
-    war.enemyActivityLog = [];
-    war.enemyActivityByHour = {};
-    war.strategy = null;
 
     // Clear call timers for this war
     for (const [key, timeoutId] of callTimers.entries()) {
@@ -597,22 +561,6 @@ router.get("/api/poll", (req, res, next) => {
 
     store.saveState();
     broadcastWarUpdate(warId);
-
-    // Fetch fresh war data from Torn API
-    const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
-    if (apiKey) {
-      fetchRankedWar(factionId, apiKey).then(rw => {
-        if (rw) {
-          if (rw.warStart) war.warStart = rw.warStart;
-          if (rw.warTarget) war.warOrigTarget = rw.warTarget;
-          if (rw.enemyFactionName) war.enemyFactionName = rw.enemyFactionName;
-          war.warScores = { myScore: rw.myScore || 0, enemyScore: rw.enemyScore || 0 };
-          store.saveState();
-          broadcastWarUpdate(warId);
-          console.log(`[api] Fresh war data: ${rw.enemyFactionName}, target=${rw.warTarget}, start=${rw.warStart}`);
-        }
-      }).catch(() => {});
-    }
   }
 
   // Auto-detect ranked war enemy if not set
@@ -683,9 +631,6 @@ router.get("/api/poll", (req, res, next) => {
     warTarget: war.warTarget || null,
     warScores: war.warScores || null,
     warEta: computeFreshWarEta(war),
-    warPercentage: computeWarPercentage(war),
-    lastBroadcast: war.lastBroadcast || null,
-    lastAssistRequest: war.lastAssistRequest || null,
     warEnded: war.warEnded || false,
     warResult: war.warResult || null,
     strategy: war.strategy || null,
@@ -713,6 +658,39 @@ router.get("/api/war/:warId/strategy", requireAuth, (req, res) => {
 
 // ── POST /api/call ───────────────────────────────────────────────────────
 // Call or uncall a target.
+
+
+router.post("/api/assist-request", requireAuth, (req, res) => {
+  const { playerId, playerName } = req.user;
+  const { warId, targetId, targetName } = (req.body || {});
+
+  if (!targetId || !warId) {
+    return res.status(400).json({ error: "targetId and warId are required" });
+  }
+
+  const war = requireWarMember(req, res, warId);
+  if (!war) return;
+
+  const payload = {
+    type: "assist_request",
+    playerId,
+    playerName,
+    targetId,
+    targetName: targetName || `Player [${targetId}]`,
+    attackUrl: `https://www.torn.com/loader.php?sid=attack&user2ID=${targetId}`,
+    timestamp: Date.now()
+  };
+
+  if (io) io.to(`war_${warId}`).emit("assist_request", payload);
+  broadcastSSE(warId, payload);
+
+  const warPlayers = store.getOnlinePlayersForWar(warId);
+  const playerIds = warPlayers.map(p => p.playerId || p.id).filter(id => id !== playerId);
+  push.notifyAssistRequest(playerIds, warId, playerName, targetName || targetId, targetId);
+
+  console.log(`[api] ${playerName} requested assist on ${targetId} in war ${warId}`);
+  return res.json({ ok: true });
+});
 
 router.post("/api/call", requireAuth, (req, res) => {
   const { playerId, playerName } = req.user;
@@ -840,13 +818,6 @@ router.post("/api/broadcast", requireAuth, (req, res) => {
     type: type || "info" 
   };
 
-  // Store last broadcast on war state for poll clients
-  const war2 = store.getWar(warId);
-  if (war2) {
-    war2.lastBroadcast = { message: payload.message, type: payload.type, timestamp: Date.now(), sender: playerName };
-    store.saveState();
-  }
-
   // 1. Broadcast to Socket.IO clients in this war room
   if (io) {
     io.to(`war_${warId}`).emit("global_toast", payload);
@@ -872,77 +843,6 @@ router.post("/api/broadcast", requireAuth, (req, res) => {
   }
 
   console.log(`[📣] Faction Broadcast sent to war ${warId} by ${playerName}: ${message}`);
-
-  return res.json({ success: true });
-});
-
-// ── POST /api/assist-request ─────────────────────────────────────────────
-// Request backup from faction members during an attack.
-
-const assistRateLimits = new Map(); // playerId -> lastTimestamp
-
-router.post("/api/assist-request", requireAuth, (req, res) => {
-  const { playerId, playerName, factionId } = req.user;
-  const { warId, targetId, targetName } = (req.body || {});
-
-  if (!warId || !targetId) {
-    return res.status(400).json({ error: "warId and targetId are required." });
-  }
-
-  const war = store.getWar(warId);
-  if (!war) {
-    return res.status(404).json({ error: "War not found." });
-  }
-
-  // Rate limit: 1 assist request per player per 30 seconds
-  const now = Date.now();
-  const lastRequest = assistRateLimits.get(playerId);
-  if (lastRequest && now - lastRequest < 30000) {
-    const remaining = Math.ceil((30000 - (now - lastRequest)) / 1000);
-    return res.status(429).json({ error: `Rate limited. Try again in ${remaining}s.` });
-  }
-  assistRateLimits.set(playerId, now);
-
-  const attackUrl = `https://www.torn.com/loader.php?sid=attack&user2ID=${targetId}`;
-  const payload = {
-    type: "assist_request",
-    playerId,
-    playerName,
-    targetId,
-    targetName: targetName || targetId,
-    attackUrl,
-    timestamp: now,
-  };
-
-  // 1. Broadcast to Socket.IO clients in this war room
-  if (io) {
-    io.to(`war_${warId}`).emit("assist_request", payload);
-  }
-
-  // 2. Broadcast to SSE clients
-  broadcastSSE(warId, payload);
-
-  // 3. Store for poll clients (same pattern as lastBroadcast)
-  war.lastAssistRequest = payload;
-  store.saveState();
-
-  // 4. Send push notifications to faction members (except requester)
-  const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
-  if (apiKey) {
-    fetchFactionMembers(factionId, apiKey).then(members => {
-      const memberIds = Object.keys(members).filter(id => String(id) !== String(playerId));
-      push.notifyAssistRequest(memberIds, warId, playerName, targetName || targetId, targetId);
-    }).catch(err => {
-      console.error(`[api] Failed to fetch members for assist push: ${err.message}`);
-    });
-  } else {
-    const onlinePlayers = store.getOnlinePlayersForWar(warId)
-      .map(p => p.id)
-      .filter(id => String(id) !== String(playerId));
-    push.notifyAssistRequest(onlinePlayers, warId, playerName, targetName || targetId, targetId);
-  }
-
-  console.log(`[⚔️] Assist request from ${playerName} for target ${targetName || targetId} in war ${warId}`);
 
   return res.json({ success: true });
 });
@@ -2576,15 +2476,1344 @@ router.get("/api/oc-verify", async (req, res) => {
 // Accepts API key as query param (no CORS preflight needed).
 // Verifies faction membership, then returns spawn data with 6h CPR cache.
 
-const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition }
-const _factionKeyCache = new Map(); // factionId  → apiKey (best working key seen for that faction)
+const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
+const _engineCache    = new Map(); // factionId  → { ts, engines, settingsHash }
+function engineSettingsHash(s) {
+  return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}|${!!s.engine_member_projector}|${!!s.engine_member_reliability}|${!!s.engine_auto_dispatcher}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SLOT OPTIMIZER ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+function runSlotOptimizer(factionId, data) {
+  const crimes = data.crimes || data.availableCrimes || [];
+  const members = data.members || {};
+  const cprCache = data.cprCache || {};
+
+  // Enrich byPosition with historical data from OC history
+  const allHistory = loadOcHistory(factionId);
+  const histByPos = {}; // "uid::crimeName::position" -> { rateSum, count }
+  for (const h of allHistory) {
+    if (!Array.isArray(h.slots)) continue;
+    for (const slot of h.slots) {
+      if (!slot.userId || !slot.weight) continue;
+      const key = `${slot.userId}::${h.crimeName}::${slot.position}`;
+      if (!histByPos[key]) histByPos[key] = { rateSum: 0, count: 0 };
+      histByPos[key].rateSum += slot.weight;
+      histByPos[key].count++;
+    }
+  }
+
+  // 1. Collect all open slots across all recruiting OCs
+  const openSlots = [];
+  for (const crime of crimes) {
+    if (crime.status !== 'Recruiting') continue;
+    const slots = crime.slots || [];
+    const totalSlots = slots.length;
+    const filledSlots = slots.filter(s => (s.user_id ?? s.user?.id) != null).length;
+    const fillPct = totalSlots > 0 ? filledSlots / totalSlots : 0;
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      if (s.user_id || s.user?.id) continue; // filled
+      openSlots.push({
+        crimeId: crime.id, crimeName: crime.name, difficulty: crime.difficulty || 0,
+        position: s.position, slotIndex: i, expiredAt: crime.expired_at || Infinity,
+        filledSlots, totalSlots, fillPct,
+      });
+    }
+  }
+
+  // 2. Collect all free members with their CPR data
+  const freeMems = [];
+  const memberArr = Array.isArray(members) ? members : Object.values(members);
+  for (const m of memberArr) {
+    if (m.inOC || m.status === 'inOC') continue; // already in an OC
+    const uid = String(m.id || m.playerId || m.uid);
+    const cpr = cprCache[uid];
+    if (!cpr) continue;
+    const joinable = cpr.joinable || 1;
+    const cprVal = cpr.cpr || 0;
+    // Build per-level CPR from entries
+    const levelCprs = {};
+    for (const e of (cpr.entries || [])) {
+      if (!levelCprs[e.diff]) levelCprs[e.diff] = { sum: 0, count: 0 };
+      levelCprs[e.diff].sum += e.rate;
+      levelCprs[e.diff].count += 1;
+    }
+    // If CPR at current level >= 75%, they're ready for next level (boost pushes them to ~90%)
+    const topLevelCpr = levelCprs[joinable] ? levelCprs[joinable].sum / levelCprs[joinable].count : cprVal;
+    const effectiveLevel = topLevelCpr >= 75 ? joinable + 1 : joinable;
+    freeMems.push({
+      uid, name: m.name || m.playerName || uid,
+      cpr: cprVal, joinable, effectiveLevel, levelCprs,
+      byPosition: cpr.byPosition || {},
+      level: m.level || 0,
+    });
+  }
+
+  // 3. Score every (member, slot) pair
+  const pairs = [];
+  for (const slot of openSlots) {
+    for (const mem of freeMems) {
+      if (mem.joinable < slot.difficulty) continue; // can't join this level
+      if (mem.effectiveLevel < slot.difficulty) continue; // CPR too low for this level
+      if (mem.effectiveLevel > slot.difficulty + 1) continue; // don't recommend members 2+ effective levels above
+      // Score: position CPR match + level proximity + expiry urgency
+      let score = 0;
+      // Position CPR (best indicator of fit)
+      // Strip "#1", "#2" suffix to match byPosition keys (e.g. "Thief" not "Thief #1")
+      const posBase = slot.position.replace(/\s*#\d+$/, '');
+      let posCpr = mem.byPosition?.[`${slot.crimeName}::${posBase}`]?.cpr
+                  || mem.byPosition?.[`${slot.crimeName}::${slot.position}`]?.cpr
+                  || null;
+      // Fallback: historical position CPR from OC history (covers older data + returning members)
+      if (!posCpr) {
+        const hKey = `${mem.uid}::${slot.crimeName}::${posBase}`;
+        const hData = histByPos[hKey];
+        if (hData && hData.count >= 1) posCpr = Math.round(hData.rateSum / hData.count * 10) / 10;
+      }
+      // Fallback: use level-specific CPR for this OC's difficulty, not overall average
+      const levelCpr = mem.levelCprs[slot.difficulty]
+        ? Math.round(mem.levelCprs[slot.difficulty].sum / mem.levelCprs[slot.difficulty].count * 10) / 10
+        : null;
+      const usedCpr = posCpr || levelCpr || mem.cpr;
+      score += usedCpr * 2;
+      // Level fit: prefer members at their effective level
+      if (mem.effectiveLevel === slot.difficulty) score += 20;
+      else if (mem.effectiveLevel > slot.difficulty) score -= 30; // 1 effective level above: penalty
+      // Fill priority: strongly prefer OCs that already have members (0-50 bonus)
+      // An OC with 5/6 filled gets 50 * (5/6) ≈ 42 bonus; empty OC gets 0
+      score += slot.fillPct * 50;
+
+      // Expiry urgency bonus (prioritize slots expiring soon)
+      const hoursToExpiry = (slot.expiredAt - Date.now() / 1000) / 3600;
+      if (hoursToExpiry < 6) score += 30;
+      else if (hoursToExpiry < 12) score += 15;
+      else if (hoursToExpiry < 24) score += 5;
+
+      pairs.push({ slot, member: mem, score });
+    }
+  }
+
+  // 4. Greedy assignment: pick highest-scoring pairs, no member or slot used twice
+  pairs.sort((a, b) => b.score - a.score);
+  const usedMembers = new Set();
+  const usedSlots = new Set();
+  const assignments = [];
+
+  for (const p of pairs) {
+    const slotKey = `${p.slot.crimeId}:${p.slot.slotIndex}`;
+    if (usedMembers.has(p.member.uid) || usedSlots.has(slotKey)) continue;
+    usedMembers.add(p.member.uid);
+    usedSlots.add(slotKey);
+    const pb = p.slot.position.replace(/\s*#\d+$/, '');
+    let exactPosCpr = p.member.byPosition?.[`${p.slot.crimeName}::${pb}`]?.cpr
+                     || p.member.byPosition?.[`${p.slot.crimeName}::${p.slot.position}`]?.cpr
+                     || null;
+    // Fallback: historical position CPR
+    if (!exactPosCpr) {
+      const hKey2 = `${p.member.uid}::${p.slot.crimeName}::${pb}`;
+      const hData2 = histByPos[hKey2];
+      if (hData2 && hData2.count >= 1) exactPosCpr = Math.round(hData2.rateSum / hData2.count * 10) / 10;
+    }
+    const lvlCpr = p.member.levelCprs[p.slot.difficulty]
+      ? Math.round(p.member.levelCprs[p.slot.difficulty].sum / p.member.levelCprs[p.slot.difficulty].count * 10) / 10
+      : null;
+    // Best CPR to display: position-specific > level-specific > overall
+    const displayCpr = exactPosCpr || lvlCpr || p.member.cpr;
+    assignments.push({
+      memberId: p.member.uid, memberName: p.member.name,
+      memberCpr: displayCpr, memberJoinable: p.member.joinable,
+      crimeId: p.slot.crimeId, crimeName: p.slot.crimeName,
+      difficulty: p.slot.difficulty, position: p.slot.position,
+      score: Math.round(p.score * 10) / 10,
+      positionCpr: exactPosCpr,
+      levelCpr: lvlCpr,
+      isEstimatedCpr: !exactPosCpr && !lvlCpr,
+      hoursToExpiry: Math.round(((p.slot.expiredAt || Infinity) - Date.now() / 1000) / 3600 * 10) / 10,
+      fillInfo: `${p.slot.filledSlots}/${p.slot.totalSlots}`,
+    });
+  }
+
+  // Sort assignments by crime urgency then difficulty
+  assignments.sort((a, b) => {
+    if (a.hoursToExpiry !== b.hoursToExpiry) return a.hoursToExpiry - b.hoursToExpiry;
+    return b.difficulty - a.difficulty;
+  });
+
+  return {
+    assignments,
+    stats: {
+      openSlots: openSlots.length,
+      freeMembers: freeMems.length,
+      assigned: assignments.length,
+      unfilledSlots: openSlots.length - assignments.length,
+      unassignedMembers: freeMems.length - assignments.length,
+    }
+  };
+}
+// ═══════════════════════════════════════════════════════════════════════════════
+//  AUTO-DISPATCHER ENGINE — personalized "join this OC" recommendation per member
+//  Unlike other engines (faction-wide cache), this runs per-request since it's
+//  personalized to the requesting player.
+// ═══════════════════════════════════════════════════════════════════════════════
+function runAutoDispatcher(factionId, data, requestingPlayerId) {
+  const crimes = data.crimes || data.availableCrimes || [];
+  const members = data.members || {};
+  const cprCache = data.cprCache || {};
+  const weights = data.weights || {};  // tornprobability.com role weights
+  const pid = String(requestingPlayerId);
+
+  // Find the requesting player's info
+  const memberArr = Array.isArray(members) ? members : Object.values(members);
+  const me = memberArr.find(m => String(m.id || m.playerId || m.uid) === pid);
+  if (!me) return { recommendation: null, fallbacks: [], reason: 'Player not found in faction members' };
+
+  const myCpr = cprCache[pid];
+  if (!myCpr) return { recommendation: null, fallbacks: [], reason: 'No CPR data for player' };
+
+  // Check if player is already in an OC by scanning crime slots
+  let playerInOC = me.inOC || me.status === 'inOC';
+  let playerCrimeName = null;
+  if (!playerInOC) {
+    for (const crime of crimes) {
+      if (!Array.isArray(crime.slots)) continue;
+      for (const s of crime.slots) {
+        const slotUid = String(s.user_id ?? s.user?.id ?? '');
+        if (slotUid === pid) { playerInOC = true; playerCrimeName = crime.name || 'Unknown'; break; }
+      }
+      if (playerInOC) break;
+    }
+  }
+  if (playerInOC) {
+    return { recommendation: null, fallbacks: [], reason: 'Already in an OC', inOC: true, crimeName: playerCrimeName };
+  }
+
+  // Load OC history for historical position CPR
+  const allHistory = loadOcHistory(factionId);
+  const histByPos = {};
+  for (const h of allHistory) {
+    if (!Array.isArray(h.slots)) continue;
+    for (const slot of h.slots) {
+      if (!slot.userId || !slot.weight) continue;
+      const key = `${slot.userId}::${h.crimeName}::${slot.position}`;
+      if (!histByPos[key]) histByPos[key] = { rateSum: 0, count: 0 };
+      histByPos[key].rateSum += slot.weight;
+      histByPos[key].count++;
+    }
+  }
+
+  // Build player's per-level CPR map
+  const myLevelCprs = {};
+  for (const e of (myCpr.entries || [])) {
+    if (!myLevelCprs[e.diff]) myLevelCprs[e.diff] = { sum: 0, count: 0 };
+    myLevelCprs[e.diff].sum += e.rate;
+    myLevelCprs[e.diff].count++;
+  }
+  const myJoinable = myCpr.joinable || 1;
+  const myOverallCpr = myCpr.cpr || 0;
+  const myByPosition = myCpr.byPosition || {};
+
+  // Collect all open slots in recruiting OCs
+  const candidates = [];
+  for (const crime of crimes) {
+    if (crime.status !== 'Recruiting') continue;
+    const slots = crime.slots || [];
+    const totalSlots = slots.length;
+    const filledSlots = slots.filter(s => s.user_id || s.user?.id);
+    const emptySlots = totalSlots - filledSlots.length;
+
+    // Count how many unplanned/recent joins are stacked (for overstacking penalty)
+    // "Unplanned" = joined but progress is 0 or very low, meaning they just joined
+    const recentJoins = filledSlots.filter(s => {
+      const prog = s.user?.progress ?? 100;
+      return prog < 10; // progress < 10% = just joined, not yet contributing
+    }).length;
+
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      if (s.user_id || s.user?.id) continue; // slot already filled
+
+      // Can I join this level?
+      if (myJoinable < (crime.difficulty || 0)) continue;
+
+      const posBase = s.position.replace(/\s*#\d+$/, '');
+
+      // ── Factor 1: CPR x Role Weight (weighted contribution) ──
+      // Get my CPR for this specific position
+      let posCpr = myByPosition?.[`${crime.name}::${posBase}`]?.cpr
+                || myByPosition?.[`${crime.name}::${s.position}`]?.cpr
+                || null;
+      // Fallback: historical position CPR
+      if (!posCpr) {
+        const hKey = `${pid}::${crime.name}::${posBase}`;
+        const hData = histByPos[hKey];
+        if (hData && hData.count >= 1) posCpr = Math.round(hData.rateSum / hData.count * 10) / 10;
+      }
+      // Fallback: level-specific CPR
+      const lvlCpr = myLevelCprs[crime.difficulty]
+        ? Math.round(myLevelCprs[crime.difficulty].sum / myLevelCprs[crime.difficulty].count * 10) / 10
+        : null;
+      const effectiveCpr = posCpr || lvlCpr || myOverallCpr;
+
+      // Get role weight from tornprobability.com data
+      const crimeWeights = weights[crime.name] || {};
+      const roleWeight = crimeWeights[posBase] || crimeWeights[s.position] || 0;
+      // Normalize weight: tornprobability returns % (sum ~100), convert to 0-1 scale
+      const normalizedWeight = roleWeight / 100;
+
+      // Weighted contribution: how much this slot benefits from MY cpr
+      const weightedContribution = effectiveCpr * (normalizedWeight > 0 ? normalizedWeight : 0.15);
+
+      // ── Factor 2: Time priority (last slot = unblock execution) ──
+      let timePriority = 1.0;
+      if (emptySlots === 1) timePriority = 2.5;       // I'm the LAST slot — huge bonus
+      else if (emptySlots === 2) timePriority = 1.6;   // Near completion
+      else if (emptySlots <= 3) timePriority = 1.2;
+
+      // Expiry urgency stacks on top
+      const hoursToExpiry = ((crime.expired_at || Infinity) - Date.now() / 1000) / 3600;
+      if (hoursToExpiry < 4) timePriority *= 1.8;
+      else if (hoursToExpiry < 8) timePriority *= 1.4;
+      else if (hoursToExpiry < 16) timePriority *= 1.1;
+
+      // ── Factor 3: Overstacking penalty ──
+      // Don't recommend joining behind 2+ freshly-joined members (queue behind them)
+      let overstackPenalty = 1.0;
+      if (recentJoins >= 3) overstackPenalty = 0.4;
+      else if (recentJoins >= 2) overstackPenalty = 0.65;
+      else if (recentJoins >= 1) overstackPenalty = 0.85;
+
+      // ── Factor 4: Level matching ──
+      // Don't waste high-CPR players on low-level OCs
+      let levelMatch = 1.0;
+      const diff = crime.difficulty || 0;
+      if (myJoinable > diff + 1) levelMatch = 0.5;  // 2+ levels above = waste
+      else if (myJoinable > diff) levelMatch = 0.8;  // 1 level above = slight waste
+      else if (myJoinable === diff) levelMatch = 1.0; // perfect match
+
+      // ── Factor 5: Scope efficiency (crime progress) ──
+      // Prefer OCs that are further along in planning
+      const filledPct = filledSlots.length / totalSlots;
+      const scopeBonus = 1.0 + (filledPct * 0.4); // up to 1.4x for nearly-full OCs
+
+      // ── Final score ──
+      const score = weightedContribution * timePriority * overstackPenalty * levelMatch * scopeBonus;
+
+      // Use ready_at from the API if available (actual execution timestamp)
+      // Otherwise estimate based on empty slots
+      let readyAtHours = null;
+      if (crime.ready_at) {
+        readyAtHours = Math.round(((crime.ready_at - Date.now() / 1000) / 3600) * 10) / 10;
+        if (readyAtHours < 0) readyAtHours = null; // already passed
+      }
+
+      candidates.push({
+        crimeId: crime.id,
+        crimeName: crime.name,
+        difficulty: diff,
+        position: s.position,
+        positionBase: posBase,
+        slotIndex: i,
+        score: Math.round(score * 100) / 100,
+        // Display data
+        cpr: effectiveCpr,
+        cprSource: posCpr ? 'position' : lvlCpr ? 'level' : 'overall',
+        roleWeight: Math.round(normalizedWeight * 100),
+        emptySlots,
+        totalSlots,
+        filledPct: Math.round(filledPct * 100),
+        hoursToExpiry: hoursToExpiry === Infinity ? null : Math.round(hoursToExpiry * 10) / 10,
+        readyAtHours, // actual execution countdown from Torn API
+        isLastSlot: emptySlots === 1,
+        // Scoring breakdown for transparency
+        breakdown: {
+          weightedContribution: Math.round(weightedContribution * 100) / 100,
+          timePriority: Math.round(timePriority * 100) / 100,
+          overstackPenalty: Math.round(overstackPenalty * 100) / 100,
+          levelMatch: Math.round(levelMatch * 100) / 100,
+          scopeBonus: Math.round(scopeBonus * 100) / 100,
+        },
+      });
+    }
+  }
+
+  // Sort by score descending
+  candidates.sort((a, b) => b.score - a.score);
+
+  // Top recommendation + 3 fallbacks
+  const top = candidates[0] || null;
+  const fallbacks = candidates.slice(1, 4);
+
+  return {
+    recommendation: top,
+    fallbacks,
+    totalCandidates: candidates.length,
+    player: { id: pid, name: me.name || me.playerName || pid, cpr: myOverallCpr, joinable: myJoinable },
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  OC HISTORY COLLECTOR — logs completed OC results for future failure rate analysis
+// ═══════════════════════════════════════════════════════════════════════════════
+const __routes_dir = pathDirname(fileURLToPath(import.meta.url));
+const OC_HISTORY_DIR = pathJoin(process.env.DATA_DIR || pathJoin(__routes_dir, 'data'), 'oc-history');
+const _seenCrimeIds = new Set(); // prevent duplicate logging per restart
+
+function collectOcHistory(factionId, data) {
+  try {
+    const crimes = data.crimes || data.availableCrimes || [];
+    const members = data.members || {};
+    const memberArr = Array.isArray(members) ? members : Object.values(members);
+    const nameMap = {};
+    for (const m of memberArr) { nameMap[String(m.id || m.playerId || m.uid)] = m.name || m.playerName || ''; }
+
+    // Use completedCrimes from oc-spawn cache if available, else filter from crimes array
+    const completedSrc = data.completedCrimes || crimes;
+    const completed = completedSrc.filter(c => c.status === 'Successful' || c.status === 'Failed');
+    if (completed.length === 0) return;
+
+    if (!existsSync(OC_HISTORY_DIR)) mkdirSync(OC_HISTORY_DIR, { recursive: true });
+    const histFile = pathJoin(OC_HISTORY_DIR, `${factionId}.json`);
+    let history = [];
+    try { history = JSON.parse(readFileSync(histFile, 'utf-8')); } catch (_) {}
+
+    let added = 0;
+    for (const c of completed) {
+      const cid = String(c.id);
+      if (_seenCrimeIds.has(cid)) continue;
+      // Check if already in history file
+      if (history.some(h => String(h.crimeId) === cid)) { _seenCrimeIds.add(cid); continue; }
+      _seenCrimeIds.add(cid);
+
+      const slots = (c.slots || []).map(s => ({
+        position: s.position,
+        userId: String(s.user_id || s.user?.id || ''),
+        userName: nameMap[String(s.user_id || s.user?.id || '')] || '',
+        weight: s.checkpoint_pass_rate || 0,
+      }));
+
+      // Store rewards data for payout tracking (only present on successful crimes)
+      const rewards = c.rewards ? {
+        money: c.rewards.money || 0,
+        respect: c.rewards.respect || 0,
+        items: c.rewards.items || [],
+      } : null;
+
+      history.push({
+        crimeId: cid, crimeName: c.name, difficulty: c.difficulty || 0,
+        status: c.status, completedAt: Date.now(),
+        executedAt: c.executed_at || 0,
+        planningAt: c.planning_at || 0,
+        slots, rewards,
+      });
+      added++;
+    }
+
+    if (added > 0) {
+      // Keep last 500 entries per faction
+      if (history.length > 500) history = history.slice(-500);
+      writeFileSync(histFile, JSON.stringify(history, null, 2));
+      console.log(`[oc-history] Logged ${added} completed OC(s) for faction ${factionId}`);
+    }
+  } catch (e) {
+    console.error('[oc-history] Error:', e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SHARED OC HISTORY LOADER — merges API completedCrimes + on-disk history
+// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * Returns a unified array of completed OC entries from two sources:
+ *  1. getCachedCompletedCrimes(factionId) — recent Torn API data (has checkpoint_pass_rate per slot)
+ *  2. /opt/warboard/server/data/oc-history/{factionId}.json — our long-term collected history
+ *
+ * Deduplicates by crimeId. API data wins on conflicts (fresher CPR values).
+ * Each entry normalised to: { crimeId, crimeName, difficulty, status, executedAt, slots: [{ userId, position, weight }] }
+ */
+function loadOcHistory(factionId) {
+  const apiCrimes = getCachedCompletedCrimes(factionId) || [];
+
+  // Load on-disk history
+  let diskHistory = [];
+  try {
+    const histFile = pathJoin(OC_HISTORY_DIR, `${factionId}.json`);
+    if (existsSync(histFile)) {
+      diskHistory = JSON.parse(readFileSync(histFile, 'utf-8'));
+    }
+  } catch (_) { /* file missing or corrupt — skip */ }
+
+  // Index API crimes by crimeId for fast dedup
+  const seen = new Set();
+  const merged = [];
+
+  // API crimes first (higher fidelity — have checkpoint_pass_rate per slot)
+  for (const c of apiCrimes) {
+    const cid = String(c.id);
+    if (seen.has(cid)) continue;
+    seen.add(cid);
+    merged.push({
+      crimeId: cid,
+      crimeName: c.name,
+      difficulty: c.difficulty || 0,
+      status: c.status,
+      executedAt: c.executed_at || c.planning_at || c.created_at || 0,
+      slots: (c.slots || []).map(s => ({
+        userId: String(s.user_id ?? s.user?.id ?? ''),
+        position: (s.position || '').replace(/\s*#\d+$/, ''),
+        weight: s.checkpoint_pass_rate ?? s.success_chance ?? 0,
+        userName: s.user?.name || '',
+      })),
+      rewards: c.rewards ? { money: c.rewards.money || 0, respect: c.rewards.respect || 0, items: c.rewards.items || [] } : null,
+      source: 'api',
+    });
+  }
+
+  // Disk history second (older entries the API no longer returns)
+  for (const h of diskHistory) {
+    const cid = String(h.crimeId);
+    if (seen.has(cid)) continue;
+    seen.add(cid);
+    merged.push({
+      crimeId: cid,
+      crimeName: h.crimeName,
+      difficulty: h.difficulty || 0,
+      status: h.status,
+      executedAt: h.completedAt ? Math.floor(h.completedAt / 1000) : (h.executedAt || 0),
+      slots: (h.slots || []).map(s => ({
+        userId: String(s.userId || ''),
+        position: (s.position || '').replace(/\s*#\d+$/, ''),
+        weight: s.weight || 0,
+        userName: s.userName || '',
+      })),
+      rewards: h.rewards || null,
+      source: 'disk',
+    });
+  }
+
+  // Sort oldest → newest
+  merged.sort((a, b) => a.executedAt - b.executedAt);
+  return merged;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  FAILURE RISK ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+function runFailureRisk(factionId, data) {
+  const crimes = data.crimes || data.availableCrimes || [];
+  const cprCache = data.cprCache || {};
+  const weights = data.weights || {};
+  const members = data.members || {};
+  const memberArr = Array.isArray(members) ? members : Object.values(members);
+  const nameMap = {};
+  for (const m of memberArr) { nameMap[String(m.id || m.playerId || m.uid)] = m.name || m.playerName || ''; }
+
+  // Build historical failure rates per crime+position from OC history
+  const allHistory = loadOcHistory(factionId);
+  const histRates = {}; // "crimeName::position" -> { succeeded, failed }
+  const memberHistRates = {}; // "uid::crimeName::position" -> { succeeded, failed }
+  for (const h of allHistory) {
+    if (h.status !== 'Successful' && h.status !== 'Failed') continue;
+    for (const slot of (h.slots || [])) {
+      const posKey = `${h.crimeName}::${slot.position}`;
+      if (!histRates[posKey]) histRates[posKey] = { succeeded: 0, failed: 0 };
+      if (h.status === 'Successful') histRates[posKey].succeeded++;
+      else histRates[posKey].failed++;
+      // Per-member rates
+      if (slot.userId) {
+        const mKey = `${slot.userId}::${posKey}`;
+        if (!memberHistRates[mKey]) memberHistRates[mKey] = { succeeded: 0, failed: 0 };
+        if (h.status === 'Successful') memberHistRates[mKey].succeeded++;
+        else memberHistRates[mKey].failed++;
+      }
+    }
+  }
+
+  const results = [];
+
+  // Helper: convert crime name to camelCase key used in weights
+  function toCamelKey(name) {
+    return name.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+(.)/g, (_, c) => c.toUpperCase()).replace(/^(.)/, (_, c) => c.toUpperCase());
+  }
+
+  for (const crime of crimes) {
+    if (crime.status !== 'Recruiting' && crime.status !== 'Planning') continue;
+    const slots = crime.slots || [];
+    const slotRisks = [];
+    let hasEmpty = false;
+    const crimeWeights = weights[toCamelKey(crime.name)] || {};
+
+    for (const s of slots) {
+      const uid = String(s.user_id || s.user?.id || '');
+      if (!uid) { hasEmpty = true; continue; }
+      const cpr = cprCache[uid];
+      const posKey = `${crime.name}::${s.position}`;
+      const posCpr = cpr?.byPosition?.[posKey]?.cpr || cpr?.cpr || 0;
+      // Look up weight from weights object using position label
+      const posLabel = s.position_info?.label || s.position || '';
+      const posBase = posLabel.replace(/\s*#\d+$/, ''); // strip "#1" etc
+      // Try exact label first, then numbered variants
+      let weight = crimeWeights[posLabel] || crimeWeights[posBase] || crimeWeights[posLabel.replace(/\s/g, '')] || crimeWeights[posBase.replace(/\s/g, '')] || 0;
+      // Also try with number suffix: Looter1, Looter2 etc
+      if (!weight && s.position_info?.number) {
+        weight = crimeWeights[posBase.replace(/\s/g, '') + s.position_info.number] || 0;
+      }
+
+      // Check historical failure rate for this member+crime+position
+      const posKeyBase = `${crime.name}::${posBase}`;
+      const mHist = memberHistRates[`${uid}::${posKeyBase}`];
+      const pHist = histRates[posKeyBase];
+      // Historical success rate: prefer member-specific, fall back to position-wide
+      const histSuccessRate = mHist && (mHist.succeeded + mHist.failed) >= 3
+        ? mHist.succeeded / (mHist.succeeded + mHist.failed)
+        : pHist && (pHist.succeeded + pHist.failed) >= 3
+          ? pHist.succeeded / (pHist.succeeded + pHist.failed)
+          : null;
+
+      // Members at or above 60% CPR are near-certain success; only below 60% is real risk
+      // Blend with historical rate when available (70% CPR-based, 30% historical)
+      let effectiveSuccessProb = posCpr >= 60 ? 0.98 : posCpr / 100;
+      if (histSuccessRate !== null) {
+        effectiveSuccessProb = effectiveSuccessProb * 0.7 + histSuccessRate * 0.3;
+      }
+      const riskScore = weight > 0 && posCpr < 60 ? Math.round((1 - effectiveSuccessProb) * weight) : 0;
+      slotRisks.push({
+        uid, name: nameMap[uid] || s.user?.name || uid,
+        position: s.position, cpr: posCpr, weight,
+        riskScore, successProb: effectiveSuccessProb,
+        histRate: histSuccessRate !== null ? Math.round(histSuccessRate * 100) : null,
+      });
+    }
+
+    // Only analyze fully filled OCs — no empty slots
+    const filledSlots = slotRisks.filter(s => s.successProb > 0);
+    const totalSlots = slots.length;
+    const emptyCount = slots.filter(s => !s.user_id && !s.user?.id).length;
+    if (emptyCount > 0 || filledSlots.length === 0) continue;
+    let overallSuccess = filledSlots.reduce((acc, s) => acc * s.successProb, 1);
+    const failureRisk = Math.round((1 - overallSuccess) * 1000) / 10;
+
+    // Find weakest link: highest risk score
+    slotRisks.sort((a, b) => b.riskScore - a.riskScore);
+    const weakestLink = slotRisks[0] || null;
+
+    // Flag high-weight + low CPR combos (below 60% MINCPR threshold)
+    const dangerSlots = slotRisks.filter(s => s.weight >= 20 && s.cpr < 60);
+
+    results.push({
+      crimeId: crime.id, crimeName: crime.name, difficulty: crime.difficulty || 0,
+      failureRisk, overallSuccess: Math.round(overallSuccess * 1000) / 10,
+      totalSlots, filledSlots: filledSlots.length, emptySlots: slots.filter(s => !s.user_id && !s.user?.id).length,
+      weakestLink: weakestLink ? { name: weakestLink.name, position: weakestLink.position, cpr: weakestLink.cpr, weight: weakestLink.weight } : null,
+      dangerSlots: dangerSlots.map(s => ({ name: s.name, position: s.position, cpr: s.cpr, weight: s.weight })),
+      slotRisks,
+    });
+  }
+
+  // Sort by failure risk descending (riskiest OCs first)
+  results.sort((a, b) => b.failureRisk - a.failureRisk);
+  return { crimes: results };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CPR FORECASTER ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+function runCprForecaster(factionId, data) {
+  const allHistory = loadOcHistory(factionId);
+  if (!allHistory || allHistory.length === 0) return { members: [] };
+
+  const members = data.members || {};
+  const memberArr = Array.isArray(members) ? members : Object.values(members);
+  const nameMap = {};
+  for (const m of memberArr) { nameMap[String(m.id || m.playerId || m.uid)] = m.name || m.playerName || ''; }
+
+  const now = Date.now() / 1000;
+  const DAY = 86400;
+  const windows = [
+    { label: '90d', from: now - 90 * DAY, days: 90 },
+    { label: '60d', from: now - 60 * DAY, days: 60 },
+    { label: '30d', from: now - 30 * DAY, days: 30 },
+    { label: '14d', from: now - 14 * DAY, days: 14 },
+    { label: '7d',  from: now - 7 * DAY,  days: 7 },
+  ];
+
+  // Build per-member, per-level, per-role entries from merged history
+  const memberData = {}; // uid -> [{ execAt, diff, role, rate }]
+  for (const crime of allHistory) {
+    const execAt = crime.executedAt || 0;
+    if (!execAt || !Array.isArray(crime.slots)) continue;
+    const diff = crime.difficulty || 0;
+    for (const slot of crime.slots) {
+      const uid = String(slot.userId || '');
+      if (!uid) continue;
+      const rate = slot.weight ?? null;
+      if (rate === null || rate === 0) continue;
+      const role = slot.position || '';
+      if (!memberData[uid]) memberData[uid] = [];
+      memberData[uid].push({ execAt, diff, role, rate });
+    }
+  }
+
+  function calcTrend(entries) {
+    entries.sort((a, b) => a.execAt - b.execAt);
+    const mid = Math.floor(entries.length / 2);
+    const firstHalf = entries.slice(0, mid);
+    const secondHalf = entries.slice(mid);
+    const firstAvg = firstHalf.reduce((s, e) => s + e.rate, 0) / firstHalf.length;
+    const secondAvg = secondHalf.reduce((s, e) => s + e.rate, 0) / secondHalf.length;
+    const timeSpanDays = (entries[entries.length - 1].execAt - entries[0].execAt) / DAY;
+    const change = secondAvg - firstAvg;
+    const changePerMonth = timeSpanDays > 7 ? Math.round((change / timeSpanDays) * 30 * 10) / 10 : 0;
+    const projected30d = Math.round(Math.min(100, Math.max(0, secondAvg + changePerMonth)) * 10) / 10;
+    let trend = 'stable';
+    if (changePerMonth >= 2) trend = 'improving';
+    else if (changePerMonth <= -2) trend = 'declining';
+    return {
+      currentCpr: Math.round(secondAvg * 10) / 10, trend, changePerMonth, projected30d,
+      projectedMin: Math.round(Math.max(0, projected30d - 3) * 10) / 10,
+      projectedMax: Math.round(Math.min(100, projected30d + 3) * 10) / 10,
+      count: entries.length,
+    };
+  }
+
+  const results = [];
+  for (const [uid, entries] of Object.entries(memberData)) {
+    if (entries.length < 2) continue;
+
+    // Group by level, then by role within each level
+    const byLevel = {};
+    for (const e of entries) {
+      const key = e.diff;
+      if (!byLevel[key]) byLevel[key] = {};
+      if (!byLevel[key][e.role]) byLevel[key][e.role] = [];
+      byLevel[key][e.role].push(e);
+    }
+
+    const levels = [];
+    for (const [lvl, roles] of Object.entries(byLevel)) {
+      const roleBreakdown = [];
+      for (const [role, roleEntries] of Object.entries(roles)) {
+        if (roleEntries.length < 2) {
+          // Still show single-entry roles but without trend
+          const avg = roleEntries.reduce((s, e) => s + e.rate, 0) / roleEntries.length;
+          roleBreakdown.push({
+            role, currentCpr: Math.round(avg * 10) / 10, trend: 'stable',
+            changePerMonth: 0, projected30d: Math.round(avg * 10) / 10,
+            projectedMin: Math.round(Math.max(0, avg - 3) * 10) / 10,
+            projectedMax: Math.round(Math.min(100, avg + 3) * 10) / 10,
+            count: roleEntries.length,
+          });
+          continue;
+        }
+        const t = calcTrend(roleEntries);
+        roleBreakdown.push({ role, ...t });
+      }
+      roleBreakdown.sort((a, b) => b.count - a.count); // most OCs first
+
+      // Level-wide: derive from role breakdowns (weighted by count)
+      if (roleBreakdown.length === 0) continue;
+      const totalCount = roleBreakdown.reduce((s, r) => s + r.count, 0);
+      const weightedCpr = roleBreakdown.reduce((s, r) => s + r.currentCpr * r.count, 0) / totalCount;
+      const weightedChange = roleBreakdown.reduce((s, r) => s + r.changePerMonth * r.count, 0) / totalCount;
+      const roundedChange = Math.round(weightedChange * 10) / 10;
+      let lvlTrend = 'stable';
+      if (roundedChange >= 2) lvlTrend = 'improving';
+      else if (roundedChange <= -2) lvlTrend = 'declining';
+      const lvlProjected = Math.round(Math.min(100, Math.max(0, weightedCpr + roundedChange)) * 10) / 10;
+      levels.push({
+        level: Number(lvl), currentCpr: Math.round(weightedCpr * 10) / 10,
+        trend: lvlTrend, changePerMonth: roundedChange,
+        projected30d: lvlProjected,
+        projectedMin: Math.round(Math.max(0, lvlProjected - 3) * 10) / 10,
+        projectedMax: Math.round(Math.min(100, lvlProjected + 3) * 10) / 10,
+        count: totalCount, roles: roleBreakdown,
+      });
+    }
+
+    if (levels.length === 0) continue;
+    levels.sort((a, b) => b.level - a.level);
+
+    const mainCpr = data.cprCache?.[uid]?.cpr ?? levels[0].currentCpr;
+    const joinable = data.cprCache?.[uid]?.joinable ?? 1;
+    const primaryLevel = levels[0];
+
+    results.push({
+      uid, name: nameMap[uid] || uid,
+      currentCpr: mainCpr, joinable,
+      trend: primaryLevel.trend, changePerMonth: primaryLevel.changePerMonth,
+      levels, totalEntries: entries.length,
+    });
+  }
+
+  const trendOrder = { declining: 0, improving: 1, stable: 2 };
+  results.sort((a, b) => {
+    if (trendOrder[a.trend] !== trendOrder[b.trend]) return trendOrder[a.trend] - trendOrder[b.trend];
+    return Math.abs(b.changePerMonth) - Math.abs(a.changePerMonth);
+  });
+
+  return { members: results };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  MEMBER PROJECTOR ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+function runMemberProjector(factionId, data) {
+  const allHistory = loadOcHistory(factionId);
+  const members = data.members || {};
+  const cprCache = data.cprCache || {};
+  const memberArr = Array.isArray(members) ? members : Object.values(members);
+  const nameMap = {};
+  for (const m of memberArr) {
+    nameMap[String(m.id || m.playerId || m.uid)] = m.name || m.playerName || '';
+  }
+
+  // Build per-member OC participation stats from merged history (API + disk)
+  const memberHistory = {}; // uid -> { totalOCs, firstOCAt, lastOCAt, byLevel: { [diff]: { count, avgCpr, roles } } }
+  for (const crime of allHistory) {
+    const execAt = crime.executedAt || 0;
+    if (!execAt || !Array.isArray(crime.slots)) continue;
+    const diff = crime.difficulty || 0;
+    for (const slot of crime.slots) {
+      const uid = String(slot.userId || '');
+      if (!uid) continue;
+      const rate = slot.weight ?? null;
+      if (rate === null || rate === 0) continue;
+      const role = slot.position || '';
+
+      if (!memberHistory[uid]) memberHistory[uid] = { totalOCs: 0, firstOCAt: execAt, lastOCAt: execAt, byLevel: {} };
+      const h = memberHistory[uid];
+      h.totalOCs++;
+      if (execAt < h.firstOCAt) h.firstOCAt = execAt;
+      if (execAt > h.lastOCAt) h.lastOCAt = execAt;
+
+      if (!h.byLevel[diff]) h.byLevel[diff] = { count: 0, rateSum: 0, roles: {} };
+      h.byLevel[diff].count++;
+      h.byLevel[diff].rateSum += rate;
+      if (!h.byLevel[diff].roles[role]) h.byLevel[diff].roles[role] = { count: 0, rateSum: 0 };
+      h.byLevel[diff].roles[role].count++;
+      h.byLevel[diff].roles[role].rateSum += rate;
+    }
+  }
+
+  // Build benchmark: for each OC level, what's the avg CPR of members who participate
+  const levelBenchmarks = {}; // diff -> { avgCpr, memberCount, minCpr, maxCpr }
+  for (const [uid, h] of Object.entries(memberHistory)) {
+    for (const [diff, ld] of Object.entries(h.byLevel)) {
+      const avgCpr = ld.rateSum / ld.count;
+      if (!levelBenchmarks[diff]) levelBenchmarks[diff] = { cprSum: 0, memberCount: 0, minCpr: 100, maxCpr: 0 };
+      levelBenchmarks[diff].cprSum += avgCpr;
+      levelBenchmarks[diff].memberCount++;
+      if (avgCpr < levelBenchmarks[diff].minCpr) levelBenchmarks[diff].minCpr = avgCpr;
+      if (avgCpr > levelBenchmarks[diff].maxCpr) levelBenchmarks[diff].maxCpr = avgCpr;
+    }
+  }
+  for (const [diff, b] of Object.entries(levelBenchmarks)) {
+    b.avgCpr = Math.round(b.cprSum / b.memberCount * 10) / 10;
+    b.minCpr = Math.round(b.minCpr * 10) / 10;
+    b.maxCpr = Math.round(b.maxCpr * 10) / 10;
+  }
+
+  // Build similar-member progression data: how long did it take members to go from level N to N+1
+  const progressionTimes = {}; // "fromLevel->toLevel" -> [days]
+  for (const [uid, h] of Object.entries(memberHistory)) {
+    const levels = Object.keys(h.byLevel).map(Number).sort((a, b) => a - b);
+    for (let i = 0; i < levels.length - 1; i++) {
+      const fromLvl = levels[i];
+      const toLvl = levels[i + 1];
+      // Find earliest OC at toLvl and latest OC at fromLvl before that
+      const fromEntries = [];
+      const toEntries = [];
+      for (const crime of allHistory) {
+        const execAt = crime.executedAt || 0;
+        if (!execAt || !Array.isArray(crime.slots)) continue;
+        const diff = crime.difficulty || 0;
+        for (const slot of crime.slots) {
+          if (String(slot.userId || '') !== uid) continue;
+          if (diff === fromLvl) fromEntries.push(execAt);
+          if (diff === toLvl) toEntries.push(execAt);
+        }
+      }
+      if (fromEntries.length > 0 && toEntries.length > 0) {
+        const firstTo = Math.min(...toEntries);
+        const lastFrom = Math.max(...fromEntries.filter(t => t <= firstTo));
+        if (lastFrom > 0) {
+          const days = Math.round((firstTo - lastFrom) / 86400);
+          const key = `${fromLvl}->${toLvl}`;
+          if (!progressionTimes[key]) progressionTimes[key] = [];
+          progressionTimes[key].push(days);
+        }
+      }
+    }
+  }
+
+  // Average progression times
+  const avgProgressionDays = {};
+  for (const [key, times] of Object.entries(progressionTimes)) {
+    if (times.length === 0) continue;
+    const sorted = [...times].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    avgProgressionDays[key] = { median, avg: Math.round(times.reduce((s, t) => s + t, 0) / times.length), samples: times.length };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const DAY = 86400;
+  const results = [];
+
+  for (const m of memberArr) {
+    const uid = String(m.id || m.playerId || m.uid);
+    const cpr = cprCache[uid];
+    if (!cpr) continue;
+
+    const history = memberHistory[uid];
+    const currentLevel = cpr.effectiveTop || cpr.highestLevel || 0;
+    const joinable = cpr.joinable || currentLevel;
+    const isEstimated = !!cpr.estimated; // no real OC data, using level-based estimate
+
+    // Current level CPR
+    let currentLevelCpr = cpr.cpr;
+    if (history?.byLevel[currentLevel]) {
+      currentLevelCpr = Math.round(history.byLevel[currentLevel].rateSum / history.byLevel[currentLevel].count * 10) / 10;
+    }
+
+    // Best roles at current level
+    const bestRoles = [];
+    if (history?.byLevel[currentLevel]?.roles) {
+      for (const [role, rd] of Object.entries(history.byLevel[currentLevel].roles)) {
+        bestRoles.push({ role, cpr: Math.round(rd.rateSum / rd.count * 10) / 10, count: rd.count });
+      }
+      bestRoles.sort((a, b) => b.cpr - a.cpr);
+    }
+
+    // Projection: can they move up?
+    const nextLevel = currentLevel + 1;
+    let projection = null;
+    if (nextLevel <= 10) {
+      const nextBench = levelBenchmarks[nextLevel];
+      const progressKey = `${currentLevel}->${nextLevel}`;
+      const progression = avgProgressionDays[progressKey];
+
+      // CPR gap analysis
+      const MINCPR = 60; // minimum to be viable
+      const gapToBenchmark = nextBench ? Math.round((nextBench.avgCpr - currentLevelCpr) * 10) / 10 : null;
+
+      // Estimate readiness based on CPR trend from CPR Forecaster data
+      let readiness = 'not_ready';
+      let readinessLabel = 'Not Ready';
+      let estimatedDays = null;
+
+      if (currentLevelCpr >= 75 && joinable >= nextLevel) {
+        readiness = 'ready';
+        readinessLabel = 'Ready Now';
+        estimatedDays = 0;
+      } else if (currentLevelCpr >= 70) {
+        readiness = 'developing';
+        readinessLabel = 'Developing';
+        if (progression) {
+          estimatedDays = progression.median;
+          const cprAboveThresh = currentLevelCpr - 70;
+          const cprNeeded = 75 - 70; // 5 points from developing to ready
+          const progress = Math.min(1, Math.max(0, cprAboveThresh / cprNeeded));
+          estimatedDays = Math.round(progression.median * (1 - progress * 0.7));
+        }
+      } else if (currentLevelCpr >= MINCPR) {
+        readiness = 'building';
+        readinessLabel = 'Building';
+      } else {
+        readiness = 'not_ready';
+        readinessLabel = 'Not Ready';
+      }
+
+      // Suggested roles at next level based on best current roles (role names carry across levels)
+      const suggestedRoles = bestRoles.slice(0, 3).map(r => r.role);
+
+      projection = {
+        nextLevel,
+        benchmarkCpr: nextBench ? nextBench.avgCpr : null,
+        benchmarkRange: nextBench ? { min: nextBench.minCpr, max: nextBench.maxCpr } : null,
+        gapToBenchmark,
+        readiness,
+        readinessLabel,
+        estimatedDays,
+        progressionData: progression || null,
+        suggestedRoles,
+      };
+    }
+
+    // Experience summary
+    const totalOCs = history?.totalOCs || 0;
+    const daysSinceFirst = history ? Math.round((now - history.firstOCAt) / DAY) : 0;
+    const daysSinceLast = history ? Math.round((now - history.lastOCAt) / DAY) : 0;
+
+    results.push({
+      uid,
+      name: nameMap[uid] || uid,
+      level: m.level || 0,
+      daysInFaction: m.days_in_faction || 0,
+      currentOcLevel: currentLevel,
+      currentLevelCpr,
+      joinableLevel: joinable,
+      isEstimated,
+      bestRoles: bestRoles.slice(0, 3),
+      totalOCs,
+      daysSinceFirstOC: daysSinceFirst,
+      daysSinceLastOC: daysSinceLast,
+      projection,
+    });
+  }
+
+  // Sort: ready first, then developing, then not ready. Within each group, by next level desc then CPR desc.
+  const readinessOrder = { ready: 0, developing: 1, building: 2, not_ready: 3 };
+  results.sort((a, b) => {
+    const aR = readinessOrder[a.projection?.readiness] ?? 2;
+    const bR = readinessOrder[b.projection?.readiness] ?? 2;
+    if (aR !== bR) return aR - bR;
+    if ((a.projection?.nextLevel || 0) !== (b.projection?.nextLevel || 0)) return (b.projection?.nextLevel || 0) - (a.projection?.nextLevel || 0);
+    return b.currentLevelCpr - a.currentLevelCpr;
+  });
+
+  return {
+    members: results,
+    benchmarks: levelBenchmarks,
+    progressionTimes: avgProgressionDays,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  MEMBER RELIABILITY ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+function runMemberReliability(factionId, data) {
+  const allHistory = loadOcHistory(factionId);
+  const members = data.members || {};
+  const cprCache = data.cprCache || {};
+  const memberArr = Array.isArray(members) ? members : Object.values(members);
+  const nameMap = {};
+  for (const m of memberArr) {
+    nameMap[String(m.id || m.playerId || m.uid)] = m.name || m.playerName || '';
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const DAY = 86400;
+  const LOOKBACK = 90 * DAY;
+  const cutoff = now - LOOKBACK;
+
+  // Build per-member participation stats from merged history (API + disk)
+  const memberStats = {}; // uid -> { total, succeeded, failed, entries: [{ execAt, diff, status, role }] }
+  for (const crime of allHistory) {
+    const execAt = crime.executedAt || 0;
+    if (!execAt || execAt < cutoff || !Array.isArray(crime.slots)) continue;
+    const diff = crime.difficulty || 0;
+    const status = crime.status || '';
+    const isSuccess = status === 'Successful';
+    const isFailed = status === 'Failed';
+    if (!isSuccess && !isFailed) continue;
+
+    for (const slot of crime.slots) {
+      const uid = String(slot.userId || '');
+      if (!uid) continue;
+      const role = slot.position || '';
+
+      if (!memberStats[uid]) memberStats[uid] = { total: 0, succeeded: 0, failed: 0, entries: [] };
+      memberStats[uid].total++;
+      if (isSuccess) memberStats[uid].succeeded++;
+      if (isFailed) memberStats[uid].failed++;
+      memberStats[uid].entries.push({ execAt, diff, status, role });
+    }
+  }
+
+  // Calculate consistency: split 90 days into 6 windows of 15 days each
+  // A consistent member participates in most windows
+  const WINDOW_SIZE = 15 * DAY;
+  const NUM_WINDOWS = 6;
+
+  function calcConsistency(entries) {
+    if (entries.length < 2) return 0;
+    const windows = new Set();
+    for (const e of entries) {
+      const windowIdx = Math.floor((e.execAt - cutoff) / WINDOW_SIZE);
+      windows.add(Math.min(windowIdx, NUM_WINDOWS - 1));
+    }
+    return Math.round(windows.size / NUM_WINDOWS * 100);
+  }
+
+  // Calculate streak: current streak of successive successful OCs
+  function calcStreak(entries) {
+    const sorted = [...entries].sort((a, b) => b.execAt - a.execAt); // newest first
+    let streak = 0;
+    for (const e of sorted) {
+      if (e.status === 'Successful') streak++;
+      else break;
+    }
+    return streak;
+  }
+
+  const results = [];
+
+  for (const m of memberArr) {
+    const uid = String(m.id || m.playerId || m.uid);
+    const stats = memberStats[uid];
+    const cpr = cprCache[uid];
+
+    // Activity score based on current status
+    let activityScore = 0;
+    let activityLabel = 'Unknown';
+    const lastActionStatus = (m.last_action?.status || 'Offline').toLowerCase();
+    const lastActionTs = m.last_action?.timestamp || 0;
+    const statusState = (m.status?.state || 'Okay').toLowerCase();
+    const daysSinceAction = lastActionTs > 0 ? Math.round((now - lastActionTs) / DAY) : 999;
+
+    if (statusState === 'hospitalized' || statusState === 'jail') {
+      activityScore = 30;
+      activityLabel = statusState === 'hospitalized' ? 'Hospitalized' : 'Jailed';
+    } else if (statusState === 'traveling') {
+      activityScore = 50;
+      activityLabel = 'Traveling';
+    } else if (lastActionStatus === 'online') {
+      activityScore = 100;
+      activityLabel = 'Online';
+    } else if (lastActionStatus === 'idle') {
+      activityScore = 75;
+      activityLabel = 'Idle';
+    } else if (daysSinceAction <= 1) {
+      activityScore = 60;
+      activityLabel = 'Recent';
+    } else if (daysSinceAction <= 3) {
+      activityScore = 40;
+      activityLabel = 'Away';
+    } else if (daysSinceAction <= 7) {
+      activityScore = 20;
+      activityLabel = 'Inactive';
+    } else {
+      activityScore = 5;
+      activityLabel = daysSinceAction > 30 ? 'Gone' : 'Inactive';
+    }
+
+    // If no OC history, still include with activity data
+    const successRate = stats && stats.total > 0 ? Math.round(stats.succeeded / stats.total * 100) : null;
+    const participationCount = stats?.total || 0;
+    const consistency = stats ? calcConsistency(stats.entries) : 0;
+    const currentStreak = stats ? calcStreak(stats.entries) : 0;
+
+    // Participation rate: OCs per 30 days
+    const ocsPerMonth = stats && stats.entries.length > 0
+      ? Math.round(stats.total / ((now - Math.min(...stats.entries.map(e => e.execAt))) / (30 * DAY)) * 10) / 10
+      : 0;
+
+    // Days since last OC
+    const lastOcAt = stats?.entries.length > 0 ? Math.max(...stats.entries.map(e => e.execAt)) : 0;
+    const daysSinceLastOC = lastOcAt > 0 ? Math.round((now - lastOcAt) / DAY) : null;
+
+    // Overall reliability score (0-100): weighted composite
+    // 35% success rate, 25% consistency, 20% activity, 20% participation frequency
+    let reliabilityScore = 0;
+    let isNewMember = false;
+    if (stats && stats.total >= 2) {
+      const successComponent = (successRate || 0) * 0.35;
+      const consistencyComponent = consistency * 0.25;
+      const activityComponent = activityScore * 0.20;
+      // Participation frequency: cap at 4+ OCs/month = 100%
+      const freqComponent = Math.min(100, ocsPerMonth / 4 * 100) * 0.20;
+      reliabilityScore = Math.round(successComponent + consistencyComponent + activityComponent + freqComponent);
+    } else if (stats && stats.total === 1) {
+      // Single OC: can't really judge, give partial credit
+      reliabilityScore = Math.round(activityScore * 0.5 + (successRate || 0) * 0.5);
+    } else {
+      // No OC history: predict based on activity + days in faction
+      // Active + established members get benefit of the doubt
+      const daysInFac = m.days_in_faction || 0;
+      const tenureBonus = Math.min(20, Math.round(daysInFac / 7 * 5)); // up to 20 pts for 4+ weeks
+      reliabilityScore = Math.round(activityScore * 0.6 + tenureBonus);
+      isNewMember = true;
+    }
+
+    // Tier label
+    let tier, tierColor;
+    if (isNewMember) {
+      // New members get a special tier -- predicted, not earned
+      if (reliabilityScore >= 60) { tier = 'New - Promising'; tierColor = '#818cf8'; }
+      else if (reliabilityScore >= 40) { tier = 'New'; tierColor = '#a78bfa'; }
+      else { tier = 'New - Unknown'; tierColor = '#6b7280'; }
+    } else if (reliabilityScore >= 80) { tier = 'Reliable'; tierColor = '#4ade80'; }
+    else if (reliabilityScore >= 60) { tier = 'Dependable'; tierColor = '#60a5fa'; }
+    else if (reliabilityScore >= 40) { tier = 'Inconsistent'; tierColor = '#e5b567'; }
+    else if (reliabilityScore >= 20) { tier = 'Unreliable'; tierColor = '#f97316'; }
+    else { tier = 'Inactive'; tierColor = '#ef4444'; }
+
+    // Most common role
+    let topRole = null;
+    if (stats?.entries.length > 0) {
+      const roleCounts = {};
+      for (const e of stats.entries) {
+        roleCounts[e.role] = (roleCounts[e.role] || 0) + 1;
+      }
+      const sorted = Object.entries(roleCounts).sort((a, b) => b[1] - a[1]);
+      topRole = sorted[0] ? { role: sorted[0][0], count: sorted[0][1] } : null;
+    }
+
+    results.push({
+      uid,
+      name: nameMap[uid] || uid,
+      level: m.level || 0,
+      daysInFaction: m.days_in_faction || 0,
+      reliabilityScore,
+      tier,
+      tierColor,
+      isNewMember,
+      successRate,
+      totalOCs: participationCount,
+      succeeded: stats?.succeeded || 0,
+      failed: stats?.failed || 0,
+      ocsPerMonth,
+      consistency,
+      currentStreak,
+      activityScore,
+      activityLabel,
+      daysSinceAction,
+      daysSinceLastOC,
+      topRole,
+    });
+  }
+
+  // Sort by reliability score descending
+  results.sort((a, b) => b.reliabilityScore - a.reliabilityScore);
+
+  // Faction-wide summary
+  const withHistory = results.filter(r => r.totalOCs >= 2);
+  const avgReliability = withHistory.length > 0
+    ? Math.round(withHistory.reduce((s, r) => s + r.reliabilityScore, 0) / withHistory.length)
+    : 0;
+  const tierCounts = { Reliable: 0, Dependable: 0, Inconsistent: 0, Unreliable: 0, Inactive: 0, New: 0 };
+  for (const r of results) {
+    if (r.isNewMember) tierCounts.New++;
+    else tierCounts[r.tier] = (tierCounts[r.tier] || 0) + 1;
+  }
+
+  return {
+    members: results,
+    summary: {
+      avgReliability,
+      totalMembers: results.length,
+      withHistory: withHistory.length,
+      tierCounts,
+    },
+  };
+}
+
+const _factionKeyCache = new Map(); // factionId  → { keys: [apiKey, ...], lastIndex: 0 } — pool of up to 10 verified faction-access keys
+const FACTION_KEY_POOL_MAX = 10;
+
+function addFactionKey(fid, key) {
+  fid = String(fid);
+  let pool = _factionKeyCache.get(fid);
+  if (!pool) { pool = { keys: [], lastIndex: 0 }; _factionKeyCache.set(fid, pool); }
+  // Don't add duplicates
+  if (pool.keys.includes(key)) return;
+  // If full, replace the oldest
+  if (pool.keys.length >= FACTION_KEY_POOL_MAX) pool.keys.shift();
+  pool.keys.push(key);
+}
+
+function getNextFactionKey(fid) {
+  const pool = _factionKeyCache.get(String(fid));
+  if (!pool || pool.keys.length === 0) return null;
+  pool.lastIndex = (pool.lastIndex + 1) % pool.keys.length;
+  return pool.keys[pool.lastIndex];
+}
+
+function removeFactionKey(fid, key) {
+  const pool = _factionKeyCache.get(String(fid));
+  if (!pool) return;
+  pool.keys = pool.keys.filter(k => k !== key);
+  if (pool.lastIndex >= pool.keys.length) pool.lastIndex = 0;
+}
 const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
 const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
 
 
+const OC_MIN_VERSION = '2.1.22';
+
+// Instant Xanax check: when a non-subscribed member refreshes, check THEIR events
+// for a recent Xanax send to RussianRob. If found, grant access immediately.
+async function checkInstantXanax(apiKey, playerInfo) {
+  try {
+    const res = await fetch(`https://api.torn.com/v2/user/events?limit=20&key=${encodeURIComponent(apiKey)}`);
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (data.error) return false;
+    const events = data.events || [];
+    // Look for "You sent 2 x Xanax to RussianRob" or similar
+    for (const ev of events) {
+      const txt = ev.event || '';
+      const match = txt.match(/sent\s+(\d+)\s*x\s*Xanax.*?(\d{4,})/i);
+      if (!match) continue;
+      const qty = parseInt(match[1], 10);
+      const targetId = match[2];
+      // Must be sent to RussianRob (137558)
+      if (String(targetId) !== String(OWNER_PLAYER_ID)) continue;
+      // Must be recent (within last 30 minutes)
+      const age = Math.floor(Date.now() / 1000) - (ev.timestamp || 0);
+      if (age > 1800) continue;
+      // Grant access
+      const { grantFactionAccess } = await import('./xanax-subscriptions.js');
+      const granted = grantFactionAccess(playerInfo.factionId, playerInfo.playerName + "'s faction", qty, playerInfo.playerName);
+      if (granted) return true;
+    }
+  } catch (e) { console.warn('[oc/spawn-key] Instant Xanax check failed:', e.message); }
+  return false;
+}
+function versionTooOld(v) {
+  if (!v) return true; // no version param = old script
+  const a = v.split('.').map(Number), b = OC_MIN_VERSION.split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i]||0) < (b[i]||0)) return true;
+    if ((a[i]||0) > (b[i]||0)) return false;
+  }
+  return false; // equal = ok
+}
+
+const _spawnKeyRateLimit = new Map(); // key suffix -> last request timestamp
+const SPAWN_KEY_COOLDOWN_MS = 1_000; // 1 second between requests per user (reduced from 5s for even faster responsiveness)
+
 router.get("/api/oc/spawn-key", async (req, res) => {
   // Explicit wildcard CORS: WebKit (TornPDA) sends Origin: null which cors middleware skips
   res.set("Access-Control-Allow-Origin", "*");
+
+  // Per-user rate limit (by key suffix)
+  const rlKey = (req.query.key || '').slice(-8);
+  if (rlKey) {
+    const lastReq = _spawnKeyRateLimit.get(rlKey) || 0;
+    const elapsed = Date.now() - lastReq;
+    if (elapsed < SPAWN_KEY_COOLDOWN_MS) {
+      const waitSec = Math.ceil((SPAWN_KEY_COOLDOWN_MS - elapsed) / 1000);
+      return res.status(429).json({ error: `Too many requests. Please wait ${waitSec}s.` });
+    }
+    _spawnKeyRateLimit.set(rlKey, Date.now());
+  }
+
+  // Build viewer object with subscription info
+  function buildViewer(playerInfo) {
+    const fid = String(playerInfo.factionId);
+    const ownerFid = String(process.env.OWNER_FACTION_ID || '42055');
+    let subscriptionExpiresAt = null;
+    if (fid === ownerFid || PARTNER_FACTIONS.includes(fid)) {
+      subscriptionExpiresAt = 'permanent';
+    } else {
+      const xSub = getXanaxSubscription(fid);
+      if (xSub && xSub.expiresAt) subscriptionExpiresAt = xSub.expiresAt;
+      if (!subscriptionExpiresAt) {
+        const allSubs = getAllSubscriptions();
+        const match = allSubs.find(s => String(s.factionId) === fid);
+        if (match && match.expiresAt) subscriptionExpiresAt = match.expiresAt;
+      }
+    }
+    return { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(fid), position: playerInfo.factionPosition || '', hasFactionAccess: playerInfo.hasFactionAccess || false, subscriptionExpiresAt };
+  }
+
+  // Block outdated script versions with a helpful update message
+  if (versionTooOld(req.query.v)) {
+    return res.status(426).json({ error: 'Your OC Spawn script is outdated.', updateUrl: 'https://tornwar.com/scripts/oc-spawn-assistance.user.js' });
+  }
+
   const key = req.query.key;
   if (!key || typeof key !== "string" || key.length < 10) {
     return res.status(400).json({ error: "Invalid key" });
@@ -2598,14 +3827,14 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     try {
       const info = await verifyTornApiKey(key);
       if (!isFactionAllowed(info.factionId) && !PARTNER_FACTIONS.includes(String(info.factionId)) && !hasXanaxSubscription(info.factionId)) {
-        // Not subscribed — check buyer's own events for a just-sent Xanax (instant grant)
-        const instantGranted = await checkInstantXanax(key, info);
-        if (!instantGranted) {
-          return res.status(403).json({ error: "Access restricted. Send 2 Xanax for a 7-day trial or 20 Xanax for 30 days to RussianRob [137558]." });
+        // Check if they just sent Xanax (instant grant)
+        const granted = await checkInstantXanax(key, { factionId: info.factionId, playerName: info.playerName });
+        if (!granted) {
+          return res.status(403).json({ error: "Access restricted. Send 2 Xanax for a 7-day trial or 20 Xanax for 30 days to RussianRob." });
         }
       }
       store.storeApiKey(info.playerId, key);
-      playerInfo = { ts: Date.now(), factionId: info.factionId, playerName: info.playerName, playerId: info.playerId, factionPosition: info.factionPosition };
+      playerInfo = { ts: Date.now(), factionId: info.factionId, playerName: info.playerName, playerId: info.playerId, factionPosition: info.factionPosition, hasFactionAccess: info.hasFactionAccess };
       _spawnKeyCache.set(suffix, playerInfo);
       console.log(`[oc/spawn-key] Verified ${info.playerName} (faction ${info.factionId})`);
     } catch (err) {
@@ -2615,18 +3844,11 @@ router.get("/api/oc/spawn-key", async (req, res) => {
   }
 
   try {
-    // oc-spawn.js already picks OWNER_API_KEY for faction 42055.
-    // For other factions: use cached faction key (from a previous Limited+ member) so
-    // Minimal-access members can still get their faction's OC data.
+    // Use requesting member's key. For members without faction access,
+    // this will fail and fall back to the cached faction key below.
     const fid = String(playerInfo.factionId);
-    const ownerFid = String(process.env.OWNER_FACTION_ID || '42055');
-    if (fid !== ownerFid && !_factionKeyCache.has(fid)) {
-      // No cached key yet — seed with member's own key as best attempt
-      _factionKeyCache.set(fid, key);
-    }
+    if (playerInfo.hasFactionAccess) addFactionKey(fid, key);
     const data = await getOcSpawnData(playerInfo.factionId, key);
-    // Success: this key has Limited+ access — cache it to help future Minimal-access members
-    if (fid !== ownerFid) _factionKeyCache.set(fid, key);
 
     // Apply faction's MINCPR/CPR_BOOST to recalculate joinable (server cache uses hardcoded defaults)
     const fSettings = store.getFactionSettings(playerInfo.factionId);
@@ -2647,32 +3869,76 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       d.joinable = d.cpr >= fMincpr + fBoost ? Math.min(effTop + 1, 10) : effTop;
     }
 
-    return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '' } });
+    const viewerObj = buildViewer(playerInfo);
+    console.log(`[oc/spawn-key] Sending viewer for ${playerInfo.playerName} (${playerInfo.playerId}): hasFactionAccess=${viewerObj.hasFactionAccess}`);
+
+    // Collect OC history (piggybacks on existing data, no extra API calls)
+    collectOcHistory(playerInfo.factionId, data);
+
+    // Run engines if enabled — cached per faction for 1 hour (same TTL as CPR cache)
+    if (!_engineCache.has(fid) || (Date.now() - _engineCache.get(fid).ts) > 3600_000 || _engineCache.get(fid).settingsHash !== engineSettingsHash(fSettings)) {
+      const engines = {};
+      if (fSettings.engine_slot_optimizer) engines.slotOptimizer = runSlotOptimizer(fid, data);
+      if (fSettings.engine_failure_risk) engines.failureRisk = runFailureRisk(fid, data);
+      if (fSettings.engine_cpr_forecaster) engines.cprForecaster = runCprForecaster(fid, data);
+      if (fSettings.engine_member_projector) engines.memberProjector = runMemberProjector(fid, data);
+      if (fSettings.engine_member_reliability) engines.memberReliability = runMemberReliability(fid, data);
+
+
+      _engineCache.set(fid, { ts: Date.now(), engines, settingsHash: engineSettingsHash(fSettings) });
+    }
+    const engines = { ..._engineCache.get(fid).engines };
+
+    // Auto-Dispatcher is per-player (not faction-cached), runs every request
+    if (fSettings.engine_auto_dispatcher) {
+      engines.autoDispatcher = runAutoDispatcher(fid, data, playerInfo.playerId);
+    }
+
+    return res.json({ ...data, viewer: viewerObj, engines });
   } catch (err) {
-    // If member's own key failed (likely Minimal access), retry with cached faction key
+    // If member's own key failed, try keys from the faction pool
     const fid = String(playerInfo.factionId);
-    const cachedKey = _factionKeyCache.get(fid);
-    if (cachedKey && cachedKey !== key) {
-      try {
-        const data = await getOcSpawnData(playerInfo.factionId, cachedKey);
-        // Apply faction settings to retry path too
-        const fS2 = store.getFactionSettings(playerInfo.factionId);
-        const fM2 = fS2.oc_mincpr ?? 60, fB2 = fS2.oc_cpr_boost ?? 15;
-        for (const [uid, d] of Object.entries(data.cprCache || {})) {
-          const lc = {};
-          for (const e of (d.entries || [])) { if (!lc[e.diff]) lc[e.diff] = { sum: 0, count: 0 }; lc[e.diff].sum += e.rate; lc[e.diff].count += 1; }
-          let effTop = d.highestLevel || 0;
-          for (let lvl = effTop; lvl >= 1; lvl--) { const lv = lc[lvl]; if (!lv) continue; if ((lv.sum / lv.count) >= fM2) { effTop = lvl; break; } }
-          d.effectiveTop = effTop;
-          d.joinable = d.cpr >= fM2 + fB2 ? Math.min(effTop + 1, 10) : effTop;
+    const pool = _factionKeyCache.get(fid);
+    if (pool && pool.keys.length > 0) {
+      const keysToTry = pool.keys.filter(k => k !== key);
+      for (const poolKey of keysToTry) {
+        try {
+          const data = await getOcSpawnData(playerInfo.factionId, poolKey);
+          // Apply faction settings to retry path too
+          const fS2 = store.getFactionSettings(playerInfo.factionId);
+          const fM2 = fS2.oc_mincpr ?? 60, fB2 = fS2.oc_cpr_boost ?? 15;
+          for (const [uid, d] of Object.entries(data.cprCache || {})) {
+            const lc = {};
+            for (const e of (d.entries || [])) { if (!lc[e.diff]) lc[e.diff] = { sum: 0, count: 0 }; lc[e.diff].sum += e.rate; lc[e.diff].count += 1; }
+            let effTop = d.highestLevel || 0;
+            for (let lvl = effTop; lvl >= 1; lvl--) { const lv = lc[lvl]; if (!lv) continue; if ((lv.sum / lv.count) >= fM2) { effTop = lvl; break; } }
+            d.effectiveTop = effTop;
+            d.joinable = d.cpr >= fM2 + fB2 ? Math.min(effTop + 1, 10) : effTop;
+          }
+          // Run engines on fallback data too
+          const fS2engines = {};
+          if (!_engineCache.has(fid) || (Date.now() - _engineCache.get(fid).ts) > 3600_000) {
+            if (fS2.engine_slot_optimizer) fS2engines.slotOptimizer = runSlotOptimizer(fid, data);
+            if (fS2.engine_failure_risk) fS2engines.failureRisk = runFailureRisk(fid, data);
+            if (fS2.engine_cpr_forecaster) fS2engines.cprForecaster = runCprForecaster(fid, data);
+            if (fS2.engine_member_projector) fS2engines.memberProjector = runMemberProjector(fid, data);
+            if (fS2.engine_member_reliability) fS2engines.memberReliability = runMemberReliability(fid, data);
+            _engineCache.set(fid, { ts: Date.now(), engines: fS2engines, settingsHash: engineSettingsHash(fS2) });
+          }
+          const retryEngines = { ...(_engineCache.get(fid)?.engines || {}) };
+          if (fS2.engine_auto_dispatcher) {
+            retryEngines.autoDispatcher = runAutoDispatcher(fid, data, playerInfo.playerId);
+          }
+          return res.json({ ...data, viewer: buildViewer(playerInfo), engines: retryEngines });
+        } catch (retryErr) {
+          console.error(`[oc/spawn-key] pool key failed for faction ${fid}:`, retryErr.message);
+          removeFactionKey(fid, poolKey); // Remove dead key from pool
         }
-        return res.json({ ...data, viewer: { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(playerInfo.factionId), position: playerInfo.factionPosition || '' } });
-      } catch (retryErr) {
-        console.error("[oc/spawn-key] retry with cached faction key also failed:", retryErr.message);
       }
     }
     console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
-    return res.status(500).json({ error: "Failed to fetch OC data: " + err.message });
+    // No cached faction key available — return partial data so the script can show viewer card
+    return res.json({ crimes: [], members: {}, cprCache: {}, pendingFactionData: true, viewer: buildViewer(playerInfo), engines: {} });
   }
 });
 
@@ -2690,7 +3956,7 @@ router.get("/api/oc/settings", async (req, res) => {
       if (!isFactionAllowed(tornInfo.factionId) && !PARTNER_FACTIONS.includes(String(tornInfo.factionId)) && !hasXanaxSubscription(tornInfo.factionId)) {
         return res.status(403).json({ error: "Access restricted" });
       }
-      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition };
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition, hasFactionAccess: tornInfo.hasFactionAccess };
       _spawnKeyCache.set(suffix, info);
     } catch (err) { return res.status(401).json({ error: err.message }); }
   }
@@ -2704,8 +3970,76 @@ router.get("/api/oc/settings", async (req, res) => {
     scope:               s.oc_scope                ?? null,
     high_weight_pct:     s.oc_high_weight_pct      ?? 25,
     high_weight_mincpr:  s.oc_high_weight_mincpr   ?? 75,
-    admin_roles:         s.oc_admin_roles           ?? 'Leader,Co-leader',
+    // Engine toggles
+    engine_slot_optimizer:   s.engine_slot_optimizer   ?? false,
+    engine_cpr_forecaster:   s.engine_cpr_forecaster   ?? false,
+    engine_failure_risk:     s.engine_failure_risk     ?? false,
+
+    engine_member_reliability: s.engine_member_reliability ?? false,
+
+
+    engine_member_projector: s.engine_member_projector ?? false,
+    engine_auto_dispatcher:  s.engine_auto_dispatcher  ?? true,
   });
+});
+
+// -- GET /api/oc/version (lightweight version check for update notifications)
+router.get("/api/oc/version", (req, res) => {
+  try {
+    const fs = require('fs');
+    const script = fs.readFileSync('/opt/warboard/server/public/scripts/oc-spawn-assistance.user.js', 'utf-8');
+    const match = script.match(/@version\s+([\d.]+)/);
+    return res.json({ version: match ? match[1] : '0' });
+  } catch (e) { return res.json({ version: '0' }); }
+});
+
+// -- GET /api/oc/scope  (lightweight scope-only update — no other settings touched)
+router.get("/api/oc/scope", async (req, res) => {
+  const key = req.query.key;
+  if (!key) return res.status(400).json({ error: "Missing key" });
+  const suffix = key.slice(-8);
+  let info = _spawnKeyCache.get(suffix);
+  if (!info || (Date.now() - info.ts) > 5 * 60_000) {
+    try {
+      const tornInfo = await verifyTornApiKey(key);
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition, hasFactionAccess: tornInfo.hasFactionAccess };
+      _spawnKeyCache.set(suffix, info);
+    } catch (err) { return res.status(401).json({ error: err.message }); }
+  }
+  const scopeRaw = parseInt(req.query.scope, 10);
+  if (isNaN(scopeRaw)) return res.status(400).json({ error: "Missing scope" });
+  store.updateFactionSettings(info.factionId, { oc_scope: Math.max(0, Math.min(100, scopeRaw)) });
+  return res.json({ ok: true });
+});
+
+// -- GET /api/oc/engines/update — engine toggles only, separate from main settings
+router.get("/api/oc/engines/update", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const key = req.query.key;
+  if (!key || key.length < 10) return res.status(400).json({ error: "Invalid key" });
+  const suffix = key.slice(-8);
+  let info = _spawnKeyCache.get(suffix);
+  if (!info || (Date.now() - info.ts) > 5 * 60_000) {
+    try {
+      const tornInfo = await verifyTornApiKey(key);
+      if (!isFactionAllowed(tornInfo.factionId)) return res.status(403).json({ error: "Access restricted" });
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition, hasFactionAccess: tornInfo.hasFactionAccess };
+      _spawnKeyCache.set(suffix, info);
+    } catch (err) { return res.status(401).json({ error: err.message }); }
+  }
+  const bool = (k) => req.query[k] === 'true' || req.query[k] === '1';
+  store.updateFactionSettings(info.factionId, {
+    engine_slot_optimizer:   bool('engine_slot_optimizer'),
+    engine_cpr_forecaster:   bool('engine_cpr_forecaster'),
+    engine_failure_risk:     bool('engine_failure_risk'),
+
+    engine_member_reliability: bool('engine_member_reliability'),
+    engine_auto_dispatcher:   bool('engine_auto_dispatcher'),
+
+    engine_member_projector: bool('engine_member_projector'),
+  });
+  console.log(`[oc/engines] ${info.playerName} updated engines for faction ${info.factionId}`);
+  return res.json({ ok: true });
 });
 
 // -- GET /api/oc/settings/update --------------------------------------------
@@ -2721,13 +4055,14 @@ router.get("/api/oc/settings/update", async (req, res) => {
       if (!isFactionAllowed(tornInfo.factionId)) {
         return res.status(403).json({ error: "Settings can only be changed by faction members." });
       }
-      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition };
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition, hasFactionAccess: tornInfo.hasFactionAccess };
       _spawnKeyCache.set(suffix, info);
     } catch (err) { return res.status(401).json({ error: err.message }); }
   } else if (!isFactionAllowed(info.factionId)) {
     return res.status(403).json({ error: "Settings can only be changed by faction members." });
   }
   const num = (k, d) => { const v = parseInt(req.query[k], 10); return isNaN(v) ? d : v; };
+  const bool = (k) => req.query[k] === 'true' || req.query[k] === '1';
   const scopeRaw = parseInt(req.query.scope, 10);
   store.updateFactionSettings(info.factionId, {
     oc_active_days:         num("active_days",         7),
@@ -2737,7 +4072,6 @@ router.get("/api/oc/settings/update", async (req, res) => {
     oc_lookback_days:       num("lookback_days",        90),
     oc_high_weight_pct:     num("high_weight_pct",      25),
     oc_high_weight_mincpr:  num("high_weight_mincpr",   75),
-    oc_admin_roles:         (req.query.admin_roles || '').trim() || 'Leader,Co-leader',
     oc_scope:               isNaN(scopeRaw) ? null : Math.max(0, Math.min(100, scopeRaw)),
   });
   console.log("[oc/settings] " + info.playerName + " updated faction " + info.factionId + " OC settings");
@@ -2768,5 +4102,44 @@ router.post("/api/nerve-tracker/config", requireAuth, (req, res) => {
     updateNerveConfig({ factionOffset, apiKey });
     res.json({ ok: true, factionOffset: Number(factionOffset) });
 });
+
+
+// ── Periodic enemy status auto-refresh ────────────────────────────────────
+// Every 30s, refresh enemy statuses from Torn API for all active wars.
+const AUTO_REFRESH_INTERVAL_MS = 30_000;
+
+setInterval(async () => {
+  for (const [warId, war] of store.getAllWars()) {
+    if (!war.enemyFactionId || !war.factionId) continue;
+    // Skip ended wars
+    if (war.warEnded) continue;
+    const onlinePlayers = store.getOnlinePlayersForWar(warId);
+
+    const apiKey = store.getFactionApiKey(war.factionId) || store.getApiKeyForFaction(war.factionId);
+    if (!apiKey) continue;
+
+    try {
+      const freshStatuses = await fetchFactionMembers(war.enemyFactionId, apiKey);
+
+      // Check for hospital pops before overwriting
+      for (const [targetId, newStatus] of Object.entries(freshStatuses)) {
+        const old = war.enemyStatuses[targetId];
+        if (old && old.status && old.status.includes('hospital') && !newStatus.status.includes('hospital')) {
+          const targetName = newStatus.name || old.name || targetId;
+          for (const p of onlinePlayers) {
+            push.notifyHospitalPop(p.id, targetName, targetId);
+          }
+        }
+      }
+
+      war.enemyStatuses = freshStatuses;
+      store.saveState();
+      broadcastWarUpdate(warId);
+      console.log(`[auto-refresh] War ${warId}: refreshed ${Object.keys(freshStatuses).length} enemy statuses`);
+    } catch (err) {
+      console.warn(`[auto-refresh] War ${warId} failed:`, err.message);
+    }
+  }
+}, AUTO_REFRESH_INTERVAL_MS);
 
 export default router;
