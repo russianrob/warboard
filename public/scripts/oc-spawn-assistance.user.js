@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.10
+// @version      2.3.3
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,17 +18,17 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
-// v3.0.10 — Disabled Slot Optimizer engine since Auto-Dispatcher serves similar purpose
-// v3.0.9 — Removed hardcoded 15s refresh cooldown completely for faster button re-enable
-// v3.0.8 — Reduced refresh cooldown from 15s to 3s for faster button re-enable
-// v3.0.7 — Reduced retry delays (1s, 2s, 3s vs 5s, 10s, 20s) for faster refresh responsiveness
-// v3.0.6 — Admin eligible list: prioritize OCs with most members filled, remove weight sorting
-// v3.0.5 — fix: re-fetch data when navigating back to crimes tab (not just re-inject stale banner)
-// v3.0.4 — travel alert: only show for fully staffed OCs (not partially filled ones with ready_at in past)
-// v3.0.3 — dispatcher banner re-injects when navigating back to crimes tab
-// v3.0.2 — dispatcher banner only visible on crimes tab, auto-hides on tab navigation
-// v3.0.1 — auto-retry on fetch errors (3 retries w/ backoff), dispatcher banner shows retry/error state instead of stuck loading
-// v3.0.0 — version bump (6 engines: Slot Optimizer, Failure Risk, CPR Forecaster, Member Projector, Member Reliability, Auto-Dispatcher)
+// v2.3.2 — Slot Optimizer recommendation shown in My OC viewer card
+// v2.3.1 — CPR Forecaster: per-level, per-role breakdown
+// v2.3.0 — Remember active tab across refreshes
+// v2.2.9 — CPR Forecaster: per-level trends instead of flat average
+// v2.2.8 — CPR Forecaster engine: 90-day trends, 30-day projections per member
+// v2.2.4 — Failure Risk engine + Slot Optimizer fit labels (Strong/Good/Weak Fit)
+// v2.2.3 — Engines tab: greyed-out coming soon engines, removed Nerve Efficiency, renamed OC Payout Tracker
+// v2.2.2 — Dedicated Engines tab with separate save, removed scope auto-push
+// v2.2.1 — Slot Optimizer engine: auto-calculate best member-to-slot assignments
+// v2.2.0 — Engine toggle system: 11 engines across Optimization, Risk, Economy, Recruitment categories
+// v2.1.27 — Recommendations search downward through lower levels if none at joinable level
 // v2.1.26 — Settings gear always visible so all members can change their API key
 // v2.1.25 — API key guidance (Limited Access required), subscription timer in header
 // v2.1.24 — Buttons render as action text if already on armoury tab at load time
@@ -132,7 +132,6 @@
             ENGINE_ITEM_ROI:         GM_getValue('eng_item_roi', false),
             ENGINE_GAP_ANALYZER:     GM_getValue('eng_gap_analyzer', false),
             ENGINE_MEMBER_PROJECTOR: GM_getValue('eng_member_projector', false),
-            VERSION:           '1.5.4',
         };
     }
     let CONFIG = loadConfig();
@@ -142,7 +141,7 @@
     let lastScopeProjection = null;
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
-    const SCRIPT_VERSION = '2.3.2';
+    const SCRIPT_VERSION = '2.3.3';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
