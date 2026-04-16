@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.47
+// @version      4.8.48
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.48  - Feature: PDA Notification toggle and Test button now visible to all users (not PDA-only).
 // v4.8.47  - Fix: Remove settings gear and heatmap button from all attack page URLs (loader.php and page.php).
 // v4.8.46  - Fix: Remove FactionOps overlay (heatmap/settings buttons) from attack pages when navigating from war pages.
 // v4.8.45  - Fix: Corrected malformed regex in target ID extraction that could prevent assist button from appearing.
@@ -4054,7 +4055,6 @@ body.wb-chain-active {
                 Keeps your Torn activity fresh while the warboard is open, so enemies can't tell you're idle.
             </div>
 
-            ${IS_PDA ? `
             <div class="wb-settings-row">
                 <span>PDA Notifications</span>
                 <label class="wb-toggle">
@@ -4067,8 +4067,6 @@ body.wb-chain-active {
             </div>
             <button class="wb-btn wb-btn-sm" id="fo-btn-test-pda-notif" style="margin-bottom:14px;font-size:11px;">Test PDA Notification</button>
             <div id="fo-pda-notif-result" style="font-size:11px;margin-bottom:10px;min-height:14px;"></div>
-
-            ` : ''}
 
             <hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:14px 0;">
 
