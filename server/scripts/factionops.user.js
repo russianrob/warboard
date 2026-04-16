@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.47
+// @version      4.8.48
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.8.48  - Feature: Added test toast notification button in settings panel for easy testing.
 // v4.8.47  - Fix: Remove settings gear and heatmap button from all attack page URLs (loader.php and page.php).
 // v4.8.46  - Fix: Remove FactionOps overlay (heatmap/settings buttons) from attack pages when navigating from war pages.
 // v4.8.45  - Fix: Corrected malformed regex in target ID extraction that could prevent assist button from appearing.
