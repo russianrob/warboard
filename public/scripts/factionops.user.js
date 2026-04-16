@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.0
+// @version      4.9.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.1   - Feature: Added Test Toast Notification button in settings.
 // v4.9.0   - Feature: PDA Notification toggle and Test button now visible to all users (not PDA-only).
 // v4.8.47  - Fix: Remove settings gear and heatmap button from all attack page URLs (loader.php and page.php).
 // v4.8.46  - Fix: Remove FactionOps overlay (heatmap/settings buttons) from attack pages when navigating from war pages.
@@ -4068,6 +4069,8 @@ body.wb-chain-active {
             <button class="wb-btn wb-btn-sm" id="fo-btn-test-pda-notif" style="margin-bottom:14px;font-size:11px;">Test PDA Notification</button>
             <div id="fo-pda-notif-result" style="font-size:11px;margin-bottom:10px;min-height:14px;"></div>
 
+            <button class="wb-btn wb-btn-sm" id="fo-btn-test-toast" style="margin-bottom:14px;font-size:11px;">Test Toast Notification</button>
+
             <hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:14px 0;">
 
             ${isLeader() ? `
@@ -4220,6 +4223,13 @@ body.wb-chain-active {
             });
         }
 
+        // Test Toast button
+        const testToastBtn = document.getElementById('fo-btn-test-toast');
+        if (testToastBtn) {
+            testToastBtn.addEventListener('click', () => {
+                showToast('Toast notifications are working!', 'success');
+            });
+        }
 
 
         // War target — set/clear (leader only)
