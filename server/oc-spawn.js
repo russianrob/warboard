@@ -4,7 +4,7 @@ import * as store from "./store.js";
 const CPR_LOOKBACK_DAYS = 90;
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
-const factionOcsCache = new Map(); // factionId -> { timestamp, cprCache }
+const factionOcsCache = new Map(); // factionId -> { timestamp, cprCache, completedCrimes }
 
 // Helper to fetch from Torn API directly if not in torn-api.js
 async function fetchCompletedCrimes(factionId, apiKey) {
@@ -75,6 +75,17 @@ function buildCprCache(completedCrimes) {
   return result;
 }
 
+/**
+ * Return raw completed crimes from the cache for a given faction.
+ * Used by routes.js engines (slot optimizer, failure risk, etc.) for OC history.
+ * Returns [] if no cached data yet (caller should handle gracefully).
+ */
+export function getCachedCompletedCrimes(factionId) {
+  const cached = factionOcsCache.get(factionId);
+  if (cached && cached.completedCrimes) return cached.completedCrimes;
+  return [];
+}
+
 export async function getOcSpawnData(factionId, apiKey) {
   let cprCache = null;
   const cached = factionOcsCache.get(factionId);
@@ -83,7 +94,7 @@ export async function getOcSpawnData(factionId, apiKey) {
   } else {
     const completedCrimes = await fetchCompletedCrimes(factionId, apiKey);
     cprCache = buildCprCache(completedCrimes);
-    factionOcsCache.set(factionId, { timestamp: Date.now(), cprCache });
+    factionOcsCache.set(factionId, { timestamp: Date.now(), cprCache, completedCrimes });
   }
 
   const availableCrimes = await fetchAvailableCrimes(factionId, apiKey);
