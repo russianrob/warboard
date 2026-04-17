@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.49
+// @version      4.9.50
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.50  - Fix: Faction Cooldowns panel header gets pointer-events:auto + touch-action treatment (same pattern as Shout button) so clicks actually land when the overlay is nested in Torn's #mainContainer.
 // v4.9.49  - Fix: Faction Cooldowns panel header now reliably expands/collapses (delegated click handler survives DOM re-renders).
 // v4.9.3   - Fix: PDA connection no longer flips to Offline on a single poll hiccup (requires 3 consecutive failures); renamed 'Syncing' to 'Connected'.
 // v4.9.2   - Fix: Boost toast z-index to max to ensure visibility on attack pages; add assist toast debug log.
@@ -2587,7 +2588,13 @@ body.wb-chain-active {
     padding: 6px 14px; cursor: pointer; user-select: none;
     font: 600 11px/1 Arial, sans-serif; color: var(--wb-text);
     text-transform: uppercase; letter-spacing: 0.06em;
+    /* Ensure clicks land — same treatment that fixed the Shout button
+       when the overlay lives inside #mainContainer. */
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    position: relative; z-index: 2;
 }
+.fo-bars-header * { pointer-events: none; }
 .fo-bars-header:hover { background: rgba(255,255,255,0.03); }
 .fo-bars-caret { font-size: 9px; transition: transform 0.15s ease; display: inline-block; }
 .fo-bars-section.is-open .fo-bars-caret { transform: rotate(90deg); }
