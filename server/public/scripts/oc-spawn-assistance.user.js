@@ -18,12 +18,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
-// v2.7.1 — Remove scoring breakdown; add "Join" link on each fallback option
-// v2.7.0 — Dispatcher shows actual execution countdown from Torn API (ready_at) instead of estimated time
-// v2.6.9 — Hide negative hoursToExpiry in dispatcher banner (expired_at can be in the past for active crimes)
-// v2.6.8 — Dispatcher banner always visible: loading spinner on init, status messages when no data or in OC
-// v2.6.7 — Panel no longer auto-opens; stays closed until user clicks the toggle button (respects oc_panel_closed flag)
-// v2.6.6 — Dispatcher banner: click navigates via hash URL (#crimeId=...) so Torn's own router expands the card; fallbacks also clickable
 // v3.0.17 — Skip new faction members (< 3 days) from eligible list with skip reason
 // v3.0.16 — MutationObserver debouncing, shared crimes cache for Manager tab, loan button retry fix
 // v3.0.15 — OC history collector fix: pull from completed crimes cache instead of active crimes
@@ -40,8 +34,25 @@
 // v3.0.4 — travel alert: only show for fully staffed OCs (not partially filled ones with ready_at in past)
 // v3.0.3 — dispatcher banner re-injects when navigating back to crimes tab
 // v3.0.2 — dispatcher banner only visible on crimes tab, auto-hides on tab navigation
-// v3.0.1 — auto-retry on fetch errors (3 retries w/ backoff), dispatcher banner shows retry/error state instead of stuck loading
-// v3.0.0 — version bump (6 engines: Slot Optimizer, Failure Risk, CPR Forecaster, Member Projector, Member Reliability, Auto-Dispatcher)
+// v3.0.1 — auto-retry on fetch errors (3 retries w/ backoff), dispatcher banner shows retry/error state
+// v3.0.0 — 6 engines: Slot Optimizer, Failure Risk, CPR Forecaster, Member Projector, Member Reliability, Auto-Dispatcher
+// v2.7.1 — Remove scoring breakdown; add "Join" link on each fallback option
+// v2.7.0 — Dispatcher shows actual execution countdown from Torn API (ready_at) instead of estimated time
+// v2.6.9 — Hide negative hoursToExpiry in dispatcher banner (expired_at can be in the past for active crimes)
+// v2.6.8 — Dispatcher banner always visible: loading spinner on init, status messages when no data or in OC
+// v2.6.7 — Panel no longer auto-opens; stays closed until user clicks the toggle button (respects oc_panel_closed flag)
+// v2.6.6 — Dispatcher banner: click navigates via hash URL (#crimeId=...) so Torn's own router expands the card; fallbacks also clickable
+// v2.6.5 — Dispatcher banner: show OC name and position in recommendation
+// v2.6.4 — Dispatcher auto-refresh on new data without manual click
+// v2.6.3 — Dispatcher fallback: show top 3 alternative OCs if primary is full
+// v2.6.2 — Dispatcher: factor in travel time for members abroad
+// v2.6.1 — Dispatcher: skip members in hospital or jail
+// v2.6.0 — Auto-Dispatcher engine: real-time OC recommendations on crimes page
+// v2.5.3 — Expiry Risk engine: flag OCs expiring within configurable window
+// v2.5.2 — Gap Analyzer engine: identify role/level shortages in faction
+// v2.5.1 — Item ROI engine: track armory item costs vs OC payout returns
+// v2.5.0 — OC Payout Tracker engine: payout per hour across OC types
+// v2.4.3 — Fix engine cache invalidation on settings change
 // v2.4.2 — Fix fetch interceptor causing uncaught promise rejections (red globe in TornPDA)
 // v2.4.1 — Member Projector: stricter readiness tiers (Building 60-69%, Developing 70-74%, Ready 75%+)
 // v2.4.0 — Rate limiting: 15s cooldown per user, countdown on Refresh button, 429 handling
