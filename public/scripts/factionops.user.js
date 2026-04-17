@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.3
+// @version      4.9.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -2676,6 +2676,33 @@ body.wb-chain-active {
             clearTimeout(timer);
             timer = setTimeout(() => fn.apply(this, args), ms);
         };
+    }
+
+    // ── Peer Relay: report observed enemy status changes to server ──────────
+    // Batches intercepted status changes and sends them to the server every 2s.
+    // Other connected clients receive the update instantly via SSE/Socket.IO,
+    // giving near-real-time enemy status without any Torn API calls.
+    let peerRelayBatch = {};
+    let peerRelayTimer = null;
+
+    function queuePeerRelay(statusBatch) {
+        if (!statusBatch || Object.keys(statusBatch).length === 0) return;
+        Object.assign(peerRelayBatch, statusBatch);
+        if (peerRelayTimer) return; // already scheduled
+        peerRelayTimer = setTimeout(flushPeerRelay, 2000);
+    }
+
+    function flushPeerRelay() {
+        peerRelayTimer = null;
+        const batch = peerRelayBatch;
+        peerRelayBatch = {};
+        if (Object.keys(batch).length === 0) return;
+        const warId = deriveWarId();
+        if (!warId || !state.jwtToken) return;
+        log(`[peer-relay] Sending ${Object.keys(batch).length} status updates`);
+        postAction('/api/status', { warId, statuses: batch }).catch(err => {
+            warn('[peer-relay] Failed to send:', err.message);
+        });
     }
 
     /** Extract a Torn player ID from a URL or href string. */
@@ -7487,7 +7514,12 @@ body.wb-chain-active {
             }
 
             // Use monotonic merge so intercepted API can't bump timers up
-            if (Object.keys(statusBatch).length > 0) mergeStatusesMonotonic(statusBatch);
+            if (Object.keys(statusBatch).length > 0) {
+                mergeStatusesMonotonic(statusBatch);
+
+                // Peer relay — report changes to server for other faction members
+                queuePeerRelay(statusBatch);
+            }
 
             // Update DOM for each affected target
             for (const targetId of Object.keys(statusBatch)) {

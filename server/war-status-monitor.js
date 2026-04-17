@@ -6,16 +6,78 @@
  */
 
 import * as store from "./store.js";
-import { fetchFactionMembers } from "./torn-api.js";
+import { fetchFactionMembers, fetchRecentFactionAttacks, fetchUserProfile } from "./torn-api.js";
 import { recordSample } from "./activity-heatmap.js";
+import { broadcastSSE } from "./routes.js";
+import * as push from "./push-notifications.js";
 
-const POLL_INTERVAL_MS = 15_000; // 15 seconds
+// Fallback intervals used when we can't look up the dynamic value (no
+// war loaded, store unavailable). Under normal operation both pollers
+// call store.getPollInterval(factionId, purpose) for a value that
+// scales with current pool size.
+const POLL_INTERVAL_MS = 30_000;
 const MAX_BACKOFF_MS = 120_000;   // max 2 minutes between retries on failure
+
+const nextWarStatus = (war) =>
+  war && war.factionId
+    ? store.getPollInterval(war.factionId, "war-status")
+    : POLL_INTERVAL_MS;
+const nextAttacksFeed = (war) =>
+  war && war.factionId
+    ? store.getPollInterval(war.factionId, "attacks-feed")
+    : ATTACKS_FEED_INTERVAL_MS;
+const nextEnemyAttacks = (war) =>
+  war && war.factionId
+    ? store.getPollInterval(war.factionId, "enemy-attacks")
+    : 30_000;
+const nextEnemyProfile = (war) =>
+  war && war.factionId
+    ? store.getPollInterval(war.factionId, "enemy-profile")
+    : 2_500;
+
+// Attacks-feed watcher — near-real-time hospital detection.
+// Shorter Torn cache on attacks endpoint + atomic event semantics (each
+// record says who hospitalized whom) give us ~20s latency for any enemy
+// hospitalized BY OUR FACTION, instead of the 30s bound of the basic poll.
+// 20s matches Torn's attack-endpoint cache window — polling faster
+// returns duplicates and burns the 100/min rate-limit budget we share
+// with chain-monitor, war-status basic poll, WarScanner, NerveTracker,
+// and xanax-subs.
+const ATTACKS_FEED_INTERVAL_MS = 60_000;
+// How long an attacks-feed-derived hospital override suppresses a stale
+// "Okay" from the basic poll. Torn's cache tends to settle within 30s; we
+// allow a bit of margin.
+const ATTACK_OVERRIDE_TTL_MS = 45_000;
+// How far back to look on the very first attacks-feed poll for a war.
+const ATTACKS_FEED_LOOKBACK_SEC = 60;
 
 /** Active polling timeout IDs per warId. */
 const timeouts = new Map();
 /** Current backoff delay per warId (resets on success). */
 const backoffs = new Map();
+/** Active attacks-feed poll timers per warId. */
+const attacksFeedTimeouts = new Map();
+/** Last-seen attack timestamp (seconds) per warId — cursor for attacks feed. */
+const attacksFeedCursors = new Map();
+/** Current attacks-feed backoff per warId. */
+const attacksFeedBackoffs = new Map();
+/** Short-lived hospital overrides per warId: memberId -> { until, setAt }. */
+const attackOverrides = new Map();
+
+/** Enemy-attacks watcher — detects when enemy faction members are
+ *  actively attacking (anyone). Useful to show "busy" / "just attacked"
+ *  badges on enemy rows so the faction knows they're not an immediate
+ *  attackable target. */
+const enemyAttacksTimeouts = new Map();
+const enemyAttacksCursors = new Map();
+const enemyAttacksBackoffs = new Map();
+
+/** Per-enemy profile round-robin. Polls one enemy's /user/:id?selections=profile
+ *  per tick at a dynamic interval. Catches status.state === "Attacking"
+ *  (sub-30s attack-activity detection that works against any public
+ *  user, unlike the faction attacks feed which is key-restricted). */
+const enemyProfileTimeouts = new Map();
+const enemyProfileCursors = new Map();
 
 const MAX_ACTIVITY_LOG = 5760; // 24 hours at 15s intervals
 
@@ -43,18 +105,24 @@ export function startWarStatusMonitor(io, warId) {
         stopWarStatusMonitor(warId);
         return;
       }
-      scheduleNext(POLL_INTERVAL_MS);
+      scheduleNext(nextWarStatus(war));
       return;
     }
 
-    // Prefer faction-dedicated key, fall back to any player key
-    const apiKey =
-      store.getFactionApiKey(war.factionId) ||
-      store.getApiKeyForFaction(war.factionId);
-    if (!apiKey) { scheduleNext(POLL_INTERVAL_MS); return; }
+    // Rotate across opted-in pool keys (different purpose tags land on
+    // different keys so pollers spread load). Falls through to faction
+    // dedicated / any stored key when the pool is empty.
+    const apiKey = store.getPollingKey(war.factionId, "war-status");
+    if (!apiKey) { scheduleNext(nextWarStatus(war)); return; }
 
     try {
       const freshStatuses = await fetchFactionMembers(war.enemyFactionId, apiKey);
+
+      // Apply any fresh attacks-feed hospital overrides so a stale
+      // "Okay" from Torn's cache doesn't briefly undo a hospitalization
+      // we already detected via the attacks feed.
+      applyAttackOverrides(warId, freshStatuses);
+
       war.enemyStatuses = freshStatuses;
       store.saveState();
 
@@ -68,6 +136,8 @@ export function startWarStatusMonitor(io, warId) {
       const totalEnemies = Object.keys(freshStatuses).length;
 
       io.to(`war_${warId}`).emit("status_update", freshStatuses);
+      // SSE clients use applyServerData which reads data.enemyStatuses.
+      broadcastSSE(warId, { enemyStatuses: freshStatuses });
 
       // ── Enemy Activity Logging ──
       try {
@@ -125,7 +195,7 @@ export function startWarStatusMonitor(io, warId) {
       } catch (_) { /* non-critical */ }
 
       store.saveState();
-      scheduleNext(POLL_INTERVAL_MS);
+      scheduleNext(nextWarStatus(war));
     } catch (err) {
       // Exponential backoff on failure
       const current = backoffs.get(warId) || POLL_INTERVAL_MS;
@@ -139,7 +209,242 @@ export function startWarStatusMonitor(io, warId) {
   // Run immediately, schedule via setTimeout chain (not setInterval)
   backoffs.set(warId, POLL_INTERVAL_MS);
   poll();
+
+  // Companion watcher — attacks-feed polling runs on its own 10s cadence
+  // alongside the 15s basic poll.
+  startAttacksFeedMonitor(io, warId);
+
+  // Enemy-attacks watcher disabled: Torn's attacks endpoint only
+  // accepts the owning faction's key. See note on startEnemyAttacksMonitor.
+  // startEnemyAttacksMonitor(io, warId);
+
+  // Per-enemy profile round-robin — catches status.state === "Attacking"
+  // and gives sub-30s freshness on individual enemies' status.
+  startEnemyProfileMonitor(io, warId);
+
   console.log(`[war-status] Started monitoring for war ${warId}`);
+}
+
+/**
+ * Watcher for the enemy faction's own attacks feed. When an enemy
+ * attacks anyone, their row lights up with a "just attacked" marker
+ * for a short window — visually signals "this enemy is currently busy
+ * / just did their hit" so the faction doesn't all pile on mid-swing.
+ * Updates war.enemyStatuses[attackerId].lastAttackAt (unix seconds) and
+ * broadcasts a partial status_update.
+ */
+function startEnemyAttacksMonitor(io, warId) {
+  if (enemyAttacksTimeouts.has(warId)) return;
+
+  const scheduleNext = (delay) => {
+    const tid = setTimeout(pollEnemyAttacks, delay);
+    enemyAttacksTimeouts.set(warId, tid);
+  };
+
+  const pollEnemyAttacks = async () => {
+    const war = store.getWar(warId);
+    if (!war || !war.enemyFactionId || war.warEnded) {
+      scheduleNext(nextEnemyAttacks(war));
+      return;
+    }
+    const apiKey = store.getPollingKey(war.factionId, "enemy-attacks");
+    if (!apiKey) { scheduleNext(nextEnemyAttacks(war)); return; }
+
+    let cursor = enemyAttacksCursors.get(warId);
+    if (!cursor) cursor = Math.floor(Date.now() / 1000) - 60;
+
+    try {
+      const attacks = await fetchRecentFactionAttacks(
+        war.enemyFactionId, apiKey, cursor
+      );
+      enemyAttacksBackoffs.set(warId, nextEnemyAttacks(war));
+
+      const updates = {};
+      let newCursor = cursor;
+      const enemyFid = String(war.enemyFactionId);
+
+      for (const atk of attacks) {
+        const ts = atk.timestamp_ended || atk.timestamp_started || 0;
+        if (ts > newCursor) newCursor = ts;
+
+        const attackerFid = String(atk.attacker_faction ?? atk.attacker_faction_id ?? "");
+        if (attackerFid !== enemyFid) continue;
+        const attackerId = String(atk.attacker_id ?? "");
+        if (!attackerId) continue;
+
+        const existing = (war.enemyStatuses && war.enemyStatuses[attackerId]) || {};
+        const updated = { ...existing, lastAttackAt: ts };
+        if (!war.enemyStatuses) war.enemyStatuses = {};
+        war.enemyStatuses[attackerId] = updated;
+        updates[attackerId] = updated;
+      }
+
+      enemyAttacksCursors.set(warId, newCursor);
+
+      if (Object.keys(updates).length > 0) {
+        console.log(
+          `[enemy-attacks] war ${warId}: ${Object.keys(updates).length} enemy attack event(s)`
+        );
+        io.to(`war_${warId}`).emit("status_update", updates);
+        broadcastSSE(warId, { enemyStatuses: updates });
+        store.saveState();
+      }
+      scheduleNext(nextEnemyAttacks(war));
+    } catch (err) {
+      const current = enemyAttacksBackoffs.get(warId) || 30_000;
+      const next = Math.min(current * 2, MAX_BACKOFF_MS);
+      enemyAttacksBackoffs.set(warId, next);
+      console.error(
+        `[enemy-attacks] Poll failed for war ${warId}: ${err.message} (retry in ${Math.round(next/1000)}s)`
+      );
+      scheduleNext(next);
+    }
+  };
+
+  enemyAttacksBackoffs.set(warId, 30_000);
+  pollEnemyAttacks();
+}
+
+/**
+ * Start the attacks-feed watcher for a war. Polls the faction's own
+ * attacks feed every ATTACKS_FEED_INTERVAL_MS and flips enemy statuses
+ * to "hospital" immediately when a hospitalization event is seen. Emits
+ * status_update with the partial change so clients repaint without
+ * waiting for the next basic poll.
+ *
+ * @param {import("socket.io").Server} io
+ * @param {string} warId
+ */
+function startAttacksFeedMonitor(io, warId) {
+  if (attacksFeedTimeouts.has(warId)) return;
+
+  const scheduleNext = (delay) => {
+    const tid = setTimeout(pollAttacks, delay);
+    attacksFeedTimeouts.set(warId, tid);
+  };
+
+  const pollAttacks = async () => {
+    const war = store.getWar(warId);
+    if (!war || !war.enemyFactionId || war.warEnded) {
+      scheduleNext(nextAttacksFeed(war));
+      return;
+    }
+
+    const apiKey = store.getPollingKey(war.factionId, "attacks-feed");
+    if (!apiKey) {
+      scheduleNext(nextAttacksFeed(war));
+      return;
+    }
+
+    // First run: look back a minute so we don't miss events that
+    // landed right before the war started monitoring.
+    let cursor = attacksFeedCursors.get(warId);
+    if (!cursor) cursor = Math.floor(Date.now() / 1000) - ATTACKS_FEED_LOOKBACK_SEC;
+
+    try {
+      const attacks = await fetchRecentFactionAttacks(war.factionId, apiKey, cursor);
+      // Success → reset backoff.
+      attacksFeedBackoffs.set(warId, ATTACKS_FEED_INTERVAL_MS);
+
+      const enemyFid = String(war.enemyFactionId);
+      const updates = {};
+      let newCursor = cursor;
+
+      for (const atk of attacks) {
+        const ts = atk.timestamp_ended || atk.timestamp_started || 0;
+        if (ts > newCursor) newCursor = ts;
+
+        // Only care about attacks where our faction attacked a member of
+        // the enemy faction and the result was a hospitalization.
+        const defenderFid = String(atk.defender_faction ?? atk.defender_faction_id ?? '');
+        if (defenderFid !== enemyFid) continue;
+        if (atk.result !== 'Hospitalized') continue;
+
+        const defenderId = String(atk.defender_id ?? atk.defenderID ?? '');
+        if (!defenderId) continue;
+
+        // Duration isn't provided in the attacks feed; use a conservative
+        // placeholder. The next basic poll will refine the countdown once
+        // Torn's cache catches up.
+        const untilSec = 30 * 60;
+
+        const existing = (war.enemyStatuses && war.enemyStatuses[defenderId]) || {};
+        const entry = {
+          name: existing.name,
+          level: existing.level,
+          status: 'hospital',
+          description: 'Hospitalized',
+          until: untilSec,
+          lastAction: existing.lastAction || 'Unknown',
+          activity: 'offline',
+        };
+
+        if (!war.enemyStatuses) war.enemyStatuses = {};
+        war.enemyStatuses[defenderId] = entry;
+        updates[defenderId] = entry;
+
+        // Record an override so the 15s basic poll can suppress any
+        // stale "Okay" that Torn's cache might still return.
+        if (!attackOverrides.has(warId)) attackOverrides.set(warId, new Map());
+        attackOverrides.get(warId).set(defenderId, {
+          until: untilSec,
+          setAt: Date.now(),
+        });
+      }
+
+      attacksFeedCursors.set(warId, newCursor);
+
+      if (Object.keys(updates).length > 0) {
+        console.log(`[attacks-feed] war ${warId}: ${Object.keys(updates).length} enemy hospitalization(s) detected`);
+        io.to(`war_${warId}`).emit('status_update', updates);
+        store.saveState();
+      }
+
+      scheduleNext(nextAttacksFeed(war));
+    } catch (err) {
+      const current = attacksFeedBackoffs.get(warId) || ATTACKS_FEED_INTERVAL_MS;
+      const next = Math.min(current * 2, MAX_BACKOFF_MS);
+      attacksFeedBackoffs.set(warId, next);
+      console.error(`[attacks-feed] Poll failed for war ${warId}: ${err.message} (retry in ${Math.round(next/1000)}s)`);
+      scheduleNext(next);
+    }
+  };
+
+  attacksFeedBackoffs.set(warId, ATTACKS_FEED_INTERVAL_MS);
+  pollAttacks();
+}
+
+/**
+ * Overlay any fresh attacks-feed hospital overrides onto a set of
+ * statuses fetched from the basic poll. Expires overrides older than
+ * ATTACK_OVERRIDE_TTL_MS or once Torn confirms the hospital state.
+ */
+function applyAttackOverrides(warId, freshStatuses) {
+  const overrides = attackOverrides.get(warId);
+  if (!overrides || overrides.size === 0) return;
+
+  const now = Date.now();
+  for (const [memberId, ov] of overrides) {
+    if (now - ov.setAt > ATTACK_OVERRIDE_TTL_MS) {
+      overrides.delete(memberId);
+      continue;
+    }
+    const fresh = freshStatuses[memberId];
+    if (!fresh) continue;
+    // If Torn now agrees the target is in hospital, clear the override.
+    if (fresh.status === 'hospital') {
+      overrides.delete(memberId);
+      continue;
+    }
+    // Otherwise Torn is still returning a cached "okay" — hold the line.
+    freshStatuses[memberId] = {
+      ...fresh,
+      status: 'hospital',
+      description: 'Hospitalized',
+      until: Math.max(fresh.until || 0, ov.until),
+      activity: 'offline',
+    };
+  }
 }
 
 /**
@@ -156,6 +461,34 @@ export function stopWarStatusMonitor(warId) {
   const id = intervals.get(warId);
   if (id) clearInterval(id);
   intervals.delete(warId);
+
+  // Also tear down the attacks-feed watcher.
+  const atid = attacksFeedTimeouts.get(warId);
+  if (atid) {
+    clearTimeout(atid);
+    attacksFeedTimeouts.delete(warId);
+  }
+  attacksFeedCursors.delete(warId);
+  attacksFeedBackoffs.delete(warId);
+  attackOverrides.delete(warId);
+
+  // Enemy-attacks watcher
+  const eatid = enemyAttacksTimeouts.get(warId);
+  if (eatid) {
+    clearTimeout(eatid);
+    enemyAttacksTimeouts.delete(warId);
+  }
+  enemyAttacksCursors.delete(warId);
+  enemyAttacksBackoffs.delete(warId);
+
+  // Enemy-profile watcher
+  const eptid = enemyProfileTimeouts.get(warId);
+  if (eptid) {
+    clearTimeout(eptid);
+    enemyProfileTimeouts.delete(warId);
+  }
+  enemyProfileCursors.delete(warId);
+
   console.log(`[war-status] Stopped monitoring for war ${warId}`);
 }
 
@@ -171,4 +504,134 @@ export function stopAll() {
   backoffs.clear();
   for (const [, id] of intervals) clearInterval(id);
   intervals.clear();
+
+  for (const [, atid] of attacksFeedTimeouts) clearTimeout(atid);
+  attacksFeedTimeouts.clear();
+  attacksFeedCursors.clear();
+  attacksFeedBackoffs.clear();
+  attackOverrides.clear();
+
+  for (const [, atid] of enemyAttacksTimeouts) clearTimeout(atid);
+  enemyAttacksTimeouts.clear();
+  enemyAttacksCursors.clear();
+  enemyAttacksBackoffs.clear();
+
+  for (const [, eptid] of enemyProfileTimeouts) clearTimeout(eptid);
+  enemyProfileTimeouts.clear();
+  enemyProfileCursors.clear();
+}
+
+/**
+ * Rotate through the enemy faction's known members, polling one profile
+ * per tick. Feeds status.state (attacking / hospital / jail / traveling
+ * / okay) into war.enemyStatuses and stamps lastAttackAt when we catch
+ * someone mid-attack. Uses rotating pool keys (per-call index, not
+ * per-purpose hash) so the request load spreads across all pooled keys
+ * instead of landing on one.
+ */
+function startEnemyProfileMonitor(io, warId) {
+  if (enemyProfileTimeouts.has(warId)) return;
+
+  const scheduleNext = (delay) => {
+    const tid = setTimeout(pollOne, delay);
+    enemyProfileTimeouts.set(warId, tid);
+  };
+
+  async function fetchAndApply(targetId, apiKey) {
+    try {
+      const data = await fetchUserProfile(targetId, apiKey);
+      // Re-look up the war fresh in case state changed during the
+      // in-flight request (war ended, enemy faction swapped, etc.).
+      const curWar = store.getWar(warId);
+      if (!curWar || !curWar.enemyStatuses) return;
+      const existing = curWar.enemyStatuses[targetId] || {};
+
+      const nowSec = Date.now() / 1000;
+      const state_str = String(data.status?.state || "").toLowerCase();
+      const untilTs = data.status?.until ?? 0;
+      const untilRemaining = untilTs > 0 ? Math.max(0, untilTs - nowSec) : 0;
+
+      const updated = {
+        ...existing,
+        name: data.name ?? existing.name,
+        level: data.level ?? existing.level,
+        status: state_str === "okay" ? "okay" : state_str,
+        description: data.status?.description ?? "",
+        until: untilRemaining,
+        lastAction: data.last_action?.relative ?? existing.lastAction ?? "Unknown",
+        activity: String(data.last_action?.status || "offline").toLowerCase(),
+      };
+
+      // Detect transition into Attacking state. Fires push notifications
+      // to faction members who've opted in (enemy_attacking pref, default
+      // off). Server-side dedup: only push when wasAttacking → isAttacking,
+      // so a chain-hitter doesn't generate back-to-back pushes per hit.
+      const wasAttacking = existing.status === "attacking";
+      if (state_str === "attacking") {
+        updated.lastAttackAt = Math.floor(nowSec);
+        if (!wasAttacking) {
+          console.log(`[enemy-profile] ${targetId} (${updated.name || '?'}) is attacking`);
+          try {
+            const warPlayers = store.getPlayerIdsForFaction(curWar.factionId);
+            push.notifyEnemyAttacking(
+              warPlayers,
+              warId,
+              updated.name || `Player [${targetId}]`,
+              targetId,
+            );
+          } catch (e) { /* push is best-effort */ }
+        }
+      }
+
+      curWar.enemyStatuses[targetId] = updated;
+      io.to(`war_${warId}`).emit("status_update", { [targetId]: updated });
+      broadcastSSE(warId, { enemyStatuses: { [targetId]: updated } });
+    } catch (err) {
+      if (!/Too many requests/i.test(err.message || "")) {
+        console.warn(`[enemy-profile] ${targetId}: ${err.message}`);
+      }
+    }
+  }
+
+  const pollOne = async () => {
+    const war = store.getWar(warId);
+    if (!war || !war.enemyStatuses || war.warEnded) {
+      scheduleNext(nextEnemyProfile(war));
+      return;
+    }
+    const ids = Object.keys(war.enemyStatuses).sort();
+    if (ids.length === 0) {
+      scheduleNext(nextEnemyProfile(war));
+      return;
+    }
+
+    // Concurrency scales linearly with pool size — one request per key
+    // per tick, so per-key rate stays at 60/tick_sec regardless of pool
+    // size. Bounded by enemy count (no point polling more users than
+    // exist) and a hard safety cap to keep Node from issuing an absurd
+    // burst if the pool grows huge. Request-rotation (cursor index)
+    // spreads the load evenly across keys.
+    const pool = store.getPooledKeysForFaction(war.factionId);
+    const concurrency = Math.max(
+      1,
+      Math.min(pool.length || 1, ids.length, 20),
+    );
+
+    const startCursor = (enemyProfileCursors.get(warId) || 0);
+    const requests = [];
+    for (let i = 0; i < concurrency; i++) {
+      const c = startCursor + i;
+      const targetId = ids[c % ids.length];
+      const apiKey = store.getPollingKey(war.factionId, "enemy-profile", c);
+      if (!apiKey) continue;
+      requests.push(fetchAndApply(targetId, apiKey));
+    }
+    enemyProfileCursors.set(warId, startCursor + concurrency);
+
+    try { await Promise.all(requests); } catch (_) { /* each handles its own */ }
+
+    scheduleNext(nextEnemyProfile(war));
+  };
+
+  pollOne();
 }

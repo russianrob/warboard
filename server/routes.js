@@ -56,7 +56,7 @@ function removeSSEClient(warId, client) {
 }
 
 /** Push SSE event to all stream clients in a war room. */
-function broadcastSSE(warId, data) {
+export function broadcastSSE(warId, data) {
   const set = sseClients.get(warId);
   if (!set || set.size === 0) return;
   const payload = `data: ${JSON.stringify(data)}\n\n`;
@@ -202,6 +202,42 @@ function uncallTarget(warId, targetId) {
   broadcastWarUpdate(warId);
 }
 
+/**
+ * Schedule a call's expiry. When the timer fires, check whether any
+ * faction member is currently viewing the target. If yes, re-schedule
+ * (the call stays alive while someone's actively working it). If no,
+ * uncall — the original "stale after N minutes" behavior, but now only
+ * triggers when nobody's around to claim it.
+ */
+function scheduleCallExpiry(warId, targetId) {
+  const war = store.getWar(warId);
+  if (!war || !war.calls[targetId]) return;
+  const call = war.calls[targetId];
+
+  const timerKey = `${warId}:${targetId}`;
+  clearExistingTimer(timerKey);
+
+  const expireMs = call.isDeal ? DEAL_EXPIRE_MS : CALL_EXPIRE_MS;
+  callTimers.set(
+    timerKey,
+    setTimeout(() => {
+      const currentWar = store.getWar(warId);
+      if (!currentWar || !currentWar.calls[targetId]) return;
+
+      const viewers = store.getViewersForWar(warId) || {};
+      const targetViewers = viewers[targetId] || [];
+      if (targetViewers.length > 0) {
+        console.log(
+          `[call] extending ${warId}:${targetId} — ${targetViewers.length} viewer(s) still active`
+        );
+        scheduleCallExpiry(warId, targetId);
+        return;
+      }
+      uncallTarget(warId, targetId);
+    }, expireMs),
+  );
+}
+
 // ── GET /api/health ──────────────────────────────────────────────────────
 // Unauthenticated — used by the landing page to show a live status dot.
 
@@ -264,7 +300,11 @@ router.post("/api/gate", async (req, res) => {
  * The landing page requires a gate cookie.
  */
 export function gateMiddleware(req, res, next) {
-  // Always allow API routes, gate page, and .meta.js files (for update checks)
+  // Gate disabled — the landing page is now public. The /api/gate
+  // endpoint and /gate.html are still available if you need to re-enable
+  // later; just restore the logic below.
+  return next();
+  /* Previous gated behavior:
   if (
     req.path.startsWith("/api/") ||
     req.path.startsWith("/data/") ||
@@ -273,25 +313,18 @@ export function gateMiddleware(req, res, next) {
   ) {
     return next();
   }
-
-  // Check for gate cookie
   const token = parseCookie(req.headers.cookie, "fo_gate");
   if (token) {
     try {
       verifyToken(token);
-      return next(); // Valid — let through
-    } catch (_) {
-      // Expired or invalid — fall through to gate
-    }
+      return next();
+    } catch (_) { }
   }
-
-  // Redirect to gate page
   if (req.path === "/" || req.path === "/index.html") {
     return res.redirect("/gate.html");
   }
-
-  // Block other static assets for unauthenticated users
   return res.redirect("/gate.html");
+  */
 }
 
 /** Simple cookie parser — no dependency needed. */
@@ -321,6 +354,16 @@ router.post("/api/auth", async (req, res) => {
     // Store the API key server-side for later Torn API calls
     store.storeApiKey(info.playerId, apiKey);
 
+    // Persist playerId → factionId so offline/disconnected members can
+    // still be reached by faction-scoped push notifications (retal).
+    store.recordPlayerFaction(info.playerId, info.factionId);
+
+    // Pool opt is opt-OUT: first time we see this player, default their
+    // key to the rotating pool. Preserves explicit opt-outs. Clients are
+    // told on first login (via the disclosure flag in the /api/auth
+    // response) so they can show a one-time notice.
+    const createdDefault = store.ensureDefaultPoolOpt(info.playerId, info.factionId);
+
     const token = issueToken({
       playerId: info.playerId,
       playerName: info.playerName,
@@ -334,6 +377,10 @@ router.post("/api/auth", async (req, res) => {
     return res.json({
       token,
       player: info,
+      // Client uses this to show a one-time "your key is helping the
+      // faction's polling pool" notice. Server only returns true on the
+      // first auth for this player.
+      poolingDefaultApplied: createdDefault,
     });
   } catch (err) {
     console.error("[auth] Authentication failed:", err.message);
@@ -635,6 +682,9 @@ router.get("/api/poll", (req, res, next) => {
     warResult: war.warResult || null,
     strategy: war.strategy || null,
     enemyActivityByHour: war.enemyActivityByHour || null,
+    // Option B faction cooldowns — included here so PDA clients (which
+    // use HTTP polling, not Socket.IO / SSE) pick up bars updates.
+    memberBars: store.getFactionBars(war.factionId),
   });
 });
 
@@ -656,41 +706,139 @@ router.get("/api/war/:warId/strategy", requireAuth, (req, res) => {
   });
 });
 
-// ── POST /api/call ───────────────────────────────────────────────────────
-// Call or uncall a target.
-
+// ── POST /api/assist-request ─────────────────────────────────────────────
+// Assist (war target) OR Retal (profile page). Broadcast to the faction's
+// active war room. `mode` = "assist" (default) or "retal" distinguishes
+// what notification text clients render.
 
 router.post("/api/assist-request", requireAuth, (req, res) => {
-  const { playerId, playerName } = req.user;
-  const { warId, targetId, targetName } = (req.body || {});
+  const { playerId, playerName, factionId } = req.user;
+  const { warId, targetId, targetName, mode } = (req.body || {});
+  const kind = mode === "retal" ? "retal" : "assist";
 
-  if (!targetId || !warId) {
-    return res.status(400).json({ error: "targetId and warId are required" });
+  if (!targetId) {
+    return res.status(400).json({ error: "targetId is required" });
   }
 
-  const war = requireWarMember(req, res, warId);
-  if (!war) return;
+  // Pick a broadcast scope: prefer the active war room; fall back to any
+  // war for the caller's faction (so retals on profile pages work even
+  // when the client hasn't joined a war room this session).
+  let broadcastWarId = warId;
+  if (!broadcastWarId) {
+    const wars = store.getAllWars();
+    for (const [id, w] of wars) {
+      if (String(w.factionId) === String(factionId) && !w.warEnded) {
+        broadcastWarId = id;
+        break;
+      }
+    }
+  }
+  if (!broadcastWarId) {
+    return res.status(400).json({ error: "No active war to broadcast into" });
+  }
+
+  const war = store.getWar(broadcastWarId);
+  if (!war || String(war.factionId) !== String(factionId)) {
+    return res.status(403).json({ error: "Not a member of this war's faction" });
+  }
 
   const payload = {
-    type: "assist_request",
+    type: kind === "retal" ? "retal_request" : "assist_request",
+    mode: kind,
     playerId,
     playerName,
     targetId,
     targetName: targetName || `Player [${targetId}]`,
-    attackUrl: `https://www.torn.com/loader.php?sid=attack&user2ID=${targetId}`,
-    timestamp: Date.now()
+    attackUrl: `https://www.torn.com/page.php?sid=attack&user2ID=${targetId}`,
+    timestamp: Date.now(),
   };
 
-  if (io) io.to(`war_${warId}`).emit("assist_request", payload);
-  broadcastSSE(warId, payload);
+  const eventName = kind === "retal" ? "retal_request" : "assist_request";
+  if (io) io.to(`war_${broadcastWarId}`).emit(eventName, payload);
+  broadcastSSE(broadcastWarId, payload);
 
-  const warPlayers = store.getOnlinePlayersForWar(warId);
-  const playerIds = warPlayers.map(p => p.playerId || p.id).filter(id => id !== playerId);
-  push.notifyAssistRequest(playerIds, warId, playerName, targetName || targetId, targetId);
+  // Assist targets war-room members only (they're actively fighting);
+  // retal targets the whole faction (offline members too) and INCLUDES
+  // the sender — they usually want the push confirmation on their other
+  // devices and it also verifies the pipeline is reaching them.
+  let pushTargets;
+  if (kind === "retal") {
+    pushTargets = store.getPlayerIdsForFaction(factionId);
+  } else {
+    const warPlayers = store.getOnlinePlayersForWar(broadcastWarId);
+    pushTargets = warPlayers.map(p => p.playerId || p.id).filter(id => id !== playerId);
+  }
+  push.notifyAssistRequest(pushTargets, broadcastWarId, playerName, targetName || targetId, targetId, kind);
 
-  console.log(`[api] ${playerName} requested assist on ${targetId} in war ${warId}`);
+  console.log(`[api] ${playerName} requested ${kind} on ${targetId} in war ${broadcastWarId}`);
   return res.json({ ok: true });
 });
+
+// ── Member bars/cooldowns self-report ────────────────────────────────────
+// Each FactionOps client periodically fetches their own bars+cooldowns
+// and POSTs the payload here so the faction can aggregate. Authenticated
+// so only real faction members contribute.
+
+router.post("/api/me/bars", requireAuth, (req, res) => {
+  const { playerId, playerName, factionId } = req.user;
+  const { bars, cooldowns } = (req.body || {});
+
+  if (!bars && !cooldowns) {
+    return res.status(400).json({ error: "bars and/or cooldowns required" });
+  }
+
+  console.log(`[bars] ${playerName} (${playerId}) reported: energy ${bars?.energy?.current}/${bars?.energy?.maximum}`);
+  store.recordMemberBars(factionId, playerId, playerName, { bars, cooldowns });
+
+  // Broadcast the fresh entry to everyone watching the war(s) this
+  // faction owns. Clients merge it into their local state.memberBars.
+  const entry = { bars, cooldowns, name: playerName, updatedAt: Date.now() };
+  const wars = store.getAllWars();
+  let broadcastCount = 0;
+  for (const [wid, w] of wars) {
+    if (String(w.factionId) === String(factionId)) {
+      if (io) io.to(`war_${wid}`).emit("member_bars", { playerId, ...entry });
+      broadcastSSE(wid, { memberBars: { [playerId]: entry } });
+      broadcastCount++;
+    }
+  }
+  console.log(`[bars] broadcast to ${broadcastCount} war room(s) for faction ${factionId}`);
+
+  return res.json({ ok: true });
+});
+
+// Full snapshot for when a client joins. Returns every fresh member
+// bars entry for the caller's faction.
+router.get("/api/faction/bars", requireAuth, (req, res) => {
+  const { factionId } = req.user;
+  return res.json({ memberBars: store.getFactionBars(factionId) });
+});
+
+// ── Key-pool opt-in ──────────────────────────────────────────────────────
+// Per-player consent flag: when enabled, the player's stored API key is
+// eligible to be used for server-side faction pollers (chain, war-status,
+// attacks-feed). Scoped to their current faction — if they move, we
+// refresh the factionId on their next opt-in.
+
+router.get("/api/pool-opt", requireAuth, (req, res) => {
+  const opt = store.getKeyPoolingOpt(req.user.playerId);
+  return res.json({
+    enabled: !!opt.enabled,
+    factionId: opt.factionId || String(req.user.factionId || ""),
+  });
+});
+
+router.post("/api/pool-opt", requireAuth, (req, res) => {
+  const { enabled } = (req.body || {});
+  store.setKeyPoolingOpt(req.user.playerId, !!enabled, req.user.factionId);
+  console.log(
+    `[pool-opt] ${req.user.playerName} (${req.user.playerId}) ${enabled ? "opted IN to" : "opted OUT of"} faction ${req.user.factionId} key pool`
+  );
+  return res.json({ ok: true, enabled: !!enabled });
+});
+
+// ── POST /api/call ───────────────────────────────────────────────────────
+// Call or uncall a target.
 
 router.post("/api/call", requireAuth, (req, res) => {
   const { playerId, playerName } = req.user;
@@ -736,16 +884,9 @@ router.post("/api/call", requireAuth, (req, res) => {
   war.calls[targetId] = callData;
   store.saveState();
 
-  // Set auto-expire timer (deal calls get a longer timeout)
-  const timerKey = `${warId}:${targetId}`;
-  const expireMs = isDeal ? DEAL_EXPIRE_MS : CALL_EXPIRE_MS;
-  clearExistingTimer(timerKey);
-  callTimers.set(
-    timerKey,
-    setTimeout(() => {
-      uncallTarget(warId, targetId);
-    }, expireMs),
-  );
+  // Expiry auto-extends while any faction member is viewing the target's
+  // attack page. Baseline timeout still applies when nobody's around.
+  scheduleCallExpiry(warId, targetId);
 
   broadcastWarUpdate(warId);
   console.log(`[api] ${playerName} ${isDeal ? 'deal-called' : 'called'} target ${targetId} in war ${warId}`);
@@ -1174,16 +1315,22 @@ router.post("/api/viewing", requireAuth, (req, res) => {
   if (player?.warId) {
     broadcastWarUpdate(player.warId);
 
-    // Call-stolen detection: if this target is called by someone else, notify the caller
     if (targetId) {
       const war = store.getWar(player.warId);
       if (war) {
         const call = war.calls[targetId];
-        if (call && call.calledBy.id !== playerId) {
-          // Someone is viewing a target called by another player
-          const targetInfo = war.enemyStatuses[targetId];
-          const targetName = targetInfo?.name || targetId;
-          push.notifyCallStolen(call.calledBy.id, playerName, targetName, targetId);
+        if (call) {
+          if (call.calledBy.id === playerId) {
+            // Caller re-entered the attack page — refresh expiry so
+            // their claim doesn't time out while they're working it.
+            scheduleCallExpiry(player.warId, targetId);
+          } else {
+            // Call-stolen detection: someone else is viewing a target
+            // that's already called.
+            const targetInfo = war.enemyStatuses[targetId];
+            const targetName = targetInfo?.name || targetId;
+            push.notifyCallStolen(call.calledBy.id, playerName, targetName, targetId);
+          }
         }
       }
     }
@@ -3771,24 +3918,9 @@ function versionTooOld(v) {
   return false; // equal = ok
 }
 
-const _spawnKeyRateLimit = new Map(); // key suffix -> last request timestamp
-const SPAWN_KEY_COOLDOWN_MS = 1_000; // 1 second between requests per user (reduced from 5s for even faster responsiveness)
-
 router.get("/api/oc/spawn-key", async (req, res) => {
   // Explicit wildcard CORS: WebKit (TornPDA) sends Origin: null which cors middleware skips
   res.set("Access-Control-Allow-Origin", "*");
-
-  // Per-user rate limit (by key suffix)
-  const rlKey = (req.query.key || '').slice(-8);
-  if (rlKey) {
-    const lastReq = _spawnKeyRateLimit.get(rlKey) || 0;
-    const elapsed = Date.now() - lastReq;
-    if (elapsed < SPAWN_KEY_COOLDOWN_MS) {
-      const waitSec = Math.ceil((SPAWN_KEY_COOLDOWN_MS - elapsed) / 1000);
-      return res.status(429).json({ error: `Too many requests. Please wait ${waitSec}s.` });
-    }
-    _spawnKeyRateLimit.set(rlKey, Date.now());
-  }
 
   // Build viewer object with subscription info
   function buildViewer(playerInfo) {
@@ -3872,8 +4004,11 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     const viewerObj = buildViewer(playerInfo);
     console.log(`[oc/spawn-key] Sending viewer for ${playerInfo.playerName} (${playerInfo.playerId}): hasFactionAccess=${viewerObj.hasFactionAccess}`);
 
-    // Collect OC history (piggybacks on existing data, no extra API calls)
-    collectOcHistory(playerInfo.factionId, data);
+    // Collect OC history from completed crimes (stored in CPR cache, not in the response)
+    const completedForHistory = getCachedCompletedCrimes(playerInfo.factionId);
+    if (completedForHistory && completedForHistory.length > 0) {
+      collectOcHistory(playerInfo.factionId, { crimes: completedForHistory, members: data.members });
+    }
 
     // Run engines if enabled — cached per faction for 1 hour (same TTL as CPR cache)
     if (!_engineCache.has(fid) || (Date.now() - _engineCache.get(fid).ts) > 3600_000 || _engineCache.get(fid).settingsHash !== engineSettingsHash(fSettings)) {
@@ -3890,7 +4025,8 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     const engines = { ..._engineCache.get(fid).engines };
 
     // Auto-Dispatcher is per-player (not faction-cached), runs every request
-    if (fSettings.engine_auto_dispatcher) {
+    // Default to true if not explicitly set in faction settings
+    if (fSettings.engine_auto_dispatcher ?? true) {
       engines.autoDispatcher = runAutoDispatcher(fid, data, playerInfo.playerId);
     }
 
@@ -3926,7 +4062,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
             _engineCache.set(fid, { ts: Date.now(), engines: fS2engines, settingsHash: engineSettingsHash(fS2) });
           }
           const retryEngines = { ...(_engineCache.get(fid)?.engines || {}) };
-          if (fS2.engine_auto_dispatcher) {
+          if (fS2.engine_auto_dispatcher ?? true) {
             retryEngines.autoDispatcher = runAutoDispatcher(fid, data, playerInfo.playerId);
           }
           return res.json({ ...data, viewer: buildViewer(playerInfo), engines: retryEngines });
@@ -4102,44 +4238,5 @@ router.post("/api/nerve-tracker/config", requireAuth, (req, res) => {
     updateNerveConfig({ factionOffset, apiKey });
     res.json({ ok: true, factionOffset: Number(factionOffset) });
 });
-
-
-// ── Periodic enemy status auto-refresh ────────────────────────────────────
-// Every 30s, refresh enemy statuses from Torn API for all active wars.
-const AUTO_REFRESH_INTERVAL_MS = 30_000;
-
-setInterval(async () => {
-  for (const [warId, war] of store.getAllWars()) {
-    if (!war.enemyFactionId || !war.factionId) continue;
-    // Skip ended wars
-    if (war.warEnded) continue;
-    const onlinePlayers = store.getOnlinePlayersForWar(warId);
-
-    const apiKey = store.getFactionApiKey(war.factionId) || store.getApiKeyForFaction(war.factionId);
-    if (!apiKey) continue;
-
-    try {
-      const freshStatuses = await fetchFactionMembers(war.enemyFactionId, apiKey);
-
-      // Check for hospital pops before overwriting
-      for (const [targetId, newStatus] of Object.entries(freshStatuses)) {
-        const old = war.enemyStatuses[targetId];
-        if (old && old.status && old.status.includes('hospital') && !newStatus.status.includes('hospital')) {
-          const targetName = newStatus.name || old.name || targetId;
-          for (const p of onlinePlayers) {
-            push.notifyHospitalPop(p.id, targetName, targetId);
-          }
-        }
-      }
-
-      war.enemyStatuses = freshStatuses;
-      store.saveState();
-      broadcastWarUpdate(warId);
-      console.log(`[auto-refresh] War ${warId}: refreshed ${Object.keys(freshStatuses).length} enemy statuses`);
-    } catch (err) {
-      console.warn(`[auto-refresh] War ${warId} failed:`, err.message);
-    }
-  }
-}, AUTO_REFRESH_INTERVAL_MS);
 
 export default router;

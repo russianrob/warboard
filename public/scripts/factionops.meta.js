@@ -1,15 +1,21 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.8.48
+// @version      4.9.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
 // @downloadURL  https://tornwar.com/scripts/factionops.user.js
 // @updateURL    https://tornwar.com/scripts/factionops.meta.js
+// @require      https://tornwar.com/socket.io/socket.io.js
 // @match        https://www.torn.com/factions.php?step=your*
 // @match        https://www.torn.com/factions.php?step=profile*
-// @match        https://www.torn.com/loader.php?sid=attack&user*
+// @match        https://www.torn.com/loader.php?sid=attack*
+// @match        https://torn.com/loader.php?sid=attack*
+// @match        https://www.torn.com/page.php?sid=attack*
+// @match        https://torn.com/page.php?sid=attack*
+// @match        https://www.torn.com/profiles.php?XID=*
+// @match        https://torn.com/profiles.php?XID=*
 // @match        https://www.torn.com/war.php*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue

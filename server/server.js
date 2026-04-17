@@ -29,7 +29,10 @@ import { loadHeatmaps, stopFlush as stopHeatmapFlush } from "./activity-heatmap.
 import { startMembershipSchedule, stopMembershipSchedule } from "./membership-check.js";
 import { startXanaxSubscriptions, stopXanaxSubscriptions } from "./xanax-subscriptions.js";
 import { startSubscriptionManager, stopSubscriptionManager } from "./subscription-manager.js";
-import { startNerveTracker, stopNerveTracker } from "./nerve-tracker.js";
+// NerveTracker disabled — its 30-minute Torn API poll was contributing to
+// our shared faction-key rate-limit pressure. Read endpoints in routes.js
+// still serve the last-saved state for any client UI that references it.
+// import { startNerveTracker, stopNerveTracker } from "./nerve-tracker.js";
 import * as store from "./store.js";
 import { loadSubscriptions } from "./push-notifications.js";
 import { fetchRankedWar } from "./torn-api.js";
@@ -87,20 +90,36 @@ app.use(helmet({ contentSecurityPolicy: false }));
 // Strict limit on auth endpoint — prevents API key brute-force and Torn API flooding
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20,
+  // Bumped from 20 → 60. A legitimate user with multiple tabs / script
+  // versions open can easily burn through 20 on a pm2 restart (every tab
+  // re-auths). 60/15min still caps brute-force attempts at 4/min average.
+  max: 60,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many auth attempts, try again in a few minutes' },
 });
 app.use('/api/auth', authLimiter);
 
-// General limiter on all routes as a backstop
+// General limiter on all routes as a backstop.
+// 500/15min (≈33/min) is too tight for authenticated clients — an active
+// faction member with a couple of tabs open easily burns through that in
+// normal play (polling, assist reports, viewing updates, static asset
+// re-fetches, socket.io polling transport, etc.). 5000/15min (≈333/min)
+// still protects against scrapers/scanners while giving legitimate clients
+// headroom. Static scripts & socket.io are also excluded since they
+// shouldn't consume the API budget.
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 500,
+  max: 5000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, slow down' },
+  skip: (req) =>
+    req.path.startsWith('/scripts/') ||
+    req.path.startsWith('/socket.io/') ||
+    req.path === '/' ||
+    req.path.startsWith('/assets/') ||
+    req.path === '/api/stream',
 });
 app.use(globalLimiter);
 
@@ -293,6 +312,8 @@ store.loadState();
 store.loadFactionKeys();
 store.loadPlayerKeys();
 store.loadFactionSettings();
+store.loadKeyPoolingOpt();
+store.loadPlayerFactions();
 loadHeatmaps();
 loadSubscriptions();
 
@@ -309,7 +330,7 @@ startMembershipSchedule();
 
 // Start faction subscription manager (polls for 50M payments)
 startSubscriptionManager();
-    startNerveTracker();
+// startNerveTracker(); // disabled — see import comment above
 
 // ── Auto-detect new ranked wars every 5 minutes ─────────────────────────
 let warDetectTimer = null;
@@ -420,7 +441,8 @@ function shutdown(signal) {
   stopHeatmapFlush();
   stopMembershipSchedule();
   stopSubscriptionManager();
-        stopNerveTracker();
+  // stopNerveTracker(); // disabled
+
   store.saveState();
   httpServer.close(() => {
     console.log("[server] Server closed");

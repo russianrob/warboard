@@ -14,8 +14,16 @@ import * as store from "./store.js";
 import { fetchFactionChain, fetchRankedWar } from "./torn-api.js";
 import * as push from "./push-notifications.js";
 
-const POLL_INTERVAL_MS = 10_000; // 10 seconds
+// Fallback interval when we can't resolve the dynamic one (e.g. no war
+// context yet). Normal operation uses store.getPollInterval(factionId,
+// "chain") which scales with pool size.
+const POLL_INTERVAL_MS = 20_000;
 const MAX_BACKOFF_MS = 120_000;   // max 2 minutes between retries on failure
+
+const nextChain = (war) =>
+  war && war.factionId
+    ? store.getPollInterval(war.factionId, "chain")
+    : POLL_INTERVAL_MS;
 // Client chain forwarding removed — server always polls directly.
 const CHAIN_ALERT_THRESHOLD = 60; // seconds — fire warning when chain timer <= this
 const CHAIN_PANIC_THRESHOLD = 30; // seconds — fire panic when chain timer <= this
@@ -59,10 +67,10 @@ export function startChainMonitor(io, warId) {
 
   const poll = async () => {
     const war = store.getWar(warId);
-    if (!war || !war.factionId) { scheduleNext(POLL_INTERVAL_MS); return; }
+    if (!war || !war.factionId) { scheduleNext(nextChain(war)); return; }
 
-    const apiKey = store.getFactionApiKey(war.factionId) || store.getApiKeyForFaction(war.factionId);
-    if (!apiKey) { scheduleNext(POLL_INTERVAL_MS); return; }
+    const apiKey = store.getPollingKey(war.factionId, "chain");
+    if (!apiKey) { scheduleNext(nextChain(war)); return; }
 
     try {
       const chain = await fetchFactionChain(war.factionId, apiKey);
@@ -226,7 +234,7 @@ export function startChainMonitor(io, warId) {
         }
       }
 
-      scheduleNext(POLL_INTERVAL_MS);
+      scheduleNext(nextChain(war));
     } catch (err) {
       // Exponential backoff on failure
       const current = backoffs.get(warId) || POLL_INTERVAL_MS;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.10
+// @version      3.0.17
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -169,7 +169,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.6';
+    const SCRIPT_VERSION = '3.0.17';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -955,8 +955,13 @@
             const s = readScopeFromDom();
             if (s !== null) handleDetectedScope(s, 'DOM/State');
         }
+        let timer = null;
+        function scheduleCheck() {
+            if (timer) return; // coalesce mutation bursts into one trailing call
+            timer = setTimeout(() => { timer = null; check(); }, 500);
+        }
         check();
-        const observer = new MutationObserver(check);
+        const observer = new MutationObserver(scheduleCheck);
         observer.observe(document.body, { childList: true, subtree: true });
     }
 
@@ -1060,12 +1065,31 @@
         mgr_membersLoaded = true;
     };
 
-    const mgr_getMissingOCItems = async () => {
+    // Shared cache for the available-crimes endpoint so mgr_getMissingOCItems and
+    // mgr_getAllOCItemRequirements don't hit the API twice when both sub-tabs load.
+    let _mgr_crimesCache = { data: null, ts: 0 };
+    let _mgr_crimesInFlight = null;
+    const MGR_CRIMES_TTL = 30000;
+    const mgr_fetchAvailableCrimes = async () => {
+        const now = Date.now();
+        if (_mgr_crimesCache.data && (now - _mgr_crimesCache.ts) < MGR_CRIMES_TTL) return _mgr_crimesCache.data;
+        if (_mgr_crimesInFlight) return _mgr_crimesInFlight;
         const key = getApiKey();
         if (!key || key === 'YOUR_API_KEY_HERE') throw new Error('API key required');
-        const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}`);
-        if (!res.ok) throw new Error('Failed to load OC data');
-        const data = await res.json();
+        _mgr_crimesInFlight = (async () => {
+            try {
+                const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}`);
+                if (!res.ok) throw new Error('Failed to load OC data');
+                const data = await res.json();
+                _mgr_crimesCache = { data, ts: Date.now() };
+                return data;
+            } finally { _mgr_crimesInFlight = null; }
+        })();
+        return _mgr_crimesInFlight;
+    };
+
+    const mgr_getMissingOCItems = async () => {
+        const data = await mgr_fetchAvailableCrimes();
         const missing = [];
         const crimes = Array.isArray(data?.crimes) ? data.crimes : Object.values(data?.crimes || {});
         crimes.forEach(crime => {
@@ -1084,11 +1108,7 @@
     };
 
     const mgr_getAllOCItemRequirements = async () => {
-        const key = getApiKey();
-        if (!key || key === 'YOUR_API_KEY_HERE') throw new Error('API key required');
-        const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}`);
-        if (!res.ok) throw new Error('Failed to load OC data');
-        const data = await res.json();
+        const data = await mgr_fetchAvailableCrimes();
         const neededByUser = new Map();
         const crimes = Array.isArray(data?.crimes) ? data.crimes : Object.values(data?.crimes || {});
         crimes.forEach(crime => {
@@ -2173,6 +2193,8 @@
                 cprEntries: cpr?.entries ?? [],
                 byPosition: cpr?.byPosition ?? {},
             };
+            const daysInFaction = m.days_in_faction ?? 999;
+            if (daysInFaction < 3) { skipped.push({ ...enriched, skipReason: `New member (${daysInFaction}d, need 3d)` }); continue; }
             if (lastAction < activeCutoff) { skipped.push({ ...enriched, skipReason: `Inactive >${CONFIG.ACTIVE_DAYS}d` }); continue; }
             if (inOC && ocInfo.readyAt > forecastCutoff) { skipped.push({ ...enriched, skipReason: `In OC (ready ${fmtTs(ocInfo.readyAt)})` }); continue; }
             eligible.push(enriched);
@@ -3311,16 +3333,30 @@
                     const itemID = parseInt(btn.dataset.itemid, 10);
                     const userID = parseInt(btn.dataset.userid, 10);
                     const userName = btn.dataset.username;
+                    let loanSucceeded = false;
                     try {
                         const armoryID = await mgr_prepareArmouryForItem(itemID);
                         if (!armoryID) {
                             btn.textContent = 'No stock'; btn.classList.add('mgr-btn-warning');
-                            setTimeout(() => { btn.dataset.loaning = 'false'; btn.disabled = false; btn.textContent = 'Go to Armoury'; btn.classList.remove('mgr-btn-warning'); }, 3000);
                             return;
                         }
                         btn.textContent = 'Loaning…'; await mgr_loanPreparedItem({ userID, userName });
                         btn.textContent = '✓ Loaned'; btn.classList.add('mgr-btn-success');
-                    } catch (e) { btn.textContent = '? Check'; btn.classList.add('mgr-btn-warning'); console.error('[OC Mgr] Loan error:', e); }
+                        loanSucceeded = true;
+                    } catch (e) {
+                        btn.textContent = '? Check'; btn.classList.add('mgr-btn-warning');
+                        console.error('[OC Mgr] Loan error:', e);
+                    } finally {
+                        // Success state stays locked (paired with mgr_recentlyLoaned tracking).
+                        // Every other outcome (no stock / error) resets so the user can retry.
+                        if (!loanSucceeded) {
+                            setTimeout(() => {
+                                btn.dataset.loaning = 'false'; btn.disabled = false;
+                                btn.textContent = 'Go to Armoury';
+                                btn.classList.remove('mgr-btn-warning');
+                            }, 3000);
+                        }
+                    }
                 };
             });
         } catch (e) { content.innerHTML = `<div class="mgr-error">${e.message}</div>`; }

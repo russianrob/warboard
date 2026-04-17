@@ -36,7 +36,7 @@ self.addEventListener("push", (event) => {
     options.actions = [{ action: "attack", title: "Attack" }];
   } else if (type === "chain-alert" || type === "bonus") {
     options.actions = [{ action: "attack", title: "Attack Now" }];
-  } else if (type === "assist_request") {
+  } else if (type === "assist_request" || type === "retal_request") {
     options.actions = [{ action: "attack", title: "Attack" }];
     options.requireInteraction = true;
   }
@@ -69,7 +69,7 @@ self.addEventListener("notificationclick", (event) => {
   if (data.url) {
     url = data.url;
   } else if (data.targetId) {
-    url = `https://www.torn.com/loader.php?sid=attack&user2ID=${data.targetId}`;
+    url = `https://www.torn.com/page.php?sid=attack&user2ID=${data.targetId}`;
   }
 
   event.waitUntil(

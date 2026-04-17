@@ -13,6 +13,8 @@ const WARS_FILE = path.join(DATA_DIR, "wars.json");
 const PLAYER_KEYS_FILE = path.join(DATA_DIR, "player-keys.json");
 const FACTION_KEYS_FILE = path.join(DATA_DIR, "faction-keys.json");
 const FACTION_SETTINGS_FILE = path.join(DATA_DIR, "faction-settings.json");
+const KEY_POOL_FILE = path.join(DATA_DIR, "key-pool.json");
+const PLAYER_FACTIONS_FILE = path.join(DATA_DIR, "player-factions.json");
 
 const factionSettings = new Map();
 
@@ -39,6 +41,30 @@ const apiKeys = new Map();
  * @type {Map<string, string>} factionId → apiKey
  */
 const factionApiKeys = new Map();
+
+/**
+ * Per-player opt-in for the server-side key pool. When enabled, the
+ * player's stored API key is eligible for rotation across pollers
+ * (chain, war-status, attacks-feed, etc.) scoped to their faction.
+ * @type {Map<string, { enabled: boolean, factionId: string }>} playerId → opt
+ */
+const keyPoolingOpt = new Map();
+
+/**
+ * Last-known faction id per player, persisted across restarts. Updated
+ * every successful /api/auth. Used for push notifications that need to
+ * reach offline/disconnected faction members (e.g. retal requests).
+ * @type {Map<string, string>} playerId → factionId
+ */
+const lastKnownFaction = new Map();
+
+/**
+ * Per-faction aggregated bars/cooldowns. Each entry is a snapshot of
+ * one member's bars reported by their own FactionOps client.
+ * @type {Map<string, Map<string, { bars, cooldowns, name, updatedAt }>>}
+ * factionId → playerId → report
+ */
+const factionBars = new Map();
 
 // ── Persistence helpers ─────────────────────────────────────────────────
 
@@ -346,4 +372,241 @@ export function getFactionApiKey(factionId) {
 export function removeFactionApiKey(factionId) {
   factionApiKeys.delete(factionId);
   saveFactionKeys();
+}
+
+// ── Key pooling opt-in ──────────────────────────────────────────────────
+
+export function loadKeyPoolingOpt() {
+  ensureDataDir();
+  if (!fs.existsSync(KEY_POOL_FILE)) return;
+  try {
+    const raw = fs.readFileSync(KEY_POOL_FILE, "utf-8");
+    const data = JSON.parse(raw);
+    for (const [playerId, opt] of Object.entries(data)) {
+      keyPoolingOpt.set(String(playerId), opt);
+    }
+    console.log(`[store] Loaded ${keyPoolingOpt.size} key-pool opt-in(s)`);
+  } catch (err) {
+    console.error("[store] Failed to load key-pool opts:", err.message);
+  }
+}
+
+function saveKeyPoolingOpt() {
+  ensureDataDir();
+  try {
+    const obj = Object.fromEntries(keyPoolingOpt);
+    fs.writeFileSync(KEY_POOL_FILE, JSON.stringify(obj, null, 2));
+  } catch (err) {
+    console.error("[store] Failed to persist key-pool opts:", err.message);
+  }
+}
+
+/**
+ * Record a player's opt-in/out decision for the key pool.
+ * Stores the factionId at opt-in time so if they later switch factions
+ * their key isn't used for their old faction's pool.
+ */
+export function setKeyPoolingOpt(playerId, enabled, factionId) {
+  keyPoolingOpt.set(String(playerId), {
+    enabled: !!enabled,
+    factionId: String(factionId || ""),
+  });
+  saveKeyPoolingOpt();
+}
+
+/**
+ * Return the player's explicit pool opt. If they've never been recorded,
+ * default to enabled: true — the pool is opt-OUT not opt-in. Users who
+ * don't want to contribute can toggle it off in settings at any time.
+ */
+export function getKeyPoolingOpt(playerId) {
+  return keyPoolingOpt.get(String(playerId)) || { enabled: true, factionId: "", defaulted: true };
+}
+
+/**
+ * Create a default pool opt-in for a player if they don't already have
+ * an explicit record. Called from /api/auth. Existing records (including
+ * explicit opt-outs) are preserved.
+ */
+export function ensureDefaultPoolOpt(playerId, factionId) {
+  const pid = String(playerId);
+  if (keyPoolingOpt.has(pid)) return false; // already has an explicit record
+  keyPoolingOpt.set(pid, {
+    enabled: true,
+    factionId: String(factionId || ""),
+  });
+  saveKeyPoolingOpt();
+  return true;
+}
+
+/**
+ * Return all keys opted into the faction's pool, stable-sorted by
+ * playerId so purpose-hash rotation is deterministic across restarts.
+ */
+export function getPooledKeysForFaction(factionId) {
+  const fid = String(factionId);
+  const out = [];
+  for (const [playerId, opt] of keyPoolingOpt) {
+    if (!opt.enabled) continue;
+    if (String(opt.factionId) !== fid) continue;
+    const key = apiKeys.get(playerId);
+    if (key) out.push({ playerId, key });
+  }
+  out.sort((a, b) => a.playerId.localeCompare(b.playerId));
+  return out;
+}
+
+/** Tiny deterministic string hash for rotating keys by purpose. */
+function stringHash(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h) + s.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h);
+}
+
+/**
+ * Primary helper for server-side pollers to pick a Torn API key. Rotates
+ * across opted-in pool keys by hashing the `purpose` string, so each
+ * poller (chain, war-status, attacks-feed, …) consistently lands on a
+ * different key as long as enough are pooled. Falls back to the faction-
+ * dedicated key, then to any stored key, preserving prior behavior for
+ * factions that haven't collected opt-ins yet.
+ */
+// ── Player ↔ faction persistence ────────────────────────────────────────
+
+export function loadPlayerFactions() {
+  ensureDataDir();
+  if (!fs.existsSync(PLAYER_FACTIONS_FILE)) return;
+  try {
+    const raw = fs.readFileSync(PLAYER_FACTIONS_FILE, "utf-8");
+    const data = JSON.parse(raw);
+    for (const [playerId, factionId] of Object.entries(data)) {
+      lastKnownFaction.set(String(playerId), String(factionId));
+    }
+    console.log(`[store] Loaded ${lastKnownFaction.size} player-faction mapping(s)`);
+  } catch (err) {
+    console.error("[store] Failed to load player-factions:", err.message);
+  }
+}
+
+function savePlayerFactions() {
+  ensureDataDir();
+  try {
+    const obj = Object.fromEntries(lastKnownFaction);
+    fs.writeFileSync(PLAYER_FACTIONS_FILE, JSON.stringify(obj, null, 2));
+  } catch (err) {
+    console.error("[store] Failed to persist player-factions:", err.message);
+  }
+}
+
+export function recordPlayerFaction(playerId, factionId) {
+  if (!playerId || !factionId) return;
+  const pid = String(playerId);
+  const fid = String(factionId);
+  if (lastKnownFaction.get(pid) === fid) return;
+  lastKnownFaction.set(pid, fid);
+  savePlayerFactions();
+}
+
+/**
+ * Return every playerId we've ever seen authenticated as a member of the
+ * given faction. Used for broadcast-to-faction push (e.g. retal).
+ */
+export function getPlayerIdsForFaction(factionId) {
+  const fid = String(factionId);
+  const out = [];
+  for (const [pid, f] of lastKnownFaction) {
+    if (f === fid) out.push(pid);
+  }
+  return out;
+}
+
+/**
+ * Dynamic poll interval that scales with pool size. More pooled keys →
+ * tighter polling (fresher data). Single-key pool → conservative
+ * intervals that stay under Torn's 100/min per-key limit.
+ *
+ * Floor values are near Torn's endpoint cache TTLs — polling faster
+ * than that just returns duplicates and burns budget with no benefit.
+ */
+export function getPollInterval(factionId, purpose) {
+  const pool = getPooledKeysForFaction(factionId);
+  const n = Math.max(1, pool.length);
+  const config = {
+    chain:           { min: 10_000, max: 20_000 }, // Torn cache ~15s
+    "war-status":    { min: 15_000, max: 30_000 }, // Torn cache ~30s
+    "attacks-feed":  { min: 15_000, max: 60_000 }, // our faction's attacks feed
+    "enemy-attacks": { min: 10_000, max: 30_000 }, // (unused — Torn blocks other factions' attacks)
+    // Per-enemy profile round-robin. At small pools (N ≤ concurrency_cap
+    // = 5) every tick hits every pooled key once, so per-key rate is
+    // 60000/tick_ms per minute. Floor must keep that under Torn's
+    // 100/min per-key limit — so 700ms (≈85/min/key, with 15% buffer).
+    // pool=1: 1500ms tick → 37s cycle (25 enemies serial).
+    // pool=4: 700ms floor → 4.4s cycle (catches ~4s+ attacks reliably).
+    // pool=10+: still 700ms (more keys don't speed this up until we
+    //          raise the concurrency cap above 5).
+    "enemy-profile": { min: 700, max: 1500 },
+  };
+  const c = config[purpose] || config["war-status"];
+  // Divide the conservative max by pool size, floor at min.
+  return Math.max(c.min, Math.round(c.max / n));
+}
+
+// ── Faction member bars aggregation ─────────────────────────────────────
+
+/**
+ * Record a member's self-reported bars snapshot. Purely in-memory (no
+ * disk persistence) — bars/cooldowns are ephemeral, losing them on
+ * restart is fine. Old entries age out after 10 minutes of no refresh.
+ */
+export function recordMemberBars(factionId, playerId, playerName, data) {
+  const fid = String(factionId);
+  const pid = String(playerId);
+  if (!factionBars.has(fid)) factionBars.set(fid, new Map());
+  factionBars.get(fid).set(pid, {
+    bars: data.bars || null,
+    cooldowns: data.cooldowns || null,
+    name: playerName || pid,
+    updatedAt: Date.now(),
+  });
+}
+
+/**
+ * Return all fresh bars snapshots for a faction. Snapshots older than
+ * `staleMs` are filtered out so the UI never shows zombie data.
+ */
+export function getFactionBars(factionId, staleMs = 10 * 60 * 1000) {
+  const fid = String(factionId);
+  const m = factionBars.get(fid);
+  if (!m) return {};
+  const cutoff = Date.now() - staleMs;
+  const out = {};
+  for (const [pid, entry] of m) {
+    if (entry.updatedAt >= cutoff) {
+      out[pid] = entry;
+    }
+  }
+  return out;
+}
+
+export function getPollingKey(factionId, purpose, index) {
+  const pool = getPooledKeysForFaction(factionId);
+  if (pool.length > 0) {
+    // If caller passes a numeric index, rotate request-by-request
+    // across the pool (used by high-frequency pollers like per-enemy
+    // profile round-robin). Otherwise fall back to the stable,
+    // purpose-hashed choice so each low-frequency poller lands on the
+    // same key predictably.
+    const idx = typeof index === "number"
+      ? Math.abs(index) % pool.length
+      : stringHash(String(purpose || "default")) % pool.length;
+    return pool[idx].key;
+  }
+  return (
+    factionApiKeys.get(String(factionId)) ||
+    getApiKeyForFaction(factionId) ||
+    null
+  );
 }

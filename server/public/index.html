@@ -2456,6 +2456,49 @@ img { max-width: 100%; display: block; }
       });
     }
 
+    // Per-device "user wants notifications" flag. Set after a successful
+    // subscribe; cleared on explicit unsubscribe. Lets us silently
+    // re-subscribe when the browser drops its push subscription (iOS
+    // Safari does this frequently) without forcing the user back through
+    // the API-key + Enable Notifications flow.
+    function wantsNotifications() { return localStorage.getItem('fo_wants_notif') === '1'; }
+    function setWantsNotifications(v) {
+      if (v) localStorage.setItem('fo_wants_notif', '1');
+      else localStorage.removeItem('fo_wants_notif');
+    }
+
+    /**
+     * Run the full subscribe flow using a cached token (no API-key prompt).
+     * Used for silent auto-resubscribe when the browser drops the sub but
+     * the user previously opted in.
+     */
+    function autoResubscribe() {
+      var token = getStoredToken();
+      if (!token) return Promise.reject(new Error('no cached token'));
+
+      return fetch('/api/push/vapid-key')
+        .then(function(r) { return r.json(); })
+        .then(function(vapid) {
+          if (!vapid.publicKey) throw new Error('Push not configured on server');
+          return swRegistration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(vapid.publicKey),
+          });
+        })
+        .then(function(subscription) {
+          return fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ subscription: subscription.toJSON() }),
+          });
+        })
+        .then(function(res) {
+          if (!res.ok) throw new Error('Server subscription failed');
+          console.log('[push] auto-resubscribed silently');
+          return true;
+        });
+    }
+
     function checkState() {
       if (Notification.permission === 'denied') {
         show(deniedEl);
@@ -2472,10 +2515,29 @@ img { max-width: 100%; display: block; }
           if (name) playerNameEl.textContent = 'Notifications active for ' + name;
           show(subscribedEl);
           loadSettings();
-        } else {
-          if (sub) sub.unsubscribe(); // stale browser sub with no token
-          show(needAuthEl);
+          return;
         }
+
+        // No active browser subscription. If the user previously opted in
+        // AND we still have a cached token, try to silently re-subscribe
+        // before falling through to the manual flow. Handles iOS Safari
+        // dropping the push endpoint on restart / permission reset.
+        if (!sub && wantsNotifications() && getStoredToken() &&
+            Notification.permission === 'granted') {
+          autoResubscribe().then(function() {
+            var name = getStoredName();
+            if (name) playerNameEl.textContent = 'Notifications active for ' + name;
+            show(subscribedEl);
+            loadSettings();
+          }).catch(function(err) {
+            console.warn('[push] auto-resubscribe failed:', err && err.message);
+            show(needAuthEl);
+          });
+          return;
+        }
+
+        if (sub) sub.unsubscribe(); // stale browser sub with no token
+        show(needAuthEl);
       });
     }
 
@@ -2523,6 +2585,7 @@ img { max-width: 100%; display: block; }
             });
           }).then(function(res) {
             if (!res.ok) throw new Error('Server subscription failed');
+            setWantsNotifications(true); // remember opt-in for silent resubscribe
             playerNameEl.textContent = 'Notifications active for ' + authData.player.playerName;
             show(subscribedEl);
             loadSettings();
@@ -2554,6 +2617,7 @@ img { max-width: 100%; display: block; }
         var headers = authHeaders();
 
         function finish() {
+          setWantsNotifications(false); // user explicitly disabled
           clearAuth();
           settingsLoaded = false; // reset so settings reload on next subscribe
           // Reset auth form to clean state

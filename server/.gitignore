@@ -1,1 +1,5 @@
-scripts/data/
+node_modules/
+data/
+*.bak-*
+*-backup
+package-lock.json

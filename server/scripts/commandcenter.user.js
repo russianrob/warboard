@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         FactionOps - Faction War Coordinator
+// @name         CommandCenter - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.5
-// @description  Real-time faction war coordination tool for Torn.com
+// @version      4.9.22
+// @description  Real-time faction war coordination tool for Torn.com (CommandCenter build).
 // @author       RussianRob
 // @license      MIT
-// @downloadURL  https://tornwar.com/scripts/factionops.user.js
-// @updateURL    https://tornwar.com/scripts/factionops.meta.js
+// @downloadURL  https://tornwar.com/scripts/commandcenter.user.js
+// @updateURL    https://tornwar.com/scripts/commandcenter.meta.js
 // @require      https://tornwar.com/socket.io/socket.io.js
 // @match        https://www.torn.com/factions.php?step=your*
 // @match        https://www.torn.com/factions.php?step=profile*
@@ -1056,37 +1056,52 @@ html.wb-theme-light {
 }
 #wb-assist-btn {
     position: fixed;
-    bottom: 80px;
-    right: 16px;
+    bottom: 72px;
+    right: 14px;
     z-index: 9999999 !important;
-    background: linear-gradient(135deg, #e17055, #d63031);
+    background: linear-gradient(135deg, #ff6b52, #e03a3a);
     color: #fff;
-    border: none;
-    border-radius: 12px;
-    padding: 12px 20px;
-    font-family: 'Open Sans', Arial, sans-serif;
-    font-size: 14px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Open Sans", Arial, sans-serif;
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    line-height: 1;
     cursor: pointer;
-    box-shadow: 0 4px 16px rgba(214, 48, 49, 0.4);
-    display: flex;
+    box-shadow: 0 2px 8px rgba(214, 48, 49, 0.35), inset 0 1px 0 rgba(255,255,255,0.12);
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    transition: all 0.2s ease;
+    gap: 6px;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
     -webkit-tap-highlight-color: transparent;
+    user-select: none;
+}
+#wb-assist-btn .wb-assist-icon {
+    width: 12px;
+    height: 12px;
+    display: inline-block;
+    vertical-align: middle;
+    flex-shrink: 0;
+    filter: drop-shadow(0 1px 0 rgba(0,0,0,0.25));
 }
 #wb-assist-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(214, 48, 49, 0.5);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(214, 48, 49, 0.5), inset 0 1px 0 rgba(255,255,255,0.18);
 }
 #wb-assist-btn:active {
     transform: translateY(0);
+    box-shadow: 0 1px 4px rgba(214, 48, 49, 0.4), inset 0 1px 0 rgba(0,0,0,0.12);
 }
 #wb-assist-btn:disabled {
-    background: linear-gradient(135deg, #636e72, #2d3436);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    background: linear-gradient(135deg, #4a5258, #2d3436);
+    color: #b0b8bc;
+    border-color: rgba(255,255,255,0.04);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
     cursor: not-allowed;
+    transform: none;
 }
 
 /* ----- Animations ----- */
@@ -2636,6 +2651,7 @@ body.wb-chain-active {
             const existing = state.statuses[targetId];
             if (!existing) {
                 state.statuses[targetId] = newData;
+                maybeAutoUncallOnHospital(targetId, null, normalizeStatus(newData.status));
                 continue;
             }
             const oldStatus = normalizeStatus(existing.status);
@@ -2648,11 +2664,177 @@ body.wb-chain-active {
                 ...newData,
             };
 
-            // Monotonic guard on `until` — only if status didn't change
-            if (!statusChanged && existing.until > 0 && newData.until > 0) {
-                // Timer must only count DOWN — keep whichever is lower
-                state.statuses[targetId].until = Math.min(existing.until, newData.until);
+            if (statusChanged) {
+                maybeAutoUncallOnHospital(targetId, oldStatus, newStatus);
             }
+
+            // Monotonic guard on `until` — timer may only count DOWN while
+            // the status is unchanged. Previously this only applied when
+            // existing.until > 0, so once the local tick reached 0 a
+            // slightly-stale server push (Torn cache lag: e.g. "2s left")
+            // would bump the countdown back up to 2s, causing the Next Up
+            // bar to visibly rebound 0 → 2 → tick down → 0 → rebound again
+            // until Torn's cache finally reported the release.
+            if (!statusChanged && Object.prototype.hasOwnProperty.call(newData, 'until')) {
+                const existingUntil = typeof existing.until === 'number' ? existing.until : 0;
+                const newUntil      = typeof newData.until === 'number' ? newData.until : existingUntil;
+                state.statuses[targetId].until = Math.min(existingUntil, newUntil);
+            }
+        }
+    }
+
+    /**
+     * Parse a duration out of a human-readable string from Torn tooltips.
+     * Handles: "1h 23m", "45 minutes", "In hospital for 2 hours 10 mins",
+     * "45:23" (MM:SS), "1:23:45" (HH:MM:SS). Returns seconds or 0.
+     */
+    function parseDurationFromText(text) {
+        if (!text) return 0;
+        const t = String(text).toLowerCase();
+        // HH:MM:SS or MM:SS forms
+        const clock = t.match(/(\d+):(\d{2})(?::(\d{2}))?/);
+        if (clock) {
+            const a = Number(clock[1]) || 0;
+            const b = Number(clock[2]) || 0;
+            const c = Number(clock[3]) || 0;
+            if (clock[3] != null) return a * 3600 + b * 60 + c;
+            // Two-group form: MM:SS if first < 60, else HH:MM
+            return a < 60 ? a * 60 + b : a * 3600 + b * 60;
+        }
+        // "1h 23m" / "1 hour 23 minutes"
+        const hm = t.match(/(\d+)\s*(?:hour|hr|h)[a-z]*\s*(?:(\d+)\s*(?:minute|min|m))?/);
+        if (hm) return (Number(hm[1]) || 0) * 3600 + (Number(hm[2]) || 0) * 60;
+        // "45 minutes" / "45 mins" / "45m"
+        const mOnly = t.match(/(\d+)\s*(?:minute|min|m)\b/);
+        if (mOnly) return Number(mOnly[1]) * 60;
+        return 0;
+    }
+
+    /**
+     * Build a name anchor that mimics Torn's native `.user.name` element as
+     * closely as possible by cloning a live example from the page. This
+     * preserves whatever wrapper/sub-span structure Torn's own profile-card
+     * handler expects — even when that structure changes between Torn
+     * releases. Player-specific sub-elements (honor icons, cipher badges,
+     * rank chips) are stripped before cloning so we don't leak someone
+     * else's data into our overlay row.
+     */
+    let _nativeNameTemplate = null;
+    function getNativeNameTemplate() {
+        if (_nativeNameTemplate) return _nativeNameTemplate.cloneNode(true);
+        const src = document.querySelector('a.user.name[href^="/profiles.php"]:not(.fo-name):not([data-fo-built])');
+        if (!src) return null;
+        const template = src.cloneNode(true);
+        // Strip player-specific child content
+        template.querySelectorAll(
+            '.user-information-cipher, .honor-text-wrap, [class*="honor"], [class*="rank"], svg, img'
+        ).forEach((el) => el.remove());
+        _nativeNameTemplate = template;
+        return template.cloneNode(true);
+    }
+
+    function buildNameAnchor(playerId, playerName) {
+        const template = getNativeNameTemplate();
+        let anchor;
+        if (template) {
+            template.setAttribute('href', `/profiles.php?XID=${playerId}`);
+            template.setAttribute('data-placeholder', `${playerName || 'Unknown'} [${playerId}]`);
+            template.setAttribute('data-fo-built', '1');
+            template.classList.add('fo-name');
+            template.style.textDecoration = 'none';
+            template.style.color = 'inherit';
+            const inner = template.querySelector('.name') || template.querySelector('span');
+            if (inner) {
+                inner.textContent = playerName || `#${playerId}`;
+            } else {
+                template.textContent = playerName || `#${playerId}`;
+            }
+            anchor = template;
+        } else {
+            // Fallback: manual construction matching the most common pattern.
+            anchor = document.createElement('a');
+            anchor.className = 'fo-name user name';
+            anchor.setAttribute('href', `/profiles.php?XID=${playerId}`);
+            anchor.dataset.placeholder = `${playerName || 'Unknown'} [${playerId}]`;
+            anchor.style.textDecoration = 'none';
+            anchor.style.color = 'inherit';
+            const inner = document.createElement('span');
+            inner.className = 'name';
+            inner.textContent = playerName || `#${playerId}`;
+            anchor.appendChild(inner);
+        }
+
+        // Copy Torn's native jQuery event handlers onto this anchor. Torn
+        // typically binds mouse/touch handlers directly to each `.user.name`
+        // element at page load (not via document delegation), so cloned
+        // elements don't inherit them. When jQuery is exposed on window, we
+        // can read the handler table from a live native element via
+        // `$._data(el, 'events')` and re-attach each binding.
+        copyNativeUserNameHandlers(anchor);
+
+        return anchor;
+    }
+
+    function copyNativeUserNameHandlers(target) {
+        try {
+            const jq = window.jQuery || window.$;
+            if (!jq || !jq._data) return false;
+            const source = document.querySelector('a.user.name[href^="/profiles.php"]:not(.fo-name):not([data-fo-built])');
+            if (!source) return false;
+            const events = jq._data(source, 'events');
+            if (!events) return false;
+            for (const type in events) {
+                const list = events[type];
+                if (!list) continue;
+                for (const h of list) {
+                    const ns = h.namespace ? `.${h.namespace}` : '';
+                    try {
+                        if (h.selector) {
+                            jq(target).on(type + ns, h.selector, h.data, h.handler);
+                        } else {
+                            jq(target).on(type + ns, h.data, h.handler);
+                        }
+                    } catch (_) { /* one handler's failure shouldn't block others */ }
+                }
+            }
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    /**
+     * Auto-uncall hook: when a target that I've called transitions into
+     * hospital (from any detection path — server push, attacks-feed, peer
+     * relay, DOM reader, intercepted attack result), clear my call. Scoped
+     * to my own calls so a teammate's call is never stomped. Runs from
+     * mergeStatusesMonotonic so it sits at the single chokepoint where all
+     * status updates flow through, instead of sprinkled across every
+     * detection path.
+     */
+    function maybeAutoUncallOnHospital(targetId, oldStatus, newStatus) {
+        if (newStatus !== 'hospital') return;
+        if (oldStatus === 'hospital') return; // not a transition
+        const call = state.calls && state.calls[targetId];
+        if (!call) {
+            log(`[auto-uncall] #${targetId} → hospital: no call exists`);
+            return;
+        }
+        if (!call.calledBy) {
+            log(`[auto-uncall] #${targetId} → hospital: call has no calledBy`);
+            return;
+        }
+        const caller = String(call.calledBy.id);
+        const me = String(state.myPlayerId || '');
+        if (caller !== me) {
+            log(`[auto-uncall] #${targetId} → hospital: call is ${caller}'s (I am ${me}), skipping`);
+            return;
+        }
+        try {
+            emitUncallTarget(targetId);
+            log(`[auto-uncall] #${targetId} hospitalized → cleared my call`);
+        } catch (e) {
+            warn(`[auto-uncall] failed for #${targetId}:`, e);
         }
     }
 
@@ -2689,7 +2871,10 @@ body.wb-chain-active {
         if (!statusBatch || Object.keys(statusBatch).length === 0) return;
         Object.assign(peerRelayBatch, statusBatch);
         if (peerRelayTimer) return; // already scheduled
-        peerRelayTimer = setTimeout(flushPeerRelay, 2000);
+        // CommandCenter: shortened from 2000ms so peer-observed status
+        // changes (e.g. a teammate viewing a target that just got
+        // hospitalized) reach the rest of the faction faster.
+        peerRelayTimer = setTimeout(flushPeerRelay, 500);
     }
 
     function flushPeerRelay() {
@@ -3039,7 +3224,11 @@ body.wb-chain-active {
 
     // PDA: polling is the primary transport (Socket.IO blocked by WebView)
     // Desktop: polling is a fallback — Socket.IO handles real-time push
-    const POLL_FAST_MS  = 2000;  // War active: 2s
+    // 200ms was tried and caused client-side "Network error" cascades when
+    // requests overlapped and GM_xmlhttpRequest queue filled up. 1000ms is
+    // the sweet spot — feels live, stays well under the browser's
+    // concurrent-socket limit and the server global rate limiter.
+    const POLL_FAST_MS  = 1000;  // War active: 1s (CommandCenter; only used when Socket.IO is unavailable)
     const POLL_IDLE_MS  = 5000;  // No war: 5s
     let currentPollInterval = POLL_IDLE_MS;
 
@@ -4072,6 +4261,21 @@ body.wb-chain-active {
                 </label>
             </div>
 
+            <div class="wb-settings-row">
+                <span>Share my API key with faction pool</span>
+                <label class="wb-toggle">
+                    <input type="checkbox" id="wb-toggle-pool-opt">
+                    <span class="wb-toggle-slider"></span>
+                </label>
+            </div>
+            <div style="font-size:11px;opacity:0.6;margin-bottom:14px;">
+                When on, your key is used alongside other officers' keys to
+                spread the faction's server-side polling load (chain, war
+                status, hospital events). Rate limits stop cascading.
+                Please use a <strong>Limited</strong> key — never a Full
+                key — for sharing. Opt out at any time.
+            </div>
+
             <div style="margin: 14px 0;">
                 <label for="wb-input-broadcast-roles">Custom Broadcast Roles (comma-separated)</label>
                 <div style="display:flex;gap:6px;">
@@ -4215,6 +4419,22 @@ body.wb-chain-active {
                 stopKeepAlive();
             }
         });
+
+        // Key-pool opt-in: hydrate current value from server, then wire toggle.
+        const poolToggle = document.getElementById('wb-toggle-pool-opt');
+        if (poolToggle) {
+            getAction('/api/pool-opt')
+                .then((r) => { poolToggle.checked = !!(r && r.enabled); })
+                .catch(() => { /* unauthenticated or network — leave default */ });
+            poolToggle.addEventListener('change', (e) => {
+                postAction('/api/pool-opt', { enabled: e.target.checked })
+                    .catch((err) => {
+                        warn('pool-opt toggle failed:', err && err.message);
+                        // revert visually
+                        e.target.checked = !e.target.checked;
+                    });
+            });
+        }
 
         const pdaNotifToggle = document.getElementById('wb-toggle-pda-notif');
         if (pdaNotifToggle) {
@@ -5169,13 +5389,9 @@ body.wb-chain-active {
             }
             item.dataset.nuId = t.targetId;
 
-            const nameLink = document.createElement('a');
-            nameLink.className = 'user name';
-            nameLink.href = `https://www.torn.com/profiles.php?XID=${t.targetId}`;
-            nameLink.dataset.placeholder = `${name} [${t.targetId}]`;
-            nameLink.style.cssText = 'text-decoration:none;color:inherit;';
+            const nameLink = buildNameAnchor(t.targetId, name);
             nameLink.title = name;
-            nameLink.textContent = name;
+            nameLink.style.cssText = 'text-decoration:none;color:inherit;';
             item.appendChild(nameLink);
 
             const timerSpan = document.createElement('span');
@@ -6200,12 +6416,21 @@ body.wb-chain-active {
         startKeepAlive();
         updateChainBar();
 
-        // Hide Torn's main content so the overlay takes over
+        // Hide Torn's main content but keep the container itself visible so
+        // we can insert the overlay INSIDE it. Torn typically scopes its
+        // native profile-card delegation to #mainContainer; nesting the
+        // overlay inside lets those handlers fire on our name elements.
         const mainContent = document.getElementById('mainContainer')
             || document.querySelector('.content-wrapper');
         if (mainContent) {
             mainContent.dataset.foHidden = 'true';
-            mainContent.style.display = 'none';
+            for (const child of Array.from(mainContent.children)) {
+                if (child.id === 'fo-overlay') continue;
+                if (!('foPrevDisplay' in child.dataset)) {
+                    child.dataset.foPrevDisplay = child.style.display || '';
+                }
+                child.style.display = 'none';
+            }
         }
 
         // Create the overlay if it doesn't already exist
@@ -6293,10 +6518,12 @@ body.wb-chain-active {
             </div>
         `;
 
-        // Insert after the hidden main content, taking over the page
+        // Insert the overlay INSIDE the hidden main container so Torn's
+        // delegated event handlers (profile-card tooltips in particular,
+        // which are scoped to #mainContainer) fire on our name elements.
         const hiddenMain = document.querySelector('[data-fo-hidden="true"]');
-        if (hiddenMain && hiddenMain.parentNode) {
-            hiddenMain.parentNode.insertBefore(overlay, hiddenMain.nextSibling);
+        if (hiddenMain) {
+            hiddenMain.appendChild(overlay);
         } else {
             document.body.appendChild(overlay);
         }
@@ -6394,25 +6621,19 @@ body.wb-chain-active {
 
         // Wire up broadcast button in overlay (leader/banker only)
         const shoutBtn = document.getElementById('fo-btn-send-broadcast');
-        log('[shout] shoutBtn found:', !!shoutBtn);
         if (shoutBtn) {
             shoutBtn.addEventListener('click', () => {
-                log('[shout] Button clicked');
                 const msgInput = document.getElementById('fo-input-broadcast');
-                const msg = msgInput ? msgInput.value.trim() : '';
-                log('[shout] msg:', msg, 'input found:', !!msgInput);
+                const msg = msgInput.value.trim();
                 
                 if (msg) {
                     const currentWarId = deriveWarId();
-                    log('[shout] warId:', currentWarId, 'jwt:', !!state.jwtToken);
                     if (!currentWarId) {
                         showToast('Error: Could not determine war ID.', 'error');
                         return;
                     }
-                    log('[shout] Sending POST to /api/broadcast');
                     postAction('/api/broadcast', { message: msg, type: 'warning', warId: currentWarId })
                     .then(data => {
-                        log('[shout] Response:', JSON.stringify(data));
                         if (data.success) {
                             msgInput.value = '';
                             showToast('Broadcast sent to faction!', 'success');
@@ -6421,11 +6642,9 @@ body.wb-chain-active {
                         }
                     })
                     .catch(e => {
-                        warn('[shout] Broadcast failed:', e.message);
-                        showToast('Failed to send broadcast: ' + e.message, 'error');
+                        warn('Broadcast failed:', e.message);
+                        showToast('Failed to send broadcast (Server Error).', 'error');
                     });
-                } else {
-                    log('[shout] Empty message, ignoring');
                 }
             });
             // Also support Enter key
@@ -6677,13 +6896,7 @@ body.wb-chain-active {
         const nameRow = document.createElement('div');
         nameRow.className = 'fo-name-row';
 
-        const nameSpan = document.createElement('a');
-        nameSpan.className = 'fo-name user name';
-        nameSpan.href = `https://www.torn.com/profiles.php?XID=${targetId}`;
-        nameSpan.dataset.placeholder = `${s.name || 'Unknown'} [${targetId}]`;
-        nameSpan.style.textDecoration = 'none';
-        nameSpan.style.color = 'inherit';
-        nameSpan.textContent = s.name || 'Unknown';
+        const nameSpan = buildNameAnchor(targetId, s.name);
         nameRow.appendChild(nameSpan);
 
         // Eye badge for viewers
@@ -7384,7 +7597,12 @@ body.wb-chain-active {
 
         const btn = document.createElement('button');
         btn.id = 'wb-assist-btn';
-        btn.innerHTML = '⚔️ ASSIST';
+        btn.innerHTML = `
+            <svg class="wb-assist-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M6.92 5 5 6.92l6.31 6.31-2.18 2.18a2.4 2.4 0 1 0 1.06 1.06l2.18-2.18 2.17 2.17a2.4 2.4 0 1 0 1.06-1.06L13.43 13.3 19.74 7 17.82 5.08l-5.51 5.51-5.39-5.59Z"/>
+            </svg>
+            <span>Assist</span>
+        `;
 
         let cooldownTimer = null;
 
@@ -7587,15 +7805,68 @@ body.wb-chain-active {
             }
         }
 
-        // Attack result
+        // Single-player profile data — shape returned by /user/:id?selections=profile
+        // and a few of Torn's internal profile fetches. Near-zero-latency update
+        // for whichever enemy a teammate is currently looking at.
+        if (data.player_id && data.status && typeof data.status === 'object' && !data.members) {
+            const mid = String(data.player_id);
+            // Only update enemies we already track — don't leak arbitrary profile views.
+            if (state.statuses[mid]) {
+                const statusInfo = parseInterceptedMemberStatus(data);
+                if (statusInfo) {
+                    const existing = state.statuses[mid];
+                    if (!statusInfo.name && existing.name) statusInfo.name = existing.name;
+                    if (statusInfo.level == null && existing.level != null) statusInfo.level = existing.level;
+                    const batch = { [mid]: statusInfo };
+                    mergeStatusesMonotonic(batch);
+                    queuePeerRelay(batch);
+                    updateTargetRow(mid);
+                    updateNextUp();
+                    log(`[profile-intercept] Updated ${mid} from profile response`);
+                }
+            }
+        }
+
+        // Attack result — a teammate's attack just resolved; if the target
+        // was hospitalized this is the single fastest signal we will ever
+        // get (no Torn API cache between us and ground truth). Flip the
+        // target's status locally and peer-relay so the rest of the faction
+        // stops showing them as "available" within ~500ms.
         if (data.result) {
             log('Attack result intercepted:', data.result);
-            if (data.result.hospitalized || data.result.mugged || data.result.attacked) {
-                // Target was hospitalized — could auto-uncall
-                const targetId = getAttackTargetId();
-                if (targetId) {
-                    log('Target hospitalized — consider uncalling');
-                }
+            const targetId = getAttackTargetId();
+            if (targetId && data.result.hospitalized) {
+                // Try multiple shapes Torn has used for hospital duration.
+                const minutesFromResult =
+                    (typeof data.result.hospitalized === 'object' && data.result.hospitalized.minutes) ||
+                    data.result.hospital_time ||
+                    data.result.hospitalTime ||
+                    (data.result.hospital && data.result.hospital.minutes) ||
+                    0;
+                // If duration is unknown, use a conservative placeholder so
+                // the row flips away from "ok"; the next real status update
+                // will refine the countdown.
+                const untilSec = minutesFromResult > 0
+                    ? minutesFromResult * 60
+                    : 30 * 60;
+                const existing = state.statuses[targetId] || {};
+                const statusInfo = {
+                    status: 'hospital',
+                    until: untilSec,
+                    description: 'Hospitalized',
+                    activity: 'offline',
+                };
+                if (existing.name) statusInfo.name = existing.name;
+                if (existing.level != null) statusInfo.level = existing.level;
+
+                const batch = { [targetId]: statusInfo };
+                mergeStatusesMonotonic(batch);
+                queuePeerRelay(batch);
+                updateTargetRow(targetId);
+                updateNextUp();
+                log(`[attack-result] Target ${targetId} marked hospital (${minutesFromResult || '~30'}m)`);
+                // Auto-uncall happens centrally via maybeAutoUncallOnHospital
+                // inside mergeStatusesMonotonic — no per-path logic needed.
             }
         }
     }
@@ -7663,44 +7934,63 @@ body.wb-chain-active {
         if (!row) return null;
 
         // Clone the row but exclude our injected FactionOps elements
-        // so we only read Torn's original DOM
+        // so we only read Torn's original DOM.
         const clone = row.cloneNode(true);
         const injected = clone.querySelectorAll('.wb-cell-container, .wb-sortable-row-overlay');
         injected.forEach((el) => el.remove());
         const text = clone.textContent.toLowerCase();
 
-        // Look for status icons (Torn uses SVG icons with title attributes, or
-        // elements with specific classes like .icon_*)
-        const icons = clone.querySelectorAll('[class*="icon"], [title], svg title');
-        for (const icon of icons) {
-            const t = (icon.getAttribute('title') || icon.textContent || '').toLowerCase();
-            if (t.includes('hospital')) return { status: 'hospital' };
-            if (t.includes('jail')) return { status: 'jail' };
-            if (t.includes('federal')) return { status: 'federal' };
-            if (t.includes('travel')) return { status: 'traveling' };
-            if (t.includes('abroad')) return { status: 'abroad' };
-            if (t.includes('fallen')) return { status: 'fallen' };
+        // Pass 1: title attributes (most information-dense — Torn's icon
+        // tooltips carry BOTH the status word and the remaining duration).
+        const titled = [];
+        if (row.getAttribute && row.getAttribute('title')) titled.push(row.getAttribute('title'));
+        clone.querySelectorAll('[title]').forEach((el) => {
+            const t = el.getAttribute('title');
+            if (t) titled.push(t);
+        });
+        for (const raw of titled) {
+            const t = raw.toLowerCase();
+            if (t.includes('hospital')) return { status: 'hospital', until: parseDurationFromText(raw) };
+            if (t.includes('jail'))     return { status: 'jail',     until: parseDurationFromText(raw) };
+            if (t.includes('federal'))  return { status: 'federal',  until: 0 };
+            if (t.includes('travel'))   return { status: 'traveling', until: 0 };
+            if (t.includes('abroad'))   return { status: 'abroad',   until: 0 };
+            if (t.includes('fallen'))   return { status: 'fallen',   until: 0 };
         }
 
-        // Fallback: scan text content for status keywords
-        if (text.includes('hospital')) return { status: 'hospital' };
-        if (text.includes('jail')) return { status: 'jail' };
-        if (text.includes('federal')) return { status: 'federal' };
-        if (text.includes('traveling') || text.includes('abroad')) return { status: 'traveling' };
-        if (text.includes('fallen')) return { status: 'fallen' };
+        // Pass 2: SVG <title> elements (some Torn layouts use these
+        // instead of attribute titles).
+        const svgTitles = clone.querySelectorAll('svg title');
+        for (const el of svgTitles) {
+            const t = (el.textContent || '').toLowerCase();
+            if (t.includes('hospital')) return { status: 'hospital', until: parseDurationFromText(el.textContent) };
+            if (t.includes('jail'))     return { status: 'jail',     until: parseDurationFromText(el.textContent) };
+            if (t.includes('federal'))  return { status: 'federal',  until: 0 };
+            if (t.includes('travel'))   return { status: 'traveling', until: 0 };
+            if (t.includes('abroad'))   return { status: 'abroad',   until: 0 };
+            if (t.includes('fallen'))   return { status: 'fallen',   until: 0 };
+        }
 
-        // Also check for status-indicating CSS classes on the row or children
+        // Pass 3: row text content (catches status words that aren't
+        // in tooltips but are rendered inline).
+        if (text.includes('hospital')) return { status: 'hospital', until: parseDurationFromText(text) };
+        if (text.includes('jail'))     return { status: 'jail',     until: parseDurationFromText(text) };
+        if (text.includes('federal'))  return { status: 'federal',  until: 0 };
+        if (text.includes('traveling') || text.includes('abroad')) return { status: 'traveling', until: 0 };
+        if (text.includes('fallen'))   return { status: 'fallen',   until: 0 };
+
+        // Pass 4: status-indicating class names on the row or children.
         const allEls = [clone, ...clone.querySelectorAll('*')];
         for (const el of allEls) {
             const cls = el.className;
             if (typeof cls !== 'string') continue;
-            if (cls.includes('hospital')) return { status: 'hospital' };
-            if (cls.includes('jail')) return { status: 'jail' };
-            if (cls.includes('travel')) return { status: 'traveling' };
+            if (cls.includes('hospital')) return { status: 'hospital', until: 0 };
+            if (cls.includes('jail'))     return { status: 'jail',     until: 0 };
+            if (cls.includes('travel'))   return { status: 'traveling', until: 0 };
         }
 
-        // If none of the above matched, member is likely OK/Online
-        return { status: 'ok' };
+        // Nothing indicative — treat as OK.
+        return { status: 'ok', until: 0 };
     }
 
     /**
@@ -7726,30 +8016,41 @@ body.wb-chain-active {
             const domStatus = readStatusFromDOM(row);
             if (!domStatus) return;
 
-            const current = state.statuses[targetId];
-            const currentNorm = normalizeStatus(current ? current.status : 'ok');
+            const current = state.statuses[targetId] || {};
+            const currentNorm = normalizeStatus(current.status || 'ok');
             const domNorm = normalizeStatus(domStatus.status);
+            const statusChanged = currentNorm !== domNorm;
 
-            if (currentNorm !== domNorm) {
-                log(`DOM status change detected: #${targetId} ${currentNorm} → ${domNorm}`);
+            // Build a merge payload. Force until=0 on "ok" so lingering
+            // timers don't stick around when a target gets released.
+            const payload = { status: domNorm };
+            if (domNorm === 'ok') {
+                payload.until = 0;
+            } else if (typeof domStatus.until === 'number') {
+                payload.until = domStatus.until;
+            }
 
-                // Update local state immediately
-                if (!state.statuses[targetId]) {
-                    state.statuses[targetId] = {};
-                }
-                state.statuses[targetId].status = domNorm;
-                // If transitioning FROM hospital/jail TO ok, clear the timer
-                if (domNorm === 'ok') {
-                    state.statuses[targetId].until = 0;
-                }
+            // Cheap change detection — skip DOM reads where nothing of
+            // interest moved. We care about status transitions and any
+            // meaningful timer change (>2s to absorb rounding).
+            const currentUntil = typeof current.until === 'number' ? current.until : 0;
+            const timerDelta = Math.abs(currentUntil - (payload.until ?? currentUntil));
+            if (!statusChanged && timerDelta < 2) return;
 
+            // Route through the monotonic merge so stale tooltip durations
+            // can't bump a decrementing timer back up (same guard that
+            // fixes the "Next Up rebounds 0 → 2s" bug for server pushes).
+            const prevUntil = state.statuses[targetId]?.until;
+            mergeStatusesMonotonic({ [targetId]: payload });
+            const postUntil = state.statuses[targetId]?.until;
+
+            if (statusChanged || prevUntil !== postUntil) {
+                log(`[dom-status] #${targetId} ${currentNorm} → ${domNorm}${payload.until ? ` (${Math.round(payload.until/60)}m)` : ''}`);
                 changedStatuses[targetId] = {
-                    status: domNorm,
-                    until: domNorm === 'ok' ? 0 : (state.statuses[targetId].until || 0),
+                    status: state.statuses[targetId].status,
+                    until: state.statuses[targetId].until || 0,
                 };
                 changeCount++;
-
-                // Update the UI row immediately
                 updateTargetRow(targetId);
             }
         });
@@ -8000,7 +8301,15 @@ body.wb-chain-active {
         const mainContent = document.getElementById('mainContainer')
             || document.querySelector('.content-wrapper');
         if (mainContent && mainContent.dataset.foHidden === 'true') {
-            mainContent.style.display = '';
+            for (const child of Array.from(mainContent.children)) {
+                if (child.id === 'fo-overlay') continue;
+                if ('foPrevDisplay' in child.dataset) {
+                    child.style.display = child.dataset.foPrevDisplay;
+                    delete child.dataset.foPrevDisplay;
+                } else {
+                    child.style.display = '';
+                }
+            }
             delete mainContent.dataset.foHidden;
         }
 
@@ -8014,6 +8323,121 @@ body.wb-chain-active {
 
         // Show the floating Assist button
         createAssistButton();
+
+        // Scrape the attack-page DOM for the target's visible status. Torn
+        // populates this sidebar text lazily, so retry a handful of times
+        // over ~15s to catch it once it renders.
+        scheduleAttackPageStatusScrape();
+    }
+
+    /**
+     * Retry-driven scrape of the attack page's visible target status.
+     * Zero API cost — we already loaded this page. Peer-relays whatever
+     * we parse so the rest of the faction sees the update within ~500ms.
+     */
+    function scheduleAttackPageStatusScrape() {
+        let attempts = 0;
+        // Scrape every 1s for 60s so we catch the target's post-attack
+        // status transition (hospital/mugged/etc.) whenever Torn's sidebar
+        // updates. Don't early-exit on first success — the first read just
+        // reflects pre-attack state, and we need subsequent reads to catch
+        // the transition that triggers auto-uncall.
+        const maxAttempts = 60;
+        const intervalMs = 1000;
+        const timer = setInterval(() => {
+            readAttackTargetStatusFromDOM();
+            attempts += 1;
+            if (attempts >= maxAttempts) {
+                clearInterval(timer);
+            }
+        }, intervalMs);
+        // Also try once immediately in case the DOM is already there.
+        setTimeout(readAttackTargetStatusFromDOM, 250);
+    }
+
+    /**
+     * Parse the attack page sidebar for target status text (hospital / jail /
+     * okay / traveling / fallen). Returns true if a status was extracted.
+     * Narrow: only updates an enemy we already track, so rogue DOM reads
+     * can't pollute state.
+     */
+    function readAttackTargetStatusFromDOM() {
+        const targetId = getAttackTargetId();
+        if (!targetId || !state.statuses[targetId]) return false;
+
+        const raw = extractAttackPageStatusText();
+        if (!raw) return false;
+
+        const lower = raw.toLowerCase();
+        let status = null;
+        let until = 0;
+        let description = raw.length < 120 ? raw : '';
+
+        if (lower.includes('hospital')) {
+            status = 'hospital';
+            // Parse durations: "1h 23m", "45m", "23 minutes", etc.
+            const hm = lower.match(/(\d+)\s*h(?:our)?s?\s*(?:(\d+)\s*m(?:in(?:ute)?s?)?)?/);
+            if (hm) {
+                const h = Number(hm[1]) || 0;
+                const mm = Number(hm[2]) || 0;
+                until = (h * 60 + mm) * 60;
+            } else {
+                const mOnly = lower.match(/(\d+)\s*m(?:in(?:ute)?s?)?/);
+                if (mOnly) until = Number(mOnly[1]) * 60;
+            }
+        } else if (lower.includes('jail')) {
+            status = 'jail';
+            const mOnly = lower.match(/(\d+)\s*m(?:in(?:ute)?s?)?/);
+            if (mOnly) until = Number(mOnly[1]) * 60;
+        } else if (lower.includes('traveling') || lower.includes('abroad')
+                   || lower.includes('in ') && /in\s+(mexico|japan|canada|hawaii|uk|switzerland|china|argentina|south africa|cayman)/i.test(raw)) {
+            status = lower.includes('traveling') ? 'traveling' : 'abroad';
+        } else if (lower.includes('federal')) {
+            status = 'federal';
+        } else if (lower.includes('fallen')) {
+            status = 'fallen';
+        } else if (lower.includes('okay') || /^\s*ok\b/i.test(raw)) {
+            status = 'ok';
+        } else {
+            return false;
+        }
+
+        const existing = state.statuses[targetId];
+        const statusInfo = {
+            status, until, description,
+            activity: existing.activity || 'offline',
+            name: existing.name || null,
+            level: existing.level != null ? existing.level : null,
+        };
+
+        const batch = { [targetId]: statusInfo };
+        mergeStatusesMonotonic(batch);
+        queuePeerRelay(batch);
+        log(`[attack-dom] Target ${targetId} status from DOM: ${status}${until ? ` (${Math.round(until/60)}m)` : ''}`);
+        return true;
+    }
+
+    function extractAttackPageStatusText() {
+        // Torn's attack page renders the opponent status in a couple of
+        // places depending on version. Try several; take the first that
+        // contains one of the recognisable status words.
+        const needles = ['hospital', 'jail', 'okay', 'traveling', 'abroad', 'federal', 'fallen'];
+        const candidates = [
+            ...document.querySelectorAll('[class*="playerStatus"]'),
+            ...document.querySelectorAll('[class*="userStatus"]'),
+            ...document.querySelectorAll('[class*="statusText"]'),
+            ...document.querySelectorAll('.info-table [class*="status"]'),
+            ...document.querySelectorAll('[class*="user-info"] [class*="status"]'),
+            ...document.querySelectorAll('.status-display'),
+            ...document.querySelectorAll('[class*="status"][class*="wrap"]'),
+        ];
+        for (const el of candidates) {
+            const text = (el.textContent || '').trim();
+            if (!text || text.length > 200) continue;
+            const lower = text.toLowerCase();
+            if (needles.some(n => lower.includes(n))) return text;
+        }
+        return null;
     }
 
     /** Report to the server which target we're currently viewing. */
@@ -9556,6 +9980,11 @@ body.wb-chain-active {
 
         document.body.appendChild(panel);
     }
+
+    // =========================================================================
+    // SECTION 27: MINI PROFILE CARDS (CommandCenter) — REMOVED
+    // Using Torn's native profile card instead; see rebindTornProfileCards().
+    // =========================================================================
 
     // =========================================================================
     // SECTION 26: MAIN INITIALISATION

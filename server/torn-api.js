@@ -27,7 +27,12 @@ export async function fetchFactionMembers(factionId, apiKey) {
   // data.timestamp is when Torn generated the response — may be up to 29s
   // stale. Using wallclock (Date.now) as the reference subtracts the
   // cache age automatically, giving the client an already-adjusted value.
-  const now = Math.floor(Date.now() / 1000);
+  //
+  // Keep sub-second precision: Math.floor() here overstates remaining time
+  // by up to 1s, which makes the client's local tick reach 0 slightly
+  // after the target is actually out of hospital. The client-side
+  // interceptor already avoids this by using Date.now()/1000 directly.
+  const now = Date.now() / 1000;
   const statuses = {};
   if (data.members) {
     for (const [memberId, member] of Object.entries(data.members)) {
@@ -201,6 +206,42 @@ export async function fetchRankedWarReport(factionId, apiKey, warId) {
   }
 
   return data.rankedwarreport || data;
+}
+
+/**
+ * Fetch a single user's profile data.
+ * Returns the raw Torn profile response; caller parses status/activity.
+ */
+export async function fetchUserProfile(userId, apiKey) {
+  const url = `https://api.torn.com/user/${encodeURIComponent(userId)}?selections=profile&key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Torn API returned HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  if (data.error) {
+    throw new Error(`Torn API error: ${data.error.error} (code ${data.error.code})`);
+  }
+  return data;
+}
+
+/**
+ * Fetch recent faction attacks (single page, no pagination).
+ * Used by the low-latency attacks-feed watcher for near-real-time hospital
+ * detection. `fromTs` is a Unix timestamp in seconds — only attacks newer
+ * than that are returned.
+ */
+export async function fetchRecentFactionAttacks(factionId, apiKey, fromTs) {
+  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=attacks&from=${encodeURIComponent(fromTs)}&key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Torn API returned HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  if (data.error) {
+    throw new Error(`Torn API error: ${data.error.error} (code ${data.error.code})`);
+  }
+  return Object.values(data.attacks || {});
 }
 
 /**

@@ -42,6 +42,7 @@ export const NOTIFICATION_TYPES = {
   bonus_imminent:  { label: "Bonus Milestones",      description: "When a bonus hit is 1–2 attacks away",              default: true  },
   call_stolen:     { label: "Call Contested",        description: "When someone else views a target you called",       default: true  },
   war_target:      { label: "War Target Reached",    description: "When faction hits the custom war target",           default: true  },
+  enemy_attacking: { label: "Enemy Attacking",        description: "When an enemy is caught mid-attack by the poller",  default: false },
 };
 
 // ── Subscription Storage ────────────────────────────────────────────────
@@ -242,7 +243,15 @@ export async function sendToPlayer(playerId, payload, notifType, pushOptions) {
     await webPush.sendNotification(sub, message, pushOptions);
   } catch (err) {
     if (err.statusCode === 410 || err.statusCode === 404) {
-      // Subscription expired — remove it and try the next most recent
+      // Subscription expired (APNs/FCM returned 410 Gone or 404). Spec
+      // says remove it. Log so we can tell the difference between
+      // server-side removal and client-side permission revocation next
+      // time a user reports "my notifications stopped."
+      const shortEndpoint = (sub.endpoint || "").slice(-24);
+      console.log(
+        `[push] Removing expired subscription for player ${playerId} ` +
+        `(endpoint …${shortEndpoint}, statusCode ${err.statusCode})`
+      );
       subscriptions[playerId] = subs.filter((s) => s.endpoint !== sub.endpoint);
       if (subscriptions[playerId].length === 0) delete subscriptions[playerId];
       saveSubscriptions();
@@ -427,17 +436,57 @@ export async function notifyWarTargetReached(warPlayers, warId, targetValue, cur
 }
 
 /**
- * Notify faction members that someone needs assist on an attack.
+ * Notify faction members that an enemy has been caught mid-attack
+ * (via the per-enemy profile round-robin poller). Respects each
+ * subscriber's enemy_attacking preference; defaults to OFF so only
+ * users who explicitly opt in get pinged.
  */
-export async function notifyAssistRequest(playerIds, warId, playerName, targetName, targetId) {
+export async function notifyEnemyAttacking(playerIds, warId, targetName, targetId) {
+  const subscribed = playerIds
+    .filter((id) => isSubscribed(id))
+    .filter((id) => isTypeEnabled(id, "enemy_attacking"));
+  if (subscribed.length === 0) return;
+  await sendToPlayers(
+    subscribed,
+    {
+      title: `⚠️ Enemy Attacking`,
+      body: `${targetName} is mid-swing`,
+      tag: `enemy_attacking_${targetId}`, // collapse duplicates on same target
+      icon: "/icon-192.png",
+      data: {
+        type: "enemy_attacking",
+        warId,
+        targetId,
+        url: `https://www.torn.com/page.php?sid=attack&user2ID=${targetId}`,
+      },
+    },
+    null,
+    { urgency: "normal", TTL: 120 },
+  );
+}
+
+/**
+ * Notify faction members that someone needs assist on an attack, or
+ * wants retaliation against a specific player (profile-page retal).
+ * `mode` = "assist" (default) or "retal".
+ */
+export async function notifyAssistRequest(playerIds, warId, playerName, targetName, targetId, mode) {
+  const isRetal = mode === "retal";
   await sendToPlayers(
     playerIds.filter((id) => isSubscribed(id)),
     {
-      title: `⚔️ Assist Needed!`,
-      body: `${playerName} needs help attacking ${targetName}!`,
-      tag: "assist_request",
+      title: isRetal ? `⚠️ Retal Requested!` : `⚔️ Assist Needed!`,
+      body: isRetal
+        ? `${playerName} wants retal on ${targetName}`
+        : `${playerName} needs help attacking ${targetName}!`,
+      tag: isRetal ? "retal_request" : "assist_request",
       icon: "/icon-192.png",
-      data: { type: "assist_request", warId, targetId, url: `https://www.torn.com/loader.php?sid=attack&user2ID=${targetId}` },
+      data: {
+        type: isRetal ? "retal_request" : "assist_request",
+        warId,
+        targetId,
+        url: `https://www.torn.com/page.php?sid=attack&user2ID=${targetId}`,
+      },
     },
     null, // Force delivery, bypass preferences
     { urgency: "high", TTL: 3600 },
