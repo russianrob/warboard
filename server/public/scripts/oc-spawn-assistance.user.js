@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.17
+// @version      3.0.18
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -187,7 +187,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.17';
+    const SCRIPT_VERSION = '3.0.18';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3612,15 +3612,32 @@
             }
             if (!fetchSuccess) throw new Error('Failed to fetch OC data after retries');
 
-            // No faction key cached yet — show waiting message
+            // No faction key cached yet — show actionable message based on Torn's error reason
             if (serverResp.pendingFactionData) {
+                const reason = (serverResp.errorReason || '').toLowerCase();
+                let icon = '\u23f3';
+                let title = 'Waiting for faction data';
+                let body = 'Your API key doesn\'t have faction access.<br>OC data will appear once a member with faction API access loads the panel.';
+                if (reason.includes('id-entity')) {
+                    icon = '\u26a0\ufe0f';
+                    title = 'Key doesn\'t match this faction';
+                    body = 'The Torn API says the key\'s player isn\'t in this faction.<br>If you recently left or rejoined, generate a fresh <b>Limited</b> key at <a href="https://www.torn.com/preferences.php#tab=api" target="_blank" style="color:#74c69d;">preferences \u2192 API</a> and paste it into Settings.';
+                } else if (reason.includes('access level')) {
+                    icon = '\ud83d\udd10';
+                    title = 'API key access level too low';
+                    body = 'You\'re using a <b>Public</b> key. OC data needs at least <b>Limited Access</b>.<br>Generate a new key at <a href="https://www.torn.com/preferences.php#tab=api" target="_blank" style="color:#74c69d;">preferences \u2192 API</a> with Limited Access (or higher) and re-enter it in Settings.';
+                } else if (serverResp.errorReason) {
+                    icon = '\u26a0\ufe0f';
+                    title = 'Faction data unavailable';
+                    body = `Torn API said: <code style="color:#f4a261;">${serverResp.errorReason.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</code><br>OC data will appear once a member with a working key loads the panel.`;
+                }
                 document.getElementById('oc-tab-profile').innerHTML =
                     `<div style="text-align:center;padding:24px 16px;color:#9ca3af;">`
-                    + `<div style="font-size:18px;margin-bottom:8px;">⏳</div>`
-                    + `<div style="font-size:12px;font-weight:600;color:#f3f4f6;margin-bottom:4px;">Waiting for faction data</div>`
-                    + `<div style="font-size:11px;line-height:1.5;">Your API key doesn't have faction access.<br>OC data will appear once a member with faction API access loads the panel.</div>`
+                    + `<div style="font-size:18px;margin-bottom:8px;">${icon}</div>`
+                    + `<div style="font-size:12px;font-weight:600;color:#f3f4f6;margin-bottom:4px;">${title}</div>`
+                    + `<div style="font-size:11px;line-height:1.5;">${body}</div>`
                     + `</div>`;
-                setStatus('Waiting for faction data.');
+                setStatus(serverResp.errorReason ? 'API key issue — see Profile tab.' : 'Waiting for faction data.');
                 return;
             }
 

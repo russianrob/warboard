@@ -3877,7 +3877,7 @@ const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
 const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
 
 
-const OC_MIN_VERSION = '2.1.22';
+const OC_MIN_VERSION = '3.0.18';
 
 // Instant Xanax check: when a non-subscribed member refreshes, check THEIR events
 // for a recent Xanax send to RussianRob. If found, grant access immediately.
@@ -4073,8 +4073,10 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       }
     }
     console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
-    // No cached faction key available — return partial data so the script can show viewer card
-    return res.json({ crimes: [], members: {}, cprCache: {}, pendingFactionData: true, viewer: buildViewer(playerInfo), engines: {} });
+    // No cached faction key available — return partial data so the script can show viewer card.
+    // errorReason carries the Torn API message from the user's own key so the client can render
+    // actionable guidance ("enable Faction permission", "use Full access key", etc).
+    return res.json({ crimes: [], members: {}, cprCache: {}, pendingFactionData: true, errorReason: err.message, viewer: buildViewer(playerInfo), engines: {} });
   }
 });
 
