@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.48
+// @version      4.9.49
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.49  - Fix: Faction Cooldowns panel header now reliably expands/collapses (delegated click handler survives DOM re-renders).
 // v4.9.3   - Fix: PDA connection no longer flips to Offline on a single poll hiccup (requires 3 consecutive failures); renamed 'Syncing' to 'Connected'.
 // v4.9.2   - Fix: Boost toast z-index to max to ensure visibility on attack pages; add assist toast debug log.
 // v4.9.1   - Feature: Added Test Toast Notification button in settings.
@@ -5849,15 +5850,21 @@ body.wb-chain-active {
 
     /** Wire the cooldowns panel header to toggle collapse/expand. */
     function setupFactionBarsToggle() {
-        const header = document.getElementById('fo-bars-toggle');
-        const list = document.getElementById('fo-bars-list');
-        const section = document.getElementById('fo-bars-section');
-        if (!header || !list || !section) return;
-        header.addEventListener('click', () => {
+        // Delegate at document level with capture — survives any DOM
+        // re-renders (Torn's React occasionally replaces overlay children),
+        // and fires before page-level handlers that might stopPropagation.
+        if (window.__foBarsToggleBound) return;
+        window.__foBarsToggleBound = true;
+        document.addEventListener('click', (e) => {
+            const header = e.target.closest && e.target.closest('#fo-bars-toggle');
+            if (!header) return;
+            const list = document.getElementById('fo-bars-list');
+            const section = document.getElementById('fo-bars-section');
+            if (!list || !section) return;
             const open = list.style.display !== 'none';
             list.style.display = open ? 'none' : 'block';
             section.classList.toggle('is-open', !open);
-        });
+        }, true);
     }
 
     function updateEnemyAttackingBadges() {

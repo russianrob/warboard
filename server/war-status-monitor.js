@@ -609,12 +609,13 @@ function startEnemyProfileMonitor(io, warId) {
     // per tick, so per-key rate stays at 60/tick_sec regardless of pool
     // size. Bounded by enemy count (no point polling more users than
     // exist) and a hard safety cap to keep Node from issuing an absurd
-    // burst if the pool grows huge. Request-rotation (cursor index)
-    // spreads the load evenly across keys.
+    // burst if the pool grows huge. Cap of 25 matches a full ranked-war
+    // roster so a well-stocked pool sweeps all enemies in a single tick.
+    // Request-rotation (cursor index) spreads the load evenly across keys.
     const pool = store.getPooledKeysForFaction(war.factionId);
     const concurrency = Math.max(
       1,
-      Math.min(pool.length || 1, ids.length, 20),
+      Math.min(pool.length || 1, ids.length, 25),
     );
 
     const startCursor = (enemyProfileCursors.get(warId) || 0);

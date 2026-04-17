@@ -539,14 +539,15 @@ export function getPollInterval(factionId, purpose) {
     "war-status":    { min: 15_000, max: 30_000 }, // Torn cache ~30s
     "attacks-feed":  { min: 15_000, max: 60_000 }, // our faction's attacks feed
     "enemy-attacks": { min: 10_000, max: 30_000 }, // (unused — Torn blocks other factions' attacks)
-    // Per-enemy profile round-robin. At small pools (N ≤ concurrency_cap
-    // = 5) every tick hits every pooled key once, so per-key rate is
-    // 60000/tick_ms per minute. Floor must keep that under Torn's
-    // 100/min per-key limit — so 700ms (≈85/min/key, with 15% buffer).
-    // pool=1: 1500ms tick → 37s cycle (25 enemies serial).
-    // pool=4: 700ms floor → 4.4s cycle (catches ~4s+ attacks reliably).
-    // pool=10+: still 700ms (more keys don't speed this up until we
-    //          raise the concurrency cap above 5).
+    // Per-enemy profile round-robin. Concurrency scales with pool size
+    // up to the cap in war-status-monitor.js (currently 25), so every
+    // tick fires min(n, ids.length, 25) parallel requests. Per-key rate
+    // is 60000/tick_ms per minute; 700ms floor keeps that under Torn's
+    // 100/min per-key limit (≈85/min/key, 15% buffer).
+    // pool=1:  1500ms tick → 37.5s full sweep (25 enemies serial).
+    // pool=7:  700ms floor  → 2.8s full sweep (ceil(25/7)=4 ticks).
+    // pool=13: 700ms floor  → 1.4s full sweep (ceil(25/13)=2 ticks).
+    // pool=25: 700ms floor  → 0.7s full sweep (1 tick at cap).
     "enemy-profile": { min: 700, max: 1500 },
   };
   const c = config[purpose] || config["war-status"];
