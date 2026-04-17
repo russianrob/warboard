@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.18
+// @version      3.0.19
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -187,7 +187,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.18';
+    const SCRIPT_VERSION = '3.0.19';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -2715,6 +2715,8 @@
 
     // Show a persistent dispatcher banner on the Torn page immediately (loading state)
     function injectDispatcherLoading() {
+        const key = getApiKey();
+        if (!key || key === "YOUR_API_KEY_HERE") return;
         if (!CONFIG.ENGINE_AUTO_DISPATCHER) return;
         if (!isOnCrimesTab()) return; // only show on crimes tab
         if (document.getElementById('oc-dispatcher-torn-banner')) return; // already exists
@@ -3700,7 +3702,8 @@
             // Render Auto-Dispatcher banner (personalized, above all tabs)
             if (engines && engines.autoDispatcher) {
                 renderDispatcherBanner(engines.autoDispatcher);
-            } else if (CONFIG.ENGINE_AUTO_DISPATCHER) {
+            } else const _dispApiKey = getApiKey();
+    if (CONFIG.ENGINE_AUTO_DISPATCHER && _dispApiKey && _dispApiKey !== "YOUR_API_KEY_HERE") {
                 // Engine is on but no data came back -- show waiting state
                 renderDispatcherBanner(null);
             } else {
@@ -3755,7 +3758,8 @@
 
     // Inject dispatcher loading banner early (before data arrives)
     // Retry a few times since Torn's DOM may not be ready yet
-    if (CONFIG.ENGINE_AUTO_DISPATCHER) {
+    const _dispApiKey = getApiKey();
+    if (CONFIG.ENGINE_AUTO_DISPATCHER && _dispApiKey && _dispApiKey !== "YOUR_API_KEY_HERE") {
         let _dispLoadTries = 0;
         const _tryInjectLoading = () => {
             if (document.getElementById('oc-dispatcher-torn-banner')) return; // already replaced by real data
