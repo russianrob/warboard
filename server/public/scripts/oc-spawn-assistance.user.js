@@ -24,6 +24,13 @@
 // v2.6.8 — Dispatcher banner always visible: loading spinner on init, status messages when no data or in OC
 // v2.6.7 — Panel no longer auto-opens; stays closed until user clicks the toggle button (respects oc_panel_closed flag)
 // v2.6.6 — Dispatcher banner: click navigates via hash URL (#crimeId=...) so Torn's own router expands the card; fallbacks also clickable
+// v3.0.17 — Skip new faction members (< 3 days) from eligible list with skip reason
+// v3.0.16 — MutationObserver debouncing, shared crimes cache for Manager tab, loan button retry fix
+// v3.0.15 — OC history collector fix: pull from completed crimes cache instead of active crimes
+// v3.0.14 — Auto-Dispatcher defaults to enabled when not explicitly set in faction settings
+// v3.0.13 — Remove spawn-key rate limiter
+// v3.0.12 — Sync SCRIPT_VERSION to match @version header
+// v3.0.11 — Reduced CPR boost threshold from 15% to 5% for more per-level consideration
 // v3.0.10 — Disabled Slot Optimizer engine since Auto-Dispatcher serves similar purpose
 // v3.0.9 — Removed hardcoded 15s refresh cooldown completely for faster button re-enable
 // v3.0.8 — Reduced refresh cooldown from 15s to 3s for faster button re-enable
