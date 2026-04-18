@@ -4053,9 +4053,16 @@ router.get("/api/oc/spawn-key", async (req, res) => {
   } catch (err) {
     // If member's own key failed, try keys from the faction pool
     const fid = String(playerInfo.factionId);
-    const pool = _factionKeyCache.get(fid);
-    if (pool && pool.keys.length > 0) {
-      const keysToTry = pool.keys.filter(k => k !== key);
+    // Merge the ephemeral in-memory pool (populated when a faction-access
+    // user hits this endpoint) with the persisted opt-in player-key pool.
+    // The persisted pool survives server restarts — without it, a reload
+    // wipes the in-memory cache and the next low-access-key user gets a
+    // premature "not high enough" failure even though subscribed teammates
+    // with full-access keys have opted into the pool.
+    const inMemKeys = (_factionKeyCache.get(fid)?.keys) || [];
+    const persistedKeys = store.getPooledKeysForFaction(fid).map(e => e.key);
+    const keysToTry = Array.from(new Set([...inMemKeys, ...persistedKeys])).filter(k => k !== key);
+    if (keysToTry.length > 0) {
       for (const poolKey of keysToTry) {
         try {
           const data = await getOcSpawnData(playerInfo.factionId, poolKey);
