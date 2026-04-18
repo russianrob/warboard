@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.51
+// @version      4.9.52
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.52  - Diagnostic: add console.log on Faction Cooldowns fetch + SSE apply so the empty-panel issue can be traced in DevTools. Also forces an empty-state render on init so users see "No faction members reporting yet." instead of a blank panel.
 // v4.9.51  - Change: Faction Cooldowns panel now starts expanded by default, so users see member cooldowns without needing to click (safety fallback while the click-through issue in Torn's #mainContainer is investigated).
 // v4.9.50  - Fix: Faction Cooldowns panel header gets pointer-events:auto + touch-action treatment (same pattern as Shout button) so clicks actually land when the overlay is nested in Torn's #mainContainer.
 // v4.9.49  - Fix: Faction Cooldowns panel header now reliably expands/collapses (delegated click handler survives DOM re-renders).
@@ -3632,6 +3633,7 @@ body.wb-chain-active {
         // Faction cooldown dashboard updates (Option B self-reports,
         // delivered via SSE or Socket.IO payloads).
         if (data.memberBars && typeof data.memberBars === 'object') {
+            console.log('[fo-bars] applyServerData got memberBars:', Object.keys(data.memberBars));
             if (!state.memberBars) state.memberBars = {};
             for (const [pid, entry] of Object.entries(data.memberBars)) {
                 state.memberBars[String(pid)] = entry;
@@ -7262,12 +7264,18 @@ body.wb-chain-active {
 
         // Faction cooldowns panel — fetch initial snapshot + render,
         // then wire the collapse toggle on the section header.
+        console.log('[fo-bars] init: fetching /api/faction/bars…');
         getAction('/api/faction/bars').then((r) => {
+            console.log('[fo-bars] /api/faction/bars response:', r);
             if (r && r.memberBars) {
                 state.memberBars = r.memberBars;
+                console.log('[fo-bars] applied memberBars, keys=', Object.keys(r.memberBars));
+                renderFactionBars();
+            } else {
+                console.warn('[fo-bars] response had no memberBars, running empty render');
                 renderFactionBars();
             }
-        }).catch(() => { /* silent — panel will fill as self-reports arrive */ });
+        }).catch((err) => { console.warn('[fo-bars] /api/faction/bars FAILED:', err); renderFactionBars(); });
         setupFactionBarsToggle();
 
         // ── Ranked War Timer popup: document-level capture-phase
