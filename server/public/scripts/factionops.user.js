@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.72
+// @version      4.9.73
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.73  - Restore: re-apply the leader-role gate on the Cooldowns panel (reverts 4.9.72 which itself reverted 4.9.71). Panel is only visible to broadcast-role members again, matching the original request.
 // v4.9.72  - Revert: 4.9.71's role gate on the Cooldowns panel was too restrictive — regular members lost visibility of everyone's cooldowns, including their own. Panel is visible to all members again; the Shout button keeps its original leader gate.
 // v4.9.71  - Feature: Faction Cooldowns panel is now gated behind the same role check as the Shout/broadcast button — only members in allowed roles (leader/co-leader/war leader/banker by default, or the faction's custom broadcastRoles) see the panel. isLeader() upgraded to prefer server-configured roles when fetched.
 // v4.9.70  - Fix: Members who authenticated but never clicked "Activate FactionOps" weren't self-reporting bars/cooldowns because startEnergyPoll was only called inside initWarOverlay. Moved the poll kickoff into the auth success path so reporting happens in the background the moment the script loads with a valid key.
@@ -7386,7 +7387,6 @@ body.wb-chain-active {
                 <input type="text" id="fo-input-broadcast" placeholder="Broadcast message to faction..." maxlength="150">
                 <button type="button" id="fo-btn-send-broadcast">Shout</button>
             </div>
-            ` : ''}
             <div class="fo-bars-section" id="fo-bars-section">
                 <div class="fo-bars-header" id="fo-bars-toggle">
                     <span class="fo-bars-caret">\u25B6</span>
@@ -7395,6 +7395,7 @@ body.wb-chain-active {
                 </div>
                 <div class="fo-bars-list" id="fo-bars-list" style="display:none;"></div>
             </div>
+            ` : ''}
             <div class="fo-col-headers">
                 <div class="fo-col-header">Prior.</div>
                 <div class="fo-col-header">Target</div>
