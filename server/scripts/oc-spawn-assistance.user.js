@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.24
+// @version      3.0.25
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.0.25 — Flyer names in the traveling-alert banner are now clickable: click a name to copy a preset fee-reminder ("You're holding off on the OC initiation...") to the clipboard and open the Torn compose page for that member, same UX as the eligible-members message button. Shared handler is attached to both the tooltip and the panel so either site fires it.
 // v3.0.24 — Flyer alert now catches both "Traveling" (in-transit) and "Abroad" (landed overseas) — previously only Traveling fired, so members who'd already landed abroad were silently missed. Banner renamed to "flying" and shows each member's exact state.
 // v3.0.23 — Traveling-alert only fires when the OC is truly "ready now" (not 30m out). Planning crimes with null/0 ready_at are treated as ready now (Torn V2 quirk); Recruiting crimes still need fully staffed + ready_at ≤ now.
 // v3.0.22 — Traveling-alert relaxed: Planning crimes always fire the flyer alert (ready_at in V2 is sometimes null/0 for Planning), and Recruiting crimes that are fully staffed + ready within 30m also fire. Urgency label now shows "ready in Nm" when not yet ready.
@@ -192,7 +193,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.24';
+    const SCRIPT_VERSION = '3.0.25';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1821,27 +1822,35 @@
     recTooltipEl.id = 'oc-rec-tooltip';
     document.body.appendChild(recTooltipEl);
 
-    // Message Player button handler (lives inside tooltip, outside panel)
-    recTooltipEl.addEventListener('click', (e) => {
-        const mb = e.target.closest('.oc-msg-btn');
+    // Shared handler for any ".oc-msg-btn" click: copy the preset message
+    // to the clipboard and open Torn's compose page for the target XID.
+    // TornPDA-compatible (execCommand copy + <a>.click navigation).
+    function handleOcMsgBtnClick(e) {
+        const mb = e.target.closest && e.target.closest('.oc-msg-btn');
         if (!mb) return;
+        e.preventDefault();
         e.stopPropagation();
         const xid = mb.dataset.xid;
         const msg = mb.dataset.msg;
-        // Copy to clipboard (TornPDA-compatible)
         try {
             const ta = document.createElement('textarea');
             ta.value = msg; ta.style.cssText = 'position:fixed;left:-9999px;';
             document.body.appendChild(ta); ta.select();
             document.execCommand('copy'); document.body.removeChild(ta);
         } catch (_) {}
+        const orig = mb.textContent;
         mb.textContent = 'Copied! Opening…';
-        // Navigate (TornPDA-compatible)
+        setTimeout(() => { if (mb.isConnected) mb.textContent = orig; }, 2500);
         const a = document.createElement('a');
         a.href = `https://www.torn.com/messages.php#/p=compose&XID=${xid}`;
         a.target = '_blank'; a.rel = 'noopener';
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    });
+    }
+    recTooltipEl.addEventListener('click', handleOcMsgBtnClick);
+    // Also catch clicks on .oc-msg-btn rendered inside the main panel
+    // (e.g. flyer names in the traveling-alert banner). Tooltip is
+    // appended to body so the two listeners cover disjoint subtrees.
+    panel.addEventListener('click', handleOcMsgBtnClick);
 
     const scopeTooltipEl = document.createElement('div');
     scopeTooltipEl.id = 'oc-scope-tooltip';
@@ -3200,6 +3209,7 @@
             statusMap[uid] = { name: m.name || m.playerName || uid, state };
         }
 
+        const FLYER_MESSAGE = "You're holding off on the OC initiation. You still have an outstanding fee that needs paying before we can crack on. Drop me a message as soon as it's done.";
         const now = Math.floor(Date.now() / 1000);
 
         const alerts = []; // { memberName, crimeName, position, difficulty, urgency }
@@ -3233,6 +3243,7 @@
                 // initiation, so flag either.
                 if (info.state === 'traveling' || info.state === 'abroad') {
                     alerts.push({
+                        memberId: uid,
                         memberName: info.name,
                         crimeName: crime.name || 'Unknown',
                         position: slot.position || 'Unknown',
@@ -3245,12 +3256,18 @@
         }
         if (alerts.length === 0) return '';
 
+        const escAttr = (s) => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const msgAttr = escAttr(FLYER_MESSAGE);
         let html = `<div style="background:#7f1d1d;border:1px solid #ef4444;border-radius:6px;padding:8px 10px;margin-bottom:8px;">`;
         html += `<div style="font-size:11px;font-weight:700;color:#fca5a5;margin-bottom:4px;">\u2708\ufe0f ${alerts.length} member${alerts.length > 1 ? 's' : ''} flying in an OC ready to execute</div>`;
         for (const a of alerts) {
             const stateLabel = a.state === 'abroad' ? 'abroad' : 'traveling';
             html += `<div style="font-size:10px;color:#fecaca;padding:2px 0;">`;
-            html += `<b style="color:#f3f4f6;">${a.memberName}</b>`;
+            if (a.memberId) {
+                html += `<b class="oc-msg-btn" data-xid="${escAttr(a.memberId)}" data-msg="${msgAttr}" title="Click to message ${escAttr(a.memberName)} (copies preset fee-reminder + opens compose)" style="color:#f3f4f6;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px;">${a.memberName}</b>`;
+            } else {
+                html += `<b style="color:#f3f4f6;">${a.memberName}</b>`;
+            }
             html += ` <span style="color:#9ca3af;">(${stateLabel})</span>`;
             html += ` <span style="color:#ef4444;">\u2192</span> `;
             html += `${a.crimeName} (${a.position}) <span style="color:#9ca3af;">Lvl ${a.difficulty}</span>`;
