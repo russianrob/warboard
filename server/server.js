@@ -314,6 +314,7 @@ store.loadPlayerKeys();
 store.loadFactionSettings();
 store.loadKeyPoolingOpt();
 store.loadPlayerFactions();
+store.loadMemberBars();
 loadHeatmaps();
 loadSubscriptions();
 
@@ -444,6 +445,7 @@ function shutdown(signal) {
   // stopNerveTracker(); // disabled
 
   store.saveState();
+  store.saveMemberBars();
   httpServer.close(() => {
     console.log("[server] Server closed");
     process.exit(0);

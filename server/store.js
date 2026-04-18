@@ -15,6 +15,7 @@ const FACTION_KEYS_FILE = path.join(DATA_DIR, "faction-keys.json");
 const FACTION_SETTINGS_FILE = path.join(DATA_DIR, "faction-settings.json");
 const KEY_POOL_FILE = path.join(DATA_DIR, "key-pool.json");
 const PLAYER_FACTIONS_FILE = path.join(DATA_DIR, "player-factions.json");
+const MEMBER_BARS_FILE = path.join(DATA_DIR, "member-bars.json");
 
 const factionSettings = new Map();
 
@@ -558,9 +559,9 @@ export function getPollInterval(factionId, purpose) {
 // ── Faction member bars aggregation ─────────────────────────────────────
 
 /**
- * Record a member's self-reported bars snapshot. Purely in-memory (no
- * disk persistence) — bars/cooldowns are ephemeral, losing them on
- * restart is fine. Old entries age out after 4 hours of no refresh.
+ * Record a member's self-reported bars snapshot. Persisted to disk
+ * (debounced) so the Faction Cooldowns panel keeps its last-known state
+ * across server restarts. Old entries age out after 4 hours of no refresh.
  */
 export function recordMemberBars(factionId, playerId, playerName, data) {
   const fid = String(factionId);
@@ -572,6 +573,7 @@ export function recordMemberBars(factionId, playerId, playerName, data) {
     name: playerName || pid,
     updatedAt: Date.now(),
   });
+  scheduleMemberBarsSave();
 }
 
 /**
@@ -590,6 +592,62 @@ export function getFactionBars(factionId, staleMs = 4 * 60 * 60 * 1000) {
     }
   }
   return out;
+}
+
+// Debounced persistence for factionBars. Every member poll hits this ~every
+// 60s × membersCount, which could be dozens of writes/minute. Coalesce into
+// at most one write per 30s.
+let _memberBarsSaveTimer = null;
+function scheduleMemberBarsSave() {
+  if (_memberBarsSaveTimer) return;
+  _memberBarsSaveTimer = setTimeout(() => {
+    _memberBarsSaveTimer = null;
+    saveMemberBars();
+  }, 30_000);
+}
+
+/** Persist factionBars to disk. Nested-Map → plain object. */
+export function saveMemberBars() {
+  ensureDataDir();
+  try {
+    const obj = {};
+    const cutoff = Date.now() - 4 * 60 * 60 * 1000;
+    for (const [fid, members] of factionBars) {
+      const fresh = {};
+      for (const [pid, entry] of members) {
+        if (entry.updatedAt >= cutoff) fresh[pid] = entry;
+      }
+      if (Object.keys(fresh).length) obj[fid] = fresh;
+    }
+    fs.writeFileSync(MEMBER_BARS_FILE, JSON.stringify(obj));
+  } catch (err) {
+    console.error("[store] Failed to save member-bars:", err.message);
+  }
+}
+
+/** Load persisted factionBars from disk (called once at startup). */
+export function loadMemberBars() {
+  ensureDataDir();
+  if (!fs.existsSync(MEMBER_BARS_FILE)) return;
+  try {
+    const raw = fs.readFileSync(MEMBER_BARS_FILE, "utf-8");
+    const data = JSON.parse(raw);
+    let total = 0;
+    const cutoff = Date.now() - 4 * 60 * 60 * 1000;
+    for (const [fid, members] of Object.entries(data)) {
+      const m = new Map();
+      for (const [pid, entry] of Object.entries(members)) {
+        if (entry && entry.updatedAt >= cutoff) {
+          m.set(pid, entry);
+          total++;
+        }
+      }
+      if (m.size) factionBars.set(fid, m);
+    }
+    console.log(`[store] Loaded ${total} member-bars snapshot(s) from disk`);
+  } catch (err) {
+    console.error("[store] Failed to load member-bars:", err.message);
+  }
 }
 
 export function getPollingKey(factionId, purpose, index) {

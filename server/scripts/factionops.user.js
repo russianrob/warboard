@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.65
+// @version      4.9.66
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.66  - Feature: Cooldown bars now project forward from the last report timestamp (D/M/B values tick down live without new reports), and the panel re-renders every 60s so you see the decay even with the whole faction offline. Member-bars cache also persists to disk (data/member-bars.json) so restarts no longer wipe the panel.
 // v4.9.65  - Fix: Booster bar kept showing a 24h reference after a war ended because state.enemyFactionId lingers post-war. Now requires an active (not ended) war to halve to 24h.
 // v4.9.64  - Change: Booster bar reference now depends on war state — 24h when an active war is detected (state.enemyFactionId set), 48h otherwise. Matches Torn's in-war booster cap.
 // v4.9.63  - Change: Faction Cooldowns row layout — energy bar moved to the leftmost column, and D/M/B swapped from letter pills to color-coded mini-bars (red=drug, blue=medical, purple=booster). Fill proportional to remaining cooldown vs. 10h/5h/24h references; ready state shows empty track with green letter label. Tooltip still shows exact remaining time.
@@ -5876,6 +5877,15 @@ body.wb-chain-active {
             const n = bars.nerve  || { current: 0, maximum: 0 };
             const ePct = e.maximum ? Math.round(100 * e.current / e.maximum) : 0;
             const nPct = n.maximum ? Math.round(100 * n.current / n.maximum) : 0;
+            // Project cooldowns forward from the last report timestamp — they
+            // only decrease unless the member takes a new drug/boost/medical,
+            // which we can't observe while their tab is closed. Stale is
+            // better than zombie.
+            const ageSec = info.updatedAt ? Math.max(0, (Date.now() - info.updatedAt) / 1000) : 0;
+            const projCd = (v) => Math.max(0, (Number(v) || 0) - ageSec);
+            const cdDrug    = projCd(cd.drug);
+            const cdMedical = projCd(cd.medical);
+            const cdBooster = projCd(cd.booster);
             const fmtCd = (s) => {
                 s = Number(s) || 0;
                 if (s <= 0) return 'ready';
@@ -5911,9 +5921,9 @@ body.wb-chain-active {
                     </div>
                     <div class="fo-bars-name" title="${name}" data-fo-tip="${name}">${name}</div>
                     <div class="fo-bars-cd">
-                        ${cdBar('Drug', 'drug', cd.drug)}
-                        ${cdBar('Medical', 'medical', cd.medical)}
-                        ${cdBar('Booster', 'booster', cd.booster)}
+                        ${cdBar('Drug', 'drug', cdDrug)}
+                        ${cdBar('Medical', 'medical', cdMedical)}
+                        ${cdBar('Booster', 'booster', cdBooster)}
                     </div>
                 </div>
             `;
@@ -5986,6 +5996,18 @@ body.wb-chain-active {
             list.style.display = open ? 'none' : 'block';
             section.classList.toggle('is-open', !open);
         }, true);
+
+        // Tick projected cooldowns forward every 60s so bars visibly decay
+        // even when no new member_bars broadcasts arrive (e.g. whole faction
+        // offline). Cheap: one DOM write per tick, skipped when collapsed.
+        if (!window.__foBarsTickInterval) {
+            window.__foBarsTickInterval = setInterval(() => {
+                const list = document.getElementById('fo-bars-list');
+                if (!list || list.style.display === 'none') return;
+                if (!Object.keys(state.memberBars || {}).length) return;
+                renderFactionBars();
+            }, 60000);
+        }
     }
 
     function updateEnemyAttackingBadges() {
