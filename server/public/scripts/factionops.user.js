@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.67
+// @version      4.9.68
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.68  - Fix: Logo click-to-minimize didn't land when the overlay was nested in Torn's #mainContainer. Same treatment as Shout/Cooldowns: pointer-events:auto + touch-action + document-level delegated click (capture phase), plus pointer-events:none on children so clicks reach the logo wrapper.
 // v4.9.67  - Feature: Clicking the FactionOps logo in the overlay header minimizes the overlay — Torn's native page comes back and the "Activate FactionOps" pill reappears so you can re-open on demand. Logo now has hover/active styling and a tooltip.
 // v4.9.66  - Feature: Cooldown bars now project forward from the last report timestamp (D/M/B values tick down live without new reports), and the panel re-renders every 60s so you see the decay even with the whole faction offline. Member-bars cache also persists to disk (data/member-bars.json) so restarts no longer wipe the panel.
 // v4.9.65  - Fix: Booster bar kept showing a 24h reference after a war ended because state.enemyFactionId lingers post-war. Now requires an active (not ended) war to halve to 24h.
@@ -1208,7 +1209,16 @@ body.wb-chain-active {
     padding: 2px 4px;
     border-radius: 4px;
     transition: background 0.15s ease;
+    /* Same click-landing treatment as the Shout button and Cooldowns
+       header — Torn's #mainContainer occasionally nulls pointer-events
+       on descendants, so lock them in and force this element above the
+       default stacking context. */
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    position: relative;
+    z-index: 2;
 }
+.fo-logo-mark * { pointer-events: none; }
 .fo-logo-mark:hover { background: rgba(255,255,255,0.06); }
 .fo-logo-mark:active { background: rgba(255,255,255,0.12); }
 
@@ -4553,6 +4563,21 @@ body.wb-chain-active {
      * click flow. Capture-phase so we beat any parent handler that might
      * call stopImmediatePropagation.
      */
+    function setupLogoMinimizeDelegation() {
+        if (window.__foLogoDelegated) return;
+        window.__foLogoDelegated = true;
+
+        document.addEventListener('click', (e) => {
+            const logo = e.target && e.target.closest && e.target.closest('#fo-overlay .fo-logo-mark');
+            if (!logo) return;
+            e.preventDefault();
+            e.stopPropagation();
+            deactivateWarOverlay();
+        }, true);
+
+        log('[logo] document delegation installed');
+    }
+
     function setupShoutDelegation() {
         if (window.__foShoutDelegated) return;
         window.__foShoutDelegated = true;
@@ -7364,15 +7389,13 @@ body.wb-chain-active {
 
         // Clicking the logo closes the overlay and brings back the
         // "Activate FactionOps" pill so the user can re-open on demand.
+        // Uses the same document-level delegated click (capture phase)
+        // pattern as the Shout button / Cooldowns header — local
+        // listeners are unreliable when the overlay is nested inside
+        // Torn's #mainContainer.
         const logoEl = overlay.querySelector('.fo-logo-mark');
-        if (logoEl) {
-            logoEl.title = 'Click to minimize FactionOps';
-            logoEl.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                deactivateWarOverlay();
-            });
-        }
+        if (logoEl) logoEl.title = 'Click to minimize FactionOps';
+        setupLogoMinimizeDelegation();
 
         renderOverlay();
 
