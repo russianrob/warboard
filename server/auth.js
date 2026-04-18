@@ -38,23 +38,27 @@ export async function verifyTornApiKey(apiKey) {
     return cached.result;
   }
 
-  const url = `https://api.torn.com/user/?selections=basic,profile,key&key=${encodeURIComponent(apiKey)}`;
+  const userUrl = `https://api.torn.com/user/?selections=basic,profile&key=${encodeURIComponent(apiKey)}`;
+  const keyUrl  = `https://api.torn.com/key/?selections=info&key=${encodeURIComponent(apiKey)}`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
-  let res;
+  let userRes, keyRes;
   try {
-    res = await fetch(url, { signal: controller.signal });
+    [userRes, keyRes] = await Promise.all([
+      fetch(userUrl, { signal: controller.signal }),
+      fetch(keyUrl,  { signal: controller.signal }),
+    ]);
   } finally {
     clearTimeout(timeout);
   }
-  if (!res.ok) {
-    const err = `Torn API returned HTTP ${res.status}`;
+  if (!userRes.ok) {
+    const err = `Torn API returned HTTP ${userRes.status}`;
     setAuthCache(apiKey, { error: err, expiresAt: Date.now() + AUTH_CACHE_FAILURE_TTL_MS });
     throw new Error(err);
   }
 
-  const data = await res.json();
+  const data = await userRes.json();
 
   if (data.error) {
     const err = `Torn API error: ${data.error.error} (code ${data.error.code})`;
@@ -62,9 +66,19 @@ export async function verifyTornApiKey(apiKey) {
     throw new Error(err);
   }
 
+  // /key/ can succeed independently; treat its failure as "unknown access"
+  // rather than a fatal auth error — the user-endpoint call already proved
+  // the key is at least Public.
+  let accessLevel = 0;
+  if (keyRes.ok) {
+    try {
+      const keyData = await keyRes.json();
+      if (!keyData.error) accessLevel = Number(keyData.access_level ?? 0);
+    } catch (_) { /* ignore */ }
+  }
+
   // Torn access levels: 1=Public, 2=Minimal, 3=Limited, 4=Full.
   // Faction endpoints (used by the OC spawn-key route) require Limited+.
-  const accessLevel = Number(data.access_level ?? data.key?.access_level ?? 0);
   const result = {
     playerId: String(data.player_id),
     playerName: data.name,
