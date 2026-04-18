@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.59
+// @version      4.9.60
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.60  - Change: Faction Cooldowns energy bar shrunk — fixed 70px column, 5px bar height, smaller "E" label; row width matches the tighter pill footprint. No more long stretchy bar.
 // v4.9.59  - Change: Faction Cooldowns row drops the Nerve bar entirely (not useful for war decisions) and shrinks the D/M/B pills to 14px wide / 9px font so they feel chip-sized. Row is now 3 columns: name · energy bar · cooldown pills.
 // v4.9.58  - Change: Faction Cooldowns row is now pills-only — removed the energy/nerve numeric labels (95/150, 8/89 etc) and moved the values onto the bar cell's hover tooltip so the row stays clean. Bars still render so you can scan percentage-full at a glance.
 // v4.9.57  - Fix: Faction Cooldowns D/M/B pills were too dim to see on the overlay's dark background. Brightened the inactive color (#b8b8b8 on rgba(255,255,255,0.10)), bumped pill width/font, gave the row a 70px minimum so the cd column can't collapse, and added a red outline on active pills.
@@ -2615,18 +2616,18 @@ body.wb-chain-active {
 .fo-bars-list { padding: 6px 12px 10px; }
 .fo-bars-row {
     display: grid;
-    grid-template-columns: 110px minmax(140px, 1fr) auto;
-    gap: 12px; align-items: center;
+    grid-template-columns: 110px 70px auto;
+    gap: 10px; align-items: center; justify-content: start;
     padding: 4px 4px; font-size: 11px;
     border-bottom: 1px dashed rgba(255,255,255,0.04);
 }
 .fo-bars-row:last-child { border-bottom: none; }
 .fo-bars-row .fo-bars-name { font-weight: 600; color: #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fo-bar-cell { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
-.fo-bar-cell .fo-bar-label { font-size: 9px; color: #888; width: 14px; }
+.fo-bar-cell .fo-bar-label { font-size: 9px; color: #888; width: 10px; flex-shrink: 0; }
 .fo-bar-cell .fo-bar-track {
-    flex: 1; height: 6px; background: rgba(255,255,255,0.06);
-    border-radius: 3px; overflow: hidden; position: relative;
+    flex: 1; height: 5px; background: rgba(255,255,255,0.06);
+    border-radius: 2px; overflow: hidden; position: relative;
 }
 .fo-bar-cell .fo-bar-fill {
     height: 100%; background: var(--wb-call-green);
