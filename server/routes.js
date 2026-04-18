@@ -366,7 +366,7 @@ router.post("/api/auth", async (req, res) => {
 
     // Faction lock — only the owner faction or subscribed factions can use the system
     if (!isFactionAllowed(info.factionId)) {
-      console.log(`[auth] Rejected ${info.playerName} (${info.playerId}) — faction ${info.factionId} not subscribed`);
+      console.log(`[auth] Rejected ${info.playerName} (${info.playerId}) — faction ${info.factionId} not subscribed (FactionOps v${scriptVersion || 'unknown'})`);
       return res.status(403).json({ error: getSubscriptionRejectionMessage() });
     }
 
@@ -391,7 +391,7 @@ router.post("/api/auth", async (req, res) => {
       factionPosition: info.factionPosition,
     });
 
-    console.log(`[auth] Player ${info.playerName} (${info.playerId}) authenticated`);
+    console.log(`[auth] Player ${info.playerName} (${info.playerId}) authenticated (FactionOps v${scriptVersion || 'unknown'})`);
 
     return res.json({
       token,
