@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.50
+// @version      4.9.51
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.51  - Change: Faction Cooldowns panel now starts expanded by default, so users see member cooldowns without needing to click (safety fallback while the click-through issue in Torn's #mainContainer is investigated).
 // v4.9.50  - Fix: Faction Cooldowns panel header gets pointer-events:auto + touch-action treatment (same pattern as Shout button) so clicks actually land when the overlay is nested in Torn's #mainContainer.
 // v4.9.49  - Fix: Faction Cooldowns panel header now reliably expands/collapses (delegated click handler survives DOM re-renders).
 // v4.9.3   - Fix: PDA connection no longer flips to Offline on a single poll hiccup (requires 3 consecutive failures); renamed 'Syncing' to 'Connected'.
@@ -7149,13 +7150,13 @@ body.wb-chain-active {
                 <button type="button" id="fo-btn-send-broadcast">Shout</button>
             </div>
             ` : ''}
-            <div class="fo-bars-section" id="fo-bars-section">
+            <div class="fo-bars-section is-open" id="fo-bars-section">
                 <div class="fo-bars-header" id="fo-bars-toggle">
                     <span class="fo-bars-caret">\u25B6</span>
                     <span class="fo-bars-title">Faction Cooldowns</span>
                     <span class="fo-bars-count" id="fo-bars-count">0</span>
                 </div>
-                <div class="fo-bars-list" id="fo-bars-list" style="display:none;"></div>
+                <div class="fo-bars-list" id="fo-bars-list" style="display:block;"></div>
             </div>
             <div class="fo-col-headers">
                 <div class="fo-col-header">Prior.</div>
