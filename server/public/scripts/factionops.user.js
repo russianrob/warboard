@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.60
+// @version      4.9.61
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.61  - Feature: Tap-to-show tooltips for the Faction Cooldowns pills and energy bar. Native `title` attributes don't fire on mobile/PDA (no hover), so tapping any pill/bar now pops a small floating tooltip showing the full value (e.g. "Drug: 4h55m"). Tap again or tap elsewhere to dismiss.
 // v4.9.60  - Change: Faction Cooldowns energy bar shrunk — fixed 70px column, 5px bar height, smaller "E" label; row width matches the tighter pill footprint. No more long stretchy bar.
 // v4.9.59  - Change: Faction Cooldowns row drops the Nerve bar entirely (not useful for war decisions) and shrinks the D/M/B pills to 14px wide / 9px font so they feel chip-sized. Row is now 3 columns: name · energy bar · cooldown pills.
 // v4.9.58  - Change: Faction Cooldowns row is now pills-only — removed the energy/nerve numeric labels (95/150, 8/89 etc) and moved the values onto the bar cell's hover tooltip so the row stays clean. Bars still render so you can scan percentage-full at a glance.
@@ -2653,6 +2654,24 @@ body.wb-chain-active {
     box-shadow: inset 0 0 0 1px rgba(255,118,117,0.35);
 }
 .fo-bars-empty { padding: 8px; color: #888; font-size: 11px; text-align: center; font-style: italic; }
+
+/* Tap-to-show tooltip — works where native title attributes do not (mobile/PDA). */
+.fo-tooltip {
+    position: absolute;
+    z-index: 2147483647;
+    background: rgba(0,0,0,0.92);
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    pointer-events: none;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.08);
+    animation: fo-tooltip-fade 0.12s ease-out;
+}
+@keyframes fo-tooltip-fade { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }
 
 /* Broadcast entry bar */
 .fo-broadcast-entry-bar {
@@ -5856,22 +5875,71 @@ body.wb-chain-active {
             const cdClass = (v) => (Number(v) > 0 ? ' is-active' : '');
             const cdTitle = (label, v) => `${label}: ${fmtCd(v)}`;
             const name = escapeHtml(info.name || `#${pid}`);
+            const energyTip = `Energy: ${e.current}/${e.maximum} (${ePct}%)`;
             return `
                 <div class="fo-bars-row">
-                    <div class="fo-bars-name" title="${name}">${name}</div>
-                    <div class="fo-bar-cell is-energy" title="Energy: ${e.current}/${e.maximum} (${ePct}%)">
+                    <div class="fo-bars-name" title="${name}" data-fo-tip="${name}">${name}</div>
+                    <div class="fo-bar-cell is-energy" title="${energyTip}" data-fo-tip="${energyTip}">
                         <span class="fo-bar-label">E</span>
                         <div class="fo-bar-track"><div class="fo-bar-fill" style="width:${ePct}%"></div></div>
                     </div>
                     <div class="fo-bars-cd">
-                        <span class="fo-cd-pill${cdClass(cd.drug)}" title="${cdTitle('Drug', cd.drug)}">D</span>
-                        <span class="fo-cd-pill${cdClass(cd.medical)}" title="${cdTitle('Medical', cd.medical)}">M</span>
-                        <span class="fo-cd-pill${cdClass(cd.booster)}" title="${cdTitle('Booster', cd.booster)}">B</span>
+                        <span class="fo-cd-pill${cdClass(cd.drug)}" title="${cdTitle('Drug', cd.drug)}" data-fo-tip="${cdTitle('Drug', cd.drug)}">D</span>
+                        <span class="fo-cd-pill${cdClass(cd.medical)}" title="${cdTitle('Medical', cd.medical)}" data-fo-tip="${cdTitle('Medical', cd.medical)}">M</span>
+                        <span class="fo-cd-pill${cdClass(cd.booster)}" title="${cdTitle('Booster', cd.booster)}" data-fo-tip="${cdTitle('Booster', cd.booster)}">B</span>
                     </div>
                 </div>
             `;
         }).join('');
         list.innerHTML = html;
+    }
+
+    /**
+     * Tap-to-show tooltip system. Native `title` attributes don't fire on
+     * mobile/PDA (no hover), so we overlay a simple custom tooltip that
+     * pops up when you tap any element with `data-fo-tip`. Hover on
+     * desktop still uses the native title. Tooltip auto-dismisses on the
+     * next tap-anywhere or scroll.
+     */
+    function setupFoTooltips() {
+        if (window.__foTooltipBound) return;
+        window.__foTooltipBound = true;
+        let tipEl = null;
+        let tipFor = null;
+        function hideTip() {
+            if (tipEl) { tipEl.remove(); tipEl = null; tipFor = null; }
+        }
+        function showTip(el) {
+            const text = el.getAttribute('data-fo-tip');
+            if (!text) return;
+            if (tipFor === el) { hideTip(); return; } // tap same pill again → dismiss
+            hideTip();
+            tipEl = document.createElement('div');
+            tipEl.className = 'fo-tooltip';
+            tipEl.textContent = text;
+            document.body.appendChild(tipEl);
+            tipFor = el;
+            const rect = el.getBoundingClientRect();
+            const tw = tipEl.offsetWidth;
+            const th = tipEl.offsetHeight;
+            let left = rect.left + rect.width / 2 - tw / 2;
+            let top = rect.top - th - 6;
+            if (top < 4) top = rect.bottom + 6; // flip below if no room above
+            left = Math.max(4, Math.min(left, window.innerWidth - tw - 4));
+            tipEl.style.left = `${left + window.scrollX}px`;
+            tipEl.style.top = `${top + window.scrollY}px`;
+        }
+        document.addEventListener('click', (e) => {
+            const trigger = e.target.closest && e.target.closest('[data-fo-tip]');
+            if (trigger) {
+                e.stopPropagation();
+                showTip(trigger);
+            } else {
+                hideTip();
+            }
+        }, true);
+        document.addEventListener('scroll', hideTip, true);
+        window.addEventListener('resize', hideTip);
     }
 
     /** Wire the cooldowns panel header to toggle collapse/expand. */
@@ -7290,6 +7358,7 @@ body.wb-chain-active {
             }
         }).catch((err) => { console.warn('[fo-bars] /api/faction/bars FAILED:', err); renderFactionBars(); });
         setupFactionBarsToggle();
+        setupFoTooltips();
 
         // ── Ranked War Timer popup: document-level capture-phase
         //    delegation, same pattern that fixed the Shout button.
