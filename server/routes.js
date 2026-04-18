@@ -4091,13 +4091,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
           if (fS2.engine_auto_dispatcher ?? true) {
             retryEngines.autoDispatcher = runAutoDispatcher(fid, data, playerInfo.playerId);
           }
-          // Pool-fallback succeeded — the user has effectively got faction
-          // data via a teammate's Full-access key, so unlock the tabs that
-          // the client gates on viewer.hasFactionAccess (admin, manager,
-          // metrics, engines). Admin-side mutations are still gated
-          // server-side by position, so this only affects visibility.
-          const pooledViewer = { ...buildViewer(playerInfo), hasFactionAccess: true };
-          return res.json({ ...data, viewer: pooledViewer, engines: retryEngines });
+          return res.json({ ...data, viewer: buildViewer(playerInfo), engines: retryEngines });
         } catch (retryErr) {
           console.error(`[oc/spawn-key] pool key failed for faction ${fid}:`, retryErr.message);
           removeFactionKey(fid, poolKey); // Remove dead key from pool
