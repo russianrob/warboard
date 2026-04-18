@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.62
+// @version      4.9.63
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.63  - Change: Faction Cooldowns row layout — energy bar moved to the leftmost column, and D/M/B swapped from letter pills to color-coded mini-bars (red=drug, blue=medical, purple=booster). Fill proportional to remaining cooldown vs. 10h/5h/24h references; ready state shows empty track with green letter label. Tooltip still shows exact remaining time.
 // v4.9.62  - Change: Faction Cooldowns panel now starts collapsed again (was forced-expanded in 4.9.51 as a workaround for the then-broken click handler). The click-to-toggle has been solid since 4.9.53, so the compact default is back.
 // v4.9.61  - Feature: Tap-to-show tooltips for the Faction Cooldowns pills and energy bar. Native `title` attributes don't fire on mobile/PDA (no hover), so tapping any pill/bar now pops a small floating tooltip showing the full value (e.g. "Drug: 4h55m"). Tap again or tap elsewhere to dismiss.
 // v4.9.60  - Change: Faction Cooldowns energy bar shrunk — fixed 70px column, 5px bar height, smaller "E" label; row width matches the tighter pill footprint. No more long stretchy bar.
@@ -2618,14 +2619,14 @@ body.wb-chain-active {
 .fo-bars-list { padding: 6px 12px 10px; }
 .fo-bars-row {
     display: grid;
-    grid-template-columns: 110px 70px auto;
+    grid-template-columns: 70px 100px minmax(0, 1fr);
     gap: 10px; align-items: center; justify-content: start;
     padding: 4px 4px; font-size: 11px;
     border-bottom: 1px dashed rgba(255,255,255,0.04);
 }
 .fo-bars-row:last-child { border-bottom: none; }
 .fo-bars-row .fo-bars-name { font-weight: 600; color: #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fo-bar-cell { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+.fo-bar-cell { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; cursor: help; }
 .fo-bar-cell .fo-bar-label { font-size: 9px; color: #888; width: 10px; flex-shrink: 0; }
 .fo-bar-cell .fo-bar-track {
     flex: 1; height: 5px; background: rgba(255,255,255,0.06);
@@ -2636,24 +2637,31 @@ body.wb-chain-active {
     transition: width 0.3s ease;
 }
 .fo-bar-cell.is-nerve .fo-bar-fill { background: #fdcb6e; }
-.fo-bar-cell { cursor: help; }
 .fo-bars-cd {
-    display: flex; gap: 3px;
-    white-space: nowrap; flex-shrink: 0;
+    display: flex; gap: 6px;
+    min-width: 0;
 }
-.fo-bars-cd .fo-cd-pill {
-    background: rgba(255,255,255,0.10);
-    color: #b8b8b8;
-    padding: 1px 0; border-radius: 2px;
-    font-size: 9px; font-weight: 700;
-    width: 14px; text-align: center;
+.fo-bars-cd .fo-cd-bar {
+    display: flex; align-items: center; gap: 4px;
+    flex: 1; min-width: 0;
     cursor: help;
-    display: inline-block;
 }
-.fo-bars-cd .fo-cd-pill.is-active {
-    color: #ff7675; background: rgba(255,118,117,0.25);
-    box-shadow: inset 0 0 0 1px rgba(255,118,117,0.35);
+.fo-bars-cd .fo-cd-bar-label { font-size: 9px; color: #888; width: 9px; flex-shrink: 0; text-align: center; font-weight: 700; }
+.fo-bars-cd .fo-cd-bar-track {
+    flex: 1; height: 5px; background: rgba(255,255,255,0.06);
+    border-radius: 2px; overflow: hidden; position: relative;
+    min-width: 0;
 }
+.fo-bars-cd .fo-cd-bar-fill {
+    height: 100%; background: #ff7675;
+    transition: width 0.3s ease;
+    border-radius: 2px;
+}
+.fo-bars-cd .fo-cd-bar.is-drug     .fo-cd-bar-fill { background: #ff7675; }
+.fo-bars-cd .fo-cd-bar.is-medical  .fo-cd-bar-fill { background: #74b9ff; }
+.fo-bars-cd .fo-cd-bar.is-booster  .fo-cd-bar-fill { background: #a29bfe; }
+.fo-bars-cd .fo-cd-bar.is-ready .fo-cd-bar-label { color: #4ade80; }
+.fo-bars-cd .fo-cd-bar.is-ready .fo-cd-bar-fill   { width: 0 !important; }
 .fo-bars-empty { padding: 8px; color: #888; font-size: 11px; text-align: center; font-style: italic; }
 
 /* Tap-to-show tooltip — works where native title attributes do not (mobile/PDA). */
@@ -5873,21 +5881,33 @@ body.wb-chain-active {
                 const m = Math.floor((s % 3600) / 60);
                 return h > 0 ? `${h}h${m.toString().padStart(2, '0')}m` : `${m}m`;
             };
-            const cdClass = (v) => (Number(v) > 0 ? ' is-active' : '');
             const cdTitle = (label, v) => `${label}: ${fmtCd(v)}`;
+            // Reference maxes for bar fill (longest typical cooldown for each type)
+            const CD_REF = { drug: 36000, medical: 18000, booster: 86400 }; // 10h / 5h / 24h
+            const cdPct = (v, max) => Math.max(0, Math.min(100, (Number(v) || 0) / max * 100));
+            const cdBar = (label, key, val) => {
+                const active = Number(val) > 0;
+                const pct = active ? cdPct(val, CD_REF[key]) : 0;
+                const tip = cdTitle(label, val);
+                const classes = `fo-cd-bar is-${key}${active ? '' : ' is-ready'}`;
+                return `<div class="${classes}" title="${tip}" data-fo-tip="${tip}">`
+                    + `<span class="fo-cd-bar-label">${label[0]}</span>`
+                    + `<div class="fo-cd-bar-track"><div class="fo-cd-bar-fill" style="width:${pct}%"></div></div>`
+                    + `</div>`;
+            };
             const name = escapeHtml(info.name || `#${pid}`);
             const energyTip = `Energy: ${e.current}/${e.maximum} (${ePct}%)`;
             return `
                 <div class="fo-bars-row">
-                    <div class="fo-bars-name" title="${name}" data-fo-tip="${name}">${name}</div>
                     <div class="fo-bar-cell is-energy" title="${energyTip}" data-fo-tip="${energyTip}">
                         <span class="fo-bar-label">E</span>
                         <div class="fo-bar-track"><div class="fo-bar-fill" style="width:${ePct}%"></div></div>
                     </div>
+                    <div class="fo-bars-name" title="${name}" data-fo-tip="${name}">${name}</div>
                     <div class="fo-bars-cd">
-                        <span class="fo-cd-pill${cdClass(cd.drug)}" title="${cdTitle('Drug', cd.drug)}" data-fo-tip="${cdTitle('Drug', cd.drug)}">D</span>
-                        <span class="fo-cd-pill${cdClass(cd.medical)}" title="${cdTitle('Medical', cd.medical)}" data-fo-tip="${cdTitle('Medical', cd.medical)}">M</span>
-                        <span class="fo-cd-pill${cdClass(cd.booster)}" title="${cdTitle('Booster', cd.booster)}" data-fo-tip="${cdTitle('Booster', cd.booster)}">B</span>
+                        ${cdBar('Drug', 'drug', cd.drug)}
+                        ${cdBar('Medical', 'medical', cd.medical)}
+                        ${cdBar('Booster', 'booster', cd.booster)}
                     </div>
                 </div>
             `;

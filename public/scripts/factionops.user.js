@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.4
+// @version      4.9.63
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,21 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.63  - Change: Faction Cooldowns row layout — energy bar moved to the leftmost column, and D/M/B swapped from letter pills to color-coded mini-bars (red=drug, blue=medical, purple=booster). Fill proportional to remaining cooldown vs. 10h/5h/24h references; ready state shows empty track with green letter label. Tooltip still shows exact remaining time.
+// v4.9.62  - Change: Faction Cooldowns panel now starts collapsed again (was forced-expanded in 4.9.51 as a workaround for the then-broken click handler). The click-to-toggle has been solid since 4.9.53, so the compact default is back.
+// v4.9.61  - Feature: Tap-to-show tooltips for the Faction Cooldowns pills and energy bar. Native `title` attributes don't fire on mobile/PDA (no hover), so tapping any pill/bar now pops a small floating tooltip showing the full value (e.g. "Drug: 4h55m"). Tap again or tap elsewhere to dismiss.
+// v4.9.60  - Change: Faction Cooldowns energy bar shrunk — fixed 70px column, 5px bar height, smaller "E" label; row width matches the tighter pill footprint. No more long stretchy bar.
+// v4.9.59  - Change: Faction Cooldowns row drops the Nerve bar entirely (not useful for war decisions) and shrinks the D/M/B pills to 14px wide / 9px font so they feel chip-sized. Row is now 3 columns: name · energy bar · cooldown pills.
+// v4.9.58  - Change: Faction Cooldowns row is now pills-only — removed the energy/nerve numeric labels (95/150, 8/89 etc) and moved the values onto the bar cell's hover tooltip so the row stays clean. Bars still render so you can scan percentage-full at a glance.
+// v4.9.57  - Fix: Faction Cooldowns D/M/B pills were too dim to see on the overlay's dark background. Brightened the inactive color (#b8b8b8 on rgba(255,255,255,0.10)), bumped pill width/font, gave the row a 70px minimum so the cd column can't collapse, and added a red outline on active pills.
+// v4.9.56  - Change: Faction Cooldowns D/M/B pills are now compact single-letter chips with a native tooltip on hover showing the remaining time (e.g. "Drug: 4h55m", "Medical: ready"). Frees up ~80px per row for the energy/nerve bars.
+// v4.9.55  - Fix: Faction Cooldowns energy/nerve cells no longer overlap their neighbors. Grid columns get a 140px minimum each, row gap widened to 12px, and bar cells get overflow:hidden so the track + value never bleed into the next column.
+// v4.9.54  - Fix: Faction Cooldowns booster pill no longer gets clipped. Grid's cooldown column now sizes to content (auto), energy/nerve cells use minmax(0,1fr) so they can shrink without pushing the pills off, and the pills themselves get white-space:nowrap + flex-shrink:0.
+// v4.9.53  - Fix: renderFactionBars / setupFactionBarsToggle / updateEnemyAttackingBadges were accidentally nested inside startStatusTimers due to a misplaced brace, making them invisible from outside that function. This meant the cooldowns panel never rendered and the click-toggle never wired up. Moved them back to IIFE top level.
+// v4.9.52  - Diagnostic: add console.log on Faction Cooldowns fetch + SSE apply so the empty-panel issue can be traced in DevTools. Also forces an empty-state render on init so users see "No faction members reporting yet." instead of a blank panel.
+// v4.9.51  - Change: Faction Cooldowns panel now starts expanded by default, so users see member cooldowns without needing to click (safety fallback while the click-through issue in Torn's #mainContainer is investigated).
+// v4.9.50  - Fix: Faction Cooldowns panel header gets pointer-events:auto + touch-action treatment (same pattern as Shout button) so clicks actually land when the overlay is nested in Torn's #mainContainer.
+// v4.9.49  - Fix: Faction Cooldowns panel header now reliably expands/collapses (delegated click handler survives DOM re-renders).
 // v4.9.3   - Fix: PDA connection no longer flips to Offline on a single poll hiccup (requires 3 consecutive failures); renamed 'Syncing' to 'Connected'.
 // v4.9.2   - Fix: Boost toast z-index to max to ensure visibility on attack pages; add assist toast debug log.
 // v4.9.1   - Feature: Added Test Toast Notification button in settings.
@@ -249,6 +264,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
         CHAIN_ALERT: GM_getValue('factionops_chain_alert', true),
         CHAIN_ALERT_THRESHOLD: GM_getValue('factionops_chain_alert_threshold', 60),
         PDA_NOTIFICATIONS: GM_getValue('factionops_pda_notif', IS_PDA),
+        ENEMY_ATTACK_NOTIF: GM_getValue('factionops_enemy_attack_notif', false),
         KEEP_ALIVE: GM_getValue('factionops_keep_alive', false),
         CALL_TIMEOUT: 5 * 60 * 1000,       // 5 minute call expiry
         DEAL_TIMEOUT: 15 * 60 * 1000,      // 15 minute deal call expiry
@@ -272,6 +288,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
             CHAIN_ALERT: 'factionops_chain_alert',
             CHAIN_ALERT_THRESHOLD: 'factionops_chain_alert_threshold',
             PDA_NOTIFICATIONS: 'factionops_pda_notif',
+            ENEMY_ATTACK_NOTIF: 'factionops_enemy_attack_notif',
             KEEP_ALIVE: 'factionops_keep_alive',
         };
         if (gmKeys[key]) {
@@ -1056,37 +1073,52 @@ html.wb-theme-light {
 }
 #wb-assist-btn {
     position: fixed;
-    bottom: 80px;
-    right: 16px;
+    bottom: 72px;
+    right: 14px;
     z-index: 9999999 !important;
-    background: linear-gradient(135deg, #e17055, #d63031);
+    background: linear-gradient(135deg, #ff6b52, #e03a3a);
     color: #fff;
-    border: none;
-    border-radius: 12px;
-    padding: 12px 20px;
-    font-family: 'Open Sans', Arial, sans-serif;
-    font-size: 14px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Open Sans", Arial, sans-serif;
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    line-height: 1;
     cursor: pointer;
-    box-shadow: 0 4px 16px rgba(214, 48, 49, 0.4);
-    display: flex;
+    box-shadow: 0 2px 8px rgba(214, 48, 49, 0.35), inset 0 1px 0 rgba(255,255,255,0.12);
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    transition: all 0.2s ease;
+    gap: 6px;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
     -webkit-tap-highlight-color: transparent;
+    user-select: none;
+}
+#wb-assist-btn .wb-assist-icon {
+    width: 12px;
+    height: 12px;
+    display: inline-block;
+    vertical-align: middle;
+    flex-shrink: 0;
+    filter: drop-shadow(0 1px 0 rgba(0,0,0,0.25));
 }
 #wb-assist-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(214, 48, 49, 0.5);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(214, 48, 49, 0.5), inset 0 1px 0 rgba(255,255,255,0.18);
 }
 #wb-assist-btn:active {
     transform: translateY(0);
+    box-shadow: 0 1px 4px rgba(214, 48, 49, 0.4), inset 0 1px 0 rgba(0,0,0,0.12);
 }
 #wb-assist-btn:disabled {
-    background: linear-gradient(135deg, #636e72, #2d3436);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    background: linear-gradient(135deg, #4a5258, #2d3436);
+    color: #b0b8bc;
+    border-color: rgba(255,255,255,0.04);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
     cursor: not-allowed;
+    transform: none;
 }
 
 /* ----- Animations ----- */
@@ -1121,6 +1153,10 @@ body.wb-chain-active {
         inset 0 1px 0 rgba(255, 255, 255, 0.04);
     overflow: hidden;
     height: fit-content;
+    /* Promote the overlay to its own compositor layer so page-level
+       scroll becomes a cheap GPU transform instead of a full repaint. */
+    transform: translateZ(0);
+    will-change: transform;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 13px;
     line-height: 1.5;
@@ -1325,6 +1361,12 @@ body.wb-chain-active {
     border: 1px solid rgba(108,92,231,0.3);
     white-space: nowrap;
     cursor: pointer;
+    /* Ensure clicks land — same treatment that fixed the Shout button
+       when the overlay lives inside #mainContainer. */
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    isolation: isolate;
+    z-index: 5;
 }
 .fo-war-timer-icon { font-size: 12px; }
 .fo-war-timer-label { opacity: 0.6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -1477,6 +1519,11 @@ body.wb-chain-active {
     background: var(--wb-bg);
     transition: background 0.15s ease;
     position: relative;
+    /* Scroll performance: isolate each row's layout/paint and let the
+       browser skip off-screen rows entirely while scrolling. */
+    contain: layout style paint;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 48px;
 }
 
 .fo-row.is-called::before {
@@ -1498,6 +1545,24 @@ body.wb-chain-active {
 
 .fo-row.is-called::before { background: #00b894; }
 .fo-row.is-called { background: rgba(0,184,148,0.04); }
+
+/* Enemy "just attacked" indicator — sits for 60s after the enemy is
+   seen in their faction's attack feed. Yellow sword in the top-right. */
+.fo-row.is-attacking::after {
+    content: '⚔';
+    position: absolute;
+    right: 8px;
+    top: 6px;
+    font-size: 13px;
+    color: #fdcb6e;
+    text-shadow: 0 0 4px rgba(253,203,110,0.4);
+    pointer-events: none;
+    animation: fo-attacking-pulse 1.2s ease-in-out infinite alternate;
+}
+@keyframes fo-attacking-pulse {
+    from { opacity: 0.6; }
+    to   { opacity: 1; }
+}
 
 /* ── Cell styles ── */
 .fo-cell { padding: 0 4px; display: flex; align-items: center; min-width: 0; overflow: hidden; }
@@ -2494,22 +2559,156 @@ body.wb-chain-active {
     line-height: 1;
 }
 
+/* Retal action row injected into Torn's native mini profile card */
+.fo-card-retal-row {
+    display: flex;
+    justify-content: center;
+    padding: 6px 8px;
+    margin: 6px 0 0 0;
+    border-top: 1px solid rgba(255,255,255,0.08);
+}
+.fo-card-retal-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: linear-gradient(135deg, #ff6b52, #e03a3a);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 2px;
+    padding: 1px 5px;
+    font: 700 8px/1 Arial, "Open Sans", sans-serif;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+    box-shadow: 0 1px 2px rgba(214,48,49,0.3);
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    user-select: none;
+}
+.fo-card-retal-btn:hover { transform: translateY(-1px); box-shadow: 0 1px 4px rgba(214,48,49,0.45); }
+.fo-card-retal-btn:active { transform: translateY(0); }
+.fo-card-retal-btn:disabled { background: #636e72; color: #b0b8bc; cursor: not-allowed; transform: none; }
+.fo-card-retal-icon { font-size: 9px; }
+
+/* Faction cooldowns dashboard (Option B — self-reported bars). */
+.fo-bars-section {
+    border-bottom: 1px solid var(--wb-border);
+    background: var(--wb-bg-secondary);
+}
+.fo-bars-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 14px; cursor: pointer; user-select: none;
+    font: 600 11px/1 Arial, sans-serif; color: var(--wb-text);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    /* Ensure clicks land — same treatment that fixed the Shout button
+       when the overlay lives inside #mainContainer. */
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    position: relative; z-index: 2;
+}
+.fo-bars-header * { pointer-events: none; }
+.fo-bars-header:hover { background: rgba(255,255,255,0.03); }
+.fo-bars-caret { font-size: 9px; transition: transform 0.15s ease; display: inline-block; }
+.fo-bars-section.is-open .fo-bars-caret { transform: rotate(90deg); }
+.fo-bars-title { opacity: 0.85; }
+.fo-bars-count {
+    margin-left: auto; font-size: 10px; color: #888;
+    background: rgba(255,255,255,0.05); padding: 2px 7px; border-radius: 3px;
+}
+.fo-bars-list { padding: 6px 12px 10px; }
+.fo-bars-row {
+    display: grid;
+    grid-template-columns: 70px 100px minmax(0, 1fr);
+    gap: 10px; align-items: center; justify-content: start;
+    padding: 4px 4px; font-size: 11px;
+    border-bottom: 1px dashed rgba(255,255,255,0.04);
+}
+.fo-bars-row:last-child { border-bottom: none; }
+.fo-bars-row .fo-bars-name { font-weight: 600; color: #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fo-bar-cell { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; cursor: help; }
+.fo-bar-cell .fo-bar-label { font-size: 9px; color: #888; width: 10px; flex-shrink: 0; }
+.fo-bar-cell .fo-bar-track {
+    flex: 1; height: 5px; background: rgba(255,255,255,0.06);
+    border-radius: 2px; overflow: hidden; position: relative;
+}
+.fo-bar-cell .fo-bar-fill {
+    height: 100%; background: var(--wb-call-green);
+    transition: width 0.3s ease;
+}
+.fo-bar-cell.is-nerve .fo-bar-fill { background: #fdcb6e; }
+.fo-bars-cd {
+    display: flex; gap: 6px;
+    min-width: 0;
+}
+.fo-bars-cd .fo-cd-bar {
+    display: flex; align-items: center; gap: 4px;
+    flex: 1; min-width: 0;
+    cursor: help;
+}
+.fo-bars-cd .fo-cd-bar-label { font-size: 9px; color: #888; width: 9px; flex-shrink: 0; text-align: center; font-weight: 700; }
+.fo-bars-cd .fo-cd-bar-track {
+    flex: 1; height: 5px; background: rgba(255,255,255,0.06);
+    border-radius: 2px; overflow: hidden; position: relative;
+    min-width: 0;
+}
+.fo-bars-cd .fo-cd-bar-fill {
+    height: 100%; background: #ff7675;
+    transition: width 0.3s ease;
+    border-radius: 2px;
+}
+.fo-bars-cd .fo-cd-bar.is-drug     .fo-cd-bar-fill { background: #ff7675; }
+.fo-bars-cd .fo-cd-bar.is-medical  .fo-cd-bar-fill { background: #74b9ff; }
+.fo-bars-cd .fo-cd-bar.is-booster  .fo-cd-bar-fill { background: #a29bfe; }
+.fo-bars-cd .fo-cd-bar.is-ready .fo-cd-bar-label { color: #4ade80; }
+.fo-bars-cd .fo-cd-bar.is-ready .fo-cd-bar-fill   { width: 0 !important; }
+.fo-bars-empty { padding: 8px; color: #888; font-size: 11px; text-align: center; font-style: italic; }
+
+/* Tap-to-show tooltip — works where native title attributes do not (mobile/PDA). */
+.fo-tooltip {
+    position: absolute;
+    z-index: 2147483647;
+    background: rgba(0,0,0,0.92);
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    pointer-events: none;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.08);
+    animation: fo-tooltip-fade 0.12s ease-out;
+}
+@keyframes fo-tooltip-fade { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }
+
 /* Broadcast entry bar */
 .fo-broadcast-entry-bar {
     display: flex; align-items: center; gap: 10px;
     padding: 8px 16px; background: var(--wb-bg-secondary);
     border-bottom: 1px solid var(--wb-border);
+    /* Create a new stacking context above anything Torn's React might
+       layer into #mainContainer after we nested the overlay inside it. */
+    position: relative;
+    z-index: 10;
+    pointer-events: auto;
+    isolation: isolate;
 }
 .fo-broadcast-entry-bar input {
     flex: 1; background: var(--wb-bg); border: 1px solid var(--wb-border);
     color: var(--wb-text); padding: 5px 12px; border-radius: 4px; font-size: 13px;
     box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+    position: relative; z-index: 1;
+    pointer-events: auto !important;
 }
 .fo-broadcast-entry-bar button {
     background: var(--wb-hospital-red); color: white; border: none;
     padding: 5px 16px; border-radius: 4px; cursor: pointer;
     font-size: 12px; font-weight: 700; text-transform: uppercase;
     transition: all 0.2s ease;
+    position: relative; z-index: 2;
+    pointer-events: auto !important;
+    touch-action: manipulation;
 }
 .fo-broadcast-entry-bar button:hover {
     filter: brightness(1.2); transform: translateY(-1px);
@@ -2562,6 +2761,10 @@ body.wb-chain-active {
         // Chain alert fired flag (resets when timeout goes back above threshold)
         chainAlertFired: false,
         chainPanicFired: false,
+
+        // Map of playerId → { bars, cooldowns, name, updatedAt } — self-
+        // reported faction-member dashboards (Option B cooldown panel).
+        memberBars: {},
 
         // Whether a faction API key has been saved on the server
         factionKeyStored: false,
@@ -2636,6 +2839,7 @@ body.wb-chain-active {
             const existing = state.statuses[targetId];
             if (!existing) {
                 state.statuses[targetId] = newData;
+                maybeAutoUncallOnHospital(targetId, null, normalizeStatus(newData.status));
                 continue;
             }
             const oldStatus = normalizeStatus(existing.status);
@@ -2648,11 +2852,177 @@ body.wb-chain-active {
                 ...newData,
             };
 
-            // Monotonic guard on `until` — only if status didn't change
-            if (!statusChanged && existing.until > 0 && newData.until > 0) {
-                // Timer must only count DOWN — keep whichever is lower
-                state.statuses[targetId].until = Math.min(existing.until, newData.until);
+            if (statusChanged) {
+                maybeAutoUncallOnHospital(targetId, oldStatus, newStatus);
             }
+
+            // Monotonic guard on `until` — timer may only count DOWN while
+            // the status is unchanged. Previously this only applied when
+            // existing.until > 0, so once the local tick reached 0 a
+            // slightly-stale server push (Torn cache lag: e.g. "2s left")
+            // would bump the countdown back up to 2s, causing the Next Up
+            // bar to visibly rebound 0 → 2 → tick down → 0 → rebound again
+            // until Torn's cache finally reported the release.
+            if (!statusChanged && Object.prototype.hasOwnProperty.call(newData, 'until')) {
+                const existingUntil = typeof existing.until === 'number' ? existing.until : 0;
+                const newUntil      = typeof newData.until === 'number' ? newData.until : existingUntil;
+                state.statuses[targetId].until = Math.min(existingUntil, newUntil);
+            }
+        }
+    }
+
+    /**
+     * Parse a duration out of a human-readable string from Torn tooltips.
+     * Handles: "1h 23m", "45 minutes", "In hospital for 2 hours 10 mins",
+     * "45:23" (MM:SS), "1:23:45" (HH:MM:SS). Returns seconds or 0.
+     */
+    function parseDurationFromText(text) {
+        if (!text) return 0;
+        const t = String(text).toLowerCase();
+        // HH:MM:SS or MM:SS forms
+        const clock = t.match(/(\d+):(\d{2})(?::(\d{2}))?/);
+        if (clock) {
+            const a = Number(clock[1]) || 0;
+            const b = Number(clock[2]) || 0;
+            const c = Number(clock[3]) || 0;
+            if (clock[3] != null) return a * 3600 + b * 60 + c;
+            // Two-group form: MM:SS if first < 60, else HH:MM
+            return a < 60 ? a * 60 + b : a * 3600 + b * 60;
+        }
+        // "1h 23m" / "1 hour 23 minutes"
+        const hm = t.match(/(\d+)\s*(?:hour|hr|h)[a-z]*\s*(?:(\d+)\s*(?:minute|min|m))?/);
+        if (hm) return (Number(hm[1]) || 0) * 3600 + (Number(hm[2]) || 0) * 60;
+        // "45 minutes" / "45 mins" / "45m"
+        const mOnly = t.match(/(\d+)\s*(?:minute|min|m)\b/);
+        if (mOnly) return Number(mOnly[1]) * 60;
+        return 0;
+    }
+
+    /**
+     * Build a name anchor that mimics Torn's native `.user.name` element as
+     * closely as possible by cloning a live example from the page. This
+     * preserves whatever wrapper/sub-span structure Torn's own profile-card
+     * handler expects — even when that structure changes between Torn
+     * releases. Player-specific sub-elements (honor icons, cipher badges,
+     * rank chips) are stripped before cloning so we don't leak someone
+     * else's data into our overlay row.
+     */
+    let _nativeNameTemplate = null;
+    function getNativeNameTemplate() {
+        if (_nativeNameTemplate) return _nativeNameTemplate.cloneNode(true);
+        const src = document.querySelector('a.user.name[href^="/profiles.php"]:not(.fo-name):not([data-fo-built])');
+        if (!src) return null;
+        const template = src.cloneNode(true);
+        // Strip player-specific child content
+        template.querySelectorAll(
+            '.user-information-cipher, .honor-text-wrap, [class*="honor"], [class*="rank"], svg, img'
+        ).forEach((el) => el.remove());
+        _nativeNameTemplate = template;
+        return template.cloneNode(true);
+    }
+
+    function buildNameAnchor(playerId, playerName) {
+        const template = getNativeNameTemplate();
+        let anchor;
+        if (template) {
+            template.setAttribute('href', `/profiles.php?XID=${playerId}`);
+            template.setAttribute('data-placeholder', `${playerName || 'Unknown'} [${playerId}]`);
+            template.setAttribute('data-fo-built', '1');
+            template.classList.add('fo-name');
+            template.style.textDecoration = 'none';
+            template.style.color = 'inherit';
+            const inner = template.querySelector('.name') || template.querySelector('span');
+            if (inner) {
+                inner.textContent = playerName || `#${playerId}`;
+            } else {
+                template.textContent = playerName || `#${playerId}`;
+            }
+            anchor = template;
+        } else {
+            // Fallback: manual construction matching the most common pattern.
+            anchor = document.createElement('a');
+            anchor.className = 'fo-name user name';
+            anchor.setAttribute('href', `/profiles.php?XID=${playerId}`);
+            anchor.dataset.placeholder = `${playerName || 'Unknown'} [${playerId}]`;
+            anchor.style.textDecoration = 'none';
+            anchor.style.color = 'inherit';
+            const inner = document.createElement('span');
+            inner.className = 'name';
+            inner.textContent = playerName || `#${playerId}`;
+            anchor.appendChild(inner);
+        }
+
+        // Copy Torn's native jQuery event handlers onto this anchor. Torn
+        // typically binds mouse/touch handlers directly to each `.user.name`
+        // element at page load (not via document delegation), so cloned
+        // elements don't inherit them. When jQuery is exposed on window, we
+        // can read the handler table from a live native element via
+        // `$._data(el, 'events')` and re-attach each binding.
+        copyNativeUserNameHandlers(anchor);
+
+        return anchor;
+    }
+
+    function copyNativeUserNameHandlers(target) {
+        try {
+            const jq = window.jQuery || window.$;
+            if (!jq || !jq._data) return false;
+            const source = document.querySelector('a.user.name[href^="/profiles.php"]:not(.fo-name):not([data-fo-built])');
+            if (!source) return false;
+            const events = jq._data(source, 'events');
+            if (!events) return false;
+            for (const type in events) {
+                const list = events[type];
+                if (!list) continue;
+                for (const h of list) {
+                    const ns = h.namespace ? `.${h.namespace}` : '';
+                    try {
+                        if (h.selector) {
+                            jq(target).on(type + ns, h.selector, h.data, h.handler);
+                        } else {
+                            jq(target).on(type + ns, h.data, h.handler);
+                        }
+                    } catch (_) { /* one handler's failure shouldn't block others */ }
+                }
+            }
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    /**
+     * Auto-uncall hook: when a target that I've called transitions into
+     * hospital (from any detection path — server push, attacks-feed, peer
+     * relay, DOM reader, intercepted attack result), clear my call. Scoped
+     * to my own calls so a teammate's call is never stomped. Runs from
+     * mergeStatusesMonotonic so it sits at the single chokepoint where all
+     * status updates flow through, instead of sprinkled across every
+     * detection path.
+     */
+    function maybeAutoUncallOnHospital(targetId, oldStatus, newStatus) {
+        if (newStatus !== 'hospital') return;
+        if (oldStatus === 'hospital') return; // not a transition
+        const call = state.calls && state.calls[targetId];
+        if (!call) {
+            log(`[auto-uncall] #${targetId} → hospital: no call exists`);
+            return;
+        }
+        if (!call.calledBy) {
+            log(`[auto-uncall] #${targetId} → hospital: call has no calledBy`);
+            return;
+        }
+        const caller = String(call.calledBy.id);
+        const me = String(state.myPlayerId || '');
+        if (caller !== me) {
+            log(`[auto-uncall] #${targetId} → hospital: call is ${caller}'s (I am ${me}), skipping`);
+            return;
+        }
+        try {
+            emitUncallTarget(targetId);
+            log(`[auto-uncall] #${targetId} hospitalized → cleared my call`);
+        } catch (e) {
+            warn(`[auto-uncall] failed for #${targetId}:`, e);
         }
     }
 
@@ -2689,7 +3059,10 @@ body.wb-chain-active {
         if (!statusBatch || Object.keys(statusBatch).length === 0) return;
         Object.assign(peerRelayBatch, statusBatch);
         if (peerRelayTimer) return; // already scheduled
-        peerRelayTimer = setTimeout(flushPeerRelay, 2000);
+        // CommandCenter: shortened from 2000ms so peer-observed status
+        // changes (e.g. a teammate viewing a target that just got
+        // hospitalized) reach the rest of the faction faster.
+        peerRelayTimer = setTimeout(flushPeerRelay, 500);
     }
 
     function flushPeerRelay() {
@@ -3039,7 +3412,11 @@ body.wb-chain-active {
 
     // PDA: polling is the primary transport (Socket.IO blocked by WebView)
     // Desktop: polling is a fallback — Socket.IO handles real-time push
-    const POLL_FAST_MS  = 2000;  // War active: 2s
+    // 200ms was tried and caused client-side "Network error" cascades when
+    // requests overlapped and GM_xmlhttpRequest queue filled up. 1000ms is
+    // the sweet spot — feels live, stays well under the browser's
+    // concurrent-socket limit and the server global rate limiter.
+    const POLL_FAST_MS  = 1000;  // War active: 1s (CommandCenter; only used when Socket.IO is unavailable)
     const POLL_IDLE_MS  = 5000;  // No war: 5s
     let currentPollInterval = POLL_IDLE_MS;
 
@@ -3298,6 +3675,17 @@ body.wb-chain-active {
             mergeStatusesMonotonic(data.enemyStatuses);
         }
 
+        // Faction cooldown dashboard updates (Option B self-reports,
+        // delivered via SSE or Socket.IO payloads).
+        if (data.memberBars && typeof data.memberBars === 'object') {
+            console.log('[fo-bars] applyServerData got memberBars:', Object.keys(data.memberBars));
+            if (!state.memberBars) state.memberBars = {};
+            for (const [pid, entry] of Object.entries(data.memberBars)) {
+                state.memberBars[String(pid)] = entry;
+            }
+            if (typeof renderFactionBars === 'function') renderFactionBars();
+        }
+
         // ── Priorities ──
         if (data.priorities) {
             state.priorities = data.priorities;
@@ -3318,7 +3706,7 @@ body.wb-chain-active {
                         firePdaNotification('target_called',
                             callData.isDeal ? '\uD83D\uDD12 Deal Call' : '\uD83C\uDFAF Target Called',
                             `${callData.calledBy.name} called ${targetName}${dealLabel}`,
-                            `https://www.torn.com/loader.php?sid=attack&user2ID=${tid}`);
+                            `https://www.torn.com/page.php?sid=attack&user2ID=${tid}`);
                     }
                     broadcastStateChange({ type: 'call_update', targetId: tid });
                 }
@@ -3559,8 +3947,19 @@ body.wb-chain-active {
         realtimeSocket.on('assist_request', (data) => {
             showAssistToast(data.playerName, data.targetName, data.attackUrl);
             if (typeof firePdaNotification === 'function') {
-                firePdaNotification('assist_request', '⚔️ Assist Needed!',
+                firePdaNotification('assist_request', '\u2694\ufe0f Assist Needed!',
                     `${data.playerName} needs help attacking ${data.targetName}!`,
+                    data.attackUrl);
+            }
+        });
+
+        // Listen for Retal Requests (profile-page retaliation calls)
+        realtimeSocket.on('retal_request', (data) => {
+            showAssistToast(data.playerName, data.targetName, data.attackUrl,
+                { kind: 'retal' });
+            if (typeof firePdaNotification === 'function') {
+                firePdaNotification('assist_request', '\u26A0\ufe0f Retal Requested!',
+                    `${data.playerName} wants retal on ${data.targetName}`,
                     data.attackUrl);
             }
         });
@@ -3568,6 +3967,19 @@ body.wb-chain-active {
         // Also handle the initial state sent on join
         realtimeSocket.on('war_state', (data) => {
             applyServerData(data);
+        });
+
+        // Faction-member bars/cooldowns self-reports (Option B dashboard).
+        realtimeSocket.on('member_bars', (data) => {
+            if (!data || !data.playerId) return;
+            if (!state.memberBars) state.memberBars = {};
+            state.memberBars[String(data.playerId)] = {
+                bars: data.bars,
+                cooldowns: data.cooldowns,
+                name: data.name,
+                updatedAt: data.updatedAt || Date.now(),
+            };
+            if (typeof renderFactionBars === 'function') renderFactionBars();
         });
 
         realtimeSocket.on('war_ended', (data) => {
@@ -3817,6 +4229,21 @@ body.wb-chain-active {
                         }
                         log('Authenticated as', state.myPlayerName || 'unknown',
                             '— factionId:', state.myFactionId);
+
+                        // First-auth disclosure: if server says this login
+                        // just created a default pool opt-in, show the
+                        // user a one-time notice so pooling isn't covert.
+                        if (body.poolingDefaultApplied && !GM_getValue('factionops_pool_notice_shown', false)) {
+                            GM_setValue('factionops_pool_notice_shown', true);
+                            setTimeout(() => {
+                                showToast(
+                                    'Your Torn API key is now part of the faction polling pool (chain, war status, attacks feed). ' +
+                                    'Open settings → "Share my API key with faction pool" to opt out.',
+                                    'info',
+                                );
+                            }, 2000);
+                        }
+
                         resolve(body);
                     } else {
                         const msg = (body && body.error) || `HTTP ${res.status}`;
@@ -3961,6 +4388,248 @@ body.wb-chain-active {
     }
 
     /** Check if current user has an elevated faction role (leader, co-leader, war leader, banker). */
+    /**
+     * Watch for Torn's native mini profile card and inject a Retal
+     * button into its existing `.buttons-list` row. The card root is
+     * reliably identified by its Emotion CSS class prefix
+     * `profile-mini-_wrapper` (or legacy `.mini-profile-wrapper`), so
+     * we don't need the size/text heuristic we were using before.
+     *
+     * Pattern adapted from tornwar.com's torn-profile-link-formatter
+     * userscript, which has been tracking this card's markup reliably
+     * across Torn redesigns.
+     *
+     * Clicks are handled via document-level capture-phase delegation so
+     * injected buttons survive re-renders or DOM replacement.
+     */
+    function setupRetalCardInjection() {
+        if (window.__foRetalCardInjection) return;
+        window.__foRetalCardInjection = true;
+
+        const observer = new MutationObserver(() => tryInjectRetalCard());
+        observer.observe(document.body, { childList: true, subtree: true });
+        // Also attempt once now in case the card is already on-screen.
+        tryInjectRetalCard();
+
+        // Delegated click — capture phase, immune to re-renders.
+        document.addEventListener('click', async (e) => {
+            const btn = e.target && e.target.closest && e.target.closest('.fo-card-retal-btn');
+            if (!btn || btn.disabled) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            const targetId = btn.dataset.targetId;
+            const targetName = btn.dataset.targetName || `Player [${targetId}]`;
+            if (!targetId) return;
+
+            btn.disabled = true;
+            const origHtml = btn.innerHTML;
+            btn.innerHTML = '<span class="fo-card-retal-icon">\u23F3</span>Sending…';
+            try {
+                await postAction('/api/assist-request', {
+                    warId: deriveWarId() || null,
+                    targetId,
+                    targetName,
+                    mode: 'retal',
+                });
+                btn.innerHTML = '<span class="fo-card-retal-icon">\u2713</span>Sent!';
+                showToast(`Retal request sent for ${targetName}`, 'success');
+            } catch (err) {
+                btn.innerHTML = '<span class="fo-card-retal-icon">\u26A0</span>Failed';
+                showToast(`Retal failed: ${(err && err.message) || 'server error'}`, 'error');
+            }
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+            }, 3000);
+        }, true);
+
+        log('[retal-card] mini-profile observer installed');
+    }
+
+    /**
+     * Find an un-injected mini profile card and add our Retal button.
+     * The `.buttons-list` inside the card is populated a beat after the
+     * wrapper appears, so we poll briefly until it shows up.
+     */
+    function tryInjectRetalCard() {
+        const card = document.querySelector(
+            '[class*="profile-mini-_wrapper"]:not(.fo-retal-injected), ' +
+            '.mini-profile-wrapper:not(.fo-retal-injected)'
+        );
+        if (!card) return;
+        card.classList.add('fo-retal-injected'); // dedup flag — one-time per card
+
+        let attempts = 0;
+        const MAX = 25; // 25 × 200ms = 5s total before giving up
+        const timer = setInterval(() => {
+            attempts += 1;
+            const buttonsList = card.querySelector('.buttons-list');
+            const nameLink = card.querySelector('a[href*="profiles.php?XID="]');
+            if (!buttonsList || !nameLink) {
+                if (attempts >= MAX) clearInterval(timer);
+                return;
+            }
+            if (buttonsList.querySelector('.fo-card-retal-btn')) {
+                clearInterval(timer);
+                return;
+            }
+
+            const m = (nameLink.getAttribute('href') || '').match(/XID=(\d+)/i);
+            if (!m) { clearInterval(timer); return; }
+            const targetId = m[1];
+            const rawName = (nameLink.textContent || '').trim();
+            const targetName = rawName && !/^\s*\[?\d+\]?\s*$/.test(rawName)
+                ? rawName
+                : `Player [${targetId}]`;
+
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'fo-card-retal-btn';
+            btn.dataset.targetId = targetId;
+            btn.dataset.targetName = targetName;
+            btn.innerHTML = '<span class="fo-card-retal-icon">\u26A0</span>Retal';
+            buttonsList.appendChild(btn);
+
+            clearInterval(timer);
+        }, 200);
+    }
+
+    /**
+     * Document-level delegation for the war-timer popup. Clicking the
+     * timer toggles the detail panel; clicking anywhere else closes it.
+     * Clicks INSIDE the detail popup itself don't toggle — so you can
+     * select text or interact with its contents. Capture-phase and
+     * idempotent, same pattern as the Shout button delegation.
+     */
+    function setupWarTimerDelegation() {
+        if (window.__foWarTimerDelegated) return;
+        window.__foWarTimerDelegated = true;
+
+        const handle = (e) => {
+            const detail = document.getElementById('fo-war-timer-detail');
+            if (!detail) return;
+            if (!e.target || !e.target.closest) return;
+            const onTimer = e.target.closest('#fo-war-timer');
+            const insideDetail = e.target.closest('#fo-war-timer-detail');
+            if (onTimer && !insideDetail) {
+                log('[war-timer] toggle');
+                detail.classList.toggle('open');
+            } else if (!onTimer) {
+                if (detail.classList.contains('open')) {
+                    detail.classList.remove('open');
+                }
+            }
+        };
+        // Listen on click + pointerdown + touchend in capture phase so
+        // PDA/mobile taps trigger even if the click event is suppressed.
+        document.addEventListener('click', handle, true);
+        document.addEventListener('pointerdown', (e) => {
+            // Only handle pointerdown as the toggle trigger — pointerdown
+            // reliably fires on PDA where click sometimes doesn't.
+            const onTimer = e.target && e.target.closest && e.target.closest('#fo-war-timer');
+            if (onTimer) handle(e);
+        }, true);
+
+        log('[war-timer] document delegation installed');
+    }
+
+    /**
+     * Document-level delegation for the Shout button + its Enter-key
+     * handler. Runs once at script startup and never goes stale — the
+     * overlay can be destroyed, recreated, moved inside #mainContainer,
+     * or clobbered by Torn's React reconciliation without breaking the
+     * click flow. Capture-phase so we beat any parent handler that might
+     * call stopImmediatePropagation.
+     */
+    function setupShoutDelegation() {
+        if (window.__foShoutDelegated) return;
+        window.__foShoutDelegated = true;
+
+        document.addEventListener('click', (e) => {
+            const btn = e.target && e.target.closest && e.target.closest('#fo-btn-send-broadcast');
+            if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            sendShoutAction();
+        }, true);
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            const inp = e.target && e.target.closest && e.target.closest('#fo-input-broadcast');
+            if (!inp) return;
+            e.preventDefault();
+            sendShoutAction();
+        }, true);
+
+        log('[shout] document delegation installed');
+    }
+
+    function sendShoutAction() {
+        log('[shout] action fired');
+        const msgInput = document.getElementById('fo-input-broadcast');
+        if (!msgInput) {
+            showToast('Broadcast input not found', 'error');
+            return;
+        }
+        const msg = msgInput.value.trim();
+        log('[shout] msg length:', msg.length);
+        if (!msg) {
+            showToast('Type something to broadcast first', 'warning');
+            return;
+        }
+        const currentWarId = deriveWarId();
+        log('[shout] warId:', currentWarId, 'myFactionId:', state.myFactionId);
+        if (!currentWarId) {
+            showToast('Error: Could not determine war ID.', 'error');
+            return;
+        }
+        log('[shout] POSTing /api/broadcast');
+        postAction('/api/broadcast', { message: msg, type: 'warning', warId: currentWarId })
+            .then(data => {
+                log('[shout] response:', data);
+                if (data && data.success) {
+                    msgInput.value = '';
+                    showToast('Broadcast sent to faction!', 'success');
+                } else {
+                    showToast((data && data.error) || 'Failed to send broadcast.', 'error');
+                }
+            })
+            .catch(e => {
+                warn('[shout] POST failed:', e && e.message);
+                showToast(`Broadcast failed: ${(e && e.message) || 'server error'}`, 'error');
+            });
+    }
+
+    /**
+     * Decode the persisted JWT payload (no signature verification — just
+     * to hydrate local state). The server still validates every
+     * authenticated request, so trusting the unverified payload locally
+     * for UI-rendering purposes is safe. Called at startup so identity
+     * fields survive re-auth failures (e.g. Torn rate-limit bounces).
+     */
+    function hydrateStateFromJwt() {
+        if (!state.jwtToken) return;
+        try {
+            const parts = state.jwtToken.split('.');
+            if (parts.length !== 3) return;
+            const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+            const padded = b64 + '==='.slice((b64.length + 3) % 4);
+            const json = atob(padded);
+            const payload = JSON.parse(json);
+            if (payload.playerId)   state.myPlayerId = String(payload.playerId);
+            if (payload.playerName) state.myPlayerName = payload.playerName;
+            if (payload.factionId)  state.myFactionId = String(payload.factionId);
+            if (payload.factionName) state.myFactionName = payload.factionName;
+            if (payload.factionPosition) {
+                state.myFactionPosition = String(payload.factionPosition).toLowerCase();
+            }
+            log('Hydrated identity from JWT:', state.myPlayerName || '?', 'pos:', state.myFactionPosition);
+        } catch (e) {
+            warn('Could not hydrate JWT:', e && e.message);
+        }
+    }
+
     function isLeader() {
         const isAdmin = String(state.myPlayerId) === '137558';
         if (isAdmin) return true;
@@ -4072,6 +4741,21 @@ body.wb-chain-active {
                 </label>
             </div>
 
+            <div class="wb-settings-row">
+                <span>Share my API key with faction pool</span>
+                <label class="wb-toggle">
+                    <input type="checkbox" id="wb-toggle-pool-opt">
+                    <span class="wb-toggle-slider"></span>
+                </label>
+            </div>
+            <div style="font-size:11px;opacity:0.6;margin-bottom:14px;">
+                When on, your key is used alongside other officers' keys to
+                spread the faction's server-side polling load (chain, war
+                status, hospital events). Rate limits stop cascading.
+                Please use a <strong>Limited</strong> key — never a Full
+                key — for sharing. Opt out at any time.
+            </div>
+
             <div style="margin: 14px 0;">
                 <label for="wb-input-broadcast-roles">Custom Broadcast Roles (comma-separated)</label>
                 <div style="display:flex;gap:6px;">
@@ -4100,6 +4784,19 @@ body.wb-chain-active {
             </div>
             <button class="wb-btn wb-btn-sm" id="fo-btn-test-pda-notif" style="margin-bottom:14px;font-size:11px;">Test PDA Notification</button>
             <div id="fo-pda-notif-result" style="font-size:11px;margin-bottom:10px;min-height:14px;"></div>
+
+            <div class="wb-settings-row">
+                <span>Notify when enemies attack</span>
+                <label class="wb-toggle">
+                    <input type="checkbox" id="wb-toggle-enemy-attack-notif" ${CONFIG.ENEMY_ATTACK_NOTIF ? 'checked' : ''}>
+                    <span class="wb-toggle-slider"></span>
+                </label>
+            </div>
+            <div style="font-size:11px;opacity:0.6;margin-bottom:14px;">
+                When off (default): in-overlay toast only when an enemy
+                is caught mid-attack. When on: also fires a native PDA
+                notification. Toasts are unaffected by this toggle.
+            </div>
 
             <button class="wb-btn wb-btn-sm" id="fo-btn-test-toast" style="margin-bottom:14px;font-size:11px;">Test Toast Notification</button>
 
@@ -4216,10 +4913,33 @@ body.wb-chain-active {
             }
         });
 
+        // Key-pool opt-in: hydrate current value from server, then wire toggle.
+        const poolToggle = document.getElementById('wb-toggle-pool-opt');
+        if (poolToggle) {
+            getAction('/api/pool-opt')
+                .then((r) => { poolToggle.checked = !!(r && r.enabled); })
+                .catch(() => { /* unauthenticated or network — leave default */ });
+            poolToggle.addEventListener('change', (e) => {
+                postAction('/api/pool-opt', { enabled: e.target.checked })
+                    .catch((err) => {
+                        warn('pool-opt toggle failed:', err && err.message);
+                        // revert visually
+                        e.target.checked = !e.target.checked;
+                    });
+            });
+        }
+
         const pdaNotifToggle = document.getElementById('wb-toggle-pda-notif');
         if (pdaNotifToggle) {
             pdaNotifToggle.addEventListener('change', (e) => {
                 setConfig('PDA_NOTIFICATIONS', e.target.checked);
+            });
+        }
+
+        const enemyAttackNotifToggle = document.getElementById('wb-toggle-enemy-attack-notif');
+        if (enemyAttackNotifToggle) {
+            enemyAttackNotifToggle.addEventListener('change', (e) => {
+                setConfig('ENEMY_ATTACK_NOTIF', e.target.checked);
             });
         }
 
@@ -4869,7 +5589,10 @@ body.wb-chain-active {
 
     function pollEnergy() {
         if (!CONFIG.API_KEY) return;
-        const url = `https://api.torn.com/user/?selections=bars&key=${encodeURIComponent(CONFIG.API_KEY)}`;
+        // Fetch bars + cooldowns in the same call; two purposes with one
+        // request budget hit. Response feeds both the local energy
+        // display and the faction-wide cooldowns dashboard via self-report.
+        const url = `https://api.torn.com/user/?selections=bars,cooldowns&key=${encodeURIComponent(CONFIG.API_KEY)}`;
         httpRequest({
             method: 'GET',
             url,
@@ -4885,6 +5608,17 @@ body.wb-chain-active {
                         energyTickAnchorVal = energyState.ticktime;
                         energyTickAnchorAt = Date.now();
                         updateEnergyDisplay();
+                    }
+                    // Self-report bars + cooldowns to the server so the
+                    // faction sees our dashboard row. Bundle only the
+                    // fields we actually display.
+                    const bars = {
+                        energy: data.energy, nerve: data.nerve,
+                        happy: data.happy, life: data.life, chain: data.chain,
+                    };
+                    const cooldowns = data.cooldowns;
+                    if (state.jwtToken && (bars || cooldowns)) {
+                        postAction('/api/me/bars', { bars, cooldowns }).catch(() => {});
                     }
                 } catch (e) { /* silent */ }
             },
@@ -5080,12 +5814,207 @@ body.wb-chain-active {
             if (nextUpAccum >= 1) {
                 nextUpAccum = 0;
                 updateNextUp();
+                updateEnemyAttackingBadges();
             }
 
             statusTimerRAF = requestAnimationFrame(tick);
         }
 
+        // Kick off the rAF loop.
         statusTimerRAF = requestAnimationFrame(tick);
+    }
+
+    /**
+     * Enemy just-attacked indicator. The server emits `lastAttackAt`
+     * (unix seconds) whenever an enemy is seen mid-attack. We tag rows
+     * with `.is-attacking` for 60 seconds after that timestamp so the
+     * overlay shows "this enemy is busy right now."
+     *
+     * Also fires a toast + PDA notification when the target is one YOU
+     * called — signals "don't hit your call yet, they're mid-swing."
+     * Scoped to your own calls so it doesn't spam with every enemy
+     * attack across the faction.
+     */
+    const _lastAttackingState = {}; // targetId → boolean, for transition detection
+    const _lastAttackToastAt = {};  // targetId → unix seconds, for per-enemy toast rate-limit
+    const ATTACK_TOAST_COOLDOWN = 120; // seconds — don't re-toast same enemy within this window
+    /**
+     * Render the faction cooldowns panel (Option B self-reported bars).
+     * One row per member with energy bar, nerve bar, and cooldowns
+     * (drug/medical/booster). Sorted by "ready to attack" — full energy
+     * + no drug cooldown first.
+     */
+    function renderFactionBars() {
+        const list = document.getElementById('fo-bars-list');
+        const countEl = document.getElementById('fo-bars-count');
+        if (!list) return;
+
+        const entries = Object.entries(state.memberBars || {});
+        if (countEl) countEl.textContent = String(entries.length);
+
+        if (entries.length === 0) {
+            list.innerHTML = '<div class="fo-bars-empty">No faction members reporting yet.</div>';
+            return;
+        }
+
+        // Sort: higher energy% first; secondary by name.
+        entries.sort((a, b) => {
+            const ea = a[1]?.bars?.energy;
+            const eb = b[1]?.bars?.energy;
+            const pa = ea && ea.maximum ? (ea.current / ea.maximum) : 0;
+            const pb = eb && eb.maximum ? (eb.current / eb.maximum) : 0;
+            if (pb !== pa) return pb - pa;
+            return (a[1]?.name || '').localeCompare(b[1]?.name || '');
+        });
+
+        const html = entries.map(([pid, info]) => {
+            const bars = info.bars || {};
+            const cd = info.cooldowns || {};
+            const e = bars.energy || { current: 0, maximum: 0 };
+            const n = bars.nerve  || { current: 0, maximum: 0 };
+            const ePct = e.maximum ? Math.round(100 * e.current / e.maximum) : 0;
+            const nPct = n.maximum ? Math.round(100 * n.current / n.maximum) : 0;
+            const fmtCd = (s) => {
+                s = Number(s) || 0;
+                if (s <= 0) return 'ready';
+                const h = Math.floor(s / 3600);
+                const m = Math.floor((s % 3600) / 60);
+                return h > 0 ? `${h}h${m.toString().padStart(2, '0')}m` : `${m}m`;
+            };
+            const cdTitle = (label, v) => `${label}: ${fmtCd(v)}`;
+            // Reference maxes for bar fill (longest typical cooldown for each type)
+            const CD_REF = { drug: 36000, medical: 18000, booster: 86400 }; // 10h / 5h / 24h
+            const cdPct = (v, max) => Math.max(0, Math.min(100, (Number(v) || 0) / max * 100));
+            const cdBar = (label, key, val) => {
+                const active = Number(val) > 0;
+                const pct = active ? cdPct(val, CD_REF[key]) : 0;
+                const tip = cdTitle(label, val);
+                const classes = `fo-cd-bar is-${key}${active ? '' : ' is-ready'}`;
+                return `<div class="${classes}" title="${tip}" data-fo-tip="${tip}">`
+                    + `<span class="fo-cd-bar-label">${label[0]}</span>`
+                    + `<div class="fo-cd-bar-track"><div class="fo-cd-bar-fill" style="width:${pct}%"></div></div>`
+                    + `</div>`;
+            };
+            const name = escapeHtml(info.name || `#${pid}`);
+            const energyTip = `Energy: ${e.current}/${e.maximum} (${ePct}%)`;
+            return `
+                <div class="fo-bars-row">
+                    <div class="fo-bar-cell is-energy" title="${energyTip}" data-fo-tip="${energyTip}">
+                        <span class="fo-bar-label">E</span>
+                        <div class="fo-bar-track"><div class="fo-bar-fill" style="width:${ePct}%"></div></div>
+                    </div>
+                    <div class="fo-bars-name" title="${name}" data-fo-tip="${name}">${name}</div>
+                    <div class="fo-bars-cd">
+                        ${cdBar('Drug', 'drug', cd.drug)}
+                        ${cdBar('Medical', 'medical', cd.medical)}
+                        ${cdBar('Booster', 'booster', cd.booster)}
+                    </div>
+                </div>
+            `;
+        }).join('');
+        list.innerHTML = html;
+    }
+
+    /**
+     * Tap-to-show tooltip system. Native `title` attributes don't fire on
+     * mobile/PDA (no hover), so we overlay a simple custom tooltip that
+     * pops up when you tap any element with `data-fo-tip`. Hover on
+     * desktop still uses the native title. Tooltip auto-dismisses on the
+     * next tap-anywhere or scroll.
+     */
+    function setupFoTooltips() {
+        if (window.__foTooltipBound) return;
+        window.__foTooltipBound = true;
+        let tipEl = null;
+        let tipFor = null;
+        function hideTip() {
+            if (tipEl) { tipEl.remove(); tipEl = null; tipFor = null; }
+        }
+        function showTip(el) {
+            const text = el.getAttribute('data-fo-tip');
+            if (!text) return;
+            if (tipFor === el) { hideTip(); return; } // tap same pill again → dismiss
+            hideTip();
+            tipEl = document.createElement('div');
+            tipEl.className = 'fo-tooltip';
+            tipEl.textContent = text;
+            document.body.appendChild(tipEl);
+            tipFor = el;
+            const rect = el.getBoundingClientRect();
+            const tw = tipEl.offsetWidth;
+            const th = tipEl.offsetHeight;
+            let left = rect.left + rect.width / 2 - tw / 2;
+            let top = rect.top - th - 6;
+            if (top < 4) top = rect.bottom + 6; // flip below if no room above
+            left = Math.max(4, Math.min(left, window.innerWidth - tw - 4));
+            tipEl.style.left = `${left + window.scrollX}px`;
+            tipEl.style.top = `${top + window.scrollY}px`;
+        }
+        document.addEventListener('click', (e) => {
+            const trigger = e.target.closest && e.target.closest('[data-fo-tip]');
+            if (trigger) {
+                e.stopPropagation();
+                showTip(trigger);
+            } else {
+                hideTip();
+            }
+        }, true);
+        document.addEventListener('scroll', hideTip, true);
+        window.addEventListener('resize', hideTip);
+    }
+
+    /** Wire the cooldowns panel header to toggle collapse/expand. */
+    function setupFactionBarsToggle() {
+        // Delegate at document level with capture — survives any DOM
+        // re-renders (Torn's React occasionally replaces overlay children),
+        // and fires before page-level handlers that might stopPropagation.
+        if (window.__foBarsToggleBound) return;
+        window.__foBarsToggleBound = true;
+        document.addEventListener('click', (e) => {
+            const header = e.target.closest && e.target.closest('#fo-bars-toggle');
+            if (!header) return;
+            const list = document.getElementById('fo-bars-list');
+            const section = document.getElementById('fo-bars-section');
+            if (!list || !section) return;
+            const open = list.style.display !== 'none';
+            list.style.display = open ? 'none' : 'block';
+            section.classList.toggle('is-open', !open);
+        }, true);
+    }
+
+    function updateEnemyAttackingBadges() {
+        const nowSec = Date.now() / 1000;
+        const WINDOW = 60;
+        for (const targetId of Object.keys(state.statuses)) {
+            const s = state.statuses[targetId];
+            const active = !!(s.lastAttackAt && (nowSec - s.lastAttackAt) < WINDOW);
+            const rows = document.querySelectorAll(`[data-fo-id="${targetId}"], [data-wb-target-id="${targetId}"]`);
+            rows.forEach((row) => {
+                row.classList.toggle('is-attacking', active);
+            });
+
+            // Transition detection: was not attacking, now is. Toast
+            // for ANY enemy (not just ones you called) with a per-enemy
+            // 2-minute cooldown so a chain-attacker doesn't spam the
+            // overlay. The in-page toast + PDA notification fire per
+            // browser tab, so each FactionOps user sees it locally.
+            const wasActive = !!_lastAttackingState[targetId];
+            _lastAttackingState[targetId] = active;
+            if (active && !wasActive) {
+                const lastToast = _lastAttackToastAt[targetId] || 0;
+                if (nowSec - lastToast >= ATTACK_TOAST_COOLDOWN) {
+                    _lastAttackToastAt[targetId] = nowSec;
+                    const targetName = (s.name && s.name.trim()) || `Player #${targetId}`;
+                    showToast(`\u26A0\uFE0F ${targetName} is attacking`, 'warning');
+                    if (CONFIG.ENEMY_ATTACK_NOTIF && typeof firePdaNotification === 'function') {
+                        firePdaNotification('target_called',
+                            '\u26A0\uFE0F Enemy is attacking',
+                            `${targetName} is mid-swing`,
+                            `https://www.torn.com/page.php?sid=attack&user2ID=${targetId}`);
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -5169,13 +6098,9 @@ body.wb-chain-active {
             }
             item.dataset.nuId = t.targetId;
 
-            const nameLink = document.createElement('a');
-            nameLink.className = 'user name';
-            nameLink.href = `https://www.torn.com/profiles.php?XID=${t.targetId}`;
-            nameLink.dataset.placeholder = `${name} [${t.targetId}]`;
-            nameLink.style.cssText = 'text-decoration:none;color:inherit;';
+            const nameLink = buildNameAnchor(t.targetId, name);
             nameLink.title = name;
-            nameLink.textContent = name;
+            nameLink.style.cssText = 'text-decoration:none;color:inherit;';
             item.appendChild(nameLink);
 
             const timerSpan = document.createElement('span');
@@ -5274,7 +6199,7 @@ body.wb-chain-active {
         }
 
         // Check for attack link specifically
-        const attackLink = row.querySelector('a[href*="loader.php?sid=attack"]');
+        const attackLink = row.querySelector('a[href*="loader.php?sid=attack"], a[href*="page.php?sid=attack"]');
         if (attackLink) return extractPlayerId(attackLink.href);
 
         // Check for profile link
@@ -5339,7 +6264,7 @@ body.wb-chain-active {
         const attackLink = document.createElement('a');
         attackLink.className = 'wb-attack-btn';
         attackLink.textContent = 'Attack';
-        attackLink.href = `https://www.torn.com/loader.php?sid=attack&user2ID=${targetId}`;
+        attackLink.href = `https://www.torn.com/page.php?sid=attack&user2ID=${targetId}`;
         attackLink.target = '_blank';
         attackLink.rel = 'noopener';
         attackLink.addEventListener('click', (e) => e.stopPropagation());
@@ -6061,21 +6986,48 @@ body.wb-chain-active {
         } else {
             // Main Ranked War Block (Target Decay + Our Rate)
             const hoursRemainingFloat = calculateHoursRemaining(currentTarget, true);
-            warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
-            warTimerLastCalc = Date.now();
-            // Report DOM-sourced ETA to server so other clients (OC tab, Armory, etc.) stay in sync
-            if (hoursRemainingFloat > 0 && state.jwtToken) {
-                postAction('/api/war-timer-report', {
-                    warId: deriveWarId(),
-                    etaTimestamp: warTimerEtaMs,
-                    calculatedAt: Date.now(),
-                }).catch(() => {});
+            const myScore = state.warScores?.myScore ?? 0;
+            const enemyScore = state.warScores?.enemyScore ?? 0;
+            const isLosing = enemyScore > myScore;
+
+            // Only propagate a reasonable ETA. `calculateHoursRemaining`
+            // returns 999 as a sentinel when scores/target DOM read
+            // fails — don't ship that downstream.
+            if (hoursRemainingFloat > 0 && hoursRemainingFloat <= 96) {
+                warTimerEtaMs = Date.now() + (hoursRemainingFloat * 3600000);
+                warTimerLastCalc = Date.now();
+                if (state.jwtToken) {
+                    postAction('/api/war-timer-report', {
+                        warId: deriveWarId(),
+                        etaTimestamp: warTimerEtaMs,
+                        calculatedAt: Date.now(),
+                    }).catch(() => {});
+                }
+            } else {
+                warTimerEtaMs = null;
             }
 
-            if (hoursRemainingFloat <= 0) {
-                const isLosing = state.warScores && (state.warScores.enemyScore > state.warScores.myScore);
-                warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
-                warTimerValue.textContent = isLosing ? 'LOST' : 'WON';
+            if (hoursRemainingFloat > 96) {
+                // Unreliable estimate — show current score progress
+                // toward target instead of a bogus 999h reading.
+                const ourScore = state.warScores ? myScore : (lead || 0);
+                const pct = currentTarget > 0
+                    ? Math.min(100, Math.round(100 * ourScore / currentTarget))
+                    : 0;
+                const urgency = pct >= 80 ? 'safe' : pct >= 50 ? 'warning' : 'danger';
+                warTimerEl.className = 'fo-war-timer ' + urgency;
+                warTimerValue.textContent = pct + '%';
+            } else if (hoursRemainingFloat <= 0) {
+                // Our ETA elapsed. Only flip to WON/LOST if Torn has
+                // officially confirmed the war ended; otherwise hold at
+                // 0h 00m with the leading-side color.
+                if (state.warEnded) {
+                    warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
+                    warTimerValue.textContent = isLosing ? 'LOST' : 'WON';
+                } else {
+                    warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
+                    warTimerValue.textContent = '0h 00m';
+                }
             } else {
                 const totalMin = Math.floor(hoursRemainingFloat * 60);
                 const hh = Math.floor(totalMin / 60).toString().padStart(2, '0');
@@ -6149,19 +7101,41 @@ body.wb-chain-active {
         const msLeft = etaMs - Date.now();
         const totalSec = Math.floor(msLeft / 1000);
         
-        // Show LOST/WON when war is confirmed ended OR when server computed hoursRemaining=0
-        // (which means enemy has exceeded the decayed target — war is effectively over)
+        // Show WON / LOST only when Torn has officially confirmed the
+        // war ended (winner !== 0 in the rankedwars response, mirrored
+        // to state.warEnded by the server). Previously we also treated
+        // `eta.hoursRemaining === 0` as an end-of-war signal, but the
+        // ETA reaches 0 whenever the leading faction exceeds the decayed
+        // target — which happens *before* the war actually resolves,
+        // giving a false "WON" readout while fighting continues.
         if (totalSec <= 0) {
-            const serverConfirmsOver = state.warEnded || (eta && eta.hoursRemaining === 0);
-            if (serverConfirmsOver) {
-                const isLosing = state.warScores && (state.warScores.enemyScore > state.warScores.myScore);
+            const myScore = state.warScores?.myScore ?? 0;
+            const enemyScore = state.warScores?.enemyScore ?? 0;
+            const targetVal = eta?.currentTarget ?? null;
+            const isLosing = enemyScore > myScore;
+
+            if (state.warEnded) {
+                // Torn officially called the war — show final result.
                 warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
                 warTimerValue.textContent = isLosing ? 'LOST' : 'WON';
+                if (warTimerDetail) warTimerDetail.innerHTML =
+                    warTimerDetailRow('Result', isLosing ? 'Loss' : 'Win')
+                    + warTimerDetailRow('Our Score', myScore.toLocaleString())
+                    + warTimerDetailRow('Enemy Score', enemyScore.toLocaleString())
+                    + (targetVal ? warTimerDetailRow('Target', targetVal.toLocaleString()) : '');
             } else {
-                // ETA expired but war not confirmed over — stale data
-                if (warTimerValue.textContent === '--:--') {
-                    warTimerValue.textContent = 'SYNCING...';
-                }
+                // Our computed ETA expired but Torn hasn't confirmed a
+                // winner yet (common: lead exceeded decayed target but
+                // the game engine is still ticking). Hold the timer at
+                // 0h 00m with the leading-side's color rather than
+                // flashing a misleading WON / LOST.
+                warTimerEl.className = 'fo-war-timer ' + (isLosing ? 'danger' : 'safe');
+                warTimerValue.textContent = '0h 00m';
+                if (warTimerDetail) warTimerDetail.innerHTML =
+                    warTimerDetailRow('Our Score', myScore.toLocaleString())
+                    + warTimerDetailRow('Enemy Score', enemyScore.toLocaleString())
+                    + (targetVal ? warTimerDetailRow('Target', targetVal.toLocaleString()) : '')
+                    + warTimerDetailRow('Status', 'Ending — awaiting official result');
             }
             return;
         }
@@ -6200,12 +7174,21 @@ body.wb-chain-active {
         startKeepAlive();
         updateChainBar();
 
-        // Hide Torn's main content so the overlay takes over
+        // Hide Torn's main content but keep the container itself visible so
+        // we can insert the overlay INSIDE it. Torn typically scopes its
+        // native profile-card delegation to #mainContainer; nesting the
+        // overlay inside lets those handlers fire on our name elements.
         const mainContent = document.getElementById('mainContainer')
             || document.querySelector('.content-wrapper');
         if (mainContent) {
             mainContent.dataset.foHidden = 'true';
-            mainContent.style.display = 'none';
+            for (const child of Array.from(mainContent.children)) {
+                if (child.id === 'fo-overlay') continue;
+                if (!('foPrevDisplay' in child.dataset)) {
+                    child.dataset.foPrevDisplay = child.style.display || '';
+                }
+                child.style.display = 'none';
+            }
         }
 
         // Create the overlay if it doesn't already exist
@@ -6268,9 +7251,17 @@ body.wb-chain-active {
             ${isLeader() ? `
             <div class="fo-broadcast-entry-bar">
                 <input type="text" id="fo-input-broadcast" placeholder="Broadcast message to faction..." maxlength="150">
-                <button id="fo-btn-send-broadcast">Shout</button>
+                <button type="button" id="fo-btn-send-broadcast">Shout</button>
             </div>
             ` : ''}
+            <div class="fo-bars-section" id="fo-bars-section">
+                <div class="fo-bars-header" id="fo-bars-toggle">
+                    <span class="fo-bars-caret">\u25B6</span>
+                    <span class="fo-bars-title">Faction Cooldowns</span>
+                    <span class="fo-bars-count" id="fo-bars-count">0</span>
+                </div>
+                <div class="fo-bars-list" id="fo-bars-list" style="display:none;"></div>
+            </div>
             <div class="fo-col-headers">
                 <div class="fo-col-header">Prior.</div>
                 <div class="fo-col-header">Target</div>
@@ -6293,10 +7284,12 @@ body.wb-chain-active {
             </div>
         `;
 
-        // Insert after the hidden main content, taking over the page
+        // Insert the overlay INSIDE the hidden main container so Torn's
+        // delegated event handlers (profile-card tooltips in particular,
+        // which are scoped to #mainContainer) fire on our name elements.
         const hiddenMain = document.querySelector('[data-fo-hidden="true"]');
-        if (hiddenMain && hiddenMain.parentNode) {
-            hiddenMain.parentNode.insertBefore(overlay, hiddenMain.nextSibling);
+        if (hiddenMain) {
+            hiddenMain.appendChild(overlay);
         } else {
             document.body.appendChild(overlay);
         }
@@ -6371,20 +7364,30 @@ body.wb-chain-active {
         const heatmapFab = document.getElementById('wb-heatmap-toggle');
         if (heatmapFab) heatmapFab.style.display = 'none';
 
-        // ── Ranked War Timer ───────────────────────────────────────────
-        const warTimerEl = document.getElementById('fo-war-timer');
-        const warTimerDetail = document.getElementById('fo-war-timer-detail');
-        if (warTimerEl && warTimerDetail) {
-            // Click toggles the detail popup
-            warTimerEl.addEventListener('click', (e) => {
-                e.stopPropagation();
-                warTimerDetail.classList.toggle('open');
-            });
-            // Close detail popup when clicking anywhere else
-            document.addEventListener('click', () => {
-                warTimerDetail.classList.remove('open');
-            });
-        }
+        // Faction cooldowns panel — fetch initial snapshot + render,
+        // then wire the collapse toggle on the section header.
+        console.log('[fo-bars] init: fetching /api/faction/bars…');
+        getAction('/api/faction/bars').then((r) => {
+            console.log('[fo-bars] /api/faction/bars response:', r);
+            if (r && r.memberBars) {
+                state.memberBars = r.memberBars;
+                console.log('[fo-bars] applied memberBars, keys=', Object.keys(r.memberBars));
+                renderFactionBars();
+            } else {
+                console.warn('[fo-bars] response had no memberBars, running empty render');
+                renderFactionBars();
+            }
+        }).catch((err) => { console.warn('[fo-bars] /api/faction/bars FAILED:', err); renderFactionBars(); });
+        setupFactionBarsToggle();
+        setupFoTooltips();
+
+        // ── Ranked War Timer popup: document-level capture-phase
+        //    delegation, same pattern that fixed the Shout button.
+        //    Per-element click listeners get clobbered by Torn's React
+        //    reconciliation inside #mainContainer; delegation survives
+        //    DOM rebuilds and can't be swallowed by competing
+        //    stopPropagation in bubble phase.
+        setupWarTimerDelegation();
 
         if (typeof updateWarTimer === 'function') {
             updateWarTimer();
@@ -6394,37 +7397,60 @@ body.wb-chain-active {
 
         // Wire up broadcast button in overlay (leader/banker only)
         const shoutBtn = document.getElementById('fo-btn-send-broadcast');
+        log('[shout-wire] button in DOM?', !!shoutBtn);
         if (shoutBtn) {
-            shoutBtn.addEventListener('click', () => {
+            // Visual diagnostic — if you mousedown/touchstart this button and
+            // nothing flashes, the button isn't receiving input events.
+            const flashDiag = () => {
+                const prev = shoutBtn.style.background;
+                shoutBtn.style.background = '#fdcb6e';
+                setTimeout(() => { shoutBtn.style.background = prev; }, 250);
+            };
+            shoutBtn.addEventListener('mousedown', flashDiag, true);
+            shoutBtn.addEventListener('touchstart', flashDiag, true);
+            shoutBtn.addEventListener('pointerdown', flashDiag, true);
+
+            const sendShout = () => {
+                log('[shout] click fired');
                 const msgInput = document.getElementById('fo-input-broadcast');
-                const msg = msgInput.value.trim();
-                
-                if (msg) {
-                    const currentWarId = deriveWarId();
-                    if (!currentWarId) {
-                        showToast('Error: Could not determine war ID.', 'error');
-                        return;
-                    }
-                    postAction('/api/broadcast', { message: msg, type: 'warning', warId: currentWarId })
-                    .then(data => {
-                        if (data.success) {
-                            msgInput.value = '';
-                            showToast('Broadcast sent to faction!', 'success');
-                        } else {
-                            showToast(data.error || 'Failed to send broadcast.', 'error');
-                        }
-                    })
-                    .catch(e => {
-                        warn('Broadcast failed:', e.message);
-                        showToast('Failed to send broadcast (Server Error).', 'error');
-                    });
+                if (!msgInput) {
+                    log('[shout] input element missing');
+                    showToast('Broadcast input not found', 'error');
+                    return;
                 }
-            });
-            // Also support Enter key
+                const msg = msgInput.value.trim();
+                log('[shout] msg length:', msg.length);
+                if (!msg) {
+                    showToast('Type something to broadcast first', 'warning');
+                    return;
+                }
+                const currentWarId = deriveWarId();
+                log('[shout] warId:', currentWarId, 'myFactionId:', state.myFactionId);
+                if (!currentWarId) {
+                    showToast('Error: Could not determine war ID.', 'error');
+                    return;
+                }
+                log('[shout] POSTing /api/broadcast');
+                postAction('/api/broadcast', { message: msg, type: 'warning', warId: currentWarId })
+                .then(data => {
+                    log('[shout] response:', data);
+                    if (data && data.success) {
+                        msgInput.value = '';
+                        showToast('Broadcast sent to faction!', 'success');
+                    } else {
+                        showToast((data && data.error) || 'Failed to send broadcast.', 'error');
+                    }
+                })
+                .catch(e => {
+                    warn('[shout] POST failed:', e && e.message);
+                    showToast(`Broadcast failed: ${(e && e.message) || 'server error'}`, 'error');
+                });
+            };
+            shoutBtn.addEventListener('click', sendShout);
             const msgInput = document.getElementById('fo-input-broadcast');
             if (msgInput) {
                 msgInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') shoutBtn.click();
+                    if (e.key === 'Enter') sendShout();
                 });
             }
         }
@@ -6669,13 +7695,7 @@ body.wb-chain-active {
         const nameRow = document.createElement('div');
         nameRow.className = 'fo-name-row';
 
-        const nameSpan = document.createElement('a');
-        nameSpan.className = 'fo-name user name';
-        nameSpan.href = `https://www.torn.com/profiles.php?XID=${targetId}`;
-        nameSpan.dataset.placeholder = `${s.name || 'Unknown'} [${targetId}]`;
-        nameSpan.style.textDecoration = 'none';
-        nameSpan.style.color = 'inherit';
-        nameSpan.textContent = s.name || 'Unknown';
+        const nameSpan = buildNameAnchor(targetId, s.name);
         nameRow.appendChild(nameSpan);
 
         // Eye badge for viewers
@@ -6765,7 +7785,7 @@ body.wb-chain-active {
         actionCell.style.justifyContent = 'flex-end';
         const atkLink = document.createElement('a');
         atkLink.className = 'fo-attack-btn';
-        atkLink.href = `https://www.torn.com/loader.php?sid=attack&user2ID=${targetId}`;
+        atkLink.href = `https://www.torn.com/page.php?sid=attack&user2ID=${targetId}`;
         atkLink.target = '_blank';
         atkLink.rel = 'noopener';
         atkLink.innerHTML = 'Atk<span class="fo-arrow">\u203A</span>';
@@ -7374,41 +8394,64 @@ body.wb-chain-active {
             return;
         }
 
+        // Retal mode on standalone profile pages (profiles.php?XID=...);
+        // classic Assist on attack pages. Same backend endpoint, different
+        // mode / wording / icon.
+        const isProfilePage = window.location.href.includes('profiles.php');
+        const mode = isProfilePage ? 'retal' : 'assist';
+        const label = isProfilePage ? 'Retal' : 'Assist';
+        const svgPath = isProfilePage
+            ? 'M12 5V1L5 8l7 7v-4a6 6 0 0 1 6 6 6 6 0 0 1-6 6 6 6 0 0 1-6-6H4a8 8 0 0 0 8 8 8 8 0 0 0 8-8 8 8 0 0 0-8-8Z'
+            : 'M6.92 5 5 6.92l6.31 6.31-2.18 2.18a2.4 2.4 0 1 0 1.06 1.06l2.18-2.18 2.17 2.17a2.4 2.4 0 1 0 1.06-1.06L13.43 13.3 19.74 7 17.82 5.08l-5.51 5.51-5.39-5.59Z';
+
         const btn = document.createElement('button');
         btn.id = 'wb-assist-btn';
-        btn.innerHTML = '⚔️ ASSIST';
+        btn.dataset.mode = mode;
+        btn.innerHTML = `
+            <svg class="wb-assist-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="${svgPath}"/>
+            </svg>
+            <span>${label}</span>
+        `;
 
         let cooldownTimer = null;
 
         btn.addEventListener('click', async () => {
             if (btn.disabled) return;
 
+            // Retal mode allows a missing warId — the server picks any
+            // active war for the caller's faction as the broadcast room.
             const warId = deriveWarId();
-            if (!warId) {
+            if (!warId && mode === 'assist') {
                 showToast('Not connected to a war', 'warning');
                 return;
             }
 
             // Try to extract target name from page DOM
             let targetName = null;
-            const defenderEl = document.querySelector('.defender .username, [class*="defender"] [class*="userName"], .playersModelWrap .right .username');
+            const defenderEl = document.querySelector('.defender .username, [class*="defender"] [class*="userName"], .playersModelWrap .right .username, [class*="user-information"] [class*="username"], h4[class*="title"]');
             if (defenderEl) {
                 targetName = defenderEl.textContent.trim();
             }
 
             try {
                 await postAction('/api/assist-request', {
-                    warId,
+                    warId: warId || null,
                     targetId,
                     targetName: targetName || `Player [${targetId}]`,
+                    mode,
                 });
-                showToast('Assist request sent!', 'success');
+                showToast(mode === 'retal' ? 'Retal request sent!' : 'Assist request sent!', 'success');
             } catch (err) {
-                showToast('Failed to send assist request', 'error');
+                showToast(`Failed to send ${mode} request`, 'error');
                 return;
             }
 
-            // Disable for 30 seconds to prevent spam
+            // Disable for 30 seconds to prevent spam. Snapshot the
+            // original label/icon HTML so the cooldown reset restores
+            // mode-appropriate content (e.g. "Retal" on profile pages
+            // instead of the old hardcoded "Assist").
+            const originalHtml = btn.innerHTML;
             btn.disabled = true;
             let remaining = 30;
             btn.innerHTML = `⏳ ${remaining}s`;
@@ -7418,7 +8461,7 @@ body.wb-chain-active {
                     clearInterval(cooldownTimer);
                     cooldownTimer = null;
                     btn.disabled = false;
-                    btn.innerHTML = '⚔️ ASSIST';
+                    btn.innerHTML = originalHtml;
                 } else {
                     btn.innerHTML = `⏳ ${remaining}s`;
                 }
@@ -7579,14 +8622,89 @@ body.wb-chain-active {
             }
         }
 
-        // Attack result
+        // Single-player profile data — shape returned by /user/:id?selections=profile
+        // and a few of Torn's internal profile fetches. Near-zero-latency update
+        // for whichever enemy a teammate is currently looking at.
+        if (data.player_id && data.status && typeof data.status === 'object' && !data.members) {
+            const mid = String(data.player_id);
+            // Only update enemies we already track — don't leak arbitrary profile views.
+            if (state.statuses[mid]) {
+                const statusInfo = parseInterceptedMemberStatus(data);
+                if (statusInfo) {
+                    const existing = state.statuses[mid];
+                    if (!statusInfo.name && existing.name) statusInfo.name = existing.name;
+                    if (statusInfo.level == null && existing.level != null) statusInfo.level = existing.level;
+                    const batch = { [mid]: statusInfo };
+                    mergeStatusesMonotonic(batch);
+                    queuePeerRelay(batch);
+                    updateTargetRow(mid);
+                    updateNextUp();
+                    log(`[profile-intercept] Updated ${mid} from profile response`);
+                }
+            }
+        }
+
+        // Attack result — a teammate's attack just resolved.
+        //
+        // Two independent flows here:
+        //   A. If the target was hospitalized, flip status locally and
+        //      peer-relay (fastest possible signal; no Torn API cache in
+        //      the way). Auto-uncall then fires via mergeStatusesMonotonic's
+        //      status-transition hook.
+        //   B. If the target was attacked/mugged (non-hospital successful
+        //      hit), the call is still "spent" — your own hit landed, the
+        //      target isn't a useful target for you right now. Uncall MY
+        //      call directly (scoped to calledBy.id === myPlayerId).
         if (data.result) {
             log('Attack result intercepted:', data.result);
-            if (data.result.hospitalized || data.result.mugged || data.result.attacked) {
-                // Target was hospitalized — could auto-uncall
-                const targetId = getAttackTargetId();
-                if (targetId) {
-                    log('Target hospitalized — consider uncalling');
+            const targetId = getAttackTargetId();
+            if (targetId) {
+                // ── A: hospital flip ───────────────────────────────────
+                if (data.result.hospitalized) {
+                    const minutesFromResult =
+                        (typeof data.result.hospitalized === 'object' && data.result.hospitalized.minutes) ||
+                        data.result.hospital_time ||
+                        data.result.hospitalTime ||
+                        (data.result.hospital && data.result.hospital.minutes) ||
+                        0;
+                    const untilSec = minutesFromResult > 0 ? minutesFromResult * 60 : 30 * 60;
+                    const existing = state.statuses[targetId] || {};
+                    const statusInfo = {
+                        status: 'hospital',
+                        until: untilSec,
+                        description: 'Hospitalized',
+                        activity: 'offline',
+                    };
+                    if (existing.name) statusInfo.name = existing.name;
+                    if (existing.level != null) statusInfo.level = existing.level;
+
+                    const batch = { [targetId]: statusInfo };
+                    mergeStatusesMonotonic(batch);
+                    queuePeerRelay(batch);
+                    updateTargetRow(targetId);
+                    updateNextUp();
+                    log(`[attack-result] Target ${targetId} marked hospital (${minutesFromResult || '~30'}m)`);
+                    // Auto-uncall on hospital runs via maybeAutoUncallOnHospital
+                    // inside mergeStatusesMonotonic.
+                }
+
+                // ── B: direct uncall on any successful hit outcome ─────
+                // Attacked / Mugged / (defeated / special variants) all
+                // mean "my hit landed, this call is done." Hospital is a
+                // superset of this — covered too.
+                const hitOutcomes =
+                    data.result.hospitalized ||
+                    data.result.mugged ||
+                    data.result.attacked ||
+                    data.result.leave ||
+                    data.result.special;
+                if (hitOutcomes) {
+                    const existingCall = state.calls[targetId];
+                    if (existingCall && existingCall.calledBy &&
+                        String(existingCall.calledBy.id) === String(state.myPlayerId)) {
+                        emitUncallTarget(targetId);
+                        log(`[attack-result] Auto-uncalled #${targetId} after successful hit`);
+                    }
                 }
             }
         }
@@ -7655,44 +8773,63 @@ body.wb-chain-active {
         if (!row) return null;
 
         // Clone the row but exclude our injected FactionOps elements
-        // so we only read Torn's original DOM
+        // so we only read Torn's original DOM.
         const clone = row.cloneNode(true);
         const injected = clone.querySelectorAll('.wb-cell-container, .wb-sortable-row-overlay');
         injected.forEach((el) => el.remove());
         const text = clone.textContent.toLowerCase();
 
-        // Look for status icons (Torn uses SVG icons with title attributes, or
-        // elements with specific classes like .icon_*)
-        const icons = clone.querySelectorAll('[class*="icon"], [title], svg title');
-        for (const icon of icons) {
-            const t = (icon.getAttribute('title') || icon.textContent || '').toLowerCase();
-            if (t.includes('hospital')) return { status: 'hospital' };
-            if (t.includes('jail')) return { status: 'jail' };
-            if (t.includes('federal')) return { status: 'federal' };
-            if (t.includes('travel')) return { status: 'traveling' };
-            if (t.includes('abroad')) return { status: 'abroad' };
-            if (t.includes('fallen')) return { status: 'fallen' };
+        // Pass 1: title attributes (most information-dense — Torn's icon
+        // tooltips carry BOTH the status word and the remaining duration).
+        const titled = [];
+        if (row.getAttribute && row.getAttribute('title')) titled.push(row.getAttribute('title'));
+        clone.querySelectorAll('[title]').forEach((el) => {
+            const t = el.getAttribute('title');
+            if (t) titled.push(t);
+        });
+        for (const raw of titled) {
+            const t = raw.toLowerCase();
+            if (t.includes('hospital')) return { status: 'hospital', until: parseDurationFromText(raw) };
+            if (t.includes('jail'))     return { status: 'jail',     until: parseDurationFromText(raw) };
+            if (t.includes('federal'))  return { status: 'federal',  until: 0 };
+            if (t.includes('travel'))   return { status: 'traveling', until: 0 };
+            if (t.includes('abroad'))   return { status: 'abroad',   until: 0 };
+            if (t.includes('fallen'))   return { status: 'fallen',   until: 0 };
         }
 
-        // Fallback: scan text content for status keywords
-        if (text.includes('hospital')) return { status: 'hospital' };
-        if (text.includes('jail')) return { status: 'jail' };
-        if (text.includes('federal')) return { status: 'federal' };
-        if (text.includes('traveling') || text.includes('abroad')) return { status: 'traveling' };
-        if (text.includes('fallen')) return { status: 'fallen' };
+        // Pass 2: SVG <title> elements (some Torn layouts use these
+        // instead of attribute titles).
+        const svgTitles = clone.querySelectorAll('svg title');
+        for (const el of svgTitles) {
+            const t = (el.textContent || '').toLowerCase();
+            if (t.includes('hospital')) return { status: 'hospital', until: parseDurationFromText(el.textContent) };
+            if (t.includes('jail'))     return { status: 'jail',     until: parseDurationFromText(el.textContent) };
+            if (t.includes('federal'))  return { status: 'federal',  until: 0 };
+            if (t.includes('travel'))   return { status: 'traveling', until: 0 };
+            if (t.includes('abroad'))   return { status: 'abroad',   until: 0 };
+            if (t.includes('fallen'))   return { status: 'fallen',   until: 0 };
+        }
 
-        // Also check for status-indicating CSS classes on the row or children
+        // Pass 3: row text content (catches status words that aren't
+        // in tooltips but are rendered inline).
+        if (text.includes('hospital')) return { status: 'hospital', until: parseDurationFromText(text) };
+        if (text.includes('jail'))     return { status: 'jail',     until: parseDurationFromText(text) };
+        if (text.includes('federal'))  return { status: 'federal',  until: 0 };
+        if (text.includes('traveling') || text.includes('abroad')) return { status: 'traveling', until: 0 };
+        if (text.includes('fallen'))   return { status: 'fallen',   until: 0 };
+
+        // Pass 4: status-indicating class names on the row or children.
         const allEls = [clone, ...clone.querySelectorAll('*')];
         for (const el of allEls) {
             const cls = el.className;
             if (typeof cls !== 'string') continue;
-            if (cls.includes('hospital')) return { status: 'hospital' };
-            if (cls.includes('jail')) return { status: 'jail' };
-            if (cls.includes('travel')) return { status: 'traveling' };
+            if (cls.includes('hospital')) return { status: 'hospital', until: 0 };
+            if (cls.includes('jail'))     return { status: 'jail',     until: 0 };
+            if (cls.includes('travel'))   return { status: 'traveling', until: 0 };
         }
 
-        // If none of the above matched, member is likely OK/Online
-        return { status: 'ok' };
+        // Nothing indicative — treat as OK.
+        return { status: 'ok', until: 0 };
     }
 
     /**
@@ -7718,30 +8855,41 @@ body.wb-chain-active {
             const domStatus = readStatusFromDOM(row);
             if (!domStatus) return;
 
-            const current = state.statuses[targetId];
-            const currentNorm = normalizeStatus(current ? current.status : 'ok');
+            const current = state.statuses[targetId] || {};
+            const currentNorm = normalizeStatus(current.status || 'ok');
             const domNorm = normalizeStatus(domStatus.status);
+            const statusChanged = currentNorm !== domNorm;
 
-            if (currentNorm !== domNorm) {
-                log(`DOM status change detected: #${targetId} ${currentNorm} → ${domNorm}`);
+            // Build a merge payload. Force until=0 on "ok" so lingering
+            // timers don't stick around when a target gets released.
+            const payload = { status: domNorm };
+            if (domNorm === 'ok') {
+                payload.until = 0;
+            } else if (typeof domStatus.until === 'number') {
+                payload.until = domStatus.until;
+            }
 
-                // Update local state immediately
-                if (!state.statuses[targetId]) {
-                    state.statuses[targetId] = {};
-                }
-                state.statuses[targetId].status = domNorm;
-                // If transitioning FROM hospital/jail TO ok, clear the timer
-                if (domNorm === 'ok') {
-                    state.statuses[targetId].until = 0;
-                }
+            // Cheap change detection — skip DOM reads where nothing of
+            // interest moved. We care about status transitions and any
+            // meaningful timer change (>2s to absorb rounding).
+            const currentUntil = typeof current.until === 'number' ? current.until : 0;
+            const timerDelta = Math.abs(currentUntil - (payload.until ?? currentUntil));
+            if (!statusChanged && timerDelta < 2) return;
 
+            // Route through the monotonic merge so stale tooltip durations
+            // can't bump a decrementing timer back up (same guard that
+            // fixes the "Next Up rebounds 0 → 2s" bug for server pushes).
+            const prevUntil = state.statuses[targetId]?.until;
+            mergeStatusesMonotonic({ [targetId]: payload });
+            const postUntil = state.statuses[targetId]?.until;
+
+            if (statusChanged || prevUntil !== postUntil) {
+                log(`[dom-status] #${targetId} ${currentNorm} → ${domNorm}${payload.until ? ` (${Math.round(payload.until/60)}m)` : ''}`);
                 changedStatuses[targetId] = {
-                    status: domNorm,
-                    until: domNorm === 'ok' ? 0 : (state.statuses[targetId].until || 0),
+                    status: state.statuses[targetId].status,
+                    until: state.statuses[targetId].until || 0,
                 };
                 changeCount++;
-
-                // Update the UI row immediately
                 updateTargetRow(targetId);
             }
         });
@@ -7992,7 +9140,15 @@ body.wb-chain-active {
         const mainContent = document.getElementById('mainContainer')
             || document.querySelector('.content-wrapper');
         if (mainContent && mainContent.dataset.foHidden === 'true') {
-            mainContent.style.display = '';
+            for (const child of Array.from(mainContent.children)) {
+                if (child.id === 'fo-overlay') continue;
+                if ('foPrevDisplay' in child.dataset) {
+                    child.style.display = child.dataset.foPrevDisplay;
+                    delete child.dataset.foPrevDisplay;
+                } else {
+                    child.style.display = '';
+                }
+            }
             delete mainContent.dataset.foHidden;
         }
 
@@ -8006,6 +9162,121 @@ body.wb-chain-active {
 
         // Show the floating Assist button
         createAssistButton();
+
+        // Scrape the attack-page DOM for the target's visible status. Torn
+        // populates this sidebar text lazily, so retry a handful of times
+        // over ~15s to catch it once it renders.
+        scheduleAttackPageStatusScrape();
+    }
+
+    /**
+     * Retry-driven scrape of the attack page's visible target status.
+     * Zero API cost — we already loaded this page. Peer-relays whatever
+     * we parse so the rest of the faction sees the update within ~500ms.
+     */
+    function scheduleAttackPageStatusScrape() {
+        let attempts = 0;
+        // Scrape every 1s for 60s so we catch the target's post-attack
+        // status transition (hospital/mugged/etc.) whenever Torn's sidebar
+        // updates. Don't early-exit on first success — the first read just
+        // reflects pre-attack state, and we need subsequent reads to catch
+        // the transition that triggers auto-uncall.
+        const maxAttempts = 60;
+        const intervalMs = 1000;
+        const timer = setInterval(() => {
+            readAttackTargetStatusFromDOM();
+            attempts += 1;
+            if (attempts >= maxAttempts) {
+                clearInterval(timer);
+            }
+        }, intervalMs);
+        // Also try once immediately in case the DOM is already there.
+        setTimeout(readAttackTargetStatusFromDOM, 250);
+    }
+
+    /**
+     * Parse the attack page sidebar for target status text (hospital / jail /
+     * okay / traveling / fallen). Returns true if a status was extracted.
+     * Narrow: only updates an enemy we already track, so rogue DOM reads
+     * can't pollute state.
+     */
+    function readAttackTargetStatusFromDOM() {
+        const targetId = getAttackTargetId();
+        if (!targetId || !state.statuses[targetId]) return false;
+
+        const raw = extractAttackPageStatusText();
+        if (!raw) return false;
+
+        const lower = raw.toLowerCase();
+        let status = null;
+        let until = 0;
+        let description = raw.length < 120 ? raw : '';
+
+        if (lower.includes('hospital')) {
+            status = 'hospital';
+            // Parse durations: "1h 23m", "45m", "23 minutes", etc.
+            const hm = lower.match(/(\d+)\s*h(?:our)?s?\s*(?:(\d+)\s*m(?:in(?:ute)?s?)?)?/);
+            if (hm) {
+                const h = Number(hm[1]) || 0;
+                const mm = Number(hm[2]) || 0;
+                until = (h * 60 + mm) * 60;
+            } else {
+                const mOnly = lower.match(/(\d+)\s*m(?:in(?:ute)?s?)?/);
+                if (mOnly) until = Number(mOnly[1]) * 60;
+            }
+        } else if (lower.includes('jail')) {
+            status = 'jail';
+            const mOnly = lower.match(/(\d+)\s*m(?:in(?:ute)?s?)?/);
+            if (mOnly) until = Number(mOnly[1]) * 60;
+        } else if (lower.includes('traveling') || lower.includes('abroad')
+                   || lower.includes('in ') && /in\s+(mexico|japan|canada|hawaii|uk|switzerland|china|argentina|south africa|cayman)/i.test(raw)) {
+            status = lower.includes('traveling') ? 'traveling' : 'abroad';
+        } else if (lower.includes('federal')) {
+            status = 'federal';
+        } else if (lower.includes('fallen')) {
+            status = 'fallen';
+        } else if (lower.includes('okay') || /^\s*ok\b/i.test(raw)) {
+            status = 'ok';
+        } else {
+            return false;
+        }
+
+        const existing = state.statuses[targetId];
+        const statusInfo = {
+            status, until, description,
+            activity: existing.activity || 'offline',
+            name: existing.name || null,
+            level: existing.level != null ? existing.level : null,
+        };
+
+        const batch = { [targetId]: statusInfo };
+        mergeStatusesMonotonic(batch);
+        queuePeerRelay(batch);
+        log(`[attack-dom] Target ${targetId} status from DOM: ${status}${until ? ` (${Math.round(until/60)}m)` : ''}`);
+        return true;
+    }
+
+    function extractAttackPageStatusText() {
+        // Torn's attack page renders the opponent status in a couple of
+        // places depending on version. Try several; take the first that
+        // contains one of the recognisable status words.
+        const needles = ['hospital', 'jail', 'okay', 'traveling', 'abroad', 'federal', 'fallen'];
+        const candidates = [
+            ...document.querySelectorAll('[class*="playerStatus"]'),
+            ...document.querySelectorAll('[class*="userStatus"]'),
+            ...document.querySelectorAll('[class*="statusText"]'),
+            ...document.querySelectorAll('.info-table [class*="status"]'),
+            ...document.querySelectorAll('[class*="user-info"] [class*="status"]'),
+            ...document.querySelectorAll('.status-display'),
+            ...document.querySelectorAll('[class*="status"][class*="wrap"]'),
+        ];
+        for (const el of candidates) {
+            const text = (el.textContent || '').trim();
+            if (!text || text.length > 200) continue;
+            const lower = text.toLowerCase();
+            if (needles.some(n => lower.includes(n))) return text;
+        }
+        return null;
     }
 
     /** Report to the server which target we're currently viewing. */
@@ -9133,8 +10404,9 @@ body.wb-chain-active {
      * Show a prominent assist request toast with an ATTACK button.
      * Stays for 15 seconds and includes a direct attack link.
      */
-    function showAssistToast(playerName, targetName, attackUrl) {
-        log('[ASSIST-TOAST] Firing assist toast:', playerName, targetName, attackUrl);
+    function showAssistToast(playerName, targetName, attackUrl, opts) {
+        const kind = (opts && opts.kind) || 'assist';
+        log(`[${kind.toUpperCase()}-TOAST]`, playerName, targetName, attackUrl);
         const container = getToastContainer();
         const toast = document.createElement('div');
 
@@ -9165,10 +10437,12 @@ body.wb-chain-active {
 
         const escapedPlayer = escapeHtml(playerName);
         const escapedTarget = escapeHtml(targetName);
+        const icon = kind === 'retal' ? '\u26A0\uFE0F' : '\u2694\uFE0F';
+        const verb = kind === 'retal' ? 'wants retal on' : 'needs assist on';
         toast.innerHTML = `
-            <div style="font-size: 18px; display: flex; align-items: center; justify-content: center; width: 24px;">⚔️</div>
+            <div style="font-size: 18px; display: flex; align-items: center; justify-content: center; width: 24px;">${icon}</div>
             <div style="flex: 1; word-wrap: break-word;">
-                <strong>${escapedPlayer}</strong> needs assist on <strong>${escapedTarget}</strong>!
+                <strong>${escapedPlayer}</strong> ${verb} <strong>${escapedTarget}</strong>!
             </div>
             <a href="${escapeHtml(attackUrl)}" target="_blank" rel="noopener" style="
                 background: #fff;
@@ -9550,6 +10824,11 @@ body.wb-chain-active {
     }
 
     // =========================================================================
+    // SECTION 27: MINI PROFILE CARDS (CommandCenter) — REMOVED
+    // Using Torn's native profile card instead; see rebindTornProfileCards().
+    // =========================================================================
+
+    // =========================================================================
     // SECTION 26: MAIN INITIALISATION
     // =========================================================================
 
@@ -9584,6 +10863,20 @@ body.wb-chain-active {
         // 6. Install fetch/XHR interceptors for passive data collection
         installFetchInterceptor();
         installXHRInterceptor();
+
+        // 6b. Seed state from cached JWT so features that depend on
+        //     identity (isLeader → Shout button, myPlayerId checks, etc.)
+        //     still work if the upcoming re-auth gets 429'd by Torn.
+        hydrateStateFromJwt();
+
+        // 6c. Install Shout delegation at document level — immune to
+        //     overlay rebuilds, React reconciliation, or clobbered
+        //     per-element listeners.
+        setupShoutDelegation();
+
+        // 6d. Watch for Torn's native mini profile card and inject a
+        //     Retal action button into it.
+        setupRetalCardInjection();
 
         // 7. Authenticate, start polling + Socket.IO
         if (CONFIG.API_KEY) {
