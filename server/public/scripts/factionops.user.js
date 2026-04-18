@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.55
+// @version      4.9.56
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.56  - Change: Faction Cooldowns D/M/B pills are now compact single-letter chips with a native tooltip on hover showing the remaining time (e.g. "Drug: 4h55m", "Medical: ready"). Frees up ~80px per row for the energy/nerve bars.
 // v4.9.55  - Fix: Faction Cooldowns energy/nerve cells no longer overlap their neighbors. Grid columns get a 140px minimum each, row gap widened to 12px, and bar cells get overflow:hidden so the track + value never bleed into the next column.
 // v4.9.54  - Fix: Faction Cooldowns booster pill no longer gets clipped. Grid's cooldown column now sizes to content (auto), energy/nerve cells use minmax(0,1fr) so they can shrink without pushing the pills off, and the pills themselves get white-space:nowrap + flex-shrink:0.
 // v4.9.53  - Fix: renderFactionBars / setupFactionBarsToggle / updateEnemyAttackingBadges were accidentally nested inside startStatusTimers due to a misplaced brace, making them invisible from outside that function. This meant the cooldowns panel never rendered and the click-toggle never wired up. Moved them back to IIFE top level.
@@ -2631,14 +2632,18 @@ body.wb-chain-active {
 .fo-bar-cell.is-nerve .fo-bar-fill { background: #fdcb6e; }
 .fo-bar-cell .fo-bar-value { font-size: 10px; color: #aaa; min-width: 50px; text-align: right; font-variant-numeric: tabular-nums; }
 .fo-bars-cd {
-    display: flex; gap: 6px; font-size: 9px;
-    color: #888; font-variant-numeric: tabular-nums;
+    display: flex; gap: 4px;
+    color: #888;
     white-space: nowrap; flex-shrink: 0;
 }
 .fo-bars-cd .fo-cd-pill {
-    background: rgba(255,255,255,0.04); padding: 2px 5px; border-radius: 3px;
+    background: rgba(255,255,255,0.04);
+    padding: 2px 0; border-radius: 3px;
+    font-size: 10px; font-weight: 700;
+    width: 18px; text-align: center;
+    cursor: help;
 }
-.fo-bars-cd .fo-cd-pill.is-active { color: #ff7675; background: rgba(255,118,117,0.12); }
+.fo-bars-cd .fo-cd-pill.is-active { color: #ff7675; background: rgba(255,118,117,0.18); }
 .fo-bars-empty { padding: 8px; color: #888; font-size: 11px; text-align: center; font-style: italic; }
 
 /* Broadcast entry bar */
@@ -5835,12 +5840,13 @@ body.wb-chain-active {
             const nPct = n.maximum ? Math.round(100 * n.current / n.maximum) : 0;
             const fmtCd = (s) => {
                 s = Number(s) || 0;
-                if (s <= 0) return '--';
+                if (s <= 0) return 'ready';
                 const h = Math.floor(s / 3600);
                 const m = Math.floor((s % 3600) / 60);
-                return h > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${m}m`;
+                return h > 0 ? `${h}h${m.toString().padStart(2, '0')}m` : `${m}m`;
             };
             const cdClass = (v) => (Number(v) > 0 ? ' is-active' : '');
+            const cdTitle = (label, v) => `${label}: ${fmtCd(v)}`;
             const name = escapeHtml(info.name || `#${pid}`);
             return `
                 <div class="fo-bars-row">
@@ -5856,9 +5862,9 @@ body.wb-chain-active {
                         <span class="fo-bar-value">${n.current}/${n.maximum}</span>
                     </div>
                     <div class="fo-bars-cd">
-                        <span class="fo-cd-pill${cdClass(cd.drug)}" title="Drug cooldown">D ${fmtCd(cd.drug)}</span>
-                        <span class="fo-cd-pill${cdClass(cd.medical)}" title="Medical cooldown">M ${fmtCd(cd.medical)}</span>
-                        <span class="fo-cd-pill${cdClass(cd.booster)}" title="Booster cooldown">B ${fmtCd(cd.booster)}</span>
+                        <span class="fo-cd-pill${cdClass(cd.drug)}" title="${cdTitle('Drug', cd.drug)}">D</span>
+                        <span class="fo-cd-pill${cdClass(cd.medical)}" title="${cdTitle('Medical', cd.medical)}">M</span>
+                        <span class="fo-cd-pill${cdClass(cd.booster)}" title="${cdTitle('Booster', cd.booster)}">B</span>
                     </div>
                 </div>
             `;
