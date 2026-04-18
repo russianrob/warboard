@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.23
+// @version      3.0.24
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.0.24 — Flyer alert now catches both "Traveling" (in-transit) and "Abroad" (landed overseas) — previously only Traveling fired, so members who'd already landed abroad were silently missed. Banner renamed to "flying" and shows each member's exact state.
 // v3.0.23 — Traveling-alert only fires when the OC is truly "ready now" (not 30m out). Planning crimes with null/0 ready_at are treated as ready now (Torn V2 quirk); Recruiting crimes still need fully staffed + ready_at ≤ now.
 // v3.0.22 — Traveling-alert relaxed: Planning crimes always fire the flyer alert (ready_at in V2 is sometimes null/0 for Planning), and Recruiting crimes that are fully staffed + ready within 30m also fire. Urgency label now shows "ready in Nm" when not yet ready.
 // v3.0.21 — Dispatcher shows "Subscribe to unlock" banner for non-subscribed factions
@@ -191,7 +192,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.23';
+    const SCRIPT_VERSION = '3.0.24';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3227,13 +3228,17 @@
                 if (!uid) continue;
                 const info = statusMap[uid];
                 if (!info) continue;
-                if (info.state === 'traveling') {
+                // "Flying" in Torn covers both in-transit ("Traveling") and
+                // landed-in-a-foreign-country ("Abroad"). Both block OC
+                // initiation, so flag either.
+                if (info.state === 'traveling' || info.state === 'abroad') {
                     alerts.push({
                         memberName: info.name,
                         crimeName: crime.name || 'Unknown',
                         position: slot.position || 'Unknown',
                         difficulty: crime.difficulty || 0,
                         urgency,
+                        state: info.state,
                     });
                 }
             }
@@ -3241,10 +3246,12 @@
         if (alerts.length === 0) return '';
 
         let html = `<div style="background:#7f1d1d;border:1px solid #ef4444;border-radius:6px;padding:8px 10px;margin-bottom:8px;">`;
-        html += `<div style="font-size:11px;font-weight:700;color:#fca5a5;margin-bottom:4px;">\u2708\ufe0f ${alerts.length} member${alerts.length > 1 ? 's' : ''} traveling in an OC ready to execute</div>`;
+        html += `<div style="font-size:11px;font-weight:700;color:#fca5a5;margin-bottom:4px;">\u2708\ufe0f ${alerts.length} member${alerts.length > 1 ? 's' : ''} flying in an OC ready to execute</div>`;
         for (const a of alerts) {
+            const stateLabel = a.state === 'abroad' ? 'abroad' : 'traveling';
             html += `<div style="font-size:10px;color:#fecaca;padding:2px 0;">`;
             html += `<b style="color:#f3f4f6;">${a.memberName}</b>`;
+            html += ` <span style="color:#9ca3af;">(${stateLabel})</span>`;
             html += ` <span style="color:#ef4444;">\u2192</span> `;
             html += `${a.crimeName} (${a.position}) <span style="color:#9ca3af;">Lvl ${a.difficulty}</span>`;
             html += ` <span style="color:#fbbf24;font-weight:600;">${a.urgency}</span>`;
