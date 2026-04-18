@@ -560,7 +560,7 @@ export function getPollInterval(factionId, purpose) {
 /**
  * Record a member's self-reported bars snapshot. Purely in-memory (no
  * disk persistence) — bars/cooldowns are ephemeral, losing them on
- * restart is fine. Old entries age out after 10 minutes of no refresh.
+ * restart is fine. Old entries age out after 4 hours of no refresh.
  */
 export function recordMemberBars(factionId, playerId, playerName, data) {
   const fid = String(factionId);
@@ -578,7 +578,7 @@ export function recordMemberBars(factionId, playerId, playerName, data) {
  * Return all fresh bars snapshots for a faction. Snapshots older than
  * `staleMs` are filtered out so the UI never shows zombie data.
  */
-export function getFactionBars(factionId, staleMs = 10 * 60 * 1000) {
+export function getFactionBars(factionId, staleMs = 4 * 60 * 60 * 1000) {
   const fid = String(factionId);
   const m = factionBars.get(fid);
   if (!m) return {};
