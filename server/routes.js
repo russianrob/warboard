@@ -4072,7 +4072,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
         }
       }
     }
-    console.error("[oc/spawn-key] getOcSpawnData failed:", err.message);
+    console.error(`[oc/spawn-key] getOcSpawnData failed for ${playerInfo.playerName} (${playerInfo.playerId}, faction ${playerInfo.factionId}): ${err.message}`);
     // No cached faction key available — return partial data so the script can show viewer card.
     // errorReason carries the Torn API message from the user's own key so the client can render
     // actionable guidance ("enable Faction permission", "use Full access key", etc).
