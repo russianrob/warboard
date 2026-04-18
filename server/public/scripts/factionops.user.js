@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.61
+// @version      4.9.62
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.62  - Change: Faction Cooldowns panel now starts collapsed again (was forced-expanded in 4.9.51 as a workaround for the then-broken click handler). The click-to-toggle has been solid since 4.9.53, so the compact default is back.
 // v4.9.61  - Feature: Tap-to-show tooltips for the Faction Cooldowns pills and energy bar. Native `title` attributes don't fire on mobile/PDA (no hover), so tapping any pill/bar now pops a small floating tooltip showing the full value (e.g. "Drug: 4h55m"). Tap again or tap elsewhere to dismiss.
 // v4.9.60  - Change: Faction Cooldowns energy bar shrunk — fixed 70px column, 5px bar height, smaller "E" label; row width matches the tighter pill footprint. No more long stretchy bar.
 // v4.9.59  - Change: Faction Cooldowns row drops the Nerve bar entirely (not useful for war decisions) and shrinks the D/M/B pills to 14px wide / 9px font so they feel chip-sized. Row is now 3 columns: name · energy bar · cooldown pills.
@@ -7233,13 +7234,13 @@ body.wb-chain-active {
                 <button type="button" id="fo-btn-send-broadcast">Shout</button>
             </div>
             ` : ''}
-            <div class="fo-bars-section is-open" id="fo-bars-section">
+            <div class="fo-bars-section" id="fo-bars-section">
                 <div class="fo-bars-header" id="fo-bars-toggle">
                     <span class="fo-bars-caret">\u25B6</span>
                     <span class="fo-bars-title">Faction Cooldowns</span>
                     <span class="fo-bars-count" id="fo-bars-count">0</span>
                 </div>
-                <div class="fo-bars-list" id="fo-bars-list" style="display:block;"></div>
+                <div class="fo-bars-list" id="fo-bars-list" style="display:none;"></div>
             </div>
             <div class="fo-col-headers">
                 <div class="fo-col-header">Prior.</div>
