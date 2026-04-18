@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.25
+// @version      3.0.26
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.0.26 — Flyer alert urgency now shows how long the OC has been sitting ready ("delayed 47m", "delayed 1h12m") instead of a static "ready now" — a practical measure of how long the flyer is holding up the crew. Falls back to "ready now" only for Planning crimes where ready_at is null/0.
 // v3.0.25 — Flyer names in the traveling-alert banner are now clickable: click a name to copy a preset fee-reminder ("You're holding off on the OC initiation...") to the clipboard and open the Torn compose page for that member, same UX as the eligible-members message button. Shared handler is attached to both the tooltip and the panel so either site fires it.
 // v3.0.24 — Flyer alert now catches both "Traveling" (in-transit) and "Abroad" (landed overseas) — previously only Traveling fired, so members who'd already landed abroad were silently missed. Banner renamed to "flying" and shows each member's exact state.
 // v3.0.23 — Traveling-alert only fires when the OC is truly "ready now" (not 30m out). Planning crimes with null/0 ready_at are treated as ready now (Torn V2 quirk); Recruiting crimes still need fully staffed + ready_at ≤ now.
@@ -193,7 +194,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.25';
+    const SCRIPT_VERSION = '3.0.26';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3231,7 +3232,20 @@
                 || (crime.status === 'Planning' && (!readyAt || readyAt <= now));
             if (!isReadyNow) continue;
             if (!fullyStaffed && crime.status !== 'Planning') continue;
-            const urgency = 'ready now';
+            // How long has this OC been sitting ready? When a flyer is in
+            // the crew, this doubles as the delay they're holding up.
+            // For Planning crimes with null ready_at we can't measure (just
+            // say "ready now" with no age).
+            const readyForSec = readyAt > 0 ? Math.max(0, now - readyAt) : 0;
+            const fmtReadyAge = (s) => {
+                const m = Math.floor(s / 60), h = Math.floor(m / 60);
+                if (h > 0) return `${h}h${(m % 60).toString().padStart(2,'0')}m`;
+                if (m > 0) return `${m}m`;
+                return `${s}s`;
+            };
+            const urgency = readyForSec > 0
+                ? `delayed ${fmtReadyAge(readyForSec)}`
+                : 'ready now';
 
             for (const slot of (crime.slots || [])) {
                 const uid = String(slot.user_id ?? slot.user?.id ?? '');
