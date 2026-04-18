@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.54
+// @version      4.9.55
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.55  - Fix: Faction Cooldowns energy/nerve cells no longer overlap their neighbors. Grid columns get a 140px minimum each, row gap widened to 12px, and bar cells get overflow:hidden so the track + value never bleed into the next column.
 // v4.9.54  - Fix: Faction Cooldowns booster pill no longer gets clipped. Grid's cooldown column now sizes to content (auto), energy/nerve cells use minmax(0,1fr) so they can shrink without pushing the pills off, and the pills themselves get white-space:nowrap + flex-shrink:0.
 // v4.9.53  - Fix: renderFactionBars / setupFactionBarsToggle / updateEnemyAttackingBadges were accidentally nested inside startStatusTimers due to a misplaced brace, making them invisible from outside that function. This meant the cooldowns panel never rendered and the click-toggle never wired up. Moved them back to IIFE top level.
 // v4.9.52  - Diagnostic: add console.log on Faction Cooldowns fetch + SSE apply so the empty-panel issue can be traced in DevTools. Also forces an empty-state render on init so users see "No faction members reporting yet." instead of a blank panel.
@@ -2610,14 +2611,14 @@ body.wb-chain-active {
 .fo-bars-list { padding: 6px 12px 10px; }
 .fo-bars-row {
     display: grid;
-    grid-template-columns: 110px minmax(0, 1fr) minmax(0, 1fr) auto;
-    gap: 8px; align-items: center;
+    grid-template-columns: 110px minmax(140px, 1fr) minmax(140px, 1fr) auto;
+    gap: 12px; align-items: center;
     padding: 4px 4px; font-size: 11px;
     border-bottom: 1px dashed rgba(255,255,255,0.04);
 }
 .fo-bars-row:last-child { border-bottom: none; }
 .fo-bars-row .fo-bars-name { font-weight: 600; color: #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fo-bar-cell { display: flex; align-items: center; gap: 6px; }
+.fo-bar-cell { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
 .fo-bar-cell .fo-bar-label { font-size: 9px; color: #888; width: 14px; }
 .fo-bar-cell .fo-bar-track {
     flex: 1; height: 6px; background: rgba(255,255,255,0.06);
