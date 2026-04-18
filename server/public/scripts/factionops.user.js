@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.64
+// @version      4.9.65
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.65  - Fix: Booster bar kept showing a 24h reference after a war ended because state.enemyFactionId lingers post-war. Now requires an active (not ended) war to halve to 24h.
 // v4.9.64  - Change: Booster bar reference now depends on war state — 24h when an active war is detected (state.enemyFactionId set), 48h otherwise. Matches Torn's in-war booster cap.
 // v4.9.63  - Change: Faction Cooldowns row layout — energy bar moved to the leftmost column, and D/M/B swapped from letter pills to color-coded mini-bars (red=drug, blue=medical, purple=booster). Fill proportional to remaining cooldown vs. 10h/5h/24h references; ready state shows empty track with green letter label. Tooltip still shows exact remaining time.
 // v4.9.62  - Change: Faction Cooldowns panel now starts collapsed again (was forced-expanded in 4.9.51 as a workaround for the then-broken click handler). The click-to-toggle has been solid since 4.9.53, so the compact default is back.
@@ -5883,8 +5884,11 @@ body.wb-chain-active {
                 return h > 0 ? `${h}h${m.toString().padStart(2, '0')}m` : `${m}m`;
             };
             const cdTitle = (label, v) => `${label}: ${fmtCd(v)}`;
-            // Booster max halves during an active war (48h → 24h)
-            const boosterRef = state.enemyFactionId ? 86400 : 172800; // 24h in war, 48h otherwise
+            // Booster max halves during an active war (48h → 24h). The war
+            // must actually be in progress — enemyFactionId lingers after a
+            // war ends, so also require !warEnded.
+            const inActiveWar = !!state.enemyFactionId && !state.warEnded;
+            const boosterRef = inActiveWar ? 86400 : 172800; // 24h in war, 48h otherwise
             const CD_REF = { drug: 36000, medical: 18000, booster: boosterRef };
             const cdPct = (v, max) => Math.max(0, Math.min(100, (Number(v) || 0) / max * 100));
             const cdBar = (label, key, val) => {
