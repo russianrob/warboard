@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.75
+// @version      4.9.76
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.76  - Polish: Last-report stamp in Cooldowns panel now shows combined units ("2h15m", "1d3h") instead of collapsing to a single unit. Under an hour is still "Xm" or "Xs" — only kicks in at the hour boundary.
 // v4.9.75  - Feature: Faction Cooldowns rows now show "Xs/m/h/d" next to each member's name — time since their last bars/cooldowns report. Lets you see at a glance who's actively reporting vs cached from earlier. Ticks forward with the existing 60s re-render.
 // v4.9.74  - Feature: Server-side version gate on /api/auth — clients older than 4.9.70 (the auto-report-on-auth fix) receive a 426 and a toast telling them to update. Adds SCRIPT_VERSION constant; existing CONFIG.VERSION now derived from it instead of the stale hardcoded string.
 // v4.9.73  - Restore: re-apply the leader-role gate on the Cooldowns panel (reverts 4.9.72 which itself reverted 4.9.71). Panel is only visible to broadcast-role members again, matching the original request.
@@ -267,7 +268,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.75';
+    const SCRIPT_VERSION = '4.9.76';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -5978,11 +5979,14 @@ body.wb-chain-active {
                 if (!ts) return '—';
                 const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
                 if (sec < 60) return `${sec}s`;
-                const m = Math.floor(sec / 60);
-                if (m < 60) return `${m}m`;
-                const h = Math.floor(m / 60);
-                if (h < 24) return `${h}h`;
-                return `${Math.floor(h / 24)}d`;
+                const totalMin = Math.floor(sec / 60);
+                if (totalMin < 60) return `${totalMin}m`;
+                const totalHr = Math.floor(totalMin / 60);
+                const remMin = totalMin % 60;
+                if (totalHr < 24) return remMin > 0 ? `${totalHr}h${remMin}m` : `${totalHr}h`;
+                const days = Math.floor(totalHr / 24);
+                const remHr = totalHr % 24;
+                return remHr > 0 ? `${days}d${remHr}h` : `${days}d`;
             };
             const cdTitle = (label, v) => `${label}: ${fmtCd(v)}`;
             // Booster max halves during an active war (48h → 24h). The war
