@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.74
+// @version      4.9.75
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.75  - Feature: Faction Cooldowns rows now show "Xs/m/h/d" next to each member's name — time since their last bars/cooldowns report. Lets you see at a glance who's actively reporting vs cached from earlier. Ticks forward with the existing 60s re-render.
 // v4.9.74  - Feature: Server-side version gate on /api/auth — clients older than 4.9.70 (the auto-report-on-auth fix) receive a 426 and a toast telling them to update. Adds SCRIPT_VERSION constant; existing CONFIG.VERSION now derived from it instead of the stale hardcoded string.
 // v4.9.73  - Restore: re-apply the leader-role gate on the Cooldowns panel (reverts 4.9.72 which itself reverted 4.9.71). Panel is only visible to broadcast-role members again, matching the original request.
 // v4.9.72  - Revert: 4.9.71's role gate on the Cooldowns panel was too restrictive — regular members lost visibility of everyone's cooldowns, including their own. Panel is visible to all members again; the Shout button keeps its original leader gate.
@@ -266,7 +267,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.74';
+    const SCRIPT_VERSION = '4.9.75';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2654,6 +2655,7 @@ body.wb-chain-active {
 }
 .fo-bars-row:last-child { border-bottom: none; }
 .fo-bars-row .fo-bars-name { font-weight: 600; color: #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fo-bars-row .fo-bars-updated { font-size: 9px; font-weight: 400; color: #6b7280; margin-left: 4px; }
 .fo-bar-cell { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; cursor: help; }
 .fo-bar-cell .fo-bar-label { font-size: 9px; color: #888; width: 10px; flex-shrink: 0; }
 .fo-bar-cell .fo-bar-track {
@@ -5972,6 +5974,16 @@ body.wb-chain-active {
                 const m = Math.floor((s % 3600) / 60);
                 return h > 0 ? `${h}h${m.toString().padStart(2, '0')}m` : `${m}m`;
             };
+            const fmtAgo = (ts) => {
+                if (!ts) return '—';
+                const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+                if (sec < 60) return `${sec}s`;
+                const m = Math.floor(sec / 60);
+                if (m < 60) return `${m}m`;
+                const h = Math.floor(m / 60);
+                if (h < 24) return `${h}h`;
+                return `${Math.floor(h / 24)}d`;
+            };
             const cdTitle = (label, v) => `${label}: ${fmtCd(v)}`;
             // Booster max halves during an active war (48h → 24h). The war
             // must actually be in progress — enemyFactionId lingers after a
@@ -5998,7 +6010,7 @@ body.wb-chain-active {
                         <span class="fo-bar-label">E</span>
                         <div class="fo-bar-track"><div class="fo-bar-fill" style="width:${ePct}%"></div></div>
                     </div>
-                    <div class="fo-bars-name" title="${name}" data-fo-tip="${name}">${name}</div>
+                    <div class="fo-bars-name" title="${name} — last update ${fmtAgo(info.updatedAt)}" data-fo-tip="${name} — ${fmtAgo(info.updatedAt)}">${name} <span class="fo-bars-updated">${fmtAgo(info.updatedAt)}</span></div>
                     <div class="fo-bars-cd">
                         ${cdBar('Drug', 'drug', cdDrug)}
                         ${cdBar('Medical', 'medical', cdMedical)}
