@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.22
+// @version      3.0.23
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.0.23 — Traveling-alert only fires when the OC is truly "ready now" (not 30m out). Planning crimes with null/0 ready_at are treated as ready now (Torn V2 quirk); Recruiting crimes still need fully staffed + ready_at ≤ now.
 // v3.0.22 — Traveling-alert relaxed: Planning crimes always fire the flyer alert (ready_at in V2 is sometimes null/0 for Planning), and Recruiting crimes that are fully staffed + ready within 30m also fire. Urgency label now shows "ready in Nm" when not yet ready.
 // v3.0.21 — Dispatcher shows "Subscribe to unlock" banner for non-subscribed factions
 // v3.0.20 — Fix syntax error in dispatcher else-branch that broke entire script
@@ -190,7 +191,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.22';
+    const SCRIPT_VERSION = '3.0.23';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3201,7 +3202,6 @@
         const now = Math.floor(Date.now() / 1000);
 
         const alerts = []; // { memberName, crimeName, position, difficulty, urgency }
-        const READY_WINDOW = 30 * 60; // 30 min
         for (const crime of (availableCrimes || [])) {
             if (crime.status !== 'Recruiting' && crime.status !== 'Planning') continue;
             const readyAt = crime.ready_at || 0;
@@ -3211,24 +3211,16 @@
             const totalSlots = slots.length;
             const fullyStaffed = totalSlots > 0 && filledSlots >= totalSlots;
 
-            // Fire the alert when:
-            //  - Crime is Planning (all slots filled, waiting to execute — the
-            //    exact moment flyers are a problem), regardless of ready_at;
-            //  - OR Recruiting AND fully staffed AND ready in <=30min or already ready.
-            // Previously we required ready_at > 0 && ready_at <= now, which
-            // silently skipped Planning crimes whose ready_at hadn't flipped.
-            let urgency;
-            if (crime.status === 'Planning') {
-                urgency = readyAt > 0 && readyAt > now
-                    ? `ready in ${Math.max(1, Math.round((readyAt - now) / 60))}m`
-                    : 'ready now';
-            } else if (fullyStaffed && readyAt > 0 && readyAt <= now + READY_WINDOW) {
-                urgency = readyAt <= now
-                    ? 'ready now'
-                    : `ready in ${Math.max(1, Math.round((readyAt - now) / 60))}m`;
-            } else {
-                continue;
-            }
+            // Only alert when the OC is ready to execute right now — a
+            // traveling member only matters at the moment we'd otherwise
+            // click Initiate. Treat a Planning crime with a null/0 ready_at
+            // as "ready now" since Torn V2 sometimes omits the field once
+            // the OC is fully assembled.
+            const isReadyNow = (readyAt > 0 && readyAt <= now)
+                || (crime.status === 'Planning' && (!readyAt || readyAt <= now));
+            if (!isReadyNow) continue;
+            if (!fullyStaffed && crime.status !== 'Planning') continue;
+            const urgency = 'ready now';
 
             for (const slot of (crime.slots || [])) {
                 const uid = String(slot.user_id ?? slot.user?.id ?? '');
