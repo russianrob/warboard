@@ -1864,7 +1864,7 @@ img { max-width: 100%; display: block; }
         <div class="download-box">
           <a href="/scripts/factionops.user.js" class="btn btn-primary">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10"/></svg>
-            Download FactionOps v4.8.4
+            Download FactionOps v<span data-fo-live-version>4.9.74</span>
           </a>
           <code class="code-inline">// Requires Tampermonkey or Torn PDA</code>
         </div>
@@ -2214,7 +2214,7 @@ img { max-width: 100%; display: block; }
       </div>
       <div class="footer-right">
         <a href="#terms">Terms & Privacy</a>
-        <span class="footer-version">v4.3.0</span>
+        <span class="footer-version">v<span data-fo-live-version>4.9.74</span></span>
       </div>
     </div>
   </div>
@@ -2224,6 +2224,24 @@ img { max-width: 100%; display: block; }
 <script>
 (function() {
   'use strict';
+
+  // ── Live version stamp ──
+  // Pull @version from the deployed factionops.meta.js so any element with
+  // data-fo-live-version always reflects what Tampermonkey would actually
+  // pull. Falls back silently to whatever's hardcoded in the span.
+  (function syncLiveVersion() {
+    const targets = document.querySelectorAll('[data-fo-live-version]');
+    if (!targets.length) return;
+    fetch('/scripts/factionops.meta.js', { cache: 'no-store' })
+      .then(r => r.ok ? r.text() : null)
+      .then(text => {
+        if (!text) return;
+        const m = text.match(/@version\s+([0-9.]+)/);
+        if (!m) return;
+        for (const el of targets) el.textContent = m[1];
+      })
+      .catch(() => { /* silent — hardcoded fallback remains */ });
+  })();
 
   // ── Server Status Dot ──
   (function checkServerStatus() {
