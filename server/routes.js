@@ -336,10 +336,29 @@ function parseCookie(cookieHeader, name) {
 
 // ── POST /api/auth ──────────────────────────────────────────────────────
 
+const FACTIONOPS_MIN_VERSION = '4.9.70';
+function factionopsVersionTooOld(v) {
+  if (!v || typeof v !== 'string') return false; // legacy clients that don't send a version — let them through
+  const a = v.split('.').map(Number), b = FACTIONOPS_MIN_VERSION.split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const ai = a[i] || 0, bi = b[i] || 0;
+    if (ai < bi) return true;
+    if (ai > bi) return false;
+  }
+  return false;
+}
+
 router.post("/api/auth", async (req, res) => {
-  const { apiKey } = (req.body || {});
+  const { apiKey, scriptVersion } = (req.body || {});
   if (!apiKey || typeof apiKey !== "string") {
     return res.status(400).json({ error: "apiKey is required" });
+  }
+
+  if (factionopsVersionTooOld(scriptVersion)) {
+    return res.status(426).json({
+      error: `FactionOps ${scriptVersion} is outdated — please update to v${FACTIONOPS_MIN_VERSION} or newer.`,
+      updateUrl: 'https://tornwar.com/scripts/factionops.user.js',
+    });
   }
 
   try {

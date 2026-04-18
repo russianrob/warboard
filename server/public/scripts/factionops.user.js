@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.73
+// @version      4.9.74
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.74  - Feature: Server-side version gate on /api/auth — clients older than 4.9.70 (the auto-report-on-auth fix) receive a 426 and a toast telling them to update. Adds SCRIPT_VERSION constant; existing CONFIG.VERSION now derived from it instead of the stale hardcoded string.
 // v4.9.73  - Restore: re-apply the leader-role gate on the Cooldowns panel (reverts 4.9.72 which itself reverted 4.9.71). Panel is only visible to broadcast-role members again, matching the original request.
 // v4.9.72  - Revert: 4.9.71's role gate on the Cooldowns panel was too restrictive — regular members lost visibility of everyone's cooldowns, including their own. Panel is visible to all members again; the Shout button keeps its original leader gate.
 // v4.9.71  - Feature: Faction Cooldowns panel is now gated behind the same role check as the Shout/broadcast button — only members in allowed roles (leader/co-leader/war leader/banker by default, or the faction's custom broadcastRoles) see the panel. isLeader() upgraded to prefer server-configured roles when fetched.
@@ -265,8 +266,9 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
+    const SCRIPT_VERSION = '4.9.74';
     const CONFIG = {
-        VERSION: '4.8.4',
+        VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
         API_KEY: GM_getValue('factionops_apikey', '') || (IS_PDA ? PDA_API_KEY : ''),
         THEME: GM_getValue('factionops_theme', 'dark'),
@@ -4244,10 +4246,18 @@ body.wb-chain-active {
                 method: 'POST',
                 url: `${CONFIG.SERVER_URL}/api/auth`,
                 headers: { 'Content-Type': 'application/json' },
-                data: JSON.stringify({ apiKey: CONFIG.API_KEY }),
+                data: JSON.stringify({ apiKey: CONFIG.API_KEY, scriptVersion: SCRIPT_VERSION }),
                 onload(res) {
                     log('Auth response status:', res.status);
                     const body = safeParse(res.responseText);
+                    if (res.status === 426) {
+                        const msg = (body && body.error) || 'FactionOps is outdated — please update.';
+                        warn('Auth blocked: outdated script.', msg);
+                        try {
+                            showToast(msg + ' Open Tampermonkey → Check for userscript updates.', 'error');
+                        } catch (_) {}
+                        return reject(new Error(msg));
+                    }
                     if (res.status >= 200 && res.status < 300 && body && body.token) {
                         state.jwtToken = body.token;
                         GM_setValue('factionops_jwt', body.token);
