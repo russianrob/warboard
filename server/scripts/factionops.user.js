@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.57
+// @version      4.9.58
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.58  - Change: Faction Cooldowns row is now pills-only — removed the energy/nerve numeric labels (95/150, 8/89 etc) and moved the values onto the bar cell's hover tooltip so the row stays clean. Bars still render so you can scan percentage-full at a glance.
 // v4.9.57  - Fix: Faction Cooldowns D/M/B pills were too dim to see on the overlay's dark background. Brightened the inactive color (#b8b8b8 on rgba(255,255,255,0.10)), bumped pill width/font, gave the row a 70px minimum so the cd column can't collapse, and added a red outline on active pills.
 // v4.9.56  - Change: Faction Cooldowns D/M/B pills are now compact single-letter chips with a native tooltip on hover showing the remaining time (e.g. "Drug: 4h55m", "Medical: ready"). Frees up ~80px per row for the energy/nerve bars.
 // v4.9.55  - Fix: Faction Cooldowns energy/nerve cells no longer overlap their neighbors. Grid columns get a 140px minimum each, row gap widened to 12px, and bar cells get overflow:hidden so the track + value never bleed into the next column.
@@ -2631,7 +2632,7 @@ body.wb-chain-active {
     transition: width 0.3s ease;
 }
 .fo-bar-cell.is-nerve .fo-bar-fill { background: #fdcb6e; }
-.fo-bar-cell .fo-bar-value { font-size: 10px; color: #aaa; min-width: 50px; text-align: right; font-variant-numeric: tabular-nums; }
+.fo-bar-cell { cursor: help; }
 .fo-bars-cd {
     display: flex; gap: 4px;
     white-space: nowrap; flex-shrink: 0;
@@ -5857,15 +5858,13 @@ body.wb-chain-active {
             return `
                 <div class="fo-bars-row">
                     <div class="fo-bars-name" title="${name}">${name}</div>
-                    <div class="fo-bar-cell is-energy">
+                    <div class="fo-bar-cell is-energy" title="Energy: ${e.current}/${e.maximum} (${ePct}%)">
                         <span class="fo-bar-label">E</span>
                         <div class="fo-bar-track"><div class="fo-bar-fill" style="width:${ePct}%"></div></div>
-                        <span class="fo-bar-value">${e.current}/${e.maximum}</span>
                     </div>
-                    <div class="fo-bar-cell is-nerve">
+                    <div class="fo-bar-cell is-nerve" title="Nerve: ${n.current}/${n.maximum} (${nPct}%)">
                         <span class="fo-bar-label">N</span>
                         <div class="fo-bar-track"><div class="fo-bar-fill" style="width:${nPct}%"></div></div>
-                        <span class="fo-bar-value">${n.current}/${n.maximum}</span>
                     </div>
                     <div class="fo-bars-cd">
                         <span class="fo-cd-pill${cdClass(cd.drug)}" title="${cdTitle('Drug', cd.drug)}">D</span>
