@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.20
+// @version      3.0.21
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.0.21 — Dispatcher shows "Subscribe to unlock" banner for non-subscribed factions
 // v3.0.20 — Fix syntax error in dispatcher else-branch that broke entire script
 // v3.0.17 — Skip new faction members (< 3 days) from eligible list with skip reason
 // v3.0.16 — MutationObserver debouncing, shared crimes cache for Manager tab, loan button retry fix
@@ -188,7 +189,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.20';
+    const SCRIPT_VERSION = '3.0.21';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -2753,6 +2754,29 @@
         anchor.parent.insertBefore(bannerEl, anchor.ref || null);
     }
 
+    // Helper: inject a "Subscribe to unlock" CTA when the server returns 403
+    function _injectDispatcherSubscribePrompt(serverMessage) {
+        if (!isOnCrimesTab()) { const old = document.getElementById('oc-dispatcher-torn-banner'); if (old) old.remove(); return; }
+        const anchor = findTornOcTabAnchor();
+        if (!anchor) return;
+        const oldBanner = document.getElementById('oc-dispatcher-torn-banner');
+        if (oldBanner) oldBanner.remove();
+        const detail = (serverMessage && typeof serverMessage === 'string')
+            ? serverMessage
+            : 'Send 2 Xanax for a 7-day trial or 20 Xanax for 30 days to RussianRob.';
+        const bannerEl = document.createElement('div');
+        bannerEl.id = 'oc-dispatcher-torn-banner';
+        bannerEl.innerHTML = `<div style="padding:10px 12px;background:linear-gradient(135deg,#1a0f2e,#0a1628);border:1px solid #7c3aed;border-radius:8px;margin:8px 10px;display:flex;align-items:center;gap:10px;">`
+            + `<span style="font-size:18px;">\u{1f512}</span>`
+            + `<div style="flex:1;min-width:0;">`
+            + `<div style="font-size:12px;font-weight:600;color:#c4b5fd;">Subscribe to unlock Auto-Dispatcher</div>`
+            + `<div style="font-size:10px;color:#9ca3af;margin-top:2px;">${detail.replace(/</g,'&lt;')}</div>`
+            + `</div>`
+            + `<a href="https://www.torn.com/messages.php#/p=compose&XID=2556388" target="_blank" rel="noopener" style="font-size:11px;font-weight:600;padding:6px 10px;background:#7c3aed;color:#fff;border-radius:6px;text-decoration:none;white-space:nowrap;">Message RussianRob</a>`
+            + `</div>`;
+        anchor.parent.insertBefore(bannerEl, anchor.ref || null);
+    }
+
     function renderDispatcherBanner(dispatcherData) {
         _lastDispatcherData = dispatcherData; // cache for tab re-injection
         // Remove old banner if it exists
@@ -3603,7 +3627,7 @@
                         document.getElementById('oc-tab-profile').innerHTML =
                             `<p class="oc-error">⛔ ${err.message}</p>`;
                         setStatus('Access denied.');
-                        _injectDispatcherStatus('⛔', 'Access denied', '#ef4444');
+                        _injectDispatcherSubscribePrompt(err.message);
                         return;
                     }
                     if (err.status === 429 || attempt >= MAX_RETRIES) throw err;
