@@ -561,7 +561,10 @@ export function getPollInterval(factionId, purpose) {
 /**
  * Record a member's self-reported bars snapshot. Persisted to disk
  * (debounced) so the Faction Cooldowns panel keeps its last-known state
- * across server restarts. Old entries age out after 4 hours of no refresh.
+ * across server restarts. Old entries age out after 24 hours of no refresh
+ * — long enough for the projection on the client to keep ticking down
+ * cooldowns through an overnight window even if the member never re-opens
+ * a Torn tab.
  */
 export function recordMemberBars(factionId, playerId, playerName, data) {
   const fid = String(factionId);
@@ -580,7 +583,7 @@ export function recordMemberBars(factionId, playerId, playerName, data) {
  * Return all fresh bars snapshots for a faction. Snapshots older than
  * `staleMs` are filtered out so the UI never shows zombie data.
  */
-export function getFactionBars(factionId, staleMs = 4 * 60 * 60 * 1000) {
+export function getFactionBars(factionId, staleMs = 24 * 60 * 60 * 1000) {
   const fid = String(factionId);
   const m = factionBars.get(fid);
   if (!m) return {};
@@ -611,7 +614,7 @@ export function saveMemberBars() {
   ensureDataDir();
   try {
     const obj = {};
-    const cutoff = Date.now() - 4 * 60 * 60 * 1000;
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     for (const [fid, members] of factionBars) {
       const fresh = {};
       for (const [pid, entry] of members) {
@@ -633,7 +636,7 @@ export function loadMemberBars() {
     const raw = fs.readFileSync(MEMBER_BARS_FILE, "utf-8");
     const data = JSON.parse(raw);
     let total = 0;
-    const cutoff = Date.now() - 4 * 60 * 60 * 1000;
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     for (const [fid, members] of Object.entries(data)) {
       const m = new Map();
       for (const [pid, entry] of Object.entries(members)) {
