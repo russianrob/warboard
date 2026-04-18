@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.52
+// @version      4.9.53
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.53  - Fix: renderFactionBars / setupFactionBarsToggle / updateEnemyAttackingBadges were accidentally nested inside startStatusTimers due to a misplaced brace, making them invisible from outside that function. This meant the cooldowns panel never rendered and the click-toggle never wired up. Moved them back to IIFE top level.
 // v4.9.52  - Diagnostic: add console.log on Faction Cooldowns fetch + SSE apply so the empty-panel issue can be traced in DevTools. Also forces an empty-state render on init so users see "No faction members reporting yet." instead of a blank panel.
 // v4.9.51  - Change: Faction Cooldowns panel now starts expanded by default, so users see member cooldowns without needing to click (safety fallback while the click-through issue in Torn's #mainContainer is investigated).
 // v4.9.50  - Fix: Faction Cooldowns panel header gets pointer-events:auto + touch-action treatment (same pattern as Shout button) so clicks actually land when the overlay is nested in Torn's #mainContainer.
@@ -5775,6 +5776,10 @@ body.wb-chain-active {
             statusTimerRAF = requestAnimationFrame(tick);
         }
 
+        // Kick off the rAF loop.
+        statusTimerRAF = requestAnimationFrame(tick);
+    }
+
     /**
      * Enemy just-attacked indicator. The server emits `lastAttackAt`
      * (unix seconds) whenever an enemy is seen mid-attack. We tag rows
@@ -5910,9 +5915,6 @@ body.wb-chain-active {
                 }
             }
         }
-    }
-
-        statusTimerRAF = requestAnimationFrame(tick);
     }
 
     /**
