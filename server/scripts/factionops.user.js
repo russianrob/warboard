@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.56
+// @version      4.9.57
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.57  - Fix: Faction Cooldowns D/M/B pills were too dim to see on the overlay's dark background. Brightened the inactive color (#b8b8b8 on rgba(255,255,255,0.10)), bumped pill width/font, gave the row a 70px minimum so the cd column can't collapse, and added a red outline on active pills.
 // v4.9.56  - Change: Faction Cooldowns D/M/B pills are now compact single-letter chips with a native tooltip on hover showing the remaining time (e.g. "Drug: 4h55m", "Medical: ready"). Frees up ~80px per row for the energy/nerve bars.
 // v4.9.55  - Fix: Faction Cooldowns energy/nerve cells no longer overlap their neighbors. Grid columns get a 140px minimum each, row gap widened to 12px, and bar cells get overflow:hidden so the track + value never bleed into the next column.
 // v4.9.54  - Fix: Faction Cooldowns booster pill no longer gets clipped. Grid's cooldown column now sizes to content (auto), energy/nerve cells use minmax(0,1fr) so they can shrink without pushing the pills off, and the pills themselves get white-space:nowrap + flex-shrink:0.
@@ -2633,17 +2634,22 @@ body.wb-chain-active {
 .fo-bar-cell .fo-bar-value { font-size: 10px; color: #aaa; min-width: 50px; text-align: right; font-variant-numeric: tabular-nums; }
 .fo-bars-cd {
     display: flex; gap: 4px;
-    color: #888;
     white-space: nowrap; flex-shrink: 0;
+    min-width: 70px;
 }
 .fo-bars-cd .fo-cd-pill {
-    background: rgba(255,255,255,0.04);
+    background: rgba(255,255,255,0.10);
+    color: #b8b8b8;
     padding: 2px 0; border-radius: 3px;
-    font-size: 10px; font-weight: 700;
-    width: 18px; text-align: center;
+    font-size: 11px; font-weight: 700;
+    width: 20px; text-align: center;
     cursor: help;
+    display: inline-block;
 }
-.fo-bars-cd .fo-cd-pill.is-active { color: #ff7675; background: rgba(255,118,117,0.18); }
+.fo-bars-cd .fo-cd-pill.is-active {
+    color: #ff7675; background: rgba(255,118,117,0.25);
+    box-shadow: inset 0 0 0 1px rgba(255,118,117,0.35);
+}
 .fo-bars-empty { padding: 8px; color: #888; font-size: 11px; text-align: center; font-style: italic; }
 
 /* Broadcast entry bar */
