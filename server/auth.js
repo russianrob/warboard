@@ -38,7 +38,7 @@ export async function verifyTornApiKey(apiKey) {
     return cached.result;
   }
 
-  const url = `https://api.torn.com/user/?selections=basic,profile&key=${encodeURIComponent(apiKey)}`;
+  const url = `https://api.torn.com/user/?selections=basic,profile,key&key=${encodeURIComponent(apiKey)}`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
@@ -62,12 +62,16 @@ export async function verifyTornApiKey(apiKey) {
     throw new Error(err);
   }
 
+  // Torn access levels: 1=Public, 2=Minimal, 3=Limited, 4=Full.
+  // Faction endpoints (used by the OC spawn-key route) require Limited+.
+  const accessLevel = Number(data.access_level ?? data.key?.access_level ?? 0);
   const result = {
     playerId: String(data.player_id),
     playerName: data.name,
     factionId: String(data.faction?.faction_id ?? 0),
     factionName: data.faction?.faction_name ?? "",
     factionPosition: data.faction?.position ?? "",
+    hasFactionAccess: accessLevel >= 3,
   };
   setAuthCache(apiKey, { result, expiresAt: Date.now() + AUTH_CACHE_SUCCESS_TTL_MS });
   return result;
