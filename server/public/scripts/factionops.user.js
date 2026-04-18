@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.70
+// @version      4.9.71
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.71  - Feature: Faction Cooldowns panel is now gated behind the same role check as the Shout/broadcast button — only members in allowed roles (leader/co-leader/war leader/banker by default, or the faction's custom broadcastRoles) see the panel. isLeader() upgraded to prefer server-configured roles when fetched.
 // v4.9.70  - Fix: Members who authenticated but never clicked "Activate FactionOps" weren't self-reporting bars/cooldowns because startEnergyPoll was only called inside initWarOverlay. Moved the poll kickoff into the auth success path so reporting happens in the background the moment the script loads with a valid key.
 // v4.9.69  - Fix: Victory/Defeat/War Over banner didn't re-render after minimize→re-activate. The warEndedBannerShown module flag stayed true after teardown, so showWarEndedBanner short-circuited on the next init. Reset the flag in deactivateWarOverlay.
 // v4.9.68  - Fix: Logo click-to-minimize didn't land when the overlay was nested in Torn's #mainContainer. Same treatment as Shout/Cooldowns: pointer-events:auto + touch-action + document-level delegated click (capture phase), plus pointer-events:none on children so clicks reach the logo wrapper.
@@ -2789,6 +2790,11 @@ body.wb-chain-active {
         // reported faction-member dashboards (Option B cooldown panel).
         memberBars: {},
 
+        // Faction-configured roles allowed to Shout + view Cooldowns. Null
+        // until fetched from /api/broadcast/roles on auth; isLeader() falls
+        // back to the hardcoded default set when null.
+        allowedBroadcastRoles: null,
+
         // Whether a faction API key has been saved on the server
         factionKeyStored: false,
 
@@ -4261,6 +4267,16 @@ body.wb-chain-active {
                         // panel. startEnergyPoll is idempotent.
                         try { startEnergyPoll(); } catch (_) {}
 
+                        // Fetch faction's custom broadcast roles so
+                        // isLeader() gates Shout + Cooldowns the same way
+                        // the server does. Best-effort — on failure we
+                        // keep using the hardcoded defaults.
+                        getAction('/api/broadcast/roles').then(resp => {
+                            if (resp && Array.isArray(resp.roles)) {
+                                state.allowedBroadcastRoles = resp.roles;
+                            }
+                        }).catch(() => {});
+
                         // First-auth disclosure: if server says this login
                         // just created a default pool opt-in, show the
                         // user a one-time notice so pooling isn't covert.
@@ -4680,7 +4696,15 @@ body.wb-chain-active {
         const isAdmin = String(state.myPlayerId) === '137558';
         if (isAdmin) return true;
 
-        const pos = state.myFactionPosition || '';
+        const pos = (state.myFactionPosition || '').toLowerCase();
+        // Prefer server-configured roles when we've fetched them (so a faction
+        // that added e.g. "warmaster" to broadcastRoles sees the same set
+        // gate both Shout and Cooldowns). Fall back to the built-in defaults
+        // if we haven't heard from the server yet.
+        const serverRoles = Array.isArray(state.allowedBroadcastRoles) && state.allowedBroadcastRoles.length
+            ? state.allowedBroadcastRoles.map(r => String(r).toLowerCase())
+            : null;
+        if (serverRoles) return serverRoles.includes(pos);
         return pos === 'leader' || pos === 'co-leader' || pos === 'war leader' || pos === 'banker';
     }
 
@@ -7361,7 +7385,6 @@ body.wb-chain-active {
                 <input type="text" id="fo-input-broadcast" placeholder="Broadcast message to faction..." maxlength="150">
                 <button type="button" id="fo-btn-send-broadcast">Shout</button>
             </div>
-            ` : ''}
             <div class="fo-bars-section" id="fo-bars-section">
                 <div class="fo-bars-header" id="fo-bars-toggle">
                     <span class="fo-bars-caret">\u25B6</span>
@@ -7370,6 +7393,7 @@ body.wb-chain-active {
                 </div>
                 <div class="fo-bars-list" id="fo-bars-list" style="display:none;"></div>
             </div>
+            ` : ''}
             <div class="fo-col-headers">
                 <div class="fo-col-header">Prior.</div>
                 <div class="fo-col-header">Target</div>
