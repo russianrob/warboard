@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.66
+// @version      4.9.67
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.67  - Feature: Clicking the FactionOps logo in the overlay header minimizes the overlay — Torn's native page comes back and the "Activate FactionOps" pill reappears so you can re-open on demand. Logo now has hover/active styling and a tooltip.
 // v4.9.66  - Feature: Cooldown bars now project forward from the last report timestamp (D/M/B values tick down live without new reports), and the panel re-renders every 60s so you see the decay even with the whole faction offline. Member-bars cache also persists to disk (data/member-bars.json) so restarts no longer wipe the panel.
 // v4.9.65  - Fix: Booster bar kept showing a 24h reference after a war ended because state.enemyFactionId lingers post-war. Now requires an active (not ended) war to halve to 24h.
 // v4.9.64  - Change: Booster bar reference now depends on war state — 24h when an active war is detected (state.enemyFactionId set), 48h otherwise. Matches Torn's in-war booster cap.
@@ -1202,7 +1203,14 @@ body.wb-chain-active {
     display: flex;
     align-items: center;
     gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: background 0.15s ease;
 }
+.fo-logo-mark:hover { background: rgba(255,255,255,0.06); }
+.fo-logo-mark:active { background: rgba(255,255,255,0.12); }
 
 .fo-logo-icon { width: 20px; height: 20px; }
 
@@ -6785,6 +6793,38 @@ body.wb-chain-active {
         tornChainOriginalNext = null;
     }
 
+    /**
+     * Tear down the full-page overlay and bring Torn's native page back,
+     * then re-show the "Activate FactionOps" pill so the user can re-open
+     * the overlay on demand. Triggered by clicking the logo in the header.
+     */
+    function deactivateWarOverlay() {
+        // Chain bar first, so Torn finds it back in its original parent
+        // before we restore the surrounding content.
+        restoreTornChainBar();
+
+        // Restore Torn's hidden content (initWarOverlay stashed each child's
+        // previous display value in data-fo-prev-display).
+        const mainContent = document.getElementById('mainContainer')
+            || document.querySelector('.content-wrapper');
+        if (mainContent) {
+            for (const child of Array.from(mainContent.children)) {
+                if (child.id === 'fo-overlay') continue;
+                if ('foPrevDisplay' in child.dataset) {
+                    child.style.display = child.dataset.foPrevDisplay || '';
+                    delete child.dataset.foPrevDisplay;
+                }
+            }
+            delete mainContent.dataset.foHidden;
+        }
+
+        const overlay = document.getElementById('fo-overlay');
+        if (overlay) overlay.remove();
+
+        // Re-offer the activate pill so the user can re-open on demand.
+        showActivateButton();
+    }
+
     // Track whether we're using DOM-based chain reading (no API calls)
     let usingChainDOM = false;
 
@@ -7320,6 +7360,18 @@ body.wb-chain-active {
             hiddenMain.appendChild(overlay);
         } else {
             document.body.appendChild(overlay);
+        }
+
+        // Clicking the logo closes the overlay and brings back the
+        // "Activate FactionOps" pill so the user can re-open on demand.
+        const logoEl = overlay.querySelector('.fo-logo-mark');
+        if (logoEl) {
+            logoEl.title = 'Click to minimize FactionOps';
+            logoEl.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                deactivateWarOverlay();
+            });
         }
 
         renderOverlay();
