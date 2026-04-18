@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.76
+// @version      4.9.77
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.77  - Feature: Energy bars in the Cooldowns panel now project forward from the last report timestamp using Torn's own regen metadata (ticktime/interval/increment/fulltime). Donator vs non-donator regen rate is baked into interval, so no per-member flag is needed. Sort order also uses projected energy so freshly topped-up members bubble up correctly.
 // v4.9.76  - Polish: Last-report stamp in Cooldowns panel now shows combined units ("2h15m", "1d3h") instead of collapsing to a single unit. Under an hour is still "Xm" or "Xs" — only kicks in at the hour boundary.
 // v4.9.75  - Feature: Faction Cooldowns rows now show "Xs/m/h/d" next to each member's name — time since their last bars/cooldowns report. Lets you see at a glance who's actively reporting vs cached from earlier. Ticks forward with the existing 60s re-render.
 // v4.9.74  - Feature: Server-side version gate on /api/auth — clients older than 4.9.70 (the auto-report-on-auth fix) receive a 426 and a toast telling them to update. Adds SCRIPT_VERSION constant; existing CONFIG.VERSION now derived from it instead of the stale hardcoded string.
@@ -268,7 +269,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.76';
+    const SCRIPT_VERSION = '4.9.77';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -5942,12 +5943,36 @@ body.wb-chain-active {
             return;
         }
 
-        // Sort: higher energy% first; secondary by name.
+        // Project energy forward from the last report timestamp using
+        // Torn's own regen metadata (ticktime, interval, increment, fulltime).
+        // Assumes the member hasn't spent energy in the gap — if they
+        // attacked while offline we'll over-count, same tradeoff as
+        // cooldowns. interval already bakes in donator vs non-donator.
+        function projectEnergy(energyObj, ageSec) {
+            if (!energyObj || !energyObj.maximum) return { current: 0, maximum: 0, pct: 0 };
+            const max = energyObj.maximum;
+            const cur0 = Number(energyObj.current) || 0;
+            const increment = Number(energyObj.increment) || 5;
+            const interval = Number(energyObj.interval) || 600;
+            const ticktime = Number(energyObj.ticktime) || 0;
+            const fulltime = Number(energyObj.fulltime) || 0;
+            if (cur0 >= max) return { current: max, maximum: max, pct: 100 };
+            if (fulltime > 0 && ageSec >= fulltime) return { current: max, maximum: max, pct: 100 };
+            let projected = cur0;
+            if (ageSec >= ticktime && interval > 0 && increment > 0) {
+                const ticks = 1 + Math.floor((ageSec - ticktime) / interval);
+                projected = Math.min(max, cur0 + ticks * increment);
+            }
+            return { current: projected, maximum: max, pct: Math.round(100 * projected / max) };
+        }
+
+        // Sort: higher projected energy% first; secondary by name.
+        const nowMs = Date.now();
         entries.sort((a, b) => {
-            const ea = a[1]?.bars?.energy;
-            const eb = b[1]?.bars?.energy;
-            const pa = ea && ea.maximum ? (ea.current / ea.maximum) : 0;
-            const pb = eb && eb.maximum ? (eb.current / eb.maximum) : 0;
+            const ageA = a[1]?.updatedAt ? Math.max(0, (nowMs - a[1].updatedAt) / 1000) : 0;
+            const ageB = b[1]?.updatedAt ? Math.max(0, (nowMs - b[1].updatedAt) / 1000) : 0;
+            const pa = projectEnergy(a[1]?.bars?.energy, ageA).pct;
+            const pb = projectEnergy(b[1]?.bars?.energy, ageB).pct;
             if (pb !== pa) return pb - pa;
             return (a[1]?.name || '').localeCompare(b[1]?.name || '');
         });
@@ -5955,15 +5980,17 @@ body.wb-chain-active {
         const html = entries.map(([pid, info]) => {
             const bars = info.bars || {};
             const cd = info.cooldowns || {};
-            const e = bars.energy || { current: 0, maximum: 0 };
+            const eRaw = bars.energy || { current: 0, maximum: 0 };
             const n = bars.nerve  || { current: 0, maximum: 0 };
-            const ePct = e.maximum ? Math.round(100 * e.current / e.maximum) : 0;
             const nPct = n.maximum ? Math.round(100 * n.current / n.maximum) : 0;
-            // Project cooldowns forward from the last report timestamp — they
-            // only decrease unless the member takes a new drug/boost/medical,
-            // which we can't observe while their tab is closed. Stale is
-            // better than zombie.
+            // Project cooldowns + energy forward from the last report
+            // timestamp. Cooldowns only decrease (assuming no new
+            // drug/boost/medical); energy uses Torn's own regen metadata.
+            // If the member spent energy while offline we'll over-count —
+            // same tradeoff as cooldowns. Stale is better than zombie.
             const ageSec = info.updatedAt ? Math.max(0, (Date.now() - info.updatedAt) / 1000) : 0;
+            const e = projectEnergy(eRaw, ageSec);
+            const ePct = e.pct;
             const projCd = (v) => Math.max(0, (Number(v) || 0) - ageSec);
             const cdDrug    = projCd(cd.drug);
             const cdMedical = projCd(cd.medical);
