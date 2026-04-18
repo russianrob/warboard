@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.19
+// @version      3.0.20
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.0.20 — Fix syntax error in dispatcher else-branch that broke entire script
 // v3.0.17 — Skip new faction members (< 3 days) from eligible list with skip reason
 // v3.0.16 — MutationObserver debouncing, shared crimes cache for Manager tab, loan button retry fix
 // v3.0.15 — OC history collector fix: pull from completed crimes cache instead of active crimes
@@ -187,7 +188,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.19';
+    const SCRIPT_VERSION = '3.0.20';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3702,15 +3703,17 @@
             // Render Auto-Dispatcher banner (personalized, above all tabs)
             if (engines && engines.autoDispatcher) {
                 renderDispatcherBanner(engines.autoDispatcher);
-            } else const _dispApiKey = getApiKey();
-    if (CONFIG.ENGINE_AUTO_DISPATCHER && _dispApiKey && _dispApiKey !== "YOUR_API_KEY_HERE") {
-                // Engine is on but no data came back -- show waiting state
-                renderDispatcherBanner(null);
             } else {
-                const dBanner = document.getElementById('oc-dispatcher-banner');
-                if (dBanner) dBanner.style.display = 'none';
-                const tornBanner = document.getElementById('oc-dispatcher-torn-banner');
-                if (tornBanner) tornBanner.remove();
+                const _dispApiKey = getApiKey();
+                if (CONFIG.ENGINE_AUTO_DISPATCHER && _dispApiKey && _dispApiKey !== "YOUR_API_KEY_HERE") {
+                    // Engine is on but no data came back -- show waiting state
+                    renderDispatcherBanner(null);
+                } else {
+                    const dBanner = document.getElementById('oc-dispatcher-banner');
+                    if (dBanner) dBanner.style.display = 'none';
+                    const tornBanner = document.getElementById('oc-dispatcher-torn-banner');
+                    if (tornBanner) tornBanner.remove();
+                }
             }
 
             // Lock admin tab content if viewer can't admin

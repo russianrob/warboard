@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.10
+// @version      3.0.20
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,12 +18,14 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
-// v2.7.1 — Remove scoring breakdown; add "Join" link on each fallback option
-// v2.7.0 — Dispatcher shows actual execution countdown from Torn API (ready_at) instead of estimated time
-// v2.6.9 — Hide negative hoursToExpiry in dispatcher banner (expired_at can be in the past for active crimes)
-// v2.6.8 — Dispatcher banner always visible: loading spinner on init, status messages when no data or in OC
-// v2.6.7 — Panel no longer auto-opens; stays closed until user clicks the toggle button (respects oc_panel_closed flag)
-// v2.6.6 — Dispatcher banner: click navigates via hash URL (#crimeId=...) so Torn's own router expands the card; fallbacks also clickable
+// v3.0.20 — Fix syntax error in dispatcher else-branch that broke entire script
+// v3.0.17 — Skip new faction members (< 3 days) from eligible list with skip reason
+// v3.0.16 — MutationObserver debouncing, shared crimes cache for Manager tab, loan button retry fix
+// v3.0.15 — OC history collector fix: pull from completed crimes cache instead of active crimes
+// v3.0.14 — Auto-Dispatcher defaults to enabled when not explicitly set in faction settings
+// v3.0.13 — Remove spawn-key rate limiter
+// v3.0.12 — Sync SCRIPT_VERSION to match @version header
+// v3.0.11 — Reduced CPR boost threshold from 15% to 5% for more per-level consideration
 // v3.0.10 — Disabled Slot Optimizer engine since Auto-Dispatcher serves similar purpose
 // v3.0.9 — Removed hardcoded 15s refresh cooldown completely for faster button re-enable
 // v3.0.8 — Reduced refresh cooldown from 15s to 3s for faster button re-enable
@@ -33,8 +35,25 @@
 // v3.0.4 — travel alert: only show for fully staffed OCs (not partially filled ones with ready_at in past)
 // v3.0.3 — dispatcher banner re-injects when navigating back to crimes tab
 // v3.0.2 — dispatcher banner only visible on crimes tab, auto-hides on tab navigation
-// v3.0.1 — auto-retry on fetch errors (3 retries w/ backoff), dispatcher banner shows retry/error state instead of stuck loading
-// v3.0.0 — version bump (6 engines: Slot Optimizer, Failure Risk, CPR Forecaster, Member Projector, Member Reliability, Auto-Dispatcher)
+// v3.0.1 — auto-retry on fetch errors (3 retries w/ backoff), dispatcher banner shows retry/error state
+// v3.0.0 — 6 engines: Slot Optimizer, Failure Risk, CPR Forecaster, Member Projector, Member Reliability, Auto-Dispatcher
+// v2.7.1 — Remove scoring breakdown; add "Join" link on each fallback option
+// v2.7.0 — Dispatcher shows actual execution countdown from Torn API (ready_at) instead of estimated time
+// v2.6.9 — Hide negative hoursToExpiry in dispatcher banner (expired_at can be in the past for active crimes)
+// v2.6.8 — Dispatcher banner always visible: loading spinner on init, status messages when no data or in OC
+// v2.6.7 — Panel no longer auto-opens; stays closed until user clicks the toggle button (respects oc_panel_closed flag)
+// v2.6.6 — Dispatcher banner: click navigates via hash URL (#crimeId=...) so Torn's own router expands the card; fallbacks also clickable
+// v2.6.5 — Dispatcher banner: show OC name and position in recommendation
+// v2.6.4 — Dispatcher auto-refresh on new data without manual click
+// v2.6.3 — Dispatcher fallback: show top 3 alternative OCs if primary is full
+// v2.6.2 — Dispatcher: factor in travel time for members abroad
+// v2.6.1 — Dispatcher: skip members in hospital or jail
+// v2.6.0 — Auto-Dispatcher engine: real-time OC recommendations on crimes page
+// v2.5.3 — Expiry Risk engine: flag OCs expiring within configurable window
+// v2.5.2 — Gap Analyzer engine: identify role/level shortages in faction
+// v2.5.1 — Item ROI engine: track armory item costs vs OC payout returns
+// v2.5.0 — OC Payout Tracker engine: payout per hour across OC types
+// v2.4.3 — Fix engine cache invalidation on settings change
 // v2.4.2 — Fix fetch interceptor causing uncaught promise rejections (red globe in TornPDA)
 // v2.4.1 — Member Projector: stricter readiness tiers (Building 60-69%, Developing 70-74%, Ready 75%+)
 // v2.4.0 — Rate limiting: 15s cooldown per user, countdown on Refresh button, 429 handling
@@ -169,7 +188,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.6';
+    const SCRIPT_VERSION = '3.0.20';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -955,8 +974,13 @@
             const s = readScopeFromDom();
             if (s !== null) handleDetectedScope(s, 'DOM/State');
         }
+        let timer = null;
+        function scheduleCheck() {
+            if (timer) return; // coalesce mutation bursts into one trailing call
+            timer = setTimeout(() => { timer = null; check(); }, 500);
+        }
         check();
-        const observer = new MutationObserver(check);
+        const observer = new MutationObserver(scheduleCheck);
         observer.observe(document.body, { childList: true, subtree: true });
     }
 
@@ -1060,12 +1084,31 @@
         mgr_membersLoaded = true;
     };
 
-    const mgr_getMissingOCItems = async () => {
+    // Shared cache for the available-crimes endpoint so mgr_getMissingOCItems and
+    // mgr_getAllOCItemRequirements don't hit the API twice when both sub-tabs load.
+    let _mgr_crimesCache = { data: null, ts: 0 };
+    let _mgr_crimesInFlight = null;
+    const MGR_CRIMES_TTL = 30000;
+    const mgr_fetchAvailableCrimes = async () => {
+        const now = Date.now();
+        if (_mgr_crimesCache.data && (now - _mgr_crimesCache.ts) < MGR_CRIMES_TTL) return _mgr_crimesCache.data;
+        if (_mgr_crimesInFlight) return _mgr_crimesInFlight;
         const key = getApiKey();
         if (!key || key === 'YOUR_API_KEY_HERE') throw new Error('API key required');
-        const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}`);
-        if (!res.ok) throw new Error('Failed to load OC data');
-        const data = await res.json();
+        _mgr_crimesInFlight = (async () => {
+            try {
+                const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}`);
+                if (!res.ok) throw new Error('Failed to load OC data');
+                const data = await res.json();
+                _mgr_crimesCache = { data, ts: Date.now() };
+                return data;
+            } finally { _mgr_crimesInFlight = null; }
+        })();
+        return _mgr_crimesInFlight;
+    };
+
+    const mgr_getMissingOCItems = async () => {
+        const data = await mgr_fetchAvailableCrimes();
         const missing = [];
         const crimes = Array.isArray(data?.crimes) ? data.crimes : Object.values(data?.crimes || {});
         crimes.forEach(crime => {
@@ -1084,11 +1127,7 @@
     };
 
     const mgr_getAllOCItemRequirements = async () => {
-        const key = getApiKey();
-        if (!key || key === 'YOUR_API_KEY_HERE') throw new Error('API key required');
-        const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}`);
-        if (!res.ok) throw new Error('Failed to load OC data');
-        const data = await res.json();
+        const data = await mgr_fetchAvailableCrimes();
         const neededByUser = new Map();
         const crimes = Array.isArray(data?.crimes) ? data.crimes : Object.values(data?.crimes || {});
         crimes.forEach(crime => {
@@ -2173,6 +2212,8 @@
                 cprEntries: cpr?.entries ?? [],
                 byPosition: cpr?.byPosition ?? {},
             };
+            const daysInFaction = m.days_in_faction ?? 999;
+            if (daysInFaction < 3) { skipped.push({ ...enriched, skipReason: `New member (${daysInFaction}d, need 3d)` }); continue; }
             if (lastAction < activeCutoff) { skipped.push({ ...enriched, skipReason: `Inactive >${CONFIG.ACTIVE_DAYS}d` }); continue; }
             if (inOC && ocInfo.readyAt > forecastCutoff) { skipped.push({ ...enriched, skipReason: `In OC (ready ${fmtTs(ocInfo.readyAt)})` }); continue; }
             eligible.push(enriched);
@@ -2675,6 +2716,8 @@
 
     // Show a persistent dispatcher banner on the Torn page immediately (loading state)
     function injectDispatcherLoading() {
+        const key = getApiKey();
+        if (!key || key === "YOUR_API_KEY_HERE") return;
         if (!CONFIG.ENGINE_AUTO_DISPATCHER) return;
         if (!isOnCrimesTab()) return; // only show on crimes tab
         if (document.getElementById('oc-dispatcher-torn-banner')) return; // already exists
@@ -3311,16 +3354,30 @@
                     const itemID = parseInt(btn.dataset.itemid, 10);
                     const userID = parseInt(btn.dataset.userid, 10);
                     const userName = btn.dataset.username;
+                    let loanSucceeded = false;
                     try {
                         const armoryID = await mgr_prepareArmouryForItem(itemID);
                         if (!armoryID) {
                             btn.textContent = 'No stock'; btn.classList.add('mgr-btn-warning');
-                            setTimeout(() => { btn.dataset.loaning = 'false'; btn.disabled = false; btn.textContent = 'Go to Armoury'; btn.classList.remove('mgr-btn-warning'); }, 3000);
                             return;
                         }
                         btn.textContent = 'Loaning…'; await mgr_loanPreparedItem({ userID, userName });
                         btn.textContent = '✓ Loaned'; btn.classList.add('mgr-btn-success');
-                    } catch (e) { btn.textContent = '? Check'; btn.classList.add('mgr-btn-warning'); console.error('[OC Mgr] Loan error:', e); }
+                        loanSucceeded = true;
+                    } catch (e) {
+                        btn.textContent = '? Check'; btn.classList.add('mgr-btn-warning');
+                        console.error('[OC Mgr] Loan error:', e);
+                    } finally {
+                        // Success state stays locked (paired with mgr_recentlyLoaned tracking).
+                        // Every other outcome (no stock / error) resets so the user can retry.
+                        if (!loanSucceeded) {
+                            setTimeout(() => {
+                                btn.dataset.loaning = 'false'; btn.disabled = false;
+                                btn.textContent = 'Go to Armoury';
+                                btn.classList.remove('mgr-btn-warning');
+                            }, 3000);
+                        }
+                    }
                 };
             });
         } catch (e) { content.innerHTML = `<div class="mgr-error">${e.message}</div>`; }
@@ -3558,15 +3615,32 @@
             }
             if (!fetchSuccess) throw new Error('Failed to fetch OC data after retries');
 
-            // No faction key cached yet — show waiting message
+            // No faction key cached yet — show actionable message based on Torn's error reason
             if (serverResp.pendingFactionData) {
+                const reason = (serverResp.errorReason || '').toLowerCase();
+                let icon = '\u23f3';
+                let title = 'Waiting for faction data';
+                let body = 'Your API key doesn\'t have faction access.<br>OC data will appear once a member with faction API access loads the panel.';
+                if (reason.includes('id-entity')) {
+                    icon = '\u26a0\ufe0f';
+                    title = 'Key doesn\'t match this faction';
+                    body = 'The Torn API says the key\'s player isn\'t in this faction.<br>If you recently left or rejoined, generate a fresh <b>Limited</b> key at <a href="https://www.torn.com/preferences.php#tab=api" target="_blank" style="color:#74c69d;">preferences \u2192 API</a> and paste it into Settings.';
+                } else if (reason.includes('access level')) {
+                    icon = '\ud83d\udd10';
+                    title = 'API key access level too low';
+                    body = 'You\'re using a <b>Public</b> key. OC data needs at least <b>Limited Access</b>.<br>Generate a new key at <a href="https://www.torn.com/preferences.php#tab=api" target="_blank" style="color:#74c69d;">preferences \u2192 API</a> with Limited Access (or higher) and re-enter it in Settings.';
+                } else if (serverResp.errorReason) {
+                    icon = '\u26a0\ufe0f';
+                    title = 'Faction data unavailable';
+                    body = `Torn API said: <code style="color:#f4a261;">${serverResp.errorReason.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</code><br>OC data will appear once a member with a working key loads the panel.`;
+                }
                 document.getElementById('oc-tab-profile').innerHTML =
                     `<div style="text-align:center;padding:24px 16px;color:#9ca3af;">`
-                    + `<div style="font-size:18px;margin-bottom:8px;">⏳</div>`
-                    + `<div style="font-size:12px;font-weight:600;color:#f3f4f6;margin-bottom:4px;">Waiting for faction data</div>`
-                    + `<div style="font-size:11px;line-height:1.5;">Your API key doesn't have faction access.<br>OC data will appear once a member with faction API access loads the panel.</div>`
+                    + `<div style="font-size:18px;margin-bottom:8px;">${icon}</div>`
+                    + `<div style="font-size:12px;font-weight:600;color:#f3f4f6;margin-bottom:4px;">${title}</div>`
+                    + `<div style="font-size:11px;line-height:1.5;">${body}</div>`
                     + `</div>`;
-                setStatus('Waiting for faction data.');
+                setStatus(serverResp.errorReason ? 'API key issue — see Profile tab.' : 'Waiting for faction data.');
                 return;
             }
 
@@ -3629,14 +3703,17 @@
             // Render Auto-Dispatcher banner (personalized, above all tabs)
             if (engines && engines.autoDispatcher) {
                 renderDispatcherBanner(engines.autoDispatcher);
-            } else if (CONFIG.ENGINE_AUTO_DISPATCHER) {
-                // Engine is on but no data came back -- show waiting state
-                renderDispatcherBanner(null);
             } else {
-                const dBanner = document.getElementById('oc-dispatcher-banner');
-                if (dBanner) dBanner.style.display = 'none';
-                const tornBanner = document.getElementById('oc-dispatcher-torn-banner');
-                if (tornBanner) tornBanner.remove();
+                const _dispApiKey = getApiKey();
+                if (CONFIG.ENGINE_AUTO_DISPATCHER && _dispApiKey && _dispApiKey !== "YOUR_API_KEY_HERE") {
+                    // Engine is on but no data came back -- show waiting state
+                    renderDispatcherBanner(null);
+                } else {
+                    const dBanner = document.getElementById('oc-dispatcher-banner');
+                    if (dBanner) dBanner.style.display = 'none';
+                    const tornBanner = document.getElementById('oc-dispatcher-torn-banner');
+                    if (tornBanner) tornBanner.remove();
+                }
             }
 
             // Lock admin tab content if viewer can't admin
@@ -3684,7 +3761,8 @@
 
     // Inject dispatcher loading banner early (before data arrives)
     // Retry a few times since Torn's DOM may not be ready yet
-    if (CONFIG.ENGINE_AUTO_DISPATCHER) {
+    const _dispApiKey = getApiKey();
+    if (CONFIG.ENGINE_AUTO_DISPATCHER && _dispApiKey && _dispApiKey !== "YOUR_API_KEY_HERE") {
         let _dispLoadTries = 0;
         const _tryInjectLoading = () => {
             if (document.getElementById('oc-dispatcher-torn-banner')) return; // already replaced by real data
