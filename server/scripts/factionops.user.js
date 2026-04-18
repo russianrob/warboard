@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.69
+// @version      4.9.70
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.70  - Fix: Members who authenticated but never clicked "Activate FactionOps" weren't self-reporting bars/cooldowns because startEnergyPoll was only called inside initWarOverlay. Moved the poll kickoff into the auth success path so reporting happens in the background the moment the script loads with a valid key.
 // v4.9.69  - Fix: Victory/Defeat/War Over banner didn't re-render after minimize→re-activate. The warEndedBannerShown module flag stayed true after teardown, so showWarEndedBanner short-circuited on the next init. Reset the flag in deactivateWarOverlay.
 // v4.9.68  - Fix: Logo click-to-minimize didn't land when the overlay was nested in Torn's #mainContainer. Same treatment as Shout/Cooldowns: pointer-events:auto + touch-action + document-level delegated click (capture phase), plus pointer-events:none on children so clicks reach the logo wrapper.
 // v4.9.67  - Feature: Clicking the FactionOps logo in the overlay header minimizes the overlay — Torn's native page comes back and the "Activate FactionOps" pill reappears so you can re-open on demand. Logo now has hover/active styling and a tooltip.
@@ -4251,6 +4252,14 @@ body.wb-chain-active {
                         }
                         log('Authenticated as', state.myPlayerName || 'unknown',
                             '— factionId:', state.myFactionId);
+
+                        // Start self-reporting bars/cooldowns immediately on
+                        // auth success — previously this only ran after the
+                        // user clicked "Activate FactionOps", so members who
+                        // never activated the overlay never reported and
+                        // their cooldowns never registered on the faction
+                        // panel. startEnergyPoll is idempotent.
+                        try { startEnergyPoll(); } catch (_) {}
 
                         // First-auth disclosure: if server says this login
                         // just created a default pool opt-in, show the
