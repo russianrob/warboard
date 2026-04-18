@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.68
+// @version      4.9.69
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.69  - Fix: Victory/Defeat/War Over banner didn't re-render after minimize→re-activate. The warEndedBannerShown module flag stayed true after teardown, so showWarEndedBanner short-circuited on the next init. Reset the flag in deactivateWarOverlay.
 // v4.9.68  - Fix: Logo click-to-minimize didn't land when the overlay was nested in Torn's #mainContainer. Same treatment as Shout/Cooldowns: pointer-events:auto + touch-action + document-level delegated click (capture phase), plus pointer-events:none on children so clicks reach the logo wrapper.
 // v4.9.67  - Feature: Clicking the FactionOps logo in the overlay header minimizes the overlay — Torn's native page comes back and the "Activate FactionOps" pill reappears so you can re-open on demand. Logo now has hover/active styling and a tooltip.
 // v4.9.66  - Feature: Cooldown bars now project forward from the last report timestamp (D/M/B values tick down live without new reports), and the panel re-renders every 60s so you see the decay even with the whole faction offline. Member-bars cache also persists to disk (data/member-bars.json) so restarts no longer wipe the panel.
@@ -6845,6 +6846,11 @@ body.wb-chain-active {
 
         const overlay = document.getElementById('fo-overlay');
         if (overlay) overlay.remove();
+
+        // The war-ended banner tracks "already shown" with a module flag that
+        // gates re-renders. Resetting it here lets a subsequent re-activate
+        // rebuild the banner instead of silently skipping it.
+        warEndedBannerShown = false;
 
         // Re-offer the activate pill so the user can re-open on demand.
         showActivateButton();
