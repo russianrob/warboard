@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.26
+// @version      3.0.27
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.0.27 — Flyer alert "delayed Xm" label now ticks live (once per second) against Date.now() instead of freezing until the next Refresh. ready_at is fixed once Torn sets it, so no extra server/API load — purely client-side text update.
 // v3.0.26 — Flyer alert urgency now shows how long the OC has been sitting ready ("delayed 47m", "delayed 1h12m") instead of a static "ready now" — a practical measure of how long the flyer is holding up the crew. Falls back to "ready now" only for Planning crimes where ready_at is null/0.
 // v3.0.25 — Flyer names in the traveling-alert banner are now clickable: click a name to copy a preset fee-reminder ("You're holding off on the OC initiation...") to the clipboard and open the Torn compose page for that member, same UX as the eligible-members message button. Shared handler is attached to both the tooltip and the panel so either site fires it.
 // v3.0.24 — Flyer alert now catches both "Traveling" (in-transit) and "Abroad" (landed overseas) — previously only Traveling fired, so members who'd already landed abroad were silently missed. Banner renamed to "flying" and shows each member's exact state.
@@ -194,7 +195,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.26';
+    const SCRIPT_VERSION = '3.0.27';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3264,6 +3265,7 @@
                         difficulty: crime.difficulty || 0,
                         urgency,
                         state: info.state,
+                        readyAt: readyAt || 0,
                     });
                 }
             }
@@ -3285,11 +3287,40 @@
             html += ` <span style="color:#9ca3af;">(${stateLabel})</span>`;
             html += ` <span style="color:#ef4444;">\u2192</span> `;
             html += `${a.crimeName} (${a.position}) <span style="color:#9ca3af;">Lvl ${a.difficulty}</span>`;
-            html += ` <span style="color:#fbbf24;font-weight:600;">${a.urgency}</span>`;
+            if (a.readyAt > 0) {
+                html += ` <span class="oc-flyer-delay" data-ready-at="${a.readyAt}" style="color:#fbbf24;font-weight:600;">${a.urgency}</span>`;
+            } else {
+                html += ` <span style="color:#fbbf24;font-weight:600;">${a.urgency}</span>`;
+            }
             html += `</div>`;
         }
         html += `</div>`;
         return html;
+    }
+
+    // Live-tick the "delayed Xm" text in the flyer banner against Date.now()
+    // so the number stays current between refreshes. Purely client-side —
+    // ready_at is fixed once Torn sets it, so no re-fetch is needed. Guarded
+    // by an idempotency flag so re-renders don't stack intervals.
+    function setupFlyerDelayTick() {
+        if (window.__ocFlyerDelayTick) return;
+        window.__ocFlyerDelayTick = setInterval(() => {
+            const nodes = document.querySelectorAll('.oc-flyer-delay[data-ready-at]');
+            if (!nodes.length) return;
+            const now = Math.floor(Date.now() / 1000);
+            for (const el of nodes) {
+                const ra = Number(el.dataset.readyAt) || 0;
+                if (!ra) continue;
+                const s = Math.max(0, now - ra);
+                const mins = Math.floor(s / 60), hrs = Math.floor(mins / 60);
+                let txt;
+                if (s <= 0) txt = 'ready now';
+                else if (hrs > 0) txt = `delayed ${hrs}h${(mins % 60).toString().padStart(2,'0')}m`;
+                else if (mins > 0) txt = `delayed ${mins}m`;
+                else txt = `delayed ${s}s`;
+                if (el.textContent !== txt) el.textContent = txt;
+            }
+        }, 1000);
     }
 
     function renderBody(recs, eligible, skipped, scopeProjection, viewer, availableCrimes, weights, engines, members) {
@@ -3318,6 +3349,7 @@
 
         // Admin tab — everything else
         const travelAlert = buildTravelingAlert(availableCrimes, members);
+        setupFlyerDelayTick();
         document.getElementById('oc-tab-admin').innerHTML = `
             ${travelAlert}
             <div class="oc-stats-strip">
