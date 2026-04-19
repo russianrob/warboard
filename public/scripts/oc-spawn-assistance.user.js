@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.28
+// @version      3.0.29
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.0.29 — Feature: Delay tracking in OC history. Clients POST each flyer observation (crimeId, memberId, delayedSec) to /api/oc/flyer-delay (throttled per pair to 60s). Server keeps max delayedSec until the crime completes, then collectOcHistory bakes the value into the slot entry. New Manager → Delays sub-tab surfaces a 30-day leaderboard of who's held up the most OCs, total delay, longest single delay, and recent crimes; pending (in-flight) observations are included with a tag.
 // v3.0.28 — Scope freshness: every Refresh now fires a call to Torn's internal getCrimesData endpoint to pull fresh scope_balance (existing AJAX interceptor catches the response and updates CONFIG.SCOPE). Scope strip also shows detection age next to "● live" — green under 1min, yellow 1-5min, red if older — so stale readings are visible instead of silent.
 // v3.0.27 — Flyer alert "delayed Xm" label now ticks live (once per second) against Date.now() instead of freezing until the next Refresh. ready_at is fixed once Torn sets it, so no extra server/API load — purely client-side text update.
 // v3.0.26 — Flyer alert urgency now shows how long the OC has been sitting ready ("delayed 47m", "delayed 1h12m") instead of a static "ready now" — a practical measure of how long the flyer is holding up the crew. Falls back to "ready now" only for Planning crimes where ready_at is null/0.
@@ -196,7 +197,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.28';
+    const SCRIPT_VERSION = '3.0.29';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3292,17 +3293,49 @@
                     alerts.push({
                         memberId: uid,
                         memberName: info.name,
+                        crimeId: String(crime.id || ''),
                         crimeName: crime.name || 'Unknown',
                         position: slot.position || 'Unknown',
                         difficulty: crime.difficulty || 0,
                         urgency,
                         state: info.state,
                         readyAt: readyAt || 0,
+                        delayedSec: readyForSec,
                     });
                 }
             }
         }
         if (alerts.length === 0) return '';
+
+        // Report each observation to the server (throttled per pair so we
+        // don't spam the endpoint). Server stores max delayedSec per
+        // (crimeId, memberId) and bakes it into OC history when the crime
+        // completes. Swallow errors — reporting is best-effort.
+        try {
+            if (!window.__ocFlyerReported) window.__ocFlyerReported = {};
+            const rptMap = window.__ocFlyerReported;
+            const nowMs = Date.now();
+            const apiKey = getApiKey();
+            if (apiKey && apiKey !== 'YOUR_API_KEY_HERE') {
+                for (const a of alerts) {
+                    if (!a.crimeId || !a.memberId) continue;
+                    const k = `${a.crimeId}::${a.memberId}`;
+                    if (rptMap[k] && (nowMs - rptMap[k]) < 60_000) continue;
+                    rptMap[k] = nowMs;
+                    const url = `${SERVER}/api/oc/flyer-delay?key=${encodeURIComponent(apiKey)}`;
+                    const body = JSON.stringify({
+                        crimeId: a.crimeId, memberId: a.memberId,
+                        memberName: a.memberName, crimeName: a.crimeName,
+                        delayedSec: a.delayedSec || 0,
+                    });
+                    if (typeof GM_xmlhttpRequest === 'function') {
+                        GM_xmlhttpRequest({ method: 'POST', url, data: body, headers: { 'Content-Type': 'application/json' }, onerror(){}, onload(){} });
+                    } else {
+                        fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'application/json' } }).catch(() => {});
+                    }
+                }
+            }
+        } catch (_) {}
 
         const escAttr = (s) => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         const msgAttr = escAttr(FLYER_MESSAGE);
@@ -3432,6 +3465,7 @@
                     <button class="mgr-sub-tab mgr-sub-tab-active" data-mgr-tab="missing">Missing</button>
                     <button class="mgr-sub-tab" data-mgr-tab="unused">Unused</button>
                     <button class="mgr-sub-tab" data-mgr-tab="payouts">Payouts</button>
+                    <button class="mgr-sub-tab" data-mgr-tab="delays">Delays</button>
                 </div>
                 <div id="mgr-sub-content" class="mgr-sub-content"></div>
             `;
@@ -3450,6 +3484,66 @@
         if (tab === 'missing') mgr_loadMissingTab();
         else if (tab === 'unused') mgr_loadUnusedTab();
         else if (tab === 'payouts') mgr_loadPayoutsTab();
+        else if (tab === 'delays') mgr_loadDelaysTab();
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    //  DELAYS SUB-TAB — who's been flying while OCs sit ready
+    // ──────────────────────────────────────────────────────────────────
+    async function mgr_loadDelaysTab() {
+        const content = document.getElementById('mgr-sub-content');
+        content.innerHTML = '<div class="mgr-loading">Loading delay history…</div>';
+        const apiKey = getApiKey();
+        if (!apiKey) {
+            content.innerHTML = '<div class="mgr-ok">Set your API key to see delay stats.</div>';
+            return;
+        }
+        const days = 30;
+        let resp;
+        try {
+            const r = await gmRequest(`${SERVER}/api/oc/delays?key=${encodeURIComponent(apiKey)}&days=${days}`);
+            resp = JSON.parse(r.responseText);
+        } catch (e) {
+            content.innerHTML = `<div class="oc-error">Failed to load delays: ${e.message || e}</div>`;
+            return;
+        }
+        const members = Array.isArray(resp?.members) ? resp.members : [];
+        if (members.length === 0) {
+            content.innerHTML = `<div class="mgr-ok">No delays recorded in the last ${days}d. Either nobody's flown during a ready OC, or data is still being collected — delays only start logging when someone on the script opens the crimes tab while a flyer is in play.</div>`;
+            return;
+        }
+        const fmtDur = (s) => {
+            s = Math.floor(Number(s) || 0);
+            if (s < 60) return `${s}s`;
+            const m = Math.floor(s / 60), h = Math.floor(m / 60);
+            if (h > 0) return `${h}h${(m % 60).toString().padStart(2,'0')}m`;
+            return `${m}m`;
+        };
+        const escHtml = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        let html = `<div style="color:#9ca3af;font-size:10px;margin-bottom:6px;">Last ${days} days · ${members.length} member${members.length === 1 ? '' : 's'} flagged · ordered by total time held</div>`;
+        html += `<table class="oc-table" style="width:100%;"><thead><tr>
+            <th>Member</th><th style="text-align:right;">Incidents</th><th style="text-align:right;">Total</th><th style="text-align:right;">Longest</th><th>Recent crimes</th>
+        </tr></thead><tbody>`;
+        for (const m of members) {
+            const top = (m.crimes || [])
+                .slice()
+                .sort((a, b) => (b.completedAt || Date.now()) - (a.completedAt || Date.now()))
+                .slice(0, 3)
+                .map(c => {
+                    const tag = c.pending ? ' <span style="color:#fbbf24;">(in-flight)</span>' : '';
+                    return `${escHtml(c.crimeName || 'Crime')}${tag} — <b>${fmtDur(c.delayedSec)}</b>`;
+                })
+                .join('<br>');
+            html += `<tr>
+                <td><a href="/profiles.php?XID=${escHtml(m.memberId)}" class="mgr-player-link">${escHtml(m.name)}</a> <span class="oc-member-id">[${escHtml(m.memberId)}]</span></td>
+                <td style="text-align:right;"><b>${m.count}</b></td>
+                <td style="text-align:right;font-weight:600;color:#f59e0b;">${fmtDur(m.totalSec)}</td>
+                <td style="text-align:right;color:#9ca3af;">${fmtDur(m.longestSec)}</td>
+                <td style="font-size:10px;color:#9ca3af;">${top}</td>
+            </tr>`;
+        }
+        html += `</tbody></table>`;
+        content.innerHTML = html;
     }
 
     async function mgr_loadMissingTab() {

@@ -2644,6 +2644,56 @@ router.get("/api/oc-verify", async (req, res) => {
 
 const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
 const _engineCache    = new Map(); // factionId  → { ts, engines, settingsHash }
+
+// In-memory flyer-delay observations. Clients POST per-render to
+// /api/oc/flyer-delay; we keep the max delayedSec seen per
+// (factionId, crimeId, memberId) until the crime completes and
+// collectOcHistory bakes it into the disk history.
+// Shape: Map<factionId, Map<crimeId::memberId, { delayedSec, observedAt, memberName, crimeName }>>
+const _flyerDelays = new Map();
+// Resolved lazily — OC_HISTORY_DIR is declared later in this file. Using a
+// getter dodges the Temporal Dead Zone while keeping a single canonical path.
+function flyerDelaysFile() { return pathJoin(OC_HISTORY_DIR, '..', 'flyer-delays.json'); }
+function loadFlyerDelays() {
+  try {
+    const file = flyerDelaysFile();
+    if (!existsSync(file)) return;
+    const raw = readFileSync(file, 'utf-8');
+    const data = JSON.parse(raw);
+    const cutoff = Date.now() - 48 * 60 * 60 * 1000; // drop anything >48h old on load
+    let total = 0;
+    for (const [fid, entries] of Object.entries(data)) {
+      const m = new Map();
+      for (const [k, v] of Object.entries(entries)) {
+        if (v && v.observedAt >= cutoff) { m.set(k, v); total++; }
+      }
+      if (m.size) _flyerDelays.set(fid, m);
+    }
+    console.log(`[flyer-delays] Loaded ${total} pending observation(s) from disk`);
+  } catch (e) {
+    console.error('[flyer-delays] Load error:', e.message);
+  }
+}
+let _flyerDelaysSaveTimer = null;
+function scheduleFlyerDelaysSave() {
+  if (_flyerDelaysSaveTimer) return;
+  _flyerDelaysSaveTimer = setTimeout(() => {
+    _flyerDelaysSaveTimer = null;
+    try {
+      const obj = {};
+      for (const [fid, entries] of _flyerDelays) {
+        const sub = {};
+        for (const [k, v] of entries) sub[k] = v;
+        if (Object.keys(sub).length) obj[fid] = sub;
+      }
+      writeFileSync(flyerDelaysFile(), JSON.stringify(obj));
+    } catch (e) {
+      console.error('[flyer-delays] Save error:', e.message);
+    }
+  }, 30_000);
+}
+// Defer load until OC_HISTORY_DIR (declared further down) has initialised.
+setImmediate(loadFlyerDelays);
 function engineSettingsHash(s) {
   return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}|${!!s.engine_member_projector}|${!!s.engine_member_reliability}|${!!s.engine_auto_dispatcher}`;
 }
@@ -3052,12 +3102,37 @@ function collectOcHistory(factionId, data) {
       if (history.some(h => String(h.crimeId) === cid)) { _seenCrimeIds.add(cid); continue; }
       _seenCrimeIds.add(cid);
 
-      const slots = (c.slots || []).map(s => ({
-        position: s.position,
-        userId: String(s.user_id || s.user?.id || ''),
-        userName: nameMap[String(s.user_id || s.user?.id || '')] || '',
-        weight: s.checkpoint_pass_rate || 0,
-      }));
+      // Merge in flyer-delay observations collected while the crime was
+      // in Planning. The store keys are "crimeId::memberId"; pull any
+      // that match and attach to the corresponding slot. Delete once
+      // baked so the in-memory store stays tight.
+      const fdMap = _flyerDelays.get(String(factionId));
+      const slots = (c.slots || []).map(s => {
+        const uid = String(s.user_id || s.user?.id || '');
+        const slot = {
+          position: s.position,
+          userId: uid,
+          userName: nameMap[uid] || '',
+          weight: s.checkpoint_pass_rate || 0,
+        };
+        if (fdMap && uid) {
+          const key = `${cid}::${uid}`;
+          const obs = fdMap.get(key);
+          if (obs && obs.delayedSec > 0) {
+            slot.delayedSec = Math.round(obs.delayedSec);
+            fdMap.delete(key);
+          }
+        }
+        return slot;
+      });
+      if (fdMap) {
+        // Also clear any other entries for this crimeId — no longer useful.
+        for (const k of Array.from(fdMap.keys())) {
+          if (k.startsWith(`${cid}::`)) fdMap.delete(k);
+        }
+        if (fdMap.size === 0) _flyerDelays.delete(String(factionId));
+        scheduleFlyerDelaysSave();
+      }
 
       // Store rewards data for payout tracking (only present on successful crimes)
       const rewards = c.rewards ? {
@@ -4104,6 +4179,119 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     // actionable guidance ("enable Faction permission", "use Full access key", etc).
     return res.json({ crimes: [], members: {}, cprCache: {}, pendingFactionData: true, errorReason: err.message, viewer: buildViewer(playerInfo), engines: {} });
   }
+});
+
+// Shared helper — resolves the API key to a cached playerInfo (or
+// verifies against Torn if the cache entry is missing/stale). Mirrors
+// the guard used in /api/oc/spawn-key so new /api/oc/* endpoints can
+// reuse the same auth path without duplicating code.
+async function resolveSpawnKeyInfo(req, res) {
+  res.set("Access-Control-Allow-Origin", "*");
+  const key = req.query.key;
+  if (!key || typeof key !== "string" || key.length < 10) {
+    res.status(400).json({ error: "Invalid key" });
+    return null;
+  }
+  const suffix = key.slice(-8);
+  let info = _spawnKeyCache.get(suffix);
+  if (!info || (Date.now() - info.ts) > 5 * 60_000) {
+    try {
+      const tornInfo = await verifyTornApiKey(key);
+      if (!isFactionAllowed(tornInfo.factionId) && !PARTNER_FACTIONS.includes(String(tornInfo.factionId)) && !hasXanaxSubscription(tornInfo.factionId)) {
+        res.status(403).json({ error: "Access restricted" });
+        return null;
+      }
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition, hasFactionAccess: tornInfo.hasFactionAccess };
+      _spawnKeyCache.set(suffix, info);
+    } catch (err) {
+      res.status(401).json({ error: err.message });
+      return null;
+    }
+  }
+  return info;
+}
+
+// ── POST /api/oc/flyer-delay ──────────────────────────────────────────
+// Client-side observation: a crew member was flying while their OC was
+// ready to execute. We keep the MAX delayedSec observed per
+// (factionId, crimeId, memberId) so when the crime finally launches
+// and lands in history, we can attach the true peak delay.
+router.post("/api/oc/flyer-delay", async (req, res) => {
+  const info = await resolveSpawnKeyInfo(req, res);
+  if (!info) return;
+  const { crimeId, memberId, memberName, crimeName, delayedSec } = (req.body || {});
+  if (!crimeId || !memberId) return res.status(400).json({ error: "crimeId and memberId are required" });
+  const delay = Math.max(0, Math.floor(Number(delayedSec) || 0));
+  const fid = String(info.factionId);
+  if (!_flyerDelays.has(fid)) _flyerDelays.set(fid, new Map());
+  const m = _flyerDelays.get(fid);
+  const key = `${crimeId}::${memberId}`;
+  const prev = m.get(key);
+  const nextDelay = Math.max(prev?.delayedSec || 0, delay);
+  m.set(key, {
+    delayedSec: nextDelay,
+    observedAt: Date.now(),
+    memberName: String(memberName || prev?.memberName || memberId),
+    crimeName:  String(crimeName  || prev?.crimeName  || crimeId),
+  });
+  scheduleFlyerDelaysSave();
+  return res.json({ ok: true, delayedSec: nextDelay });
+});
+
+// ── GET /api/oc/delays ───────────────────────────────────────────────
+// Aggregates per-member delay stats over the faction's OC history.
+// Reads the on-disk history file (written by collectOcHistory) and
+// also includes any still-pending in-memory observations from
+// _flyerDelays so a crime currently holding up the crew shows in the
+// leaderboard before it completes. Returns a sorted array by total
+// delayed seconds descending.
+router.get("/api/oc/delays", async (req, res) => {
+  const info = await resolveSpawnKeyInfo(req, res);
+  if (!info) return;
+  const fid = String(info.factionId);
+  const lookbackDays = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+  const cutoff = Date.now() - lookbackDays * 86400 * 1000;
+
+  const stats = new Map(); // memberId → { name, count, totalSec, longestSec, crimes: [] }
+  function add(memberId, name, crimeName, crimeId, completedAt, delayedSec) {
+    if (!memberId || delayedSec <= 0) return;
+    if (completedAt && completedAt < cutoff) return;
+    let s = stats.get(memberId);
+    if (!s) { s = { memberId, name: name || memberId, count: 0, totalSec: 0, longestSec: 0, crimes: [] }; stats.set(memberId, s); }
+    if (name) s.name = name;
+    s.count++;
+    s.totalSec += delayedSec;
+    if (delayedSec > s.longestSec) s.longestSec = delayedSec;
+    s.crimes.push({ crimeId, crimeName, delayedSec, completedAt: completedAt || null, pending: !completedAt });
+  }
+
+  try {
+    const histFile = pathJoin(OC_HISTORY_DIR, `${fid}.json`);
+    if (existsSync(histFile)) {
+      const history = JSON.parse(readFileSync(histFile, 'utf-8'));
+      for (const c of history) {
+        if (!Array.isArray(c.slots)) continue;
+        for (const s of c.slots) {
+          if (!s.delayedSec) continue;
+          add(String(s.userId), s.userName, c.crimeName, c.crimeId, c.completedAt, Number(s.delayedSec));
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[oc/delays] history read failed:', e.message);
+  }
+
+  // Layer in-memory pending delays on top (for in-flight crimes).
+  const pend = _flyerDelays.get(fid);
+  if (pend) {
+    for (const [k, v] of pend) {
+      const [crimeId, memberId] = k.split('::');
+      add(memberId, v.memberName, v.crimeName, crimeId, null, Number(v.delayedSec || 0));
+    }
+  }
+
+  const out = Array.from(stats.values()).sort((a, b) => b.totalSec - a.totalSec);
+  return res.json({ days: lookbackDays, members: out });
 });
 
 
