@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.27
+// @version      3.0.28
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.0.28 — Scope freshness: every Refresh now fires a call to Torn's internal getCrimesData endpoint to pull fresh scope_balance (existing AJAX interceptor catches the response and updates CONFIG.SCOPE). Scope strip also shows detection age next to "● live" — green under 1min, yellow 1-5min, red if older — so stale readings are visible instead of silent.
 // v3.0.27 — Flyer alert "delayed Xm" label now ticks live (once per second) against Date.now() instead of freezing until the next Refresh. ready_at is fixed once Torn sets it, so no extra server/API load — purely client-side text update.
 // v3.0.26 — Flyer alert urgency now shows how long the OC has been sitting ready ("delayed 47m", "delayed 1h12m") instead of a static "ready now" — a practical measure of how long the flyer is holding up the crew. Falls back to "ready now" only for Planning crimes where ready_at is null/0.
 // v3.0.25 — Flyer names in the traveling-alert banner are now clickable: click a name to copy a preset fee-reminder ("You're holding off on the OC initiation...") to the clipboard and open the Torn compose page for that member, same UX as the eligible-members message button. Shared handler is attached to both the tooltip and the panel so either site fires it.
@@ -195,7 +196,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.27';
+    const SCRIPT_VERSION = '3.0.28';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -886,7 +887,11 @@
     //  SCOPE SYNC  — push detected scope to server ASAP
     // ═══════════════════════════════════════════════════════════════════════
     function handleDetectedScope(scope, source) {
-        if (scope === null || scope === CONFIG.SCOPE) return;
+        // Always stamp the update time, even if the value didn't change —
+        // so the UI can say "confirmed Xs ago" instead of looking stale.
+        CONFIG._scopeUpdatedAt = Date.now();
+        if (scope === null) return;
+        if (scope === CONFIG.SCOPE) return;
 
         console.log(`[OC Spawn] Detected scope ${scope} from ${source}`);
         CONFIG.SCOPE = scope;
@@ -897,6 +902,22 @@
         if (scopeEl) scopeEl.value = scope;
 
         // Scope auto-push removed — scope is saved manually via Settings
+    }
+
+    // Force a fresh scope read by calling Torn's internal crimes data
+    // endpoint. Our AJAX interceptor (setupAjaxInterceptor) catches the
+    // response and forwards scope_balance to handleDetectedScope. The
+    // request is sent with the user's existing session cookie (we only
+    // run on torn.com) so no extra auth is needed. Swallows errors — if
+    // Torn blocks the direct call we just fall back to whatever the page
+    // last reported.
+    function refreshScopeFromTorn() {
+        try {
+            fetch('/factions.php?step=getCrimesData', {
+                credentials: 'include',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            }).catch(() => {});
+        } catch (_) {}
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -2925,8 +2946,19 @@
         }
         const { current, regen, expectedGain, projected } = scopeProjection;
         const barClass = projected < 10 ? 'warn' : 'ok';
+        let ageLabel = '';
+        if (CONFIG._scopeUpdatedAt) {
+            const s = Math.max(0, Math.floor((Date.now() - CONFIG._scopeUpdatedAt) / 1000));
+            const m = Math.floor(s / 60), h = Math.floor(m / 60);
+            const age = h > 0 ? `${h}h${(m % 60).toString().padStart(2,'0')}m`
+                       : m > 0 ? `${m}m`
+                       : `${s}s`;
+            // Red if over 5min old, yellow over 1min, green fresh.
+            const col = s > 300 ? '#ef4444' : s > 60 ? '#fbbf24' : '#2d6a4f';
+            ageLabel = ` <span style="font-size:9px;color:${col};">${age}</span>`;
+        }
         const autoTag = CONFIG._scopeAutoDetected
-            ? `<span style="font-size:9px;color:#2d6a4f;margin-left:4px;">● live</span>`
+            ? `<span style="font-size:9px;color:#2d6a4f;margin-left:4px;">● live${ageLabel}</span>`
             : `<span style="font-size:9px;color:#374151;margin-left:4px;">manual</span>`;
         return `<div class="oc-scope-strip">
             <div style="white-space:nowrap;color:#9ca3af;font-size:10px;">Scope${autoTag}</div>
@@ -3638,6 +3670,12 @@
         refreshBtn.disabled = true;
         document.getElementById('oc-tab-profile').innerHTML = '';
         document.getElementById('oc-tab-admin').innerHTML   = '';
+
+        // Force a fresh scope read at the start of every analysis so the
+        // strip never shows stale data just because the user hasn't visited
+        // the crimes tab in a while. Response lands asynchronously via the
+        // AJAX interceptor and updates CONFIG.SCOPE + _scopeUpdatedAt.
+        refreshScopeFromTorn();
 
         try {
             // Fetch faction-wide settings
