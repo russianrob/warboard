@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.29
+// @version      3.0.30
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.0.30 — Fix: Manager Delays tab used r.responseText, but gmRequest already returns { ok, status, data } with JSON parsed. That produced "JSON parse error: unexpected identifier undefined" every time. Now reads r.data and surfaces non-2xx responses with the server's error message.
 // v3.0.29 — Feature: Delay tracking in OC history. Clients POST each flyer observation (crimeId, memberId, delayedSec) to /api/oc/flyer-delay (throttled per pair to 60s). Server keeps max delayedSec until the crime completes, then collectOcHistory bakes the value into the slot entry. New Manager → Delays sub-tab surfaces a 30-day leaderboard of who's held up the most OCs, total delay, longest single delay, and recent crimes; pending (in-flight) observations are included with a tag.
 // v3.0.28 — Scope freshness: every Refresh now fires a call to Torn's internal getCrimesData endpoint to pull fresh scope_balance (existing AJAX interceptor catches the response and updates CONFIG.SCOPE). Scope strip also shows detection age next to "● live" — green under 1min, yellow 1-5min, red if older — so stale readings are visible instead of silent.
 // v3.0.27 — Flyer alert "delayed Xm" label now ticks live (once per second) against Date.now() instead of freezing until the next Refresh. ready_at is fixed once Torn sets it, so no extra server/API load — purely client-side text update.
@@ -197,7 +198,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.29';
+    const SCRIPT_VERSION = '3.0.30';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3502,7 +3503,12 @@
         let resp;
         try {
             const r = await gmRequest(`${SERVER}/api/oc/delays?key=${encodeURIComponent(apiKey)}&days=${days}`);
-            resp = JSON.parse(r.responseText);
+            if (!r.ok) {
+                const msg = r.data?.error || `HTTP ${r.status}`;
+                content.innerHTML = `<div class="oc-error">Failed to load delays: ${msg}</div>`;
+                return;
+            }
+            resp = r.data;
         } catch (e) {
             content.innerHTML = `<div class="oc-error">Failed to load delays: ${e.message || e}</div>`;
             return;
