@@ -336,7 +336,7 @@ function parseCookie(cookieHeader, name) {
 
 // ── POST /api/auth ──────────────────────────────────────────────────────
 
-const FACTIONOPS_MIN_VERSION = '4.9.70';
+const FACTIONOPS_MIN_VERSION = '4.9.74';
 function factionopsVersionTooOld(v) {
   if (!v || typeof v !== 'string') return false; // legacy clients that don't send a version — let them through
   const a = v.split('.').map(Number), b = FACTIONOPS_MIN_VERSION.split('.').map(Number);
