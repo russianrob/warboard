@@ -17,6 +17,7 @@ const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { getOcSpawnData, getCachedCompletedCrimes } from "./oc-spawn.js";
 import * as vaultRequests from "./vault-requests.js";
+import * as keyUsage from "./key-usage-log.js";
 import { hasXanaxSubscription, grantFactionAccess, getXanaxSubscription } from "./xanax-subscriptions.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
@@ -4171,6 +4172,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     // this will fail and fall back to the cached faction key below.
     const fid = String(playerInfo.factionId);
     if (playerInfo.hasFactionAccess) addFactionKey(fid, key);
+    keyUsage.logCall(key, 'faction/spawn (primary)', `oc-spawn:${playerInfo.playerName}`);
     const data = await getOcSpawnData(playerInfo.factionId, key);
 
     // Apply faction's MINCPR/CPR_BOOST to recalculate joinable (server cache uses hardcoded defaults)
@@ -4235,8 +4237,12 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     const persistedKeys = store.getPooledKeysForFaction(fid).map(e => e.key);
     const keysToTry = Array.from(new Set([...inMemKeys, ...persistedKeys])).filter(k => k !== key);
     if (keysToTry.length > 0) {
+      // Log WHY we're falling back so debug output ties pool 429s back to the
+      // original caller whose key triggered the retry.
+      console.warn(`[oc/spawn-key] primary failed for ${playerInfo.playerName} (${playerInfo.playerId}, faction ${fid}) key ****${String(key).slice(-4)}: ${err.message} — trying ${keysToTry.length} pool key(s)`);
       for (const poolKey of keysToTry) {
         try {
+          keyUsage.logCall(poolKey, 'faction/spawn (fallback)', `oc-spawn-fallback:for:${playerInfo.playerName}`);
           const data = await getOcSpawnData(playerInfo.factionId, poolKey);
           // Apply faction settings to retry path too
           const fS2 = store.getFactionSettings(playerInfo.factionId);
@@ -4785,6 +4791,37 @@ router.post("/api/oc/notification-test", async (req, res) => {
     return res.json({ ok: true });
   } catch (e) {
     return res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Debug: API key usage tracker ───────────────────────────────────────────
+// Last N minutes of server-side Torn API calls with summary by source.
+// Auth: Torn API key query param verified against dev XID 137558. Zero
+// infra cost — in-memory ring buffer, max 15 min / 5k entries.
+router.get("/api/debug/key-usage", async (req, res) => {
+  const key = req.query.key;
+  if (!key || String(key).length < 10) return res.status(400).json({ error: "key required" });
+  try {
+    const info = await verifyTornApiKey(String(key));
+    if (String(info.playerId) !== '137558') return res.status(403).json({ error: "dev only" });
+    const windowMin = Math.max(1, Math.min(15, Number(req.query.window) || 10));
+    const keySuffix = req.query.keySuffix ? String(req.query.keySuffix) : null;
+    return res.json(keyUsage.getRecent(windowMin, keySuffix));
+  } catch (e) {
+    return res.status(401).json({ error: e.message });
+  }
+});
+
+router.post("/api/debug/key-usage/clear", async (req, res) => {
+  const key = (req.body && req.body.key) || req.query.key;
+  if (!key || String(key).length < 10) return res.status(400).json({ error: "key required" });
+  try {
+    const info = await verifyTornApiKey(String(key));
+    if (String(info.playerId) !== '137558') return res.status(403).json({ error: "dev only" });
+    keyUsage.clear();
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(401).json({ error: e.message });
   }
 });
 

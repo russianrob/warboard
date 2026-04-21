@@ -329,6 +329,49 @@ export function getAllowedBroadcastRoles(factionId) {
   return settings.broadcastRoles;
 }
 
+/**
+ * Roles that can see the OC Spawn Assistance admin/manager/engines tabs.
+ * Configured separately from broadcast roles via the OC settings panel —
+ * leadership might want to delegate "admin tab access" to a different set
+ * (e.g. trusted Sergeants) than who can shout to the war room.
+ */
+export function getAdminRoles(factionId) {
+  const settings = getFactionSettings(factionId);
+  if (!settings.adminRoles || !Array.isArray(settings.adminRoles) || settings.adminRoles.length === 0) {
+    return ["leader", "co-leader"];
+  }
+  return settings.adminRoles;
+}
+
+export function setAdminRoles(factionId, roles) {
+  const cleaned = Array.isArray(roles)
+    ? roles.map(r => String(r).trim().toLowerCase()).filter(Boolean).slice(0, 30)
+    : [];
+  const current = getFactionSettings(factionId);
+  factionSettings.set(String(factionId), { ...current, adminRoles: cleaned });
+  saveFactionSettings();
+  return cleaned;
+}
+
+/**
+ * Per-faction dedicated OC API key. Replaces the single-owner-key model
+ * for faction-scoped tasks: auto-cleanup of vault-requests, faction crime
+ * polling, any other task that needs faction-access-level API calls.
+ * Only faction admins can set this (enforced at route level).
+ */
+export function getOcApiKey(factionId) {
+  const settings = getFactionSettings(factionId);
+  return settings.ocApiKey || '';
+}
+
+export function setOcApiKey(factionId, apiKey) {
+  const cleaned = String(apiKey || '').trim();
+  const current = getFactionSettings(factionId);
+  factionSettings.set(String(factionId), { ...current, ocApiKey: cleaned });
+  saveFactionSettings();
+  return cleaned.length > 0;
+}
+
 /** Load faction API keys from disk (called once at startup). */
 export function loadFactionKeys() {
   ensureDataDir();
@@ -655,6 +698,8 @@ export function loadMemberBars() {
 
 export function getPollingKey(factionId, purpose, index) {
   const pool = getPooledKeysForFaction(factionId);
+  let picked = null;
+  let pickedPid = null;
   if (pool.length > 0) {
     // If caller passes a numeric index, rotate request-by-request
     // across the pool (used by high-frequency pollers like per-enemy
@@ -664,11 +709,20 @@ export function getPollingKey(factionId, purpose, index) {
     const idx = typeof index === "number"
       ? Math.abs(index) % pool.length
       : stringHash(String(purpose || "default")) % pool.length;
-    return pool[idx].key;
+    picked = pool[idx].key;
+    pickedPid = pool[idx].playerId || null;
+  } else {
+    picked = factionApiKeys.get(String(factionId))
+          || getApiKeyForFaction(factionId)
+          || null;
   }
-  return (
-    factionApiKeys.get(String(factionId)) ||
-    getApiKeyForFaction(factionId) ||
-    null
-  );
+  // Fire-and-forget key-usage log so the debug tracker sees every pool
+  // pick. Caller-side code doesn't need to log separately. Dynamic import
+  // avoids a circular dep at module load time.
+  if (picked) {
+    import('./key-usage-log.js')
+      .then(m => m.logCall(picked, `pool/${purpose || 'default'}`, `pool:${purpose || 'default'}:pid=${pickedPid || '?'}`))
+      .catch(() => {});
+  }
+  return picked;
 }

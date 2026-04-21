@@ -72,6 +72,7 @@ function saveState() {
 
 async function fetchMoneyLog() {
   const url = `https://api.torn.com/user/?selections=log&log=5200&key=${OWNER_API_KEY}`;
+  try { (await import('./key-usage-log.js')).logCall(OWNER_API_KEY, 'user?selections=log&log=5200', 'subscription-mgr:poll'); } catch (_) {}
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Torn API HTTP ${res.status}`);
   const data = await res.json();
@@ -81,6 +82,7 @@ async function fetchMoneyLog() {
 
 async function fetchPlayerBasic(playerId) {
   const url = `https://api.torn.com/user/${playerId}?selections=basic&key=${OWNER_API_KEY}`;
+  try { (await import('./key-usage-log.js')).logCall(OWNER_API_KEY, `user/${playerId}?selections=basic`, 'subscription-mgr:lookup'); } catch (_) {}
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Torn API HTTP ${res.status}`);
   const data = await res.json();
