@@ -28,7 +28,13 @@ const MAX_ITEM_AGE_MS  = Number(process.env.WEAV3R_MAX_AGE_MS) || 60 * 60 * 1000
 // mark each weav3r listing as verified/gone, cache in the served snapshot so
 // clients don't have to verify themselves. Rate-limited to 60 calls/min to
 // stay under Torn's 100/min budget with headroom for spawn-assistance etc.
+//
+// Disabled by default: verify burns ~60% of OWNER_API_KEY's 100/min budget
+// and the user-facing feed is fine without it (items just show verified:null
+// and let the client decide whether to display them). Flip WEAV3R_VERIFY=1
+// in the environment to re-enable.
 const OWNER_API_KEY         = process.env.OWNER_API_KEY || '';
+const VERIFY_ENABLED        = process.env.WEAV3R_VERIFY === '1';
 const VERIFY_RATE_PER_MIN   = 60;
 const VERIFY_INTERVAL_MS    = 60_000 / VERIFY_RATE_PER_MIN;
 const VERIFY_CACHE_TTL_MS   = 5 * 60 * 1000;
@@ -143,6 +149,7 @@ async function refresh() {
 }
 
 function enqueueSellers(items) {
+    if (!VERIFY_ENABLED) return;
     if (!OWNER_API_KEY) return;
     const now = Date.now();
     const seen = new Set(verifyQueue);
