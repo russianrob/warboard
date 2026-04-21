@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.13
+// @version      3.1.14
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.14 — Fix: Admin tab was always visible to every member regardless of admin-roles list. Now hidden for non-admins alongside Manager/Metrics/Engines. Also removed the stale "Admin requires faction API access" locked message — gating is role-based now, the old copy was misleading.
 // v3.1.13 — Admin settings (gear) now has a "Vault-Request Notifications" toggle and a "Send Test Notification" button. Toggle is server-backed via /api/oc/notification-prefs (auth'd by Torn API key — no FactionOps JWT needed). Test button fires a real push to the caller so they can verify their subscription before relying on live alerts.
 // v3.1.12 — Vault-request amount input accepts shorthand: "500k" → 500,000, "2.5m" → 2,500,000, "1b" → 1,000,000,000. Also tolerates commas ("1,000"), leading $ ("$500"), and decimals. Input switched from type=number to type=text + inputmode=decimal so mobile still gets a numeric keypad.
 // v3.1.11 — TornPDA fix: header buttons (Refresh, settings gear, close ✕) bind both click + touchend with a 350ms dedupe. Flutter InAppWebView swallows synthesized click events on children of the drag-handle <h2>, which is why taps in TornPDA did nothing. Handlers still fire exactly once on desktop / mobile web / WebView.
@@ -211,7 +212,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.13';
+    const SCRIPT_VERSION = '3.1.14';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4414,25 +4415,21 @@
             renderBody(recs, eligible, skipped, scopeProjection, viewer, availableCrimes, weights, engines, members);
             bindVaultRequestHandlers(apiKey, viewer);
 
-            // Always show tab bar with both tabs
-            const tabBar   = document.getElementById('oc-tab-bar');
-            const adminTab = document.getElementById('oc-admin-tab');
+            // Tab visibility: Admin/Manager/Metrics/Engines are gated together
+            // on canViewAdmin (dev OR viewer's faction position is in the
+            // admin-roles list). Non-admins see only the My OC tab — no stale
+            // "requires API access" message, just hidden tabs entirely.
+            const tabBar     = document.getElementById('oc-tab-bar');
+            const adminTab   = document.getElementById('oc-admin-tab');
             const managerTab = document.getElementById('oc-manager-tab');
-            tabBar.style.display   = 'flex';
-            adminTab.style.display = '';
-
-            // Show Manager tab for admins (same check as Admin tab)
             const metricsTab = document.getElementById('oc-metrics-tab');
             const enginesTab = document.getElementById('oc-engines-tab');
-            if (canViewAdmin(viewer)) {
-                managerTab.style.display = '';
-                if (metricsTab) metricsTab.style.display = '';
-                if (enginesTab) enginesTab.style.display = '';
-            } else {
-                managerTab.style.display = 'none';
-                if (metricsTab) metricsTab.style.display = 'none';
-                if (enginesTab) enginesTab.style.display = 'none';
-            }
+            const canAdmin   = canViewAdmin(viewer);
+            tabBar.style.display = 'flex';
+            adminTab.style.display   = canAdmin ? '' : 'none';
+            managerTab.style.display = canAdmin ? '' : 'none';
+            if (metricsTab) metricsTab.style.display = canAdmin ? '' : 'none';
+            if (enginesTab) enginesTab.style.display = canAdmin ? '' : 'none';
 
             // Render Engines tab content
             document.getElementById('oc-tab-engines').innerHTML = renderEnginesTab(engines, viewer);
@@ -4460,15 +4457,11 @@
             // Show config section only for admins (prevents non-admins from pushing default settings)
             const cfgSection = document.getElementById('oc-cfg-section');
             if (cfgSection) cfgSection.style.display = (isDev(viewer) || canViewAdmin(viewer)) ? '' : 'none';
-            if (canViewAdmin(viewer)) {
+            if (canAdmin) {
                 const lastTab = GM_getValue('oc_last_tab', 'admin');
                 const validTabs = ['profile', 'admin', 'manager', 'metrics', 'engines'];
                 switchTab(validTabs.includes(lastTab) ? lastTab : 'admin');
             } else {
-                // Replace admin content with locked message
-                document.getElementById('oc-tab-admin').innerHTML =
-                    `<p class="oc-error" style="margin-top:8px;">🔒 Admin access requires faction API access.</p>
-                     <p style="color:#6b7280;font-size:11px;">Your API key does not have faction access. &nbsp;·&nbsp; ID: <b style="color:#9ca3af;">${viewer?.playerId || '?'}</b></p>`;
                 switchTab('profile');
             }
 
