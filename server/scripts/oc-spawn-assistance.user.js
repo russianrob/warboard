@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.27
+// @version      3.1.28
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.28 — Scope cleanup: auto-detect + auto-push is working correctly so dropped the verbose diagnostic logs (init snapshot, per-refresh overwrite decisions, strategy-fire lines). Kept the two useful console lines: "Detected scope change: X → Y (source: …)" and "pushed N to server". Strategy logs demoted to console.debug for Verbose-mode recovery if we ever need to diagnose again.
 // v3.1.27 — Scope auto-push: when the DOM reader catches a fresh scope value (e.g. 14 from the Recruiting tab's currentScopes element), the script now debounce-pushes it to /api/oc/settings/update with the caller's API key, 1.5s debounce. Side effect: everyone else in the faction sees the fresh value on their next refresh — no one has to open the Recruiting tab themselves. Also makes the "revert to 11 on reload" class of bug impossible since the server's saved value matches the last detection.
 // v3.1.26 — Scope diagnostic logging for "full reload reverts to 11": init now logs what GM storage contained at script boot (cfg_scope, cfg_scope_auto_ts, age in seconds, resulting CONFIG.SCOPE, autoDetected flag). fetchFactionSettings also logs whether it kept the fresh value or let the server overwrite, so we can tell exactly where a revert happens.
 // v3.1.25 — Scope persistence: auto-detected scope now survives a full page reload. handleDetectedScope writes the value to GM_setValue('cfg_scope', …) and stamps GM_setValue('cfg_scope_auto_ts', now). On init, CONFIG._scopeAutoDetected is restored as true if that stamp is under 2h old, preventing fetchFactionSettings from clobbering the fresh detection with the stale server-saved value. Previously: reload → _scopeAutoDetected reset to false → server's 11 won even after user detected 14 on Recruiting.
@@ -206,11 +207,6 @@
             // stamp is the last time a DOM/state reader read it; lasts 2h.
             _scopeAutoDetected:      (Date.now() - Number(GM_getValue('cfg_scope_auto_ts', 0))) < 2 * 60 * 60 * 1000,
             _scopeUpdatedAt:         Number(GM_getValue('cfg_scope_auto_ts', 0)) || null,
-            _scopeInitSnapshot:      {
-                cfg_scope:         GM_getValue('cfg_scope', null),
-                cfg_scope_auto_ts: GM_getValue('cfg_scope_auto_ts', 0),
-                ts_age_s:          Math.round((Date.now() - Number(GM_getValue('cfg_scope_auto_ts', 0))) / 1000),
-            },
             // Engine toggles
             ENGINE_SLOT_OPTIMIZER:   GM_getValue('eng_slot_optimizer', false),
             VAULT_REQUESTS_ENABLED:  true,     // always on for now
@@ -235,7 +231,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.27';
+    const SCRIPT_VERSION = '3.1.28';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1037,7 +1033,7 @@
         if (win.torn && win.torn.faction) {
              const s = win.torn.faction.scope_balance ?? win.torn.faction.scope;
              if (typeof s === 'number' && s >= 0 && s <= SCOPE_MAX) {
-                 console.log('[OC Spawn][scope] strategy 0 (state):', s);
+                 console.debug('[OC Spawn][scope] strategy 0 (state):', s);
                  return s;
              }
         }
@@ -1059,14 +1055,14 @@
             if (!visible(el)) continue;
             const num = parseInt(el.textContent.trim());
             if (!isNaN(num) && num >= 0 && num <= SCOPE_MAX) {
-                console.log('[OC Spawn][scope] strategy 1 (class):', num, '·', el.className);
+                console.debug('[OC Spawn][scope] strategy 1 (class):', num, '·', el.className);
                 return num;
             }
             const numChild = el.querySelector('span, b, strong');
             if (numChild && visible(numChild)) {
                 const n2 = parseInt(numChild.textContent.trim());
                 if (!isNaN(n2) && n2 >= 0 && n2 <= SCOPE_MAX) {
-                    console.log('[OC Spawn][scope] strategy 1 (class-child):', n2, '·', el.className);
+                    console.debug('[OC Spawn][scope] strategy 1 (class-child):', n2, '·', el.className);
                     return n2;
                 }
             }
@@ -1083,7 +1079,7 @@
             if (m) {
                 const val = parseInt(m[1]);
                 if (val >= 0 && val <= SCOPE_MAX) {
-                    console.log('[OC Spawn][scope] strategy 2 (text):', val, '·', text.slice(0, 60));
+                    console.debug('[OC Spawn][scope] strategy 2 (text):', val, '·', text.slice(0, 60));
                     return val;
                 }
             }
@@ -4370,10 +4366,7 @@
                 // refresh would overwrite a fresh Recruiting-tab read (e.g.
                 // 14) with the last-saved stored value (e.g. 11).
                 if (!CONFIG._scopeAutoDetected) {
-                    console.log(`[OC Spawn][scope] server settings → CONFIG.SCOPE: ${CONFIG.SCOPE} → ${srvSettings.scope} (auto-detected=false, allowing overwrite)`);
                     CONFIG.SCOPE               = srvSettings.scope;
-                } else {
-                    console.log(`[OC Spawn][scope] skipped server overwrite: kept ${CONFIG.SCOPE} instead of server's ${srvSettings.scope} (auto-detected=true)`);
                 }
 
                 // Engine toggles
@@ -4588,10 +4581,6 @@
             // Refresh button re-enables via cooldown timer (startRefreshCooldown)
         }
     }
-
-    // One-shot init trace for scope — helps diagnose "full reload reverts
-    // to old value" by showing what GM storage had at script boot.
-    console.log('[OC Spawn][scope] init snapshot:', JSON.stringify(CONFIG._scopeInitSnapshot), 'CONFIG.SCOPE=', CONFIG.SCOPE, 'autoDetected=', CONFIG._scopeAutoDetected);
 
     // Start ASAP interception
     setupAjaxInterceptor();
