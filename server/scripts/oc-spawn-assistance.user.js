@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.26
+// @version      3.1.27
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.27 — Scope auto-push: when the DOM reader catches a fresh scope value (e.g. 14 from the Recruiting tab's currentScopes element), the script now debounce-pushes it to /api/oc/settings/update with the caller's API key, 1.5s debounce. Side effect: everyone else in the faction sees the fresh value on their next refresh — no one has to open the Recruiting tab themselves. Also makes the "revert to 11 on reload" class of bug impossible since the server's saved value matches the last detection.
 // v3.1.26 — Scope diagnostic logging for "full reload reverts to 11": init now logs what GM storage contained at script boot (cfg_scope, cfg_scope_auto_ts, age in seconds, resulting CONFIG.SCOPE, autoDetected flag). fetchFactionSettings also logs whether it kept the fresh value or let the server overwrite, so we can tell exactly where a revert happens.
 // v3.1.25 — Scope persistence: auto-detected scope now survives a full page reload. handleDetectedScope writes the value to GM_setValue('cfg_scope', …) and stamps GM_setValue('cfg_scope_auto_ts', now). On init, CONFIG._scopeAutoDetected is restored as true if that stamp is under 2h old, preventing fetchFactionSettings from clobbering the fresh detection with the stale server-saved value. Previously: reload → _scopeAutoDetected reset to false → server's 11 won even after user detected 14 on Recruiting.
 // v3.1.24 — Scope diagnostics: upgraded the strategy-fired logs from console.debug to console.log so Chrome's default Console level shows them (Verbose was required to see debug). Detection log now includes the old→new transition so we can trace whether a strategy is actively overwriting a fresh value with a stale one vs. leaving it alone.
@@ -234,7 +235,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.26';
+    const SCRIPT_VERSION = '3.1.27';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -940,6 +941,19 @@
         // fetchFactionSettings overwrite with the stale server-saved scope.
         GM_setValue('cfg_scope', scope);
         GM_setValue('cfg_scope_auto_ts', Date.now());
+
+        // Auto-push to server, debounced 1.5s — if the MutationObserver fires
+        // the same value a few times in rapid succession we only send one
+        // request. Everyone else in the faction picks up the new scope on
+        // their next refresh without needing the detector to fire on their
+        // own client.
+        clearTimeout(scopePushTimer);
+        scopePushTimer = setTimeout(() => {
+            const apiKey = getApiKey();
+            if (apiKey && apiKey !== 'YOUR_API_KEY_HERE') {
+                pushScopeOnly(apiKey, scope);
+            }
+        }, 1500);
 
         // Update settings panel input
         const scopeEl = document.getElementById('cfg-scope');
@@ -1648,6 +1662,22 @@
             await gmRequest(`${SERVER}/api/oc/settings/update?${p}`);
         } catch (e) {
             console.warn('[OC Spawn] Could not push faction settings:', e.message);
+        }
+    }
+
+    // Scope-only push. Used by the auto-detect path so a fresh read from
+    // the Recruiting DOM propagates to the faction-wide server value
+    // immediately — everyone else on Planning / Admin / etc sees the new
+    // scope without that user having to tap Save Settings manually.
+    async function pushScopeOnly(apiKey, scope) {
+        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
+        if (scope === null || scope === undefined) return;
+        try {
+            const p = new URLSearchParams({ key: apiKey, scope: String(scope) });
+            await gmRequest(`${SERVER}/api/oc/settings/update?${p}`);
+            console.log(`[OC Spawn][scope] pushed ${scope} to server`);
+        } catch (e) {
+            console.warn('[OC Spawn][scope] push failed:', e.message);
         }
     }
 
