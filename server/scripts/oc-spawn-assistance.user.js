@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.22
+// @version      3.1.23
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.23 — ACTUAL scope root cause (turns out it was never the DOM reader): every runAnalysis refresh called fetchFactionSettings and unconditionally did CONFIG.SCOPE = srvSettings.scope, which overwrote a fresh auto-detected value (e.g. 14 from Recruiting DOM) with the last-saved server value (e.g. 11). Now only applies the server-side value when _scopeAutoDetected is false, so fresh local reads stick. The previous "scope goes back to 11 on Planning" wasn't a DOM-scrape issue — it was server-settings clobber. Strategies 0/1/2 kept as-is; 3.1.22's visibility gate + logs stay in place.
 // v3.1.22 — Scope fix round 2: v3.1.21 removed fallback text-scraping entirely, but state (Strategy 0) apparently never populates on live Torn, so scope stopped updating altogether. Restored Strategies 1 (class-match) and 2 (text-match) but now gated on visibility — hidden tab panels (display:none, zero-size) are excluded, so Planning can't scrape stale 11 from an inactive Recruiting panel still sitting in the DOM. Each strategy now logs which fired + the element it matched so root-cause of any remaining mismatches is visible in devtools.
 // v3.1.21 — Scope regression fix: DOM reader was overwriting a correct state-read value (e.g. 14 on Recruiting) with a stale DOM-text scrape from another tab (e.g. 11 on Planning from a tooltip/cached summary). Dropped the fallback text-scraping strategies entirely; scope now comes only from Torn's authoritative faction state (unsafeWindow.torn.faction.scope_balance). If state isn't populated on the current tab, last-known value stays put and the age chip indicates freshness.
 // v3.1.20 — Scope source: Torn deleted the internal getCrimesData endpoint entirely ("Call to undefined method getCrimesData" on v3.1.19). Removed the HTTP refresh fetch; scope now comes exclusively from the DOM/state reader, which reads unsafeWindow.torn.faction.scope_balance from Torn's own state (populated whenever the user has loaded any factions page). Refresh button still nudges the reader in case a value is present but hasn't been picked up. Detection-age chip stays visible so stale readings are obvious.
@@ -220,7 +221,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.22';
+    const SCRIPT_VERSION = '3.1.23';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4315,7 +4316,13 @@
                 CONFIG.CPR_LOOKBACK_DAYS       = srvSettings.lookback_days;
                 CONFIG.HIGH_WEIGHT_THRESHOLD   = srvSettings.high_weight_pct      ?? CONFIG.HIGH_WEIGHT_THRESHOLD;
                 CONFIG.HIGH_WEIGHT_MIN_CPR     = srvSettings.high_weight_mincpr   ?? CONFIG.HIGH_WEIGHT_MIN_CPR;
-                CONFIG.SCOPE                   = srvSettings.scope;
+                // Only apply server-side scope if we don't have a fresher
+                // auto-detected value from the DOM reader. Otherwise every
+                // refresh would overwrite a fresh Recruiting-tab read (e.g.
+                // 14) with the last-saved stored value (e.g. 11).
+                if (!CONFIG._scopeAutoDetected) {
+                    CONFIG.SCOPE               = srvSettings.scope;
+                }
 
                 // Engine toggles
                 // v3.1.10: Respect server setting instead of force-false, so
