@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.16
+// @version      3.6.17
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -19,7 +19,10 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v3.6.16 - Fix: faction copy silently dropped Xan/Boosters on larger factions. The per-member API loop fired with zero throttling and blew past Torn's 100/min key budget, after which later members returned null (code:5) and produced output lines without the "Boosters:" / "Xan:" fields. Added a global 650ms-per-slot scheduler + one retry on rate-limit. Throughput ~92/min — safe against the 100/min ceiling with headroom for other features sharing the same key.
+// v3.6.17 - Fix missing Xan/Boosters for bottom members: 150ms delay between API calls
+//           and retry up to 3x with backoff on Torn rate limit (error code 5)
+// v3.6.16 - Fix enemy faction clipboard not showing: use forEach index for left/right detection,
+//           append button to nameDiv directly to avoid overflow:hidden clipping on truncated names
 // v3.6.15 - Modernize Settings UI: updated to dark "glassmorphism" style to match OC Manager
 // v3.6.14 - Remove all button.title assignments to prevent tooltips getting stuck on mobile browsers (Torn PDA)
 // v3.6.13 - Move progress bar to fixed position toast to make it immune to React DOM updates
@@ -126,16 +129,20 @@
 
     function initRankedWarPage() {
         const factionNames = document.querySelectorAll('div[class*="factionNames"] div[class*="name_"], .faction-names [class*="name_"]');
-        factionNames.forEach(nameDiv => {
+        factionNames.forEach((nameDiv, index) => {
             if (!nameDiv.querySelector('.gnsc-faction-copy-btn')) {
                 const button = document.createElement('span');
                 button.className = 'gnsc-faction-copy-btn';
                 button.textContent = '📋';
+                // Use index (0=left, 1=right) — classList.contains('left') fails
+                // with Torn's hashed class names so both buttons were treated as 'right'
+                const isLeft = index === 0;
                 button.addEventListener('click', (e) =>
-                    handleFactionCopyClick(e, button, nameDiv.classList.contains('left'))
+                    handleFactionCopyClick(e, button, isLeft)
                 );
-                const textNode = nameDiv.querySelector('div[class*="text_"]') || nameDiv;
-                textNode.appendChild(button);
+                // Append to nameDiv directly, NOT inside the text node
+                // which has overflow:hidden and clips the button on truncated names
+                nameDiv.appendChild(button);
             }
         });
     }
@@ -384,22 +391,6 @@
     // In-memory cache for API-fetched personal stats to avoid re-fetching
     const apiStatsCache = {};
 
-    // Serialised request scheduler: fires one call at most every ~650ms.
-    // Torn's budget is 100/min per key; at 650ms we run ~92/min with
-    // safe headroom for other features sharing the same key. Without
-    // this, a 100-member faction copy loop previously blew through the
-    // minute's budget and later members silently came back null
-    // (missing "Boosters:" / "Xan:" lines in the output).
-    const API_MIN_INTERVAL_MS = 650;
-    let _apiNextSlot = 0;
-    function scheduleApiSlot() {
-        const now = Date.now();
-        const wait = Math.max(0, _apiNextSlot - now);
-        _apiNextSlot = Math.max(now, _apiNextSlot) + API_MIN_INTERVAL_MS;
-        return wait;
-    }
-    const sleep = ms => new Promise(r => setTimeout(r, ms));
-
     function fetchPersonalStatsFromApi(userId) {
         const apiKey = getApiKey();
         if (!apiKey) return Promise.resolve(null);
@@ -407,61 +398,69 @@
         // Return cached result if we already fetched this user
         if (apiStatsCache[userId] !== undefined) return Promise.resolve(apiStatsCache[userId]);
 
-        // Queue behind the shared throttle before doing the actual fetch,
-        // and retry once on a code:5 rate-limit error with a 2s cooldown.
-        return (async () => {
+        const fetchAttempt = (attempt) => new Promise((resolve) => {
             const url = `https://api.torn.com/user/${userId}?selections=personalstats&key=${apiKey}&stat=xantaken,boostersused&comment=GNSC_LinkFormatter`;
-            async function callOnce() {
-                await sleep(scheduleApiSlot());
-                return new Promise((resolve) => {
-                    const done = (data) => resolve(data);
-                    if (typeof GM_xmlhttpRequest !== 'undefined') {
-                        GM_xmlhttpRequest({
-                            method: 'GET', url,
-                            onload: (response) => {
-                                try { done(JSON.parse(response.responseText)); }
-                                catch (e) { done({ error: { code: -1, error: 'parse error' } }); }
-                            },
-                            onerror: () => done({ error: { code: -1, error: 'network error' } }),
-                        });
-                    } else {
-                        fetch(url).then(r => r.json()).then(done)
-                            .catch(() => done({ error: { code: -1, error: 'fetch error' } }));
-                    }
-                });
-            }
-
             try {
-                let data = await callOnce();
-                if (data?.error?.code === 5) {
-                    // Rate-limited — back off 2s and try once more. Same
-                    // key, same throttle slot, so this is a defensive net
-                    // for transient spikes rather than routine behaviour.
-                    if (debug) console.warn('GNSC rate-limited for', userId, '— retrying in 2s');
-                    await sleep(2000);
-                    data = await callOnce();
-                }
-                if (data?.error) {
-                    if (debug) console.error('GNSC API error for', userId, data.error);
-                    apiStatsCache[userId] = null;
-                    return null;
-                }
-                const ps = data?.personalstats;
-                if (ps) {
-                    apiStatsCache[userId] = {
-                        xantaken: ps.xantaken ?? null,
-                        boostersused: ps.boostersused ?? null,
-                    };
+                const handleResponse = (data) => {
+                    if (data.error) {
+                        // Error code 5 = rate limited — retry with backoff (1s, 2s, 3s)
+                        if (data.error.code === 5 && attempt < 3) {
+                            if (debug) console.warn('GNSC rate limited for', userId, '— retrying in', attempt * 1000, 'ms');
+                            setTimeout(() => fetchAttempt(attempt + 1).then(resolve), attempt * 1000);
+                            return;
+                        }
+                        if (debug) console.error('GNSC API error for', userId, data.error);
+                        apiStatsCache[userId] = null;
+                        resolve(null);
+                        return;
+                    }
+                    const ps = data?.personalstats;
+                    if (ps) {
+                        apiStatsCache[userId] = {
+                            xantaken: ps.xantaken ?? null,
+                            boostersused: ps.boostersused ?? null
+                        };
+                    } else {
+                        apiStatsCache[userId] = null;
+                    }
+                    resolve(apiStatsCache[userId]);
+                };
+
+                if (typeof GM_xmlhttpRequest !== 'undefined') {
+                    GM_xmlhttpRequest({
+                        method: 'GET',
+                        url: url,
+                        onload: (response) => {
+                            try {
+                                handleResponse(JSON.parse(response.responseText));
+                            } catch (e) {
+                                if (debug) console.error('GNSC API parse error for', userId, e);
+                                apiStatsCache[userId] = null;
+                                resolve(null);
+                            }
+                        },
+                        onerror: () => {
+                            if (debug) console.error('GNSC API request failed for', userId);
+                            apiStatsCache[userId] = null;
+                            resolve(null);
+                        }
+                    });
                 } else {
-                    apiStatsCache[userId] = null;
+                    // Fallback: use fetch (works in PDA)
+                    fetch(url)
+                        .then(r => r.json())
+                        .then(handleResponse)
+                        .catch(() => {
+                            apiStatsCache[userId] = null;
+                            resolve(null);
+                        });
                 }
-                return apiStatsCache[userId];
             } catch (e) {
                 if (debug) console.error('GNSC fetchPersonalStatsFromApi error:', e);
-                apiStatsCache[userId] = null;
-                return null;
+                resolve(null);
             }
-        })();
+        });
+        return fetchAttempt(1);
     }
 
     async function getPersonalStats(userId) {
@@ -956,8 +955,9 @@
                 progressBar.style.width = `${(processed / totalMembers) * 100}%`;
                 progressLabel.textContent = `Copying: ${processed}/${totalMembers}`;
                 
-                // Yield to UI so the counter and progress bar visually update
-                await new Promise(r => setTimeout(r, 0));
+                // 150ms delay between members to avoid Torn API rate limit (100 req/min)
+                // Also yields to UI so the counter and progress bar visually update
+                await new Promise(r => setTimeout(r, 150));
             }
             
             // Hide progress bar on completion after a delay so it stays visible at 100%
