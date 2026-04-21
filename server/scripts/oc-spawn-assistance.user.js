@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.24
+// @version      3.1.25
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.25 — Scope persistence: auto-detected scope now survives a full page reload. handleDetectedScope writes the value to GM_setValue('cfg_scope', …) and stamps GM_setValue('cfg_scope_auto_ts', now). On init, CONFIG._scopeAutoDetected is restored as true if that stamp is under 2h old, preventing fetchFactionSettings from clobbering the fresh detection with the stale server-saved value. Previously: reload → _scopeAutoDetected reset to false → server's 11 won even after user detected 14 on Recruiting.
 // v3.1.24 — Scope diagnostics: upgraded the strategy-fired logs from console.debug to console.log so Chrome's default Console level shows them (Verbose was required to see debug). Detection log now includes the old→new transition so we can trace whether a strategy is actively overwriting a fresh value with a stale one vs. leaving it alone.
 // v3.1.23 — ACTUAL scope root cause (turns out it was never the DOM reader): every runAnalysis refresh called fetchFactionSettings and unconditionally did CONFIG.SCOPE = srvSettings.scope, which overwrote a fresh auto-detected value (e.g. 14 from Recruiting DOM) with the last-saved server value (e.g. 11). Now only applies the server-side value when _scopeAutoDetected is false, so fresh local reads stick. The previous "scope goes back to 11 on Planning" wasn't a DOM-scrape issue — it was server-settings clobber. Strategies 0/1/2 kept as-is; 3.1.22's visibility gate + logs stay in place.
 // v3.1.22 — Scope fix round 2: v3.1.21 removed fallback text-scraping entirely, but state (Strategy 0) apparently never populates on live Torn, so scope stopped updating altogether. Restored Strategies 1 (class-match) and 2 (text-match) but now gated on visibility — hidden tab panels (display:none, zero-size) are excluded, so Planning can't scrape stale 11 from an inactive Recruiting panel still sitting in the DOM. Each strategy now logs which fired + the element it matched so root-cause of any remaining mismatches is visible in devtools.
@@ -198,6 +199,11 @@
             HIGH_WEIGHT_THRESHOLD:   Number(GM_getValue('cfg_high_weight_pct',    25)),
             HIGH_WEIGHT_MIN_CPR:     Number(GM_getValue('cfg_high_weight_mincpr', 75)),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
+            // Persisted: remember that scope came from auto-detection so a page
+            // reload doesn't let the server's older saved value clobber it. The
+            // stamp is the last time a DOM/state reader read it; lasts 2h.
+            _scopeAutoDetected:      (Date.now() - Number(GM_getValue('cfg_scope_auto_ts', 0))) < 2 * 60 * 60 * 1000,
+            _scopeUpdatedAt:         Number(GM_getValue('cfg_scope_auto_ts', 0)) || null,
             // Engine toggles
             ENGINE_SLOT_OPTIMIZER:   GM_getValue('eng_slot_optimizer', false),
             VAULT_REQUESTS_ENABLED:  true,     // always on for now
@@ -222,7 +228,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.24';
+    const SCRIPT_VERSION = '3.1.25';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -922,6 +928,12 @@
         console.log(`[OC Spawn] Detected scope change: ${CONFIG.SCOPE} → ${scope} (source: ${source})`);
         CONFIG.SCOPE = scope;
         CONFIG._scopeAutoDetected = true;
+        // Persist so a full page reload survives the detection — without this,
+        // on reload CONFIG.SCOPE = GM_getValue('cfg_scope', null) loads the
+        // old stored value and _scopeAutoDetected resets to false, which lets
+        // fetchFactionSettings overwrite with the stale server-saved scope.
+        GM_setValue('cfg_scope', scope);
+        GM_setValue('cfg_scope_auto_ts', Date.now());
 
         // Update settings panel input
         const scopeEl = document.getElementById('cfg-scope');
