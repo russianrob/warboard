@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.0.30
+// @version      3.1.11
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,9 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.11 — TornPDA fix: header buttons (Refresh, settings gear, close ✕) bind both click + touchend with a 350ms dedupe. Flutter InAppWebView swallows synthesized click events on children of the drag-handle <h2>, which is why taps in TornPDA did nothing. Handlers still fire exactly once on desktop / mobile web / WebView.
+// v3.1.10 — Admin-roles config: in OC settings (gear), comma-separated faction positions that gate Admin/Manager/Engines tab visibility. Defaults to leader + co-leader. Replaces the API-key-tier check that was incorrectly granting tab access to anyone with a Limited+ key. Plus: $ button inside vault-request amount box auto-fills max balance; "Send anytime / Only when I'm online" is requester preference (push always goes to all admin-role members). "Send anytime / Only when I'm online" is now a requester preference about accepting money while offline (not notification filtering). Push notifications always go to everyone. Balance shown above form.
+// v3.1.0 — Vault requests: My OC tab now shows a live "$X from vault" board. Any faction member submits an amount; Torn currencynews auto-removes the request when the transfer shows up. Push notifications on submit.
 // v3.0.30 — Fix: Manager Delays tab used r.responseText, but gmRequest already returns { ok, status, data } with JSON parsed. That produced "JSON parse error: unexpected identifier undefined" every time. Now reads r.data and surfaces non-2xx responses with the server's error message.
 // v3.0.29 — Feature: Delay tracking in OC history. Clients POST each flyer observation (crimeId, memberId, delayedSec) to /api/oc/flyer-delay (throttled per pair to 60s). Server keeps max delayedSec until the crime completes, then collectOcHistory bakes the value into the slot entry. New Manager → Delays sub-tab surfaces a 30-day leaderboard of who's held up the most OCs, total delay, longest single delay, and recent crimes; pending (in-flight) observations are included with a tag.
 // v3.0.28 — Scope freshness: every Refresh now fires a call to Torn's internal getCrimesData endpoint to pull fresh scope_balance (existing AJAX interceptor catches the response and updates CONFIG.SCOPE). Scope strip also shows detection age next to "● live" — green under 1min, yellow 1-5min, red if older — so stale readings are visible instead of silent.
@@ -26,6 +29,10 @@
 // v3.0.25 — Flyer names in the traveling-alert banner are now clickable: click a name to copy a preset fee-reminder ("You're holding off on the OC initiation...") to the clipboard and open the Torn compose page for that member, same UX as the eligible-members message button. Shared handler is attached to both the tooltip and the panel so either site fires it.
 // v3.0.24 — Flyer alert now catches both "Traveling" (in-transit) and "Abroad" (landed overseas) — previously only Traveling fired, so members who'd already landed abroad were silently missed. Banner renamed to "flying" and shows each member's exact state.
 // v3.0.23 — Traveling-alert only fires when the OC is truly "ready now" (not 30m out). Planning crimes with null/0 ready_at are treated as ready now (Torn V2 quirk); Recruiting crimes still need fully staffed + ready_at ≤ now.
+// v3.0.34 — Remove confidence scoring + Bayesian shrinkage; trust raw CPR. Dev-only indicator now shows only sample count.
+// v3.0.33 — Slot Optimizer engine toggle no longer force-reset to false on settings load; checkbox now persists.
+// v3.0.32 — Confidence indicator shows info inline (stars + pct + samples) so it's readable on mobile without hover.
+// v3.0.31 — Dev-only (XID 137558) confidence/samples indicator next to CPR values in Slot Optimizer output. Helps verify the server-side Bayesian CPR-tightening changes.
 // v3.0.22 — Traveling-alert relaxed: Planning crimes always fire the flyer alert (ready_at in V2 is sometimes null/0 for Planning), and Recruiting crimes that are fully staffed + ready within 30m also fire. Urgency label now shows "ready in Nm" when not yet ready.
 // v3.0.21 — Dispatcher shows "Subscribe to unlock" banner for non-subscribed factions
 // v3.0.20 — Fix syntax error in dispatcher else-branch that broke entire script
@@ -180,6 +187,7 @@
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
             // Engine toggles
             ENGINE_SLOT_OPTIMIZER:   GM_getValue('eng_slot_optimizer', false),
+            VAULT_REQUESTS_ENABLED:  true,     // always on for now
             ENGINE_CPR_FORECASTER:   GM_getValue('eng_cpr_forecaster', false),
             ENGINE_FAILURE_RISK:     GM_getValue('eng_failure_risk', false),
 
@@ -194,11 +202,14 @@
 
     let cprBreakdownMap = {};
     let recMap = {}; // uid → { crime, position, cpr, count }
+    // Vault-request board: list of { id, requesterId, requesterName, amount, target, createdAt }
+    // Refreshed alongside the main analysis cycle.
+    let S = { vaultRequests: [], vaultBalance: null };
     let lastScopeProjection = null;
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.0.30';
+    const SCRIPT_VERSION = '3.1.11';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1378,6 +1389,167 @@
         }
     }
 
+    // Wire up form submit + delete buttons after each render. Safe to call
+    // repeatedly; replaces handlers each time since render() rebuilds DOM.
+    // Module-level timer so we don't accumulate multiple intervals across
+    // re-renders. Polls the vault-request list every 15s and updates the
+    // visible list in place — admins see auto-removals near-real-time
+    // without needing to wait for the next full panel refresh.
+    let _vaultPollTimer = null;
+    function ensureVaultPolling(apiKey, viewer) {
+        if (_vaultPollTimer) { clearInterval(_vaultPollTimer); _vaultPollTimer = null; }
+        const myId = String(viewer?.playerId || '');
+        const isAdmin = viewer?.hasFactionAccess === true || myId === '137558';
+        if (!isAdmin) return;   // non-admins don't see the list anyway
+        _vaultPollTimer = setInterval(async () => {
+            try {
+                const fresh = await fetchVaultRequests(apiKey);
+                // Diff: only re-render if the list actually changed.
+                const sigOld = (S.vaultRequests || []).map(r => r.id).sort().join(',');
+                const sigNew = fresh.map(r => r.id).sort().join(',');
+                if (sigOld === sigNew) return;
+                S.vaultRequests = fresh;
+                // Re-render the list portion only — extract the inner list
+                // HTML from a fresh renderVaultRequestSection call and swap.
+                const html = renderVaultRequestSection(viewer);
+                const m = html.match(/<div id="oc-vault-list">([\s\S]*?)<\/div>\s*<form/);
+                const list = document.getElementById('oc-vault-list');
+                if (m && list) {
+                    list.innerHTML = m[1];
+                    bindVaultRequestHandlers(apiKey, viewer);   // re-bind delete buttons
+                }
+            } catch (_) { /* swallow; next tick will retry */ }
+        }, 15_000);
+    }
+
+    function bindVaultRequestHandlers(apiKey, viewer) {
+        ensureVaultPolling(apiKey, viewer);
+        // $ button: fill amount input with the requester's current max balance
+        const maxBtn = document.getElementById('oc-vault-max');
+        if (maxBtn && S.vaultBalance && S.vaultBalance > 0) {
+            maxBtn.addEventListener('click', () => {
+                const amtInput = document.getElementById('oc-vault-amount');
+                if (amtInput) amtInput.value = String(Math.floor(S.vaultBalance));
+            }, { once: false });
+        }
+        const form = document.getElementById('oc-vault-form');
+        if (form) {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const amtInput = document.getElementById('oc-vault-amount');
+                const tgtSel   = document.getElementById('oc-vault-target');
+                const msgEl    = document.getElementById('oc-vault-msg');
+                const amount = Number(amtInput?.value);
+                const target = tgtSel?.value === 'online' ? 'online' : 'both';
+                if (!(amount > 0)) {
+                    if (msgEl) msgEl.textContent = 'Enter an amount.';
+                    return;
+                }
+                if (msgEl) msgEl.textContent = 'Submitting…';
+                const r = await submitVaultRequest(apiKey, amount, target);
+                if (r.ok && r.data?.request) {
+                    if (msgEl) {
+                        const actual = Number(r.data.request.amount || 0).toLocaleString('en-US');
+                        msgEl.textContent = `Posted — $${actual}. Notified ${target === 'online' ? 'online members' : 'everyone'}.`;
+                    }
+                    if (amtInput) amtInput.value = '';
+                    // Refresh the list
+                    S.vaultRequests = await fetchVaultRequests(apiKey);
+                    const list = document.getElementById('oc-vault-list');
+                    if (list) {
+                        // Re-render just the list section
+                        const html = renderVaultRequestSection(viewer).match(/<div id="oc-vault-list">([\s\S]*?)<\/div>\s*<form/);
+                        if (html) list.innerHTML = html[1];
+                        // Rebind delete buttons
+                        bindVaultRequestHandlers(apiKey, viewer);
+                    }
+                } else {
+                    if (msgEl) msgEl.textContent = `Failed: ${r.data?.error || 'unknown'}`;
+                }
+            }, { once: true });
+        }
+        // Send-button clicks: stash the payout intent in sessionStorage so
+        // the auto-fill handler on the Controls tab can pick it up, plus
+        // copy the raw amount to clipboard as a fallback if auto-fill fails.
+        document.querySelectorAll('.oc-vault-send').forEach(a => {
+            a.addEventListener('click', (e) => {
+                const amt = a.dataset.amount;
+                const recipient = a.dataset.recipient;
+                const xid = a.dataset.recipientId;
+                try {
+                    sessionStorage.setItem('ocVaultPayout', JSON.stringify({
+                        recipientId: xid, recipientName: recipient,
+                        amount: Number(amt), ts: Date.now(),
+                    }));
+                } catch (_) {}
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(String(amt));
+                    }
+                } catch (_) {}
+                const msg = document.getElementById('oc-vault-msg');
+                if (msg) msg.textContent = `Opening Controls tab — give ${recipient} [${xid}] $${Number(amt).toLocaleString('en-US')} (autofill queued)`;
+            }, { once: false });
+        });
+        document.querySelectorAll('.oc-vault-del').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const id = btn.dataset.reqId;
+                btn.disabled = true;
+                const r = await deleteVaultRequest(apiKey, id);
+                if (r.ok) {
+                    S.vaultRequests = (S.vaultRequests || []).filter(x => x.id !== id);
+                    const row = btn.closest('div');
+                    if (row) row.remove();
+                }
+            }, { once: true });
+        });
+    }
+
+    // ── Vault-request helpers ──────────────────────────────────────────────
+    async function fetchVaultRequests(apiKey) {
+        try {
+            const r = await gmRequest(`${SERVER}/api/oc/vault-requests?key=${encodeURIComponent(apiKey)}`);
+            if (!r.ok) return [];
+            return Array.isArray(r.data?.requests) ? r.data.requests : [];
+        } catch (_) { return []; }
+    }
+    async function fetchVaultBalance(apiKey) {
+        try {
+            const r = await gmRequest(`${SERVER}/api/oc/vault-balance?key=${encodeURIComponent(apiKey)}`);
+            if (!r.ok) return null;
+            return Number(r.data?.balance) || 0;
+        } catch (_) { return null; }
+    }
+    async function submitVaultRequest(apiKey, amount, target) {
+        const body = JSON.stringify({ key: apiKey, amount, target });
+        const r = await new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `${SERVER}/api/oc/vault-request`,
+                headers: { 'Content-Type': 'application/json' },
+                data: body,
+                onload: (resp) => {
+                    try { resolve({ ok: resp.status >= 200 && resp.status < 300, data: JSON.parse(resp.responseText) }); }
+                    catch { resolve({ ok: false, data: {} }); }
+                },
+                onerror: () => resolve({ ok: false, data: {} }),
+            });
+        });
+        return r;
+    }
+    async function deleteVaultRequest(apiKey, id) {
+        const r = await new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: 'DELETE',
+                url: `${SERVER}/api/oc/vault-request/${encodeURIComponent(id)}?key=${encodeURIComponent(apiKey)}`,
+                onload: (resp) => resolve({ ok: resp.status >= 200 && resp.status < 300 }),
+                onerror: () => resolve({ ok: false }),
+            });
+        });
+        return r;
+    }
+
     async function pushFactionSettings(apiKey, cfg) {
         try {
             const p = new URLSearchParams({
@@ -1820,6 +1992,21 @@
                 <button id="oc-spawn-cfg-save" class="oc-setting-save-btn" disabled>Save for All Members</button>
             </div>
 
+            <hr class="oc-setting-divider"/>
+            <div class="oc-setting-row" style="flex-direction:column;align-items:stretch;">
+                <div class="oc-setting-info" style="margin-bottom:6px;">
+                    <span class="oc-setting-label">Admin Roles</span>
+                    <div class="oc-setting-desc">Faction positions that can see Admin / Manager / Engines tabs. Comma-separated, case-insensitive (e.g. <code>leader, co-leader, banker</code>). Default: leader, co-leader.</div>
+                </div>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <input id="cfg-admin-roles" type="text" placeholder="leader, co-leader, …"
+                        style="flex:1;background:#0f1a2e;border:1px solid #1e3a5f;color:#dde;border-radius:5px;padding:6px 8px;font-size:12px;">
+                    <button id="cfg-admin-roles-save" class="oc-setting-save-btn">Save Roles</button>
+                </div>
+                <div id="cfg-admin-roles-msg" style="font-size:10px;color:#6b7280;margin-top:4px;min-height:12px;"></div>
+            </div>
+
+
             </div><!-- /oc-cfg-section -->
         </div>
 
@@ -1916,17 +2103,36 @@
             }
         }, 1000);
     }
-    document.getElementById('oc-spawn-refresh').addEventListener('click', () => {
+    // TornPDA (Flutter InAppWebView) swallows synthesized click events on
+    // children of elements with touchstart listeners (the drag handle <h2>
+    // the header buttons live inside). Bind both 'click' and 'touchend'
+    // with a short dedupe window so a single tap fires the handler exactly
+    // once across desktop, mobile web, and the Flutter WebView.
+    function bindTap(el, fn) {
+        if (!el) return;
+        let lastFire = 0;
+        const wrapped = (e) => {
+            const now = Date.now();
+            if (now - lastFire < 350) return;
+            lastFire = now;
+            if (e.type === 'touchend' && e.cancelable) e.preventDefault();
+            fn(e);
+        };
+        el.addEventListener('click', wrapped);
+        el.addEventListener('touchend', wrapped);
+    }
+
+    bindTap(document.getElementById('oc-spawn-refresh'), () => {
         if (Date.now() - _lastRefresh < 3000) return; // 3s cooldown between refreshes (reduced from 15s for faster responsiveness)
         _lastRefresh = Date.now();
         startRefreshCooldown();
         runAnalysis();
     });
-    document.getElementById('oc-spawn-close').addEventListener('click', () => {
+    bindTap(document.getElementById('oc-spawn-close'), () => {
         panelVisible = false; panel.style.display = 'none';
         GM_setValue('oc_panel_closed', true); // stay closed until user taps button
     });
-    document.getElementById('oc-spawn-settings').addEventListener('click', () => {
+    bindTap(document.getElementById('oc-spawn-settings'), () => {
         // Switch to Admin tab first, then toggle settings
         switchTab('admin');
         const sp = document.getElementById('oc-settings-panel');
@@ -1974,7 +2180,20 @@
         document.getElementById('cfg-lookback-days').value        = CONFIG.CPR_LOOKBACK_DAYS;
         document.getElementById('cfg-high-weight-pct').value      = CONFIG.HIGH_WEIGHT_THRESHOLD;
         document.getElementById('cfg-high-weight-mincpr').value   = CONFIG.HIGH_WEIGHT_MIN_CPR;
+        // Admin roles — fetched from server, populated async
+        loadAdminRoles();
         // Engine toggles
+    }
+
+    async function loadAdminRoles() {
+        const apiKey = getApiKey();
+        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
+        try {
+            const r = await gmRequest(`${SERVER}/api/oc/admin-roles?key=${encodeURIComponent(apiKey)}`);
+            if (!r.ok) return;
+            const inp = document.getElementById('cfg-admin-roles');
+            if (inp) inp.value = (r.data?.roles || []).join(', ');
+        } catch (_) {}
     }
 
     function checkKeyRow() {
@@ -1985,6 +2204,63 @@
         }
     }
     checkKeyRow();
+
+    // Admin-roles save handler. Server enforces three safeguards:
+    //   - empty list rejected
+    //   - your own position must remain
+    //   - mass-removal (≥50% of roles) needs confirmRemove=true
+    // Client handles the third by re-prompting with confirm() on a 409.
+    const adminRolesSaveBtn = document.getElementById('cfg-admin-roles-save');
+    if (adminRolesSaveBtn) adminRolesSaveBtn.addEventListener('click', async () => {
+        const apiKey = getApiKey();
+        const msg = document.getElementById('cfg-admin-roles-msg');
+        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
+            if (msg) msg.textContent = 'Save your API key first.';
+            return;
+        }
+        const raw = document.getElementById('cfg-admin-roles')?.value || '';
+        const roles = raw.split(',').map(r => r.trim()).filter(Boolean);
+        if (msg) msg.textContent = 'Saving…';
+
+        const post = (confirmRemove = false) => new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `${SERVER}/api/oc/admin-roles`,
+                headers: { 'Content-Type': 'application/json' },
+                data: JSON.stringify({ key: apiKey, roles, confirmRemove }),
+                onload: (resp) => {
+                    let data = {};
+                    try { data = JSON.parse(resp.responseText); } catch (_) {}
+                    resolve({ ok: resp.status >= 200 && resp.status < 300, status: resp.status, data });
+                },
+                onerror: () => resolve({ ok: false, status: 0, data: {} }),
+            });
+        });
+
+        try {
+            let r = await post(false);
+            // 409 = mass-removal warning. Re-prompt the user with the list of
+            // roles being removed and resend with confirmRemove=true if they
+            // still want to proceed.
+            if (r.status === 409 && Array.isArray(r.data?.removing)) {
+                const ok = window.confirm(
+                    `This will remove these admin roles:\n  ${r.data.removing.join(', ')}\n\nProceed?`
+                );
+                if (!ok) {
+                    if (msg) msg.textContent = 'Cancelled. No changes saved.';
+                    return;
+                }
+                r = await post(true);
+            }
+            if (r.ok) {
+                if (msg) msg.textContent = `✓ Saved: ${(r.data.roles || []).join(', ')}`;
+            } else {
+                if (msg) msg.textContent = `Failed: ${r.data?.error || 'unknown'}`;
+            }
+        } catch (e) {
+            if (msg) msg.textContent = `Error: ${e.message}`;
+        }
+    });
 
     document.getElementById('oc-spawn-key-save').addEventListener('click', () => {
         const val = document.getElementById('oc-spawn-key-input').value.trim();
@@ -2398,7 +2674,7 @@
     // ═══════════════════════════════════════════════════════════════════════
     //  ENGINE RENDERERS
     // ═══════════════════════════════════════════════════════════════════════
-    function renderEnginesTab(engines) {
+    function renderEnginesTab(engines, viewer) {
         engines = engines || {};
         let html = `<div style="padding:4px 0;">`;
 
@@ -2425,7 +2701,7 @@
         // Engine results
         if (engines.slotOptimizer || engines.failureRisk || engines.cprForecaster || engines.memberProjector || engines.memberReliability) {
             html += `<div style="margin-top:12px;border-top:1px solid #374151;padding-top:10px;">`;
-            if (engines.slotOptimizer) html += renderSlotOptimizer(engines.slotOptimizer);
+            if (engines.slotOptimizer) html += renderSlotOptimizer(engines.slotOptimizer, viewer);
             if (engines.failureRisk) html += renderFailureRisk(engines.failureRisk);
             if (engines.cprForecaster) html += renderCprForecaster(engines.cprForecaster);
             if (engines.memberProjector) html += renderMemberProjector(engines.memberProjector);
@@ -2527,7 +2803,7 @@
         return html;
     }
 
-    function renderSlotOptimizer(engineData) {
+    function renderSlotOptimizer(engineData, viewer) {
         if (!engineData || !engineData.assignments) return '';
         const { assignments, stats } = engineData;
         let html = `<div style="margin:12px 0;border:1px solid #2d6a4f;border-radius:8px;padding:10px;background:#0a1f14;">`;
@@ -2553,6 +2829,13 @@
                 const displayCpr = a.positionCpr || a.memberCpr;
                 const cprPrefix = a.isEstimatedCpr ? '~' : '';
                 html += `<span style="color:${cprColor};font-weight:600;">${cprPrefix}${displayCpr.toFixed(0)}%</span>`;
+                // Dev-only sample count (XID 137558). Lets you see how much
+                // history a member has without needing confidence scoring.
+                if (isDev(viewer) && a.samples !== undefined) {
+                    const samples = a.samples || 0;
+                    const sampleColor = samples >= 5 ? '#74c69d' : samples >= 1 ? '#e5b567' : '#6b7280';
+                    html += `<span style="color:${sampleColor};font-size:9px;">${samples}s</span>`;
+                }
                 html += `<span style="color:#6b7280;">Lvl ${a.difficulty}</span>`;
 
                 const cprVal = a.positionCpr || a.memberCpr;
@@ -3229,10 +3512,106 @@
             recsHtml = `<div class="oc-viewer-crimes">${chips}</div>`;
         }
 
+        // Faction role (Leader / Co-Leader / Banker / etc.) — small chip
+        // under the name so admins know who's logged in at a glance.
+        const posText = viewer.position ? met_escapeHtml(viewer.position) : '';
+        const posHtml = posText
+            ? `<div style="font-size:10px;color:#9ca3af;margin-bottom:4px;">🏛 ${posText}</div>`
+            : '';
+
         return `<div class="oc-viewer-card">
             <div class="oc-viewer-name">${viewer.playerName} • Lvl ${joinable} • <span style="color:${cprColor}">${cprText}</span></div>
+            ${posHtml}
             <div class="oc-viewer-meta">${statusHtml}</div>
             ${recsHtml}
+            ${renderVaultRequestSection(viewer)}
+        </div>`;
+    }
+
+    // ── Vault request board ─────────────────────────────────────────────────
+    // Lets any faction member ask for $X from the vault. Everyone in the
+    // faction sees the pending list (polled every 30s alongside the main
+    // refresh cycle). Auto-removes when Torn's currencynews shows the
+    // request was fulfilled. Push notifications to online / online+offline
+    // members per the requester's choice.
+    function renderVaultRequestSection(viewer) {
+        const requests = S.vaultRequests || [];
+        const myId = String(viewer.playerId);
+        const balance = S.vaultBalance;
+        const balanceLabel = (balance != null && balance > 0)
+            ? `$${Number(balance).toLocaleString('en-US')}`
+            : null;
+
+        // Gate the request LIST to admin-role viewers only. Regular members
+        // (incl. the requester themselves) submit requests but don't see
+        // the pending list — only the admins responsible for fulfilling
+        // them get to see the queue.
+        const isAdmin = viewer.hasFactionAccess === true || myId === '137558';
+
+        const rowsHtml = !isAdmin ? '' : requests.map(r => {
+            const amt = Number(r.amount || 0).toLocaleString('en-US');
+            const ts = Math.round((Date.now() - (r.createdAt || Date.now())) / 60000);
+            const isMine = String(r.requesterId) === myId;
+            const canDelete = isMine || viewer.hasFactionAccess === true || myId === '137558';
+            const delBtn = canDelete
+                ? `<button class="oc-vault-del" data-req-id="${met_escapeHtml(r.id)}" style="background:none;border:0;color:#ef4444;cursor:pointer;font-size:11px;margin-left:6px;">✕</button>`
+                : '';
+            // Show the requester's delivery preference — whether it's OK to
+            // send money while they're offline. Fulfillers see this so they
+            // know not to bother sending right now if the flag is "only when online".
+            const prefLabel = r.target === 'online'
+                ? '<span style="color:#9ca3af;" title="Only send while requester is online">⏱ online only</span>'
+                : '<span style="color:#4ade80;" title="OK to send even while requester is offline">✓ anytime</span>';
+            // Payout link: opens Torn's faction Controls tab (where "give to
+            // user" lives). Torn's form doesn't pre-fill via URL params, so
+            // the tooltip shows the recipient + amount the admin needs to
+            // enter. Our fundsnews poll auto-removes this request once the
+            // money lands.
+            const payUrl = 'https://www.torn.com/factions.php?step=your&type=1#/tab=controls';
+            const sendBtn = `<a href="${payUrl}" target="_blank" rel="noopener"
+                class="oc-vault-send"
+                data-amount="${met_escapeHtml(r.amount)}"
+                data-recipient="${met_escapeHtml(r.requesterName)}"
+                data-recipient-id="${met_escapeHtml(r.requesterId)}"
+                title="Opens Controls tab · Amount $${amt} copied to clipboard · Give to ${met_escapeHtml(r.requesterName)} [${met_escapeHtml(r.requesterId)}]"
+                style="display:inline-block;background:#166534;color:#f3f4f6;text-decoration:none;font-weight:600;font-size:10px;padding:2px 8px;border-radius:3px;margin-left:auto;">Send</a>`;
+            return `<div style="display:flex;align-items:center;gap:6px;padding:3px 6px;font-size:11px;background:#111b14;border-radius:3px;margin-bottom:3px;">
+                <span style="color:#f3f4f6;font-weight:600;">${met_escapeHtml(r.requesterName)}</span>
+                <span style="color:#facc15;">$${amt}</span>
+                <span style="color:#6b7280;font-size:9px;">${ts}m</span>
+                <span style="font-size:9px;">${prefLabel}</span>
+                ${sendBtn}
+                ${delBtn}
+            </div>`;
+        }).join('');
+
+        // $ button inside the amount input fills with the requester's max
+        // balance. Sits absolutely positioned on the input's left edge.
+        const amountBoxHtml = `
+            <div style="flex:1;min-width:140px;position:relative;">
+                <button type="button" id="oc-vault-max" title="${balanceLabel ? 'Fill with your max vault balance: ' + balanceLabel : 'Vault balance unknown'}"
+                    style="position:absolute;left:2px;top:1px;bottom:1px;width:26px;background:#1e3a5f;border:0;color:#facc15;font-weight:700;border-radius:3px;cursor:${balance ? 'pointer' : 'default'};font-size:12px;">$</button>
+                <input type="number" min="1" step="1" placeholder="${balanceLabel ? 'Max ' + balanceLabel : 'Amount'}" id="oc-vault-amount"
+                    style="width:100%;box-sizing:border-box;background:#0f1a2e;border:1px solid #1e3a5f;color:#dde;border-radius:4px;padding:4px 6px 4px 32px;font-size:11px;">
+            </div>`;
+
+        const headerLabel = isAdmin ? '💰 Vault requests' : '💰 Request from vault';
+        const listHtml = isAdmin
+            ? `<div id="oc-vault-list">${rowsHtml || '<div style="color:#6b7280;font-size:10px;font-style:italic;">No pending requests.</div>'}</div>`
+            : '';   // non-admins don't see the queue at all
+
+        return `<div class="oc-vault" style="margin-top:10px;border-top:1px solid #2d4a3e;padding-top:8px;">
+            <div style="font-size:11px;color:#9ca3af;font-weight:600;margin-bottom:4px;">${headerLabel}${balanceLabel ? ` <span style="color:#6b7280;font-weight:400;font-size:10px;">(your balance: ${balanceLabel})</span>` : ''}</div>
+            ${listHtml}
+            <form id="oc-vault-form" style="display:flex;gap:4px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+                ${amountBoxHtml}
+                <select id="oc-vault-target" title="Can the money be sent while you're offline?" style="background:#0f1a2e;border:1px solid #1e3a5f;color:#dde;border-radius:4px;padding:4px;font-size:10px;">
+                    <option value="both">Send anytime</option>
+                    <option value="online">Only when I'm online</option>
+                </select>
+                <button type="submit" class="w3b-btn" style="padding:4px 10px;font-size:11px;">Request</button>
+            </form>
+            <div id="oc-vault-msg" style="font-size:10px;color:#6b7280;margin-top:4px;min-height:12px;"></div>
         </div>`;
     }
 
@@ -3792,7 +4171,11 @@
                 CONFIG.SCOPE                   = srvSettings.scope;
 
                 // Engine toggles
-                CONFIG.ENGINE_SLOT_OPTIMIZER   = false;  // Disabled since Auto-Dispatcher serves similar purpose
+                // v3.1.10: Respect server setting instead of force-false, so
+                // the Engines tab checkbox actually persists after a reload.
+                // Still defaults off everywhere (local GM_getValue default = false),
+                // must be consciously enabled per user.
+                CONFIG.ENGINE_SLOT_OPTIMIZER   = srvSettings.engine_slot_optimizer   ?? CONFIG.ENGINE_SLOT_OPTIMIZER;
                 CONFIG.ENGINE_CPR_FORECASTER   = srvSettings.engine_cpr_forecaster   ?? CONFIG.ENGINE_CPR_FORECASTER;
                 CONFIG.ENGINE_FAILURE_RISK     = srvSettings.engine_failure_risk     ?? CONFIG.ENGINE_FAILURE_RISK;
 
@@ -3917,7 +4300,17 @@
             lastScopeProjection         = scopeProjection; // cache for tooltip
             const recs                  = buildRecommendations(eligible, slotMap, scopeProjection);
 
+            // Vault data: balance for everyone (form needs it), but the
+            // pending-request list only for admins (they're the only ones
+            // who can see it in the UI).
+            const isViewerAdmin = viewer?.hasFactionAccess === true || String(viewer?.playerId) === '137558';
+            [S.vaultRequests, S.vaultBalance] = await Promise.all([
+                isViewerAdmin ? fetchVaultRequests(apiKey) : Promise.resolve([]),
+                fetchVaultBalance(apiKey),
+            ]);
+
             renderBody(recs, eligible, skipped, scopeProjection, viewer, availableCrimes, weights, engines, members);
+            bindVaultRequestHandlers(apiKey, viewer);
 
             // Always show tab bar with both tabs
             const tabBar   = document.getElementById('oc-tab-bar');
@@ -3940,7 +4333,7 @@
             }
 
             // Render Engines tab content
-            document.getElementById('oc-tab-engines').innerHTML = renderEnginesTab(engines);
+            document.getElementById('oc-tab-engines').innerHTML = renderEnginesTab(engines, viewer);
 
             // Render Auto-Dispatcher banner (personalized, above all tabs)
             if (engines && engines.autoDispatcher) {
@@ -4052,6 +4445,77 @@
 
     // Start DOM scope reader (runs whenever recruiting tab is visible)
     setupScopeDomReader();
+
+    // ── Vault-payout autofill on Controls tab ────────────────────────────
+    // When an admin taps the Send button on a vault-request row, we stash
+    // {recipientId, recipientName, amount} in sessionStorage. Torn's give-
+    // to-user form lives at factions.php#/tab=controls. We watch for that
+    // page + form and pre-populate the fields so the admin just taps Submit.
+    //
+    // Fragile: Torn's React DOM selectors can change. The selectors below
+    // are best-effort; if Torn ships a redesign, autofill breaks silently
+    // and the amount-in-clipboard + name-in-toast fallback still works.
+    function setReactInputValue(el, value) {
+        const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+        if (setter) setter.call(el, String(value));
+        else el.value = String(value);
+        el.dispatchEvent(new Event('input',  { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    async function tryAutofillVaultPayout() {
+        let intent;
+        try {
+            const raw = sessionStorage.getItem('ocVaultPayout');
+            if (!raw) return;
+            intent = JSON.parse(raw);
+            // Only honor intents from the last 5 minutes.
+            if (!intent || (Date.now() - (intent.ts || 0)) > 5 * 60_000) {
+                sessionStorage.removeItem('ocVaultPayout');
+                return;
+            }
+        } catch (_) { return; }
+
+        // Poll for the form elements — React may take a moment to mount.
+        const start = Date.now();
+        const maxWaitMs = 10_000;
+        while (Date.now() - start < maxWaitMs) {
+            // Best-effort selectors. Torn's Controls tab has a "Give to
+            // faction member" form with a user picker + amount input.
+            const moneyInput = document.querySelector(
+                'input[name="money"], input[placeholder*="mount" i], input[type="text"][data-testid*="money" i]'
+            );
+            const userInput = document.querySelector(
+                'input[name="user"], input[placeholder*="user" i], input[placeholder*="member" i]'
+            );
+
+            if (moneyInput) {
+                setReactInputValue(moneyInput, intent.amount);
+                // Also fill user input if we found one — Torn usually uses
+                // a dropdown that filters as you type.
+                if (userInput) {
+                    setReactInputValue(userInput, intent.recipientName);
+                }
+                // Clear the intent so it doesn't re-fire on reload
+                sessionStorage.removeItem('ocVaultPayout');
+                console.log(`[OC Spawn] autofilled vault payout: ${intent.recipientName} [${intent.recipientId}] $${intent.amount}`);
+                return;
+            }
+            await new Promise(r => setTimeout(r, 300));
+        }
+        console.log('[OC Spawn] vault-payout form not found; fallback = paste amount from clipboard');
+    }
+
+    // Run autofill whenever the hash changes to #/tab=controls AND on
+    // initial load if we're already there.
+    function maybeAutofill() {
+        if ((window.location.hash || '').toLowerCase().includes('tab=controls')) {
+            tryAutofillVaultPayout();
+        }
+    }
+    window.addEventListener('hashchange', maybeAutofill);
+    maybeAutofill();
 
 })();
 
