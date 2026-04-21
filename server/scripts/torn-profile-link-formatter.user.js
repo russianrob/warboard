@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.18
+// @version      3.6.19
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -19,6 +19,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.19 - Fix middle-of-list missing Xan/Boosters: 1-2-3s retry backoffs were too short vs. Torn's 60s rolling rate-limit window. Added a shared _rateLimitedUntil cooldown (30s per code:5) that ALL pending calls respect before firing. Retries now wait 30s each, so the window has time to drain instead of exhausting retries inside the blackout.
 // v3.6.18 - Version bump to trigger userscript auto-update (no code changes vs 3.6.17)
 // v3.6.17 - Fix missing Xan/Boosters for bottom members: 150ms delay between API calls
 //           and retry up to 3x with backoff on Torn rate limit (error code 5)
@@ -392,6 +393,15 @@
     // In-memory cache for API-fetched personal stats to avoid re-fetching
     const apiStatsCache = {};
 
+    // Shared rate-limit cooldown: when ANY call comes back with code:5,
+    // all subsequent calls wait until this timestamp before firing. Torn
+    // enforces a 100 req/min rolling window; once exhausted, it takes
+    // ~45–60s to drain. Prior retry logic only backed off 1-2-3s per call,
+    // which was far too short — middle members silently failed after the
+    // window closed and exhausted their 3 retries before it reopened.
+    let _rateLimitedUntil = 0;
+    const sleepMs = ms => new Promise(r => setTimeout(r, ms));
+
     function fetchPersonalStatsFromApi(userId) {
         const apiKey = getApiKey();
         if (!apiKey) return Promise.resolve(null);
@@ -401,13 +411,21 @@
 
         const fetchAttempt = (attempt) => new Promise((resolve) => {
             const url = `https://api.torn.com/user/${userId}?selections=personalstats&key=${apiKey}&stat=xantaken,boostersused&comment=GNSC_LinkFormatter`;
+            // Respect the shared cooldown BEFORE firing anything.
+            const waitFor = Math.max(0, _rateLimitedUntil - Date.now());
+            const kickoff = async () => {
+            if (waitFor > 0) await sleepMs(waitFor);
             try {
                 const handleResponse = (data) => {
                     if (data.error) {
-                        // Error code 5 = rate limited — retry with backoff (1s, 2s, 3s)
+                        // Error code 5 = rate limited. Set a global 30s cooldown
+                        // so the next ~40 calls don't all hit the wall in
+                        // parallel, then retry up to 3× per call. The cooldown
+                        // gets extended if subsequent calls still hit 429.
                         if (data.error.code === 5 && attempt < 3) {
-                            if (debug) console.warn('GNSC rate limited for', userId, '— retrying in', attempt * 1000, 'ms');
-                            setTimeout(() => fetchAttempt(attempt + 1).then(resolve), attempt * 1000);
+                            _rateLimitedUntil = Math.max(_rateLimitedUntil, Date.now() + 30_000);
+                            if (debug) console.warn('GNSC rate limited for', userId, '— cooling 30s, attempt', attempt);
+                            setTimeout(() => fetchAttempt(attempt + 1).then(resolve), 30_000);
                             return;
                         }
                         if (debug) console.error('GNSC API error for', userId, data.error);
@@ -460,6 +478,8 @@
                 if (debug) console.error('GNSC fetchPersonalStatsFromApi error:', e);
                 resolve(null);
             }
+            };
+            kickoff();
         });
         return fetchAttempt(1);
     }
