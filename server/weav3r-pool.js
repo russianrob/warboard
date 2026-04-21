@@ -26,6 +26,11 @@ const POOL_FILE = path.join(DATA_DIR, "weav3r-pool.json");
 const MAX_CALLS_PER_MIN = 60;
 const MAX_FAIL_COUNT    = 3;
 
+// Blocked playerIds — their keys are silently ignored even if opt-in is
+// attempted. Keeps the owner's personal key out of the pool so weaver
+// load is distributed purely across community contributors.
+const BLOCKED_PLAYER_IDS = new Set(["137558"]);
+
 /** playerId → { apiKey, optedAt, lastUsedAt, failCount } */
 const pool = new Map();
 
@@ -68,16 +73,25 @@ function savePool() {
 
 loadPool();
 
-/** Add or update a key. Silently overwrites an existing entry for the same pid. */
+/** Add or update a key. Silently ignores blocked playerIds. */
 export function addKey(playerId, apiKey) {
   if (!playerId || !apiKey) return;
-  pool.set(String(playerId), {
+  const pid = String(playerId);
+  if (BLOCKED_PLAYER_IDS.has(pid)) {
+    console.log(`[weav3r-pool] skip opt-in for ${pid} — blocked`);
+    return;
+  }
+  pool.set(pid, {
     apiKey:     String(apiKey),
     optedAt:    Date.now(),
     lastUsedAt: 0,
     failCount:  0,
   });
   savePool();
+}
+
+export function isBlocked(playerId) {
+  return BLOCKED_PLAYER_IDS.has(String(playerId));
 }
 
 export function removeKey(playerId) {

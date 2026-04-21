@@ -375,6 +375,12 @@ app.post("/api/weav3r/pool/opt-in", async (req, res) => {
   try {
     const { verifyTornApiKey } = await import("./auth.js");
     const info = await verifyTornApiKey(String(key));
+    if (weav3rPool.isBlocked(info.playerId)) {
+      // Dev / owner — intentionally never enrolled so pool load stays
+      // spread across community contributors. Return ok so the UI shows
+      // the expected "off" state without showing an error.
+      return res.json({ ok: true, optedIn: false, blocked: true, poolSize: weav3rPool.size() });
+    }
     weav3rPool.addKey(info.playerId, String(key));
     console.log(`[weav3r-pool] opt-in: ${info.playerName} (${info.playerId}) — pool size: ${weav3rPool.size()}`);
     res.json({ ok: true, optedIn: true, poolSize: weav3rPool.size() });

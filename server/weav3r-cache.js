@@ -150,11 +150,10 @@ async function refresh() {
 }
 
 function enqueueSellers(items) {
-    // Run verify when EITHER the env flag is on OR the community pool
-    // has at least one opted-in key. The env flag stays available as a
-    // "use OWNER_API_KEY anyway" override for solo / bootstrap setups.
-    if (!VERIFY_ENABLED && pool.size() === 0) return;
-    if (!OWNER_API_KEY && pool.size() === 0) return;
+    // Pool-only verify — no work until at least one community contributor
+    // has opted in via the weav3r userscript settings. Owner's key is
+    // intentionally excluded from the pool.
+    if (pool.size() === 0) return;
     const now = Date.now();
     const seen = new Set(verifyQueue);
     for (const item of items) {
@@ -181,17 +180,17 @@ async function runVerify() {
     verifyTimer = null;
     if (verifyQueue.length === 0) return;
     const sid = verifyQueue.shift();
-    // Prefer a pooled key; fall back to OWNER_API_KEY. Pool keys are
-    // round-robin'd by least-recently-used with a per-key 60/min cap.
+    // Pool-only: no OWNER_API_KEY fallback. Owner's key is intentionally
+    // excluded so weaver verify burden is spread purely across community
+    // contributors. Empty pool → verify simply pauses until someone opts in.
     const pooled = pool.pickKey();
-    const apiKey = pooled?.apiKey || OWNER_API_KEY;
-    if (!apiKey) {
-        // Nothing available — stash the sellerId back and try later.
+    if (!pooled) {
         verifyQueue.unshift(sid);
         verifyPausedUntil = Date.now() + 30_000;
         scheduleVerify();
         return;
     }
+    const apiKey = pooled.apiKey;
     try {
         const url = `https://api.torn.com/user/${sid}?selections=bazaar&key=${encodeURIComponent(apiKey)}`;
         const res = await fetch(url, { headers: { 'User-Agent': UA } });
