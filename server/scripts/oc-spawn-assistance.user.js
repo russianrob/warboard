@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.16
+// @version      3.1.17
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.17 — Scope fix: moved the refresh fetch from `/v2/faction?selections=basic` (which returns id/name/tag/respect/days_old/capacity — no scope) to `/v2/faction/crimes?cat=available` where scope_balance actually lives. Confirmed by 3.1.16's shape dump.
 // v3.1.16 — Scope fix follow-up: 3.1.15's defensive lookup missed because Torn's `basic` selection wraps the payload one level deeper than checked. Replaced with a bounded recursive walk that finds any numeric field matching /scope/i at any depth. On miss, logs the full top-level shape so we can adapt without guesswork.
 // v3.1.15 — Fix: scope wasn't refreshing. Old path fired at Torn's internal `step=getCrimesData` endpoint and relied on a sandbox AJAX interceptor to catch scope_balance — brittle because Torn's own XHRs happen in page context (bypass the wrapper) and sandbox-origin calls can get HTML responses that silently fail to parse as JSON. Now hits the documented v2 API via gmRequest with defensive field extraction + console.warn logging when the field isn't found.
 // v3.1.14 — Fix: Admin tab was always visible to every member regardless of admin-roles list. Now hidden for non-admins alongside Manager/Metrics/Engines. Also removed the stale "Admin requires faction API access" locked message — gating is role-based now, the old copy was misleading.
@@ -214,7 +215,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.16';
+    const SCRIPT_VERSION = '3.1.17';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -934,7 +935,10 @@
         const key = getApiKey();
         if (!key || key === 'YOUR_API_KEY_HERE') return;
         try {
-            const r = await gmRequest(`https://api.torn.com/v2/faction/?selections=basic&key=${encodeURIComponent(key)}`);
+            // `basic` doesn't expose scope_balance (confirmed 3.1.16 on
+            // live Torn v2). Scope lives on the crimes endpoint which the
+            // rest of the script already uses.
+            const r = await gmRequest(`https://api.torn.com/v2/faction/crimes?cat=available&key=${encodeURIComponent(key)}`);
             if (!r.ok) {
                 console.warn('[OC Spawn] scope fetch failed:', r.status, r.data?.error);
                 return;
