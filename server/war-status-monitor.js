@@ -41,8 +41,7 @@ const nextEnemyProfile = (war) =>
 // hospitalized BY OUR FACTION, instead of the 30s bound of the basic poll.
 // 20s matches Torn's attack-endpoint cache window — polling faster
 // returns duplicates and burns the 100/min rate-limit budget we share
-// with chain-monitor, war-status basic poll, WarScanner, NerveTracker,
-// and xanax-subs.
+// with chain-monitor, war-status basic poll, WarScanner, and xanax-subs.
 const ATTACKS_FEED_INTERVAL_MS = 60_000;
 // How long an attacks-feed-derived hospital override suppresses a stale
 // "Okay" from the basic poll. Torn's cache tends to settle within 30s; we

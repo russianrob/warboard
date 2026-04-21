@@ -32,10 +32,6 @@ import { startWeav3rCache, getWeav3rSnapshot, subscribeToWeav3r, kickVerifyOnPoo
 import * as weav3rPool from "./weav3r-pool.js";
 import * as vaultRequests from "./vault-requests.js";
 import { startSubscriptionManager, stopSubscriptionManager } from "./subscription-manager.js";
-// NerveTracker disabled — its 30-minute Torn API poll was contributing to
-// our shared faction-key rate-limit pressure. Read endpoints in routes.js
-// still serve the last-saved state for any client UI that references it.
-// import { startNerveTracker, stopNerveTracker } from "./nerve-tracker.js";
 import * as store from "./store.js";
 import { loadSubscriptions } from "./push-notifications.js";
 import { fetchRankedWar } from "./torn-api.js";
@@ -529,7 +525,6 @@ startMembershipSchedule();
 
 // Start faction subscription manager (polls for 50M payments)
 startSubscriptionManager();
-// startNerveTracker(); // disabled — see import comment above
 
 // ── Auto-detect new ranked wars every 5 minutes ─────────────────────────
 let warDetectTimer = null;
@@ -640,7 +635,6 @@ function shutdown(signal) {
   stopHeatmapFlush();
   stopMembershipSchedule();
   stopSubscriptionManager();
-  // stopNerveTracker(); // disabled
 
   store.saveState();
   store.saveMemberBars();
