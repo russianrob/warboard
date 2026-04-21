@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.11
+// @version      3.1.12
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.12 — Vault-request amount input accepts shorthand: "500k" → 500,000, "2.5m" → 2,500,000, "1b" → 1,000,000,000. Also tolerates commas ("1,000"), leading $ ("$500"), and decimals. Input switched from type=number to type=text + inputmode=decimal so mobile still gets a numeric keypad.
 // v3.1.11 — TornPDA fix: header buttons (Refresh, settings gear, close ✕) bind both click + touchend with a 350ms dedupe. Flutter InAppWebView swallows synthesized click events on children of the drag-handle <h2>, which is why taps in TornPDA did nothing. Handlers still fire exactly once on desktop / mobile web / WebView.
 // v3.1.10 — Admin-roles config: in OC settings (gear), comma-separated faction positions that gate Admin/Manager/Engines tab visibility. Defaults to leader + co-leader. Replaces the API-key-tier check that was incorrectly granting tab access to anyone with a Limited+ key. Plus: $ button inside vault-request amount box auto-fills max balance; "Send anytime / Only when I'm online" is requester preference (push always goes to all admin-role members). "Send anytime / Only when I'm online" is now a requester preference about accepting money while offline (not notification filtering). Push notifications always go to everyone. Balance shown above form.
 // v3.1.0 — Vault requests: My OC tab now shows a live "$X from vault" board. Any faction member submits an amount; Torn currencynews auto-removes the request when the transfer shows up. Push notifications on submit.
@@ -209,7 +210,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.11';
+    const SCRIPT_VERSION = '3.1.12';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1422,6 +1423,21 @@
         }, 15_000);
     }
 
+    // Parse "500k" / "2.5m" / "1b" / "500,000" / "$500" / "500" → integer cents-free amount.
+    // Returns NaN if unparseable.
+    function parseVaultAmount(raw) {
+        if (raw == null) return NaN;
+        const s = String(raw).trim().replace(/[\s,$]/g, '');
+        if (!s) return NaN;
+        const m = s.match(/^(\d+(?:\.\d+)?)([kmb])?$/i);
+        if (!m) return NaN;
+        const n = parseFloat(m[1]);
+        if (!isFinite(n) || n < 0) return NaN;
+        const suf = (m[2] || '').toLowerCase();
+        const mult = suf === 'k' ? 1e3 : suf === 'm' ? 1e6 : suf === 'b' ? 1e9 : 1;
+        return Math.floor(n * mult);
+    }
+
     function bindVaultRequestHandlers(apiKey, viewer) {
         ensureVaultPolling(apiKey, viewer);
         // $ button: fill amount input with the requester's current max balance
@@ -1439,10 +1455,10 @@
                 const amtInput = document.getElementById('oc-vault-amount');
                 const tgtSel   = document.getElementById('oc-vault-target');
                 const msgEl    = document.getElementById('oc-vault-msg');
-                const amount = Number(amtInput?.value);
+                const amount = parseVaultAmount(amtInput?.value);
                 const target = tgtSel?.value === 'online' ? 'online' : 'both';
                 if (!(amount > 0)) {
-                    if (msgEl) msgEl.textContent = 'Enter an amount.';
+                    if (msgEl) msgEl.textContent = 'Enter a valid amount (e.g. 500k, 2.5m, 1b).';
                     return;
                 }
                 if (msgEl) msgEl.textContent = 'Submitting…';
@@ -3591,7 +3607,7 @@
             <div style="flex:1;min-width:140px;position:relative;">
                 <button type="button" id="oc-vault-max" title="${balanceLabel ? 'Fill with your max vault balance: ' + balanceLabel : 'Vault balance unknown'}"
                     style="position:absolute;left:2px;top:1px;bottom:1px;width:26px;background:#1e3a5f;border:0;color:#facc15;font-weight:700;border-radius:3px;cursor:${balance ? 'pointer' : 'default'};font-size:12px;">$</button>
-                <input type="number" min="1" step="1" placeholder="${balanceLabel ? 'Max ' + balanceLabel : 'Amount'}" id="oc-vault-amount"
+                <input type="text" inputmode="decimal" autocomplete="off" placeholder="${balanceLabel ? 'Max ' + balanceLabel + ' — e.g. 500k, 2.5m' : 'Amount — e.g. 500k, 2.5m'}" id="oc-vault-amount"
                     style="width:100%;box-sizing:border-box;background:#0f1a2e;border:1px solid #1e3a5f;color:#dde;border-radius:4px;padding:4px 6px 4px 32px;font-size:11px;">
             </div>`;
 
