@@ -17,7 +17,7 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, appendFileSync, mkdirSync } from "node:fs";
 
 import routes, { setIO, gateMiddleware } from "./routes.js";
 import "./war-scanner.js";
@@ -27,7 +27,9 @@ import { startChainMonitor, stopAll as stopAllChainMonitors } from "./chain-moni
 import { startWarStatusMonitor, stopAll as stopAllWarStatusMonitors } from "./war-status-monitor.js";
 import { loadHeatmaps, stopFlush as stopHeatmapFlush } from "./activity-heatmap.js";
 import { startMembershipSchedule, stopMembershipSchedule } from "./membership-check.js";
-import { startXanaxSubscriptions, stopXanaxSubscriptions } from "./xanax-subscriptions.js";
+import { startXanaxSubscriptions, stopXanaxSubscriptions, getActiveSubscribedFactionIds } from "./xanax-subscriptions.js";
+import { startWeav3rCache, getWeav3rSnapshot, subscribeToWeav3r } from "./weav3r-cache.js";
+import * as vaultRequests from "./vault-requests.js";
 import { startSubscriptionManager, stopSubscriptionManager } from "./subscription-manager.js";
 // NerveTracker disabled — its 30-minute Torn API poll was contributing to
 // our shared faction-key rate-limit pressure. Read endpoints in routes.js
@@ -222,6 +224,130 @@ app.get("/socket.io.min.js", (_req, res) => {
   }
 });
 
+// ── WhisperBoard training telemetry ─────────────────────────────────────
+// Receives one-shot training-run reports from the keyboard so the user can
+// see whether overnight auto-training actually ran (and succeeded). No auth:
+// personal fork on one device, and the log is append-only JSON lines with
+// no sensitive content (samples count + loss + error message, nothing
+// user-typed). View at /whisperboard/training_log.
+const WHISPERBOARD_LOG_DIR = join(__dirname, "..", "logs");
+const WHISPERBOARD_LOG_PATH = join(WHISPERBOARD_LOG_DIR, "whisperboard_training.log");
+try { mkdirSync(WHISPERBOARD_LOG_DIR, { recursive: true }); } catch {}
+
+app.post("/whisperboard/training_log", (req, res) => {
+  const body = req.body || {};
+  const entry = {
+    ts: new Date().toISOString(),
+    ip: req.ip,
+    versionName: String(body.versionName || "").slice(0, 32),
+    versionCode: Number.isFinite(+body.versionCode) ? +body.versionCode : null,
+    success: !!body.success,
+    state: String(body.state || "").slice(0, 32),
+    samples: Number.isFinite(+body.samples) ? +body.samples : null,
+    loss: Number.isFinite(+body.loss) ? +body.loss : null,
+    durationMs: Number.isFinite(+body.durationMs) ? +body.durationMs : null,
+    trigger: String(body.trigger || "").slice(0, 32),
+    error: body.error ? String(body.error).slice(0, 512) : null,
+  };
+  try {
+    appendFileSync(WHISPERBOARD_LOG_PATH, JSON.stringify(entry) + "\n");
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[whisperboard] log append failed:", err.message);
+    res.status(500).json({ ok: false });
+  }
+});
+
+app.get("/whisperboard/training_log", (_req, res) => {
+  try {
+    const content = existsSync(WHISPERBOARD_LOG_PATH)
+      ? readFileSync(WHISPERBOARD_LOG_PATH, "utf-8")
+      : "";
+    res.setHeader("Content-Type", "text/plain; charset=UTF-8");
+    res.setHeader("Cache-Control", "no-cache");
+    res.send(content);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── Weav3r dollar-deals cache ───────────────────────────────────────────
+// Shared snapshot of weav3r.dev's dollar-bazaars list, refreshed every 30s
+// by one background poller. Userscript clients connect via SSE and get live
+// pushes instead of each polling weav3r themselves.
+app.get("/api/weav3r/deals", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  weav3rDealsHits++;
+  res.json(getWeav3rSnapshot());
+});
+
+// Lightweight usage telemetry for weav3r endpoints. Used to decide
+// whether the polling budget is worth the 60/min API calls it burns.
+let weav3rDealsHits = 0;
+let weav3rStreamSubs = 0;
+let weav3rStreamOpens = 0;
+
+app.get("/api/weav3r/stream", (req, res) => {
+  res.writeHead(200, {
+    "Content-Type":  "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    "Connection":    "keep-alive",
+    // CORS allowed separately at top of file for torn.com origins.
+  });
+
+  weav3rStreamSubs++;
+  weav3rStreamOpens++;
+  const clientIp = req.ip || req.headers['x-forwarded-for'] || '?';
+  console.log(`[weav3r-usage] stream-open from ${clientIp} — active subs: ${weav3rStreamSubs}`);
+
+  // Immediate snapshot on connect so the client has data within ~1 RTT.
+  const initial = getWeav3rSnapshot();
+  res.write(`event: snapshot\ndata: ${JSON.stringify(initial)}\n\n`);
+
+  // Subscribe to refresh events.
+  const unsub = subscribeToWeav3r((snap) => {
+    try {
+      res.write(`event: update\ndata: ${JSON.stringify(snap)}\n\n`);
+    } catch (_) { /* client gone, cleanup via close below */ }
+  });
+
+  // Periodic keepalive so intermediaries / mobile networks don't drop idle.
+  const ping = setInterval(() => {
+    try { res.write(":ping\n\n"); } catch (_) {}
+  }, 25_000);
+
+  req.on("close", () => {
+    clearInterval(ping);
+    unsub();
+    weav3rStreamSubs--;
+    console.log(`[weav3r-usage] stream-close — active subs: ${weav3rStreamSubs}`);
+  });
+});
+
+// Admin-only usage snapshot. Dev XID 137558 only.
+app.get("/api/weav3r/usage", (req, res) => {
+  const key = req.query.key;
+  if (!key) return res.status(400).json({ error: "key required" });
+  // Lightweight check: just require it matches the dev key. Intentionally
+  // no Torn API verify here to keep it cheap — leaks nothing sensitive.
+  import("./auth.js").then(async ({ verifyTornApiKey }) => {
+    try {
+      const info = await verifyTornApiKey(key);
+      if (String(info.playerId) !== '137558') {
+        return res.status(403).json({ error: "dev only" });
+      }
+      res.json({
+        dealsHits: weav3rDealsHits,
+        streamSubsActive: weav3rStreamSubs,
+        streamOpensTotal: weav3rStreamOpens,
+        snapshot: getWeav3rSnapshot(),
+      });
+    } catch (e) {
+      res.status(401).json({ error: e.message });
+    }
+  });
+});
+
 app.use(routes);
 
 // Health check
@@ -328,6 +454,18 @@ for (const [warId, war] of store.getAllWars()) {
 // Schedule weekly membership verification (every Tuesday)
 startMembershipSchedule();
   startXanaxSubscriptions();
+  startWeav3rCache();
+  // Background poller handles OWNER faction only (uses OWNER_API_KEY).
+  // Other factions get "piggy-back" cleanup — /api/oc/vault-requests
+  // opportunistically triggers a fundsnews poll using the caller's OWN
+  // key whenever someone opens the panel. No stored keys needed, each
+  // user's key only polls their own faction. See vault-requests.js.
+  const OWNER_FID = String(process.env.OWNER_FACTION_ID || '42055');
+  vaultRequests.startPoller({
+    getApiKeyForFaction: async (factionId) =>
+      String(factionId) === OWNER_FID ? (process.env.OWNER_API_KEY || '') : '',
+    listActiveFactions: () => [OWNER_FID],
+  });
 
 // Start faction subscription manager (polls for 50M payments)
 startSubscriptionManager();
