@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.19
+// @version      3.6.20
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -19,6 +19,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.20 - Faction copy now shows BOTH BSP and FFS side-by-side ("(BSP: 345k · FFS: 534k)") so pasted output lets any reader eyeball the spread without needing a live overlay. Also adds W/L ratio from attackswon/attackslost (free — same personalstats API call as Xan/Boosters) as a gut-check against stat predictions. Single-source format kept for profile-page / list-item one-liners.
 // v3.6.19 - Fix middle-of-list missing Xan/Boosters: 1-2-3s retry backoffs were too short vs. Torn's 60s rolling rate-limit window. Added a shared _rateLimitedUntil cooldown (30s per code:5) that ALL pending calls respect before firing. Retries now wait 30s each, so the window has time to drain instead of exhausting retries inside the blackout.
 // v3.6.18 - Version bump to trigger userscript auto-update (no code changes vs 3.6.17)
 // v3.6.17 - Fix missing Xan/Boosters for bottom members: 150ms delay between API calls
@@ -410,7 +411,7 @@
         if (apiStatsCache[userId] !== undefined) return Promise.resolve(apiStatsCache[userId]);
 
         const fetchAttempt = (attempt) => new Promise((resolve) => {
-            const url = `https://api.torn.com/user/${userId}?selections=personalstats&key=${apiKey}&stat=xantaken,boostersused&comment=GNSC_LinkFormatter`;
+            const url = `https://api.torn.com/user/${userId}?selections=personalstats&key=${apiKey}&stat=xantaken,boostersused,attackswon,attackslost&comment=GNSC_LinkFormatter`;
             // Respect the shared cooldown BEFORE firing anything.
             const waitFor = Math.max(0, _rateLimitedUntil - Date.now());
             const kickoff = async () => {
@@ -437,7 +438,9 @@
                     if (ps) {
                         apiStatsCache[userId] = {
                             xantaken: ps.xantaken ?? null,
-                            boostersused: ps.boostersused ?? null
+                            boostersused: ps.boostersused ?? null,
+                            attackswon: ps.attackswon ?? null,
+                            attackslost: ps.attackslost ?? null,
                         };
                     } else {
                         apiStatsCache[userId] = null;
@@ -493,7 +496,9 @@
 
         return {
             xantaken: xanCached ?? apiStats?.xantaken ?? null,
-            boostersused: apiStats?.boostersused ?? null
+            boostersused: apiStats?.boostersused ?? null,
+            attackswon: apiStats?.attackswon ?? null,
+            attackslost: apiStats?.attackslost ?? null,
         };
     }
 
@@ -939,17 +944,16 @@
                 const extras = [];
 
                 try {
-                    // Try to fetch battle stats
+                    // Faction copy: pull BOTH BSP and FFS and show them
+                    // side-by-side so any reader of the pasted output can
+                    // see the spread. Profile/single-target copies still
+                    // use the original prefer-BSP-then-FFS fallback above
+                    // since those are 1 line and meant for quick glances.
                     if (settings.battlestats) {
                         const predOnly = getBspPredictionOrFf(id);
-                        if (predOnly?.type === 'prediction' && predOnly.prediction) {
-                            statsString = formatPredictionString(predOnly.prediction);
-                        } else {
-                            const ff = await getFfScouterEstimate(id);
-                            if (ff && ff.total != null) {
-                                statsString = formatFfScouterString(ff, settings.battleStatsFormat);
-                            }
-                        }
+                        const pred = predOnly?.type === 'prediction' ? predOnly.prediction : null;
+                        const ff   = await getFfScouterEstimate(id);
+                        statsString = formatDualStats(pred, ff);
                     }
                 } catch (statErr) {
                     if (debug) console.error('GNSC faction copy: stat error for', id, statErr);
@@ -962,6 +966,21 @@
                     if (level != null) extras.push(`Lvl ${level}`);
 
                     const pStats = await getPersonalStats(id);
+                    // W/L ratio — cheap gut-check against the BSP/FFS
+                    // numbers. A target with 2M wins / 10k losses is
+                    // top-tier regardless of what either predictor says.
+                    // Formatted as "W/L 2.1M/10k" keeping it compact.
+                    const fmtCount = (n) => {
+                        if (n == null) return null;
+                        if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M';
+                        if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k';
+                        return String(n);
+                    };
+                    if (pStats && pStats.attackswon != null && pStats.attackslost != null) {
+                        const w = fmtCount(pStats.attackswon);
+                        const l = fmtCount(pStats.attackslost);
+                        if (w && l) extras.push(`W/L ${w}/${l}`);
+                    }
                     if (pStats && pStats.xantaken != null) extras.push(`Xan: ${pStats.xantaken.toLocaleString()}`);
                     if (pStats && pStats.boostersused != null) extras.push(`Boosters: ${pStats.boostersused.toLocaleString()}`);
                 } catch (apiErr) {
@@ -1063,6 +1082,33 @@
             return `(Stats: ${tbsStr})`;
         } catch (e) {
             if (debug) console.error('Torn Profile Link Formatter: formatPredictionString error', pred, e);
+            return "(Stats: Error)";
+        }
+    }
+
+    // Show BOTH BSP prediction and FF Scouter side-by-side when both are
+    // available, so downstream readers (pasted into chat) can eyeball the
+    // spread themselves. When only one source has data, falls back to the
+    // single-source format.
+    function formatDualStats(pred, ff) {
+        try {
+            const fmtTbs = (tbs) => {
+                if (tbs == null) return null;
+                let n = tbs;
+                if (typeof n === 'string') n = parseFloat(n.replace(/,/g, ''));
+                return isFinite(n) ? formatNumber(n) : null;
+            };
+            const bspStr = pred && pred.TBS != null ? fmtTbs(pred.TBS) : null;
+            const ffStr  = ff && ff.total != null
+                ? (ff.human && typeof ff.human === 'string' ? ff.human : fmtTbs(ff.total))
+                : null;
+
+            if (bspStr && ffStr) return `(BSP: ${bspStr} · FFS: ${ffStr})`;
+            if (bspStr)          return `(BSP: ${bspStr})`;
+            if (ffStr)           return `(FFS: ${ffStr})`;
+            return "(Stats: N/A)";
+        } catch (e) {
+            if (debug) console.error('Torn Profile Link Formatter: formatDualStats error', e);
             return "(Stats: Error)";
         }
     }
