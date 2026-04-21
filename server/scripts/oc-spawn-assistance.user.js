@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.14
+// @version      3.1.15
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.15 — Fix: scope wasn't refreshing. Old path fired at Torn's internal `step=getCrimesData` endpoint and relied on a sandbox AJAX interceptor to catch scope_balance — brittle because Torn's own XHRs happen in page context (bypass the wrapper) and sandbox-origin calls can get HTML responses that silently fail to parse as JSON. Now hits the documented v2 API via gmRequest with defensive field extraction + console.warn logging when the field isn't found.
 // v3.1.14 — Fix: Admin tab was always visible to every member regardless of admin-roles list. Now hidden for non-admins alongside Manager/Metrics/Engines. Also removed the stale "Admin requires faction API access" locked message — gating is role-based now, the old copy was misleading.
 // v3.1.13 — Admin settings (gear) now has a "Vault-Request Notifications" toggle and a "Send Test Notification" button. Toggle is server-backed via /api/oc/notification-prefs (auth'd by Torn API key — no FactionOps JWT needed). Test button fires a real push to the caller so they can verify their subscription before relying on live alerts.
 // v3.1.12 — Vault-request amount input accepts shorthand: "500k" → 500,000, "2.5m" → 2,500,000, "1b" → 1,000,000,000. Also tolerates commas ("1,000"), leading $ ("$500"), and decimals. Input switched from type=number to type=text + inputmode=decimal so mobile still gets a numeric keypad.
@@ -212,7 +213,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.14';
+    const SCRIPT_VERSION = '3.1.15';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -920,20 +921,39 @@
         // Scope auto-push removed — scope is saved manually via Settings
     }
 
-    // Force a fresh scope read by calling Torn's internal crimes data
-    // endpoint. Our AJAX interceptor (setupAjaxInterceptor) catches the
-    // response and forwards scope_balance to handleDetectedScope. The
-    // request is sent with the user's existing session cookie (we only
-    // run on torn.com) so no extra auth is needed. Swallows errors — if
-    // Torn blocks the direct call we just fall back to whatever the page
-    // last reported.
-    function refreshScopeFromTorn() {
+    // Force a fresh scope read via Torn's public v2 faction API. Prior
+    // implementation fired at the internal `step=getCrimesData` endpoint
+    // and relied on the sandbox AJAX interceptor to extract scope_balance
+    // from the response — brittle because (a) Torn's own crimes-page
+    // XHRs fire in page-context and bypass sandbox wrappers, and (b) the
+    // internal endpoint responds with HTML (not JSON) for sandbox-origin
+    // requests, which broke parsing silently. Direct v2 API call is
+    // deterministic and documented.
+    async function refreshScopeFromTorn() {
+        const key = getApiKey();
+        if (!key || key === 'YOUR_API_KEY_HERE') return;
         try {
-            fetch('/factions.php?step=getCrimesData', {
-                credentials: 'include',
-                headers: { 'X-Requested-With': 'XMLHttpRequest' },
-            }).catch(() => {});
-        } catch (_) {}
+            const r = await gmRequest(`https://api.torn.com/v2/faction/?selections=basic&key=${encodeURIComponent(key)}`);
+            if (!r.ok) {
+                console.warn('[OC Spawn] scope fetch failed:', r.status, r.data?.error);
+                return;
+            }
+            // Field name varies across API versions / edge cases. Probe
+            // a few documented + legacy spots defensively.
+            const d = r.data || {};
+            const s = d.scope_balance
+                   ?? d.scope
+                   ?? d.basic?.scope_balance
+                   ?? d.basic?.scope
+                   ?? d.faction?.scope_balance;
+            if (typeof s === 'number' && s >= 0 && s <= SCOPE_MAX) {
+                handleDetectedScope(s, 'Torn v2 API');
+            } else {
+                console.warn('[OC Spawn] scope not found in v2 response — fields:', Object.keys(d).slice(0, 12));
+            }
+        } catch (e) {
+            console.warn('[OC Spawn] scope fetch threw:', e?.message || e);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
