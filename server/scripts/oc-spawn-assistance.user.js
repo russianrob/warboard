@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.20
+// @version      3.1.21
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.21 — Scope regression fix: DOM reader was overwriting a correct state-read value (e.g. 14 on Recruiting) with a stale DOM-text scrape from another tab (e.g. 11 on Planning from a tooltip/cached summary). Dropped the fallback text-scraping strategies entirely; scope now comes only from Torn's authoritative faction state (unsafeWindow.torn.faction.scope_balance). If state isn't populated on the current tab, last-known value stays put and the age chip indicates freshness.
 // v3.1.20 — Scope source: Torn deleted the internal getCrimesData endpoint entirely ("Call to undefined method getCrimesData" on v3.1.19). Removed the HTTP refresh fetch; scope now comes exclusively from the DOM/state reader, which reads unsafeWindow.torn.faction.scope_balance from Torn's own state (populated whenever the user has loaded any factions page). Refresh button still nudges the reader in case a value is present but hasn't been picked up. Detection-age chip stays visible so stale readings are obvious.
 // v3.1.19 — Scope fix: 3.1.18's direct getCrimesData call hit Torn's "Validation is required" wall because the internal endpoint requires an rfcv CSRF token (read from the rfc_v cookie). Added the token to the query string, matching the pattern used by the armory-cache fetches elsewhere in this script.
 // v3.1.18 — Scope fix: v2 API dead-end — neither `basic` nor `crimes?cat=available` selections expose scope_balance (confirmed via shape dumps). Fell back to Torn's internal /factions.php?step=getCrimesData endpoint, same URL the crimes page uses internally. Called directly (not via the interceptor) with credentials:'include' + Accept:application/json. Logs the first 120 chars of the body when JSON.parse fails so we see exactly what Torn is returning.
@@ -218,7 +219,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.20';
+    const SCRIPT_VERSION = '3.1.21';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -996,36 +997,18 @@
     //  DOM SCOPE READER  — fallback / secondary detection
     // ═══════════════════════════════════════════════════════════════════════
     function readScopeFromDom() {
-        // Strategy 0: Check internal page state
+        // Authoritative source only: Torn's internal page state. Previous
+        // versions also scraped DOM elements whose class/text contained
+        // "scope" as fallback strategies — but those fallbacks would
+        // overwrite a correct state-read value with stale text from
+        // tooltips, help cards, or cached summaries on other tabs
+        // (e.g. Planning tab holding onto "11" while state said 14).
+        // If state isn't populated, leave CONFIG.SCOPE alone — stale
+        // detection-age chip handles surfacing that to the user.
         const win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
         if (win.torn && win.torn.faction) {
              const s = win.torn.faction.scope_balance ?? win.torn.faction.scope;
              if (typeof s === 'number' && s >= 0 && s <= SCOPE_MAX) return s;
-        }
-
-        // Strategy 1: any element whose class contains 'scope' (exclude our panel)
-        const byClass = document.querySelector('[class*="scope" i]:not(#oc-spawn-panel *)');
-        if (byClass) {
-            const num = parseInt(byClass.textContent.trim());
-            if (!isNaN(num) && num >= 0 && num <= SCOPE_MAX) return num;
-            const numChild = byClass.querySelector('span, b, strong');
-            if (numChild) {
-                const n2 = parseInt(numChild.textContent.trim());
-                if (!isNaN(n2) && n2 >= 0 && n2 <= SCOPE_MAX) return n2;
-            }
-        }
-
-        // Strategy 2: elements matching "Scope balance: NN" (exclude our panel)
-        const candidates = document.querySelectorAll('span, div, p, li');
-        for (const el of candidates) {
-            if (el.closest('#oc-spawn-panel')) continue;
-            if (el.children.length > 2) continue;
-            const text = el.textContent.trim();
-            const m = text.match(/scope[\s\w:]*?(\d+)/i);
-            if (m) {
-                const val = parseInt(m[1]);
-                if (val >= 0 && val <= SCOPE_MAX) return val;
-            }
         }
         return null;
     }
