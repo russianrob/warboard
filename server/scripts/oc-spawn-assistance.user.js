@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.19
+// @version      3.1.20
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.20 — Scope source: Torn deleted the internal getCrimesData endpoint entirely ("Call to undefined method getCrimesData" on v3.1.19). Removed the HTTP refresh fetch; scope now comes exclusively from the DOM/state reader, which reads unsafeWindow.torn.faction.scope_balance from Torn's own state (populated whenever the user has loaded any factions page). Refresh button still nudges the reader in case a value is present but hasn't been picked up. Detection-age chip stays visible so stale readings are obvious.
 // v3.1.19 — Scope fix: 3.1.18's direct getCrimesData call hit Torn's "Validation is required" wall because the internal endpoint requires an rfcv CSRF token (read from the rfc_v cookie). Added the token to the query string, matching the pattern used by the armory-cache fetches elsewhere in this script.
 // v3.1.18 — Scope fix: v2 API dead-end — neither `basic` nor `crimes?cat=available` selections expose scope_balance (confirmed via shape dumps). Fell back to Torn's internal /factions.php?step=getCrimesData endpoint, same URL the crimes page uses internally. Called directly (not via the interceptor) with credentials:'include' + Accept:application/json. Logs the first 120 chars of the body when JSON.parse fails so we see exactly what Torn is returning.
 // v3.1.17 — Scope fix: moved the refresh fetch from `/v2/faction?selections=basic` (which returns id/name/tag/respect/days_old/capacity — no scope) to `/v2/faction/crimes?cat=available` where scope_balance actually lives. Confirmed by 3.1.16's shape dump.
@@ -217,7 +218,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.19';
+    const SCRIPT_VERSION = '3.1.20';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -933,70 +934,23 @@
     // internal endpoint responds with HTML (not JSON) for sandbox-origin
     // requests, which broke parsing silently. Direct v2 API call is
     // deterministic and documented.
-    // Torn's public v2 API doesn't expose scope_balance (confirmed via
-    // 3.1.15–3.1.17 shape dumps: neither `basic` nor `crimes?cat=available`
-    // include it). Fall back to Torn's internal getCrimesData endpoint,
-    // same URL the crimes page itself uses. We call it directly (not via
-    // the sandbox AJAX interceptor — that was unreliable) with
-    // `credentials: 'include'` so the user's browser session cookie is
-    // attached. Same-origin request from torn.com → cookies travel fine.
-    async function refreshScopeFromTorn() {
-        try {
-            // Torn's internal `step=getCrimesData` endpoint requires an
-            // `rfcv` query param (CSRF-style token pulled from cookie),
-            // otherwise it returns a "Validation is required" HTML wall.
-            // Same pattern the armory-cache fetches use.
-            const rfcv = mgr_getRfcvToken();
-            if (!rfcv) {
-                console.warn('[OC Spawn] scope skip — rfc_v cookie missing (navigate into factions tab first)');
-                return;
-            }
-            const res = await fetch(`/factions.php?step=getCrimesData&rfcv=${encodeURIComponent(rfcv)}`, {
-                credentials: 'include',
-                headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
-            });
-            if (!res.ok) {
-                console.warn('[OC Spawn] scope HTTP', res.status);
-                return;
-            }
-            const text = await res.text();
-            let data = null;
-            try { data = JSON.parse(text); }
-            catch (_) {
-                console.warn('[OC Spawn] scope response not JSON — first 120 chars:', text.slice(0, 120));
-                return;
-            }
-            // Recursive scan for any numeric scope-ish field. getCrimesData
-            // has historically used `scope_balance` at top-level but guard
-            // against structural drift.
-            function findScope(obj, depth = 0) {
-                if (!obj || typeof obj !== 'object' || depth > 4) return null;
-                for (const [k, v] of Object.entries(obj)) {
-                    if (/scope/i.test(k) && typeof v === 'number' && v >= 0 && v <= SCOPE_MAX) return v;
-                }
-                for (const v of Object.values(obj)) {
-                    if (v && typeof v === 'object') {
-                        const found = findScope(v, depth + 1);
-                        if (found !== null) return found;
-                    }
-                }
-                return null;
-            }
-            const s = findScope(data);
-            if (s !== null) {
-                handleDetectedScope(s, 'getCrimesData');
-            } else {
-                const shape = {};
-                for (const [k, v] of Object.entries(data).slice(0, 12)) {
-                    shape[k] = v && typeof v === 'object'
-                        ? `{${Object.keys(v).slice(0, 10).join(',')}}`
-                        : typeof v;
-                }
-                console.warn('[OC Spawn] scope not found in getCrimesData — shape:', JSON.stringify(shape));
-            }
-        } catch (e) {
-            console.warn('[OC Spawn] scope fetch threw:', e?.message || e);
-        }
+    // Scope refresh history (all found dead in 3.1.15–3.1.19):
+    //   - Torn's public v2 API: neither `basic` nor `crimes?cat=available`
+    //     selections expose scope_balance.
+    //   - Internal /factions.php?step=getCrimesData: returns
+    //     "Call to undefined method getCrimesData" — endpoint deleted.
+    // Fallback: trust the DOM/state reader (setupScopeDomReader) which
+    // reads unsafeWindow.torn.faction.scope_balance whenever Torn's
+    // internal state is populated — i.e., whenever the user has loaded
+    // any factions page. The scope strip shows detection age so stale
+    // readings surface visibly. Users who want a fresh value just open
+    // the crimes tab; Torn's own code repopulates the state there.
+    function refreshScopeFromTorn() {
+        // One-shot nudge to the DOM reader in case state is present but
+        // hasn't been picked up yet (e.g. panel opened before MutationObserver
+        // caught the relevant DOM change).
+        const s = readScopeFromDom();
+        if (s !== null) handleDetectedScope(s, 'DOM/State (manual refresh)');
     }
 
     // ═══════════════════════════════════════════════════════════════════════
