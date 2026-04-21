@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.25
+// @version      3.1.26
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.26 — Scope diagnostic logging for "full reload reverts to 11": init now logs what GM storage contained at script boot (cfg_scope, cfg_scope_auto_ts, age in seconds, resulting CONFIG.SCOPE, autoDetected flag). fetchFactionSettings also logs whether it kept the fresh value or let the server overwrite, so we can tell exactly where a revert happens.
 // v3.1.25 — Scope persistence: auto-detected scope now survives a full page reload. handleDetectedScope writes the value to GM_setValue('cfg_scope', …) and stamps GM_setValue('cfg_scope_auto_ts', now). On init, CONFIG._scopeAutoDetected is restored as true if that stamp is under 2h old, preventing fetchFactionSettings from clobbering the fresh detection with the stale server-saved value. Previously: reload → _scopeAutoDetected reset to false → server's 11 won even after user detected 14 on Recruiting.
 // v3.1.24 — Scope diagnostics: upgraded the strategy-fired logs from console.debug to console.log so Chrome's default Console level shows them (Verbose was required to see debug). Detection log now includes the old→new transition so we can trace whether a strategy is actively overwriting a fresh value with a stale one vs. leaving it alone.
 // v3.1.23 — ACTUAL scope root cause (turns out it was never the DOM reader): every runAnalysis refresh called fetchFactionSettings and unconditionally did CONFIG.SCOPE = srvSettings.scope, which overwrote a fresh auto-detected value (e.g. 14 from Recruiting DOM) with the last-saved server value (e.g. 11). Now only applies the server-side value when _scopeAutoDetected is false, so fresh local reads stick. The previous "scope goes back to 11 on Planning" wasn't a DOM-scrape issue — it was server-settings clobber. Strategies 0/1/2 kept as-is; 3.1.22's visibility gate + logs stay in place.
@@ -204,6 +205,11 @@
             // stamp is the last time a DOM/state reader read it; lasts 2h.
             _scopeAutoDetected:      (Date.now() - Number(GM_getValue('cfg_scope_auto_ts', 0))) < 2 * 60 * 60 * 1000,
             _scopeUpdatedAt:         Number(GM_getValue('cfg_scope_auto_ts', 0)) || null,
+            _scopeInitSnapshot:      {
+                cfg_scope:         GM_getValue('cfg_scope', null),
+                cfg_scope_auto_ts: GM_getValue('cfg_scope_auto_ts', 0),
+                ts_age_s:          Math.round((Date.now() - Number(GM_getValue('cfg_scope_auto_ts', 0))) / 1000),
+            },
             // Engine toggles
             ENGINE_SLOT_OPTIMIZER:   GM_getValue('eng_slot_optimizer', false),
             VAULT_REQUESTS_ENABLED:  true,     // always on for now
@@ -228,7 +234,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.25';
+    const SCRIPT_VERSION = '3.1.26';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4334,7 +4340,10 @@
                 // refresh would overwrite a fresh Recruiting-tab read (e.g.
                 // 14) with the last-saved stored value (e.g. 11).
                 if (!CONFIG._scopeAutoDetected) {
+                    console.log(`[OC Spawn][scope] server settings → CONFIG.SCOPE: ${CONFIG.SCOPE} → ${srvSettings.scope} (auto-detected=false, allowing overwrite)`);
                     CONFIG.SCOPE               = srvSettings.scope;
+                } else {
+                    console.log(`[OC Spawn][scope] skipped server overwrite: kept ${CONFIG.SCOPE} instead of server's ${srvSettings.scope} (auto-detected=true)`);
                 }
 
                 // Engine toggles
@@ -4549,6 +4558,10 @@
             // Refresh button re-enables via cooldown timer (startRefreshCooldown)
         }
     }
+
+    // One-shot init trace for scope — helps diagnose "full reload reverts
+    // to old value" by showing what GM storage had at script boot.
+    console.log('[OC Spawn][scope] init snapshot:', JSON.stringify(CONFIG._scopeInitSnapshot), 'CONFIG.SCOPE=', CONFIG.SCOPE, 'autoDetected=', CONFIG._scopeAutoDetected);
 
     // Start ASAP interception
     setupAjaxInterceptor();
