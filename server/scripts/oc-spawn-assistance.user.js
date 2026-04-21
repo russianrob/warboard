@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.21
+// @version      3.1.22
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.22 — Scope fix round 2: v3.1.21 removed fallback text-scraping entirely, but state (Strategy 0) apparently never populates on live Torn, so scope stopped updating altogether. Restored Strategies 1 (class-match) and 2 (text-match) but now gated on visibility — hidden tab panels (display:none, zero-size) are excluded, so Planning can't scrape stale 11 from an inactive Recruiting panel still sitting in the DOM. Each strategy now logs which fired + the element it matched so root-cause of any remaining mismatches is visible in devtools.
 // v3.1.21 — Scope regression fix: DOM reader was overwriting a correct state-read value (e.g. 14 on Recruiting) with a stale DOM-text scrape from another tab (e.g. 11 on Planning from a tooltip/cached summary). Dropped the fallback text-scraping strategies entirely; scope now comes only from Torn's authoritative faction state (unsafeWindow.torn.faction.scope_balance). If state isn't populated on the current tab, last-known value stays put and the age chip indicates freshness.
 // v3.1.20 — Scope source: Torn deleted the internal getCrimesData endpoint entirely ("Call to undefined method getCrimesData" on v3.1.19). Removed the HTTP refresh fetch; scope now comes exclusively from the DOM/state reader, which reads unsafeWindow.torn.faction.scope_balance from Torn's own state (populated whenever the user has loaded any factions page). Refresh button still nudges the reader in case a value is present but hasn't been picked up. Detection-age chip stays visible so stale readings are obvious.
 // v3.1.19 — Scope fix: 3.1.18's direct getCrimesData call hit Torn's "Validation is required" wall because the internal endpoint requires an rfcv CSRF token (read from the rfc_v cookie). Added the token to the query string, matching the pattern used by the armory-cache fetches elsewhere in this script.
@@ -219,7 +220,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.21';
+    const SCRIPT_VERSION = '3.1.22';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -997,18 +998,61 @@
     //  DOM SCOPE READER  — fallback / secondary detection
     // ═══════════════════════════════════════════════════════════════════════
     function readScopeFromDom() {
-        // Authoritative source only: Torn's internal page state. Previous
-        // versions also scraped DOM elements whose class/text contained
-        // "scope" as fallback strategies — but those fallbacks would
-        // overwrite a correct state-read value with stale text from
-        // tooltips, help cards, or cached summaries on other tabs
-        // (e.g. Planning tab holding onto "11" while state said 14).
-        // If state isn't populated, leave CONFIG.SCOPE alone — stale
-        // detection-age chip handles surfacing that to the user.
+        // Strategy 0: Torn's internal state (authoritative when populated).
         const win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
         if (win.torn && win.torn.faction) {
              const s = win.torn.faction.scope_balance ?? win.torn.faction.scope;
-             if (typeof s === 'number' && s >= 0 && s <= SCOPE_MAX) return s;
+             if (typeof s === 'number' && s >= 0 && s <= SCOPE_MAX) {
+                 console.debug('[OC Spawn][scope] strategy 0 (state):', s);
+                 return s;
+             }
+        }
+
+        // Helper: is this element actually visible to the user right now?
+        // Torn hides inactive tabs via display:none; we don't want to
+        // scrape scope numbers from a hidden Recruiting panel while the
+        // user is on Planning.
+        function visible(el) {
+            if (!el) return false;
+            if (!el.offsetParent && el.tagName !== 'BODY') return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+        }
+
+        // Strategy 1: element whose class contains 'scope' (visible only).
+        const byClass = document.querySelectorAll('[class*="scope" i]:not(#oc-spawn-panel *)');
+        for (const el of byClass) {
+            if (!visible(el)) continue;
+            const num = parseInt(el.textContent.trim());
+            if (!isNaN(num) && num >= 0 && num <= SCOPE_MAX) {
+                console.debug('[OC Spawn][scope] strategy 1 (class):', num, '·', el.className);
+                return num;
+            }
+            const numChild = el.querySelector('span, b, strong');
+            if (numChild && visible(numChild)) {
+                const n2 = parseInt(numChild.textContent.trim());
+                if (!isNaN(n2) && n2 >= 0 && n2 <= SCOPE_MAX) {
+                    console.debug('[OC Spawn][scope] strategy 1 (class-child):', n2, '·', el.className);
+                    return n2;
+                }
+            }
+        }
+
+        // Strategy 2: text matching "Scope … NN" (visible, leaf-ish only).
+        const candidates = document.querySelectorAll('span, div, p, li');
+        for (const el of candidates) {
+            if (el.closest('#oc-spawn-panel')) continue;
+            if (el.children.length > 2) continue;
+            if (!visible(el)) continue;
+            const text = el.textContent.trim();
+            const m = text.match(/scope[\s\w:]*?(\d+)/i);
+            if (m) {
+                const val = parseInt(m[1]);
+                if (val >= 0 && val <= SCOPE_MAX) {
+                    console.debug('[OC Spawn][scope] strategy 2 (text):', val, '·', text.slice(0, 60));
+                    return val;
+                }
+            }
         }
         return null;
     }
