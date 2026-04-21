@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.15
+// @version      3.1.16
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.16 — Scope fix follow-up: 3.1.15's defensive lookup missed because Torn's `basic` selection wraps the payload one level deeper than checked. Replaced with a bounded recursive walk that finds any numeric field matching /scope/i at any depth. On miss, logs the full top-level shape so we can adapt without guesswork.
 // v3.1.15 — Fix: scope wasn't refreshing. Old path fired at Torn's internal `step=getCrimesData` endpoint and relied on a sandbox AJAX interceptor to catch scope_balance — brittle because Torn's own XHRs happen in page context (bypass the wrapper) and sandbox-origin calls can get HTML responses that silently fail to parse as JSON. Now hits the documented v2 API via gmRequest with defensive field extraction + console.warn logging when the field isn't found.
 // v3.1.14 — Fix: Admin tab was always visible to every member regardless of admin-roles list. Now hidden for non-admins alongside Manager/Metrics/Engines. Also removed the stale "Admin requires faction API access" locked message — gating is role-based now, the old copy was misleading.
 // v3.1.13 — Admin settings (gear) now has a "Vault-Request Notifications" toggle and a "Send Test Notification" button. Toggle is server-backed via /api/oc/notification-prefs (auth'd by Torn API key — no FactionOps JWT needed). Test button fires a real push to the caller so they can verify their subscription before relying on live alerts.
@@ -213,7 +214,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.15';
+    const SCRIPT_VERSION = '3.1.16';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -938,18 +939,37 @@
                 console.warn('[OC Spawn] scope fetch failed:', r.status, r.data?.error);
                 return;
             }
-            // Field name varies across API versions / edge cases. Probe
-            // a few documented + legacy spots defensively.
+            // Recursive search: Torn's v2 shape wraps the payload under
+            // `basic` (or deeper) depending on selection. Walk the object
+            // looking for any numeric field whose name matches scope.
+            // Caps recursion depth to 4 to avoid pathological cases.
             const d = r.data || {};
-            const s = d.scope_balance
-                   ?? d.scope
-                   ?? d.basic?.scope_balance
-                   ?? d.basic?.scope
-                   ?? d.faction?.scope_balance;
-            if (typeof s === 'number' && s >= 0 && s <= SCOPE_MAX) {
+            function findScope(obj, depth = 0) {
+                if (!obj || typeof obj !== 'object' || depth > 4) return null;
+                for (const [k, v] of Object.entries(obj)) {
+                    if (/scope/i.test(k) && typeof v === 'number' && v >= 0 && v <= SCOPE_MAX) return v;
+                }
+                for (const v of Object.values(obj)) {
+                    if (v && typeof v === 'object') {
+                        const found = findScope(v, depth + 1);
+                        if (found !== null) return found;
+                    }
+                }
+                return null;
+            }
+            const s = findScope(d);
+            if (s !== null) {
                 handleDetectedScope(s, 'Torn v2 API');
             } else {
-                console.warn('[OC Spawn] scope not found in v2 response — fields:', Object.keys(d).slice(0, 12));
+                // Nothing scope-ish found. Dump the shape so we can see
+                // what selection to use instead. Keep output bounded.
+                const shape = {};
+                for (const [k, v] of Object.entries(d).slice(0, 12)) {
+                    shape[k] = v && typeof v === 'object'
+                        ? `{${Object.keys(v).slice(0, 10).join(',')}}`
+                        : typeof v;
+                }
+                console.warn('[OC Spawn] scope not found in v2 response — shape:', JSON.stringify(shape));
             }
         } catch (e) {
             console.warn('[OC Spawn] scope fetch threw:', e?.message || e);
