@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.23
+// @version      3.1.24
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.24 — Scope diagnostics: upgraded the strategy-fired logs from console.debug to console.log so Chrome's default Console level shows them (Verbose was required to see debug). Detection log now includes the old→new transition so we can trace whether a strategy is actively overwriting a fresh value with a stale one vs. leaving it alone.
 // v3.1.23 — ACTUAL scope root cause (turns out it was never the DOM reader): every runAnalysis refresh called fetchFactionSettings and unconditionally did CONFIG.SCOPE = srvSettings.scope, which overwrote a fresh auto-detected value (e.g. 14 from Recruiting DOM) with the last-saved server value (e.g. 11). Now only applies the server-side value when _scopeAutoDetected is false, so fresh local reads stick. The previous "scope goes back to 11 on Planning" wasn't a DOM-scrape issue — it was server-settings clobber. Strategies 0/1/2 kept as-is; 3.1.22's visibility gate + logs stay in place.
 // v3.1.22 — Scope fix round 2: v3.1.21 removed fallback text-scraping entirely, but state (Strategy 0) apparently never populates on live Torn, so scope stopped updating altogether. Restored Strategies 1 (class-match) and 2 (text-match) but now gated on visibility — hidden tab panels (display:none, zero-size) are excluded, so Planning can't scrape stale 11 from an inactive Recruiting panel still sitting in the DOM. Each strategy now logs which fired + the element it matched so root-cause of any remaining mismatches is visible in devtools.
 // v3.1.21 — Scope regression fix: DOM reader was overwriting a correct state-read value (e.g. 14 on Recruiting) with a stale DOM-text scrape from another tab (e.g. 11 on Planning from a tooltip/cached summary). Dropped the fallback text-scraping strategies entirely; scope now comes only from Torn's authoritative faction state (unsafeWindow.torn.faction.scope_balance). If state isn't populated on the current tab, last-known value stays put and the age chip indicates freshness.
@@ -221,7 +222,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.23';
+    const SCRIPT_VERSION = '3.1.24';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -918,7 +919,7 @@
         if (scope === null) return;
         if (scope === CONFIG.SCOPE) return;
 
-        console.log(`[OC Spawn] Detected scope ${scope} from ${source}`);
+        console.log(`[OC Spawn] Detected scope change: ${CONFIG.SCOPE} → ${scope} (source: ${source})`);
         CONFIG.SCOPE = scope;
         CONFIG._scopeAutoDetected = true;
 
@@ -1004,7 +1005,7 @@
         if (win.torn && win.torn.faction) {
              const s = win.torn.faction.scope_balance ?? win.torn.faction.scope;
              if (typeof s === 'number' && s >= 0 && s <= SCOPE_MAX) {
-                 console.debug('[OC Spawn][scope] strategy 0 (state):', s);
+                 console.log('[OC Spawn][scope] strategy 0 (state):', s);
                  return s;
              }
         }
@@ -1026,14 +1027,14 @@
             if (!visible(el)) continue;
             const num = parseInt(el.textContent.trim());
             if (!isNaN(num) && num >= 0 && num <= SCOPE_MAX) {
-                console.debug('[OC Spawn][scope] strategy 1 (class):', num, '·', el.className);
+                console.log('[OC Spawn][scope] strategy 1 (class):', num, '·', el.className);
                 return num;
             }
             const numChild = el.querySelector('span, b, strong');
             if (numChild && visible(numChild)) {
                 const n2 = parseInt(numChild.textContent.trim());
                 if (!isNaN(n2) && n2 >= 0 && n2 <= SCOPE_MAX) {
-                    console.debug('[OC Spawn][scope] strategy 1 (class-child):', n2, '·', el.className);
+                    console.log('[OC Spawn][scope] strategy 1 (class-child):', n2, '·', el.className);
                     return n2;
                 }
             }
@@ -1050,7 +1051,7 @@
             if (m) {
                 const val = parseInt(m[1]);
                 if (val >= 0 && val <= SCOPE_MAX) {
-                    console.debug('[OC Spawn][scope] strategy 2 (text):', val, '·', text.slice(0, 60));
+                    console.log('[OC Spawn][scope] strategy 2 (text):', val, '·', text.slice(0, 60));
                     return val;
                 }
             }
