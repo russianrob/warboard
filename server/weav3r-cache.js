@@ -36,9 +36,28 @@ const MAX_ITEM_AGE_MS  = Number(process.env.WEAV3R_MAX_AGE_MS) || 60 * 60 * 1000
 // in the environment to re-enable.
 const OWNER_API_KEY         = process.env.OWNER_API_KEY || '';
 const VERIFY_ENABLED        = process.env.WEAV3R_VERIFY === '1';
-const VERIFY_RATE_PER_MIN   = 60;
-const VERIFY_INTERVAL_MS    = 60_000 / VERIFY_RATE_PER_MIN;
+// Per-key cap: each pooled key never exceeds this rate (enforced in pool.pickKey).
+const VERIFY_RATE_PER_KEY   = 60;
+// Global throughput ceiling: no matter how many keys pool, we never call
+// Torn faster than this. 300/min = 5 calls/sec, still very polite given
+// their 10M+ call/day bus. Keeps us from looking abusive if pool scales.
+const VERIFY_MAX_PER_MIN    = 300;
 const VERIFY_CACHE_TTL_MS   = 5 * 60 * 1000;
+
+/**
+ * Dynamic interval between verify calls — scales with pool size so more
+ * contributors = faster verification:
+ *   1 key   → 60/min  → 1000ms between calls
+ *   3 keys  → 180/min → 333ms
+ *   5 keys  → 300/min → 200ms   (hit global cap)
+ *  10 keys  → 300/min → 200ms   (capped)
+ */
+function currentVerifyIntervalMs() {
+    const poolKeys = pool.size();
+    if (poolKeys === 0) return 1000; // idle default, enqueueSellers won't fire anyway
+    const targetRate = Math.min(VERIFY_MAX_PER_MIN, VERIFY_RATE_PER_KEY * poolKeys);
+    return Math.floor(60_000 / targetRate);
+}
 // Fall back to per-seller verification. torn/<id>?selections=bazaar needs
 // an API Access upgrade we don't have, so item-level isn't possible. Per-
 // seller catches sold/removed items but can't distinguish target trades.
@@ -172,7 +191,7 @@ function scheduleVerify() {
     // Respect the rate-limit pause. enqueueSellers() fires on every
     // weav3r refresh (~15s), which previously clobbered the 60s pause
     // because the bare setTimeout didn't populate verifyTimer.
-    const wait = Math.max(VERIFY_INTERVAL_MS, verifyPausedUntil - Date.now());
+    const wait = Math.max(currentVerifyIntervalMs(), verifyPausedUntil - Date.now());
     verifyTimer = setTimeout(runVerify, wait);
 }
 
@@ -260,6 +279,10 @@ export function stopWeav3rCache() {
  * stuck rate-limit) no longer applies.
  */
 export function kickVerifyOnPoolGrowth() {
+    const poolKeys = pool.size();
+    const intervalMs = currentVerifyIntervalMs();
+    const ratePerMin = Math.round(60_000 / intervalMs);
+    console.log(`[weav3r-cache] pool-growth kick — ${poolKeys} key(s), verify cadence now ${ratePerMin}/min (${intervalMs}ms between calls)`);
     if (!cache.items || cache.items.length === 0) return;
     verifyPausedUntil = 0;
     enqueueSellers(cache.items);
