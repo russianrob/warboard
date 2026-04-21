@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.18
+// @version      3.1.19
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.19 — Scope fix: 3.1.18's direct getCrimesData call hit Torn's "Validation is required" wall because the internal endpoint requires an rfcv CSRF token (read from the rfc_v cookie). Added the token to the query string, matching the pattern used by the armory-cache fetches elsewhere in this script.
 // v3.1.18 — Scope fix: v2 API dead-end — neither `basic` nor `crimes?cat=available` selections expose scope_balance (confirmed via shape dumps). Fell back to Torn's internal /factions.php?step=getCrimesData endpoint, same URL the crimes page uses internally. Called directly (not via the interceptor) with credentials:'include' + Accept:application/json. Logs the first 120 chars of the body when JSON.parse fails so we see exactly what Torn is returning.
 // v3.1.17 — Scope fix: moved the refresh fetch from `/v2/faction?selections=basic` (which returns id/name/tag/respect/days_old/capacity — no scope) to `/v2/faction/crimes?cat=available` where scope_balance actually lives. Confirmed by 3.1.16's shape dump.
 // v3.1.16 — Scope fix follow-up: 3.1.15's defensive lookup missed because Torn's `basic` selection wraps the payload one level deeper than checked. Replaced with a bounded recursive walk that finds any numeric field matching /scope/i at any depth. On miss, logs the full top-level shape so we can adapt without guesswork.
@@ -216,7 +217,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.18';
+    const SCRIPT_VERSION = '3.1.19';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -941,7 +942,16 @@
     // attached. Same-origin request from torn.com → cookies travel fine.
     async function refreshScopeFromTorn() {
         try {
-            const res = await fetch('/factions.php?step=getCrimesData', {
+            // Torn's internal `step=getCrimesData` endpoint requires an
+            // `rfcv` query param (CSRF-style token pulled from cookie),
+            // otherwise it returns a "Validation is required" HTML wall.
+            // Same pattern the armory-cache fetches use.
+            const rfcv = mgr_getRfcvToken();
+            if (!rfcv) {
+                console.warn('[OC Spawn] scope skip — rfc_v cookie missing (navigate into factions tab first)');
+                return;
+            }
+            const res = await fetch(`/factions.php?step=getCrimesData&rfcv=${encodeURIComponent(rfcv)}`, {
                 credentials: 'include',
                 headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
             });
