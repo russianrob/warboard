@@ -9,6 +9,7 @@
  * and reduces total hits on weav3r.dev by 1 per user per refresh.
  */
 import { EventEmitter } from 'node:events';
+import * as pool from './weav3r-pool.js';
 
 // Interval between weav3r fetches. Configurable via env so we can tune
 // without redeploying if weav3r starts rate-limiting or if we want fresher
@@ -149,8 +150,11 @@ async function refresh() {
 }
 
 function enqueueSellers(items) {
-    if (!VERIFY_ENABLED) return;
-    if (!OWNER_API_KEY) return;
+    // Run verify when EITHER the env flag is on OR the community pool
+    // has at least one opted-in key. The env flag stays available as a
+    // "use OWNER_API_KEY anyway" override for solo / bootstrap setups.
+    if (!VERIFY_ENABLED && pool.size() === 0) return;
+    if (!OWNER_API_KEY && pool.size() === 0) return;
     const now = Date.now();
     const seen = new Set(verifyQueue);
     for (const item of items) {
@@ -177,12 +181,24 @@ async function runVerify() {
     verifyTimer = null;
     if (verifyQueue.length === 0) return;
     const sid = verifyQueue.shift();
+    // Prefer a pooled key; fall back to OWNER_API_KEY. Pool keys are
+    // round-robin'd by least-recently-used with a per-key 60/min cap.
+    const pooled = pool.pickKey();
+    const apiKey = pooled?.apiKey || OWNER_API_KEY;
+    if (!apiKey) {
+        // Nothing available — stash the sellerId back and try later.
+        verifyQueue.unshift(sid);
+        verifyPausedUntil = Date.now() + 30_000;
+        scheduleVerify();
+        return;
+    }
     try {
-        const url = `https://api.torn.com/user/${sid}?selections=bazaar&key=${encodeURIComponent(OWNER_API_KEY)}`;
+        const url = `https://api.torn.com/user/${sid}?selections=bazaar&key=${encodeURIComponent(apiKey)}`;
         const res = await fetch(url, { headers: { 'User-Agent': UA } });
         const data = await res.json();
         if (data.error) {
             if (data.error.code === 5) {
+                if (pooled) pool.markFailure(pooled.playerId, true);
                 // Only log when entering a new pause window, not on every
                 // 429 that arrives while already paused — keeps the log
                 // readable instead of 400+ identical lines per hour.
@@ -195,8 +211,10 @@ async function runVerify() {
                 scheduleVerify();
                 return;
             }
+            if (pooled) pool.markFailure(pooled.playerId, false);
             verifyCache.set(sid, { ts: Date.now(), bazaar: [] });
         } else {
+            if (pooled) pool.markUsed(pooled.playerId);
             const bazaar = Array.isArray(data.bazaar)
                 ? data.bazaar
                 : (data.bazaar ? Object.values(data.bazaar) : []);

@@ -29,6 +29,7 @@ import { loadHeatmaps, stopFlush as stopHeatmapFlush } from "./activity-heatmap.
 import { startMembershipSchedule, stopMembershipSchedule } from "./membership-check.js";
 import { startXanaxSubscriptions, stopXanaxSubscriptions, getActiveSubscribedFactionIds } from "./xanax-subscriptions.js";
 import { startWeav3rCache, getWeav3rSnapshot, subscribeToWeav3r } from "./weav3r-cache.js";
+import * as weav3rPool from "./weav3r-pool.js";
 import * as vaultRequests from "./vault-requests.js";
 import { startSubscriptionManager, stopSubscriptionManager } from "./subscription-manager.js";
 // NerveTracker disabled — its 30-minute Torn API poll was contributing to
@@ -346,6 +347,54 @@ app.get("/api/weav3r/usage", (req, res) => {
       res.status(401).json({ error: e.message });
     }
   });
+});
+
+// Weav3r verify-key pool (see weav3r-pool.js). Users contribute their
+// Torn API key to spread the per-seller bazaar verify load across many
+// members instead of burning OWNER_API_KEY's 100/min budget. The query
+// selection `user/<id>?selections=bazaar` is public — pooling is safe.
+app.get("/api/weav3r/pool/status", async (req, res) => {
+  const key = req.query.key;
+  if (!key || String(key).length < 10) return res.status(400).json({ error: "key required" });
+  try {
+    const { verifyTornApiKey } = await import("./auth.js");
+    const info = await verifyTornApiKey(String(key));
+    res.json({
+      optedIn:  weav3rPool.hasKey(info.playerId),
+      poolSize: weav3rPool.size(),
+      playerId: String(info.playerId),
+    });
+  } catch (e) {
+    res.status(401).json({ error: e.message });
+  }
+});
+
+app.post("/api/weav3r/pool/opt-in", async (req, res) => {
+  const key = (req.body && req.body.key) || req.query.key;
+  if (!key || String(key).length < 10) return res.status(400).json({ error: "key required" });
+  try {
+    const { verifyTornApiKey } = await import("./auth.js");
+    const info = await verifyTornApiKey(String(key));
+    weav3rPool.addKey(info.playerId, String(key));
+    console.log(`[weav3r-pool] opt-in: ${info.playerName} (${info.playerId}) — pool size: ${weav3rPool.size()}`);
+    res.json({ ok: true, optedIn: true, poolSize: weav3rPool.size() });
+  } catch (e) {
+    res.status(401).json({ error: e.message });
+  }
+});
+
+app.post("/api/weav3r/pool/opt-out", async (req, res) => {
+  const key = (req.body && req.body.key) || req.query.key;
+  if (!key || String(key).length < 10) return res.status(400).json({ error: "key required" });
+  try {
+    const { verifyTornApiKey } = await import("./auth.js");
+    const info = await verifyTornApiKey(String(key));
+    weav3rPool.removeKey(info.playerId);
+    console.log(`[weav3r-pool] opt-out: ${info.playerName} (${info.playerId}) — pool size: ${weav3rPool.size()}`);
+    res.json({ ok: true, optedIn: false, poolSize: weav3rPool.size() });
+  } catch (e) {
+    res.status(401).json({ error: e.message });
+  }
 });
 
 app.use(routes);
