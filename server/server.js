@@ -28,7 +28,7 @@ import { startWarStatusMonitor, stopAll as stopAllWarStatusMonitors } from "./wa
 import { loadHeatmaps, stopFlush as stopHeatmapFlush } from "./activity-heatmap.js";
 import { startMembershipSchedule, stopMembershipSchedule } from "./membership-check.js";
 import { startXanaxSubscriptions, stopXanaxSubscriptions, getActiveSubscribedFactionIds } from "./xanax-subscriptions.js";
-import { startWeav3rCache, getWeav3rSnapshot, subscribeToWeav3r } from "./weav3r-cache.js";
+import { startWeav3rCache, getWeav3rSnapshot, subscribeToWeav3r, kickVerifyOnPoolGrowth } from "./weav3r-cache.js";
 import * as weav3rPool from "./weav3r-pool.js";
 import * as vaultRequests from "./vault-requests.js";
 import { startSubscriptionManager, stopSubscriptionManager } from "./subscription-manager.js";
@@ -381,9 +381,14 @@ app.post("/api/weav3r/pool/opt-in", async (req, res) => {
       // the expected "off" state without showing an error.
       return res.json({ ok: true, optedIn: false, blocked: true, poolSize: weav3rPool.size() });
     }
+    const sizeBefore = weav3rPool.size();
     weav3rPool.addKey(info.playerId, String(key));
-    console.log(`[weav3r-pool] opt-in: ${info.playerName} (${info.playerId}) — pool size: ${weav3rPool.size()}`);
-    res.json({ ok: true, optedIn: true, poolSize: weav3rPool.size() });
+    const sizeAfter = weav3rPool.size();
+    console.log(`[weav3r-pool] opt-in: ${info.playerName} (${info.playerId}) — pool size: ${sizeAfter}`);
+    // First contributor after an empty pool? Kick verify immediately so we
+    // don't wait ~15s for the next weav3r refresh cycle.
+    if (sizeBefore === 0 && sizeAfter > 0) kickVerifyOnPoolGrowth();
+    res.json({ ok: true, optedIn: true, poolSize: sizeAfter });
   } catch (e) {
     res.status(401).json({ error: e.message });
   }

@@ -252,6 +252,19 @@ export function stopWeav3rCache() {
     verifyQueue = [];
 }
 
+/**
+ * Called by the opt-in endpoint right after a new key is added to the
+ * pool. Re-enqueues sellers from the current cache and kicks off the
+ * verify loop immediately instead of waiting up to 15s for the next
+ * refresh. Clears any lingering pause since the cause (empty pool /
+ * stuck rate-limit) no longer applies.
+ */
+export function kickVerifyOnPoolGrowth() {
+    if (!cache.items || cache.items.length === 0) return;
+    verifyPausedUntil = 0;
+    enqueueSellers(cache.items);
+}
+
 export function getWeav3rSnapshot() {
     return {
         items: cache.items,
