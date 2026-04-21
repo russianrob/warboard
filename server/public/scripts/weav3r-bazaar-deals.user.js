@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Weav3r Bazaar Deals
 // @namespace    russianrob
-// @version      2.0.8
+// @version      2.2.2
 // @description  Find real below-market bazaar deals using weav3r.dev + item price lookup
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -14,6 +14,7 @@
 // @connect      weav3r.dev
 // @connect      www.torn.com
 // @connect      api.torn.com
+// @connect      tornwar.com
 // ==/UserScript==
 
 (function () {
@@ -25,7 +26,34 @@
         pageSize:     50,
         maxPages:     4,
         dealsBatch:   8,   // parallel marketplace requests
-        minDiscount:  5,   // only show deals at least 5% below market
+        // minDiscount is user-configurable via Settings tab; loaded lazily
+        // so GM_getValue is available. Defaults to 2% so the empty-state
+        // isn't the common experience when the market is tight.
+        get minDiscount() {
+            try { return Number(GM_getValue('w3_min_discount', 2)) || 2; }
+            catch { return 2; }
+        },
+        // When true, $1 listings ("dollar deals") are INCLUDED in the scan.
+        // Default OFF because Torn's API doesn't expose a way to distinguish
+        // public $1 listings from target-trades (locked to specific buyers).
+        // Even with server-side verification via a full-access key, target
+        // trades that happen to be aimed at us show up as "verified" false
+        // positives. The feature can surface real public $1 steals when they
+        // exist but most entries are target trades you can't actually buy.
+        // Users can opt in knowing the limitation.
+        get includeDollarDeals() {
+            try { return GM_getValue('w3_include_dollar', false) === true; }
+            catch { return false; }
+        },
+        // When true, only $1 listings the server verified as still-listed
+        // are shown. Hides both "gone" (✗) AND "pending verification" (⋯)
+        // entries — the user only sees what's confirmed buyable. Default ON
+        // because that's the cleanest experience; flip off in Settings to
+        // see unverified + gone listings for debugging.
+        get onlyBuyable() {
+            try { return GM_getValue('w3_only_buyable', true) === true; }
+            catch { return true; }
+        },
     };
 
     // ── Persistent storage helpers ─────────────────────────────────────────
@@ -80,6 +108,9 @@
         realDeals:      [],
         realDealsLoading: false,
         realDealsTs:    null,
+        realDealsProgress: { done: 0, total: 0 },   // progressive scan counter
+        sse:            null,                        // live warboard EventSource, null when disconnected
+        verified:       {},                          // verification cache: (seller:item:price) → true/false/null
         lookupId:       null,
         lookupName:     '',
         lookupListings: [],
@@ -285,14 +316,102 @@
         } catch {}
     }
 
+    // ── Verify $1 deals via Torn's own bazaar API ────────────────────────────
+    // Group all $1 deals by seller, then make ONE API call per seller to fetch
+    // their whole bazaar. Mark each deal as verified (✓) or gone (✗) in a
+    // single pass. This is 5-10× faster than verifying each listing separately
+    // for sellers like Fox12_ who have multiple $1 listings in the dataset.
+    async function verifyDeals() {
+        if (!S.apiKey || !S.realDeals.length) return;
+        const dollarDeals = S.realDeals.filter(d => d.isDollarDeal);
+        if (!dollarDeals.length) return;
+
+        // Group by sellerId
+        const bySeller = new Map();
+        for (const d of dollarDeals) {
+            const sid = String(d.playerId);
+            if (!bySeller.has(sid)) bySeller.set(sid, []);
+            bySeller.get(sid).push(d);
+        }
+
+        for (const [sid, deals] of bySeller) {
+            // Skip sellers where all their deals are already verified
+            if (deals.every(d => S.verified[`${d.playerId}:${d.itemId}:${d.price}`] !== undefined)) continue;
+            try {
+                const data = await gmJSON(
+                    `https://api.torn.com/user/${sid}?selections=bazaar&key=${encodeURIComponent(S.apiKey)}`
+                );
+                if (data.error) {
+                    // Mark all this seller's deals as unknown so we don't retry every render
+                    for (const d of deals) {
+                        const k = `${d.playerId}:${d.itemId}:${d.price}`;
+                        if (S.verified[k] === undefined) S.verified[k] = null;
+                    }
+                } else {
+                    const bazaar = Array.isArray(data.bazaar)
+                        ? data.bazaar
+                        : (data.bazaar ? Object.values(data.bazaar) : []);
+                    for (const d of deals) {
+                        const k = `${d.playerId}:${d.itemId}:${d.price}`;
+                        if (S.verified[k] !== undefined) continue;
+                        S.verified[k] = bazaar.some(b =>
+                            String(b.ID ?? b.id) === String(d.itemId) &&
+                            Number(b.price) === Number(d.price)
+                        );
+                    }
+                }
+            } catch (_) {
+                for (const d of deals) {
+                    const k = `${d.playerId}:${d.itemId}:${d.price}`;
+                    if (S.verified[k] === undefined) S.verified[k] = null;
+                }
+            }
+            render();
+            // Smaller pause between sellers now that there are far fewer calls
+            await new Promise(r => setTimeout(r, 200));
+        }
+    }
+
     // ── Real deals — cheapest bazaar listings below market value ─────────────
+    // Progressive: renders after every batch so the user sees deals appearing
+    // within ~1s of starting the scan instead of waiting 15-20s for everything.
     async function loadRealDeals() {
         if (S.realDealsLoading || S.deals.length === 0) return;
         S.realDealsLoading = true;
+        S.realDeals = [];   // wipe previous list; we rebuild progressively
+        S.realDealsProgress = { done: 0, total: 0 };
+
+        const results = [];
+
+        // Seed the results with the $1 listings themselves. The dollar-bazaars
+        // endpoint IS the $1 deal list — each entry is a seller+item+market
+        // price. Each entry also carries a server-side `verified` field
+        // (true/false/null) so we don't need to run our own Torn API calls,
+        // which was flooding users' 100-req/min budget.
+        if (CFG.includeDollarDeals) {
+            for (const item of S.deals) {
+                const mp = Number(item.marketPrice) || 0;
+                if (!mp) continue;
+                results.push({
+                    itemId:      item.itemId,
+                    itemName:    item.itemName,
+                    marketPrice: mp,
+                    price:       1,
+                    discount:    ((mp - 1) / mp) * 100,
+                    playerId:    item.playerId,
+                    sellerName:  item.sellerName,
+                    quantity:    item.quantity,
+                    lastChecked: item.lastUpdated,
+                    isDollarDeal: true,
+                    verified:    item.verified,   // null | true | false from server
+                });
+            }
+            S.realDeals = results.slice().sort((a, b) => b.discount - a.discount);
+        }
         render();
 
         const uniqueIds = [...new Set(S.deals.map(d => d.itemId))];
-        const results = [];
+        S.realDealsProgress.total = uniqueIds.length;
 
         for (let i = 0; i < uniqueIds.length; i += CFG.dealsBatch) {
             const batch = uniqueIds.slice(i, i + CFG.dealsBatch);
@@ -303,60 +422,133 @@
             );
             for (const data of responses) {
                 if (!data?.listings?.length || !data.market_price) continue;
-                // Filter out ghost trades ($1 listings)
-                const real = data.listings
-                    .filter(l => l.price > 1)
-                    .sort((a, b) => a.price - b.price);
-                if (real.length === 0) continue;
-                const cheapest = real[0];
-                const discount = ((data.market_price - cheapest.price) / data.market_price) * 100;
-                if (discount < CFG.minDiscount) continue;
-                results.push({
-                    itemId:      data.item_id,
-                    itemName:    data.item_name,
-                    marketPrice: data.market_price,
-                    price:       cheapest.price,
-                    discount:    discount,
-                    playerId:    cheapest.player_id,
-                    sellerName:  cheapest.player_name,
-                    quantity:    cheapest.quantity,
-                    lastChecked: cheapest.last_checked,
-                });
+
+                // When Include $1 deals is ON, emit ONE ROW PER $1 LISTING
+                // (not just the cheapest per item). If an item has 5 different
+                // $1 listings from 5 sellers, the user wants to see all 5 so
+                // they can try each one.
+                const sorted = data.listings.slice().sort((a, b) => a.price - b.price);
+                const dollarListings = sorted.filter(l => l.price <= 1);
+                const normalListings = sorted.filter(l => l.price > 1);
+
+                if (CFG.includeDollarDeals) {
+                    for (const l of dollarListings) {
+                        const discount = ((data.market_price - l.price) / data.market_price) * 100;
+                        results.push({
+                            itemId:      data.item_id,
+                            itemName:    data.item_name,
+                            marketPrice: data.market_price,
+                            price:       l.price,
+                            discount:    discount,
+                            playerId:    l.player_id,
+                            sellerName:  l.player_name,
+                            quantity:    l.quantity,
+                            lastChecked: l.last_checked,
+                            isDollarDeal: true,
+                        });
+                    }
+                }
+
+                // Also surface the cheapest non-$1 listing if it still beats
+                // the minDiscount threshold — captures real deep discounts
+                // alongside the $1 grab-bag.
+                if (normalListings.length > 0) {
+                    const cheapest = normalListings[0];
+                    const discount = ((data.market_price - cheapest.price) / data.market_price) * 100;
+                    if (discount >= CFG.minDiscount) {
+                        results.push({
+                            itemId:      data.item_id,
+                            itemName:    data.item_name,
+                            marketPrice: data.market_price,
+                            price:       cheapest.price,
+                            discount:    discount,
+                            playerId:    cheapest.player_id,
+                            sellerName:  cheapest.player_name,
+                            quantity:    cheapest.quantity,
+                            lastChecked: cheapest.last_checked,
+                            isDollarDeal: false,
+                        });
+                    }
+                }
             }
+            // Progressive: update visible list after each batch
+            S.realDealsProgress.done = Math.min(i + CFG.dealsBatch, uniqueIds.length);
+            S.realDeals = results.slice().sort((a, b) => b.discount - a.discount);
+            render();
+
             if (i + CFG.dealsBatch < uniqueIds.length)
                 await new Promise(r => setTimeout(r, 400));
         }
 
-        S.realDeals    = results.sort((a, b) => b.discount - a.discount);
         S.realDealsTs  = Date.now();
         S.realDealsLoading = false;
         render();
+
+        // Verification is handled server-side now (warboard's weav3r-cache
+        // verifies each seller against Torn's API with the owner key, results
+        // arrive in the `verified` field on each item). Clients don't need
+        // to verify themselves anymore — saves users' 100-req/min API budget.
     }
 
     // ── Dollar Deals API ───────────────────────────────────────────────────
+    // ── Server-side cache endpoint (warboard) ────────────────────────────────
+    // Warboard polls weav3r.dev every 30s and serves a cached snapshot plus
+    // live SSE pushes. Userscripts hit this instead of weav3r directly, so:
+    //  - Initial load is <100ms (cache hit) instead of 1-4s (direct weav3r)
+    //  - Load reduced on weav3r (one poller serves all users)
+    //  - Updates arrive in real time via SSE — no manual refresh needed.
+    const WARBOARD_BASE = 'https://tornwar.com';
+
     async function loadDeals() {
+        if (S.dealsLoading || S.realDealsLoading) return;
         S.dealsLoading = true;
         S.dealsError = null;
         render();
-        const all = [];
         try {
-            for (let p = 1; p <= CFG.maxPages; p++) {
-                const data = await gmJSON(
-                    `https://weav3r.dev/api/dollar-bazaars/items?page=${p}&limit=${CFG.pageSize}`
-                );
-                if (!data.items?.length) break;
-                all.push(...data.items);
-                if (data.items.length < CFG.pageSize) break;
-            }
-            S.deals = all.sort((a, b) => b.marketPrice - a.marketPrice);
-            S.dealsTs = Date.now();
-            enrichIndex(all);
+            const data = await gmJSON(`${WARBOARD_BASE}/api/weav3r/deals`);
+            const items = Array.isArray(data.items) ? data.items : [];
+            S.deals = items.slice().sort((a, b) => (b.marketPrice||0) - (a.marketPrice||0));
+            S.dealsTs = data.ts || Date.now();
+            if (data.error) S.dealsError = `server: ${data.error}`;
+            enrichIndex(items);
             loadRealDeals();
         } catch (e) {
             S.dealsError = e.message;
         }
         S.dealsLoading = false;
         render();
+    }
+
+    // Live push from warboard's /api/weav3r/stream. One connection per tab,
+    // auto-reconnects on drop. Cache updates flow straight into S.deals and
+    // trigger a silent re-render of $1 listings.
+    function connectWeav3rStream() {
+        if (S.sse) return;
+        try {
+            const es = new EventSource(`${WARBOARD_BASE}/api/weav3r/stream`);
+            S.sse = es;
+            const handle = (evt) => {
+                try {
+                    const msg = JSON.parse(evt.data);
+                    const items = Array.isArray(msg.items) ? msg.items : [];
+                    S.deals = items.slice().sort((a, b) => (b.marketPrice||0) - (a.marketPrice||0));
+                    S.dealsTs = msg.ts || Date.now();
+                    enrichIndex(items);
+                    // Only re-scan if not currently scanning; avoid stomping an in-flight scan.
+                    if (!S.realDealsLoading) loadRealDeals();
+                } catch (_) { /* malformed payload, skip */ }
+            };
+            es.addEventListener('snapshot', handle);
+            es.addEventListener('update', handle);
+            es.onerror = () => {
+                // EventSource auto-reconnects; if it hits the readyState=closed
+                // path we drop our reference so the next event-loop cycle re-opens.
+                if (es.readyState === 2 /* CLOSED */) {
+                    S.sse = null;
+                    setTimeout(connectWeav3rStream, 5000);
+                }
+            };
+        } catch (_) { S.sse = null; }
     }
 
     // ── Item Lookup — weav3r marketplace API ─────────────────────────────────
@@ -427,6 +619,7 @@
     }
 
     function renderSettings() {
+        const currentMinDiscount = CFG.minDiscount;
         return `
             <div style="padding:12px;">
                 <div class="w3b-section-label">Torn API Key</div>
@@ -443,42 +636,126 @@
                     ${S.apiKey ? '<button class="w3b-btn dim" id="w3b-apikey-clear" style="flex:1;padding:8px;">Clear Key</button>' : ''}
                 </div>
                 ${S.apiKey ? '<div style="margin-top:10px;font-size:11px;color:#4ade80">✓ Key saved — tap Save Key to update</div>' : ''}
+
+                <div class="w3b-section-label" style="margin-top:16px;">Minimum Discount %</div>
+                <div class="w3b-hint" style="margin-bottom:10px;color:#778;">Only show deals that are at least this % below market price. Lower = more results. Try 2 when the market is tight; raise to 10 for only steep discounts.</div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <input id="w3b-mindiscount-input"
+                        type="number" min="0" max="100" step="0.5"
+                        value="${currentMinDiscount}"
+                        style="width:80px;background:#0f1a2e;border:1px solid #1e3a5f;color:#dde;border-radius:5px;padding:8px;font-size:13px;">
+                    <button class="w3b-btn" id="w3b-mindiscount-save" style="flex:1;padding:8px;">Save & Rescan</button>
+                </div>
+
+                <div class="w3b-section-label" style="margin-top:16px;">Only Show Buyable $1 Deals</div>
+                <div class="w3b-hint" style="margin-bottom:10px;color:#778;">Show only $1 listings the server has confirmed are still publicly listed in the seller's bazaar. Hides: (a) listings already sold/removed, (b) target trades not open to you, and (c) listings not yet verified. Off = show everything including pending and gone ones.</div>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;">
+                    <input id="w3b-onlybuyable-input" type="checkbox" ${CFG.onlyBuyable ? 'checked' : ''}
+                        style="width:18px;height:18px;cursor:pointer;">
+                    <span style="color:#dde;font-size:13px;">Only show verified-buyable</span>
+                </label>
+                <button class="w3b-btn" id="w3b-onlybuyable-save" style="margin-top:8px;padding:8px;width:100%;">Save</button>
+
+                <div class="w3b-section-label" style="margin-top:16px;">Include $1 Deals</div>
+                <div class="w3b-hint" style="margin-bottom:10px;color:#778;">Off by default. Weav3r's $1 listings include many <b>target trades</b> (locked to specific buyers) that Torn's API doesn't flag as non-public. Server-side verification catches sold/removed items but cannot distinguish targets from public listings. Expect a lot of unbuyable results when scanning. Turn on if you want to hunt for the rare real public $1 steals.</div>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;">
+                    <input id="w3b-includedollar-input" type="checkbox" ${CFG.includeDollarDeals ? 'checked' : ''}
+                        style="width:18px;height:18px;cursor:pointer;">
+                    <span style="color:#dde;font-size:13px;">Include $1 listings in deal scan</span>
+                </label>
+                <button class="w3b-btn" id="w3b-includedollar-save" style="margin-top:8px;padding:8px;width:100%;">Save & Rescan</button>
             </div>`;
     }
 
     function renderDeals() {
         let out = `
             <div class="w3b-filter">
-                <button class="w3b-btn dim" id="w3b-refresh" title="Refresh">↻</button>
+                <button class="w3b-btn dim" id="w3b-refresh" title="Refresh"
+                    ${(S.dealsLoading || S.realDealsLoading) ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>↻</button>
             </div>`;
 
-        if (S.dealsLoading || S.realDealsLoading) {
-            out += `<div class="w3b-loading">⏳ ${S.dealsLoading ? 'Loading items…' : 'Finding deals…'}</div>`;
+        // Phase 1: fetching the initial dollar-bazaar list (no deals yet).
+        if (S.dealsLoading) {
+            out += `<div class="w3b-loading">⏳ Loading items…</div>`;
         } else if (S.dealsError) {
             out += `<div class="w3b-error">⚠ ${esc(S.dealsError)}</div>`;
-        } else if (S.realDeals.length === 0) {
-            out += `<div class="w3b-empty">No below-market deals found right now.<br>Hit ↻ to scan again.</div>`;
         } else {
-            out += S.realDeals.map(it => `
-                <div class="w3b-row">
-                    <div class="w3b-row-name">
-                        ${esc(it.itemName)}
-                        <span style="color:#facc15;font-weight:700;font-size:11px;margin-left:4px;">↓${it.discount.toFixed(1)}%</span>
-                    </div>
-                    <div class="w3b-row-meta">
-                        <span class="w3b-price">${fmtMoney(it.price)}</span>
-                        <span style="color:#556;">Mkt: ${fmtMoney(it.marketPrice)}</span>
-                    </div>
-                    <div class="w3b-row-meta">
-                        <span class="w3b-seller">🧍 ${esc(it.sellerName)}</span>
-                        <span>Qty: ${it.quantity}</span>
-                    </div>
-                    <div class="w3b-links">
-                        <a href="https://www.torn.com/bazaar.php?userId=${it.playerId}&highlightItem=${it.itemId}" target="_blank">Open Bazaar</a>
-                        <a href="https://www.torn.com/trade.php#step=start&userID=${it.playerId}" target="_blank">Trade</a>
-                        <a href="https://weav3r.dev/item/${it.itemId}" target="_blank">Weav3r</a>
-                    </div>
-                </div>`).join('');
+            // Phase 2: scanning marketplaces — show progress bar + deals as
+            // they come in. User sees results within ~1s of scan start.
+            if (S.realDealsLoading) {
+                const p = S.realDealsProgress || { done: 0, total: 0 };
+                const pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
+                out += `
+                    <div class="w3b-scan" style="margin:4px 0 8px;padding:6px 8px;background:#1a2332;border-radius:4px;font-size:11px;color:#9ca3af;">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                            <span>🔍 Scanning bazaars — ${p.done} / ${p.total}</span>
+                            <span style="color:#facc15;">${S.realDeals.length} found</span>
+                        </div>
+                        <div style="background:#0a1018;height:4px;border-radius:2px;overflow:hidden;">
+                            <div style="background:#facc15;height:100%;width:${pct}%;transition:width 200ms;"></div>
+                        </div>
+                    </div>`;
+            }
+            // Verification runs server-side now — no API key warning needed.
+
+            if (S.realDeals.length === 0 && !S.realDealsLoading) {
+                const md = CFG.minDiscount;
+                out += `<div class="w3b-empty">No listings ≥${md}% below market right now.<br>Hit ↻ to rescan, or lower the threshold in <b>Settings</b>.</div>`;
+            } else {
+                let hiddenGone = 0;
+                let hiddenPending = 0;
+                out += S.realDeals.map(it => {
+                    // Server provides `verified`: true = still listed, false
+                    // = gone, null/undefined = not yet verified by server.
+                    const vStatus = it.isDollarDeal ? it.verified : undefined;
+                    // With "only buyable" on, we hide both gone AND pending.
+                    if (it.isDollarDeal && CFG.onlyBuyable) {
+                        if (vStatus === false) { hiddenGone++; return ''; }
+                        if (vStatus !== true)  { hiddenPending++; return ''; }
+                    }
+                    let vBadge = '';
+                    if (it.isDollarDeal) {
+                        if (vStatus === true) {
+                            vBadge = '<span class="w3b-verified" title="Verified: still listed">✓</span>';
+                        } else if (vStatus === false) {
+                            vBadge = '<span style="color:#ef4444;font-size:10px;font-weight:700;margin-left:4px;" title="No longer listed — likely already sold or target trade">✗ gone</span>';
+                        } else {
+                            vBadge = '<span class="w3b-unverified" title="Pending server verification…">⋯</span>';
+                        }
+                    }
+                    return `
+                    <div class="w3b-row"${vStatus === false ? ' style="opacity:0.5;"' : ''}>
+                        <div class="w3b-row-name">
+                            ${esc(it.itemName)}
+                            ${it.isDollarDeal ? '<span style="color:#4ade80;font-weight:700;font-size:10px;margin-left:4px;background:#0a1f14;padding:1px 4px;border-radius:3px;">$1</span>' : ''}
+                            ${vBadge}
+                            <span style="color:#facc15;font-weight:700;font-size:11px;margin-left:4px;">↓${it.discount.toFixed(1)}%</span>
+                        </div>
+                        <div class="w3b-row-meta">
+                            <span class="w3b-price">${fmtMoney(it.price)}</span>
+                            <span style="color:#556;">Mkt: ${fmtMoney(it.marketPrice)}</span>
+                        </div>
+                        <div class="w3b-row-meta">
+                            <span class="w3b-seller">🧍 ${esc(it.sellerName)}</span>
+                            <span>Qty: ${it.quantity}</span>
+                        </div>
+                        <div class="w3b-links">
+                            <a href="https://www.torn.com/bazaar.php?userId=${it.playerId}&highlightItem=${it.itemId}" target="_blank">Open Bazaar</a>
+                            <a href="https://www.torn.com/trade.php#step=start&userID=${it.playerId}" target="_blank">Trade</a>
+                            <a href="https://weav3r.dev/item/${it.itemId}" target="_blank">Weav3r</a>
+                        </div>
+                    </div>`;
+                }).join('');
+                const hiddenTotal = hiddenGone + hiddenPending;
+                if (hiddenTotal > 0) {
+                    const parts = [];
+                    if (hiddenGone > 0) parts.push(`${hiddenGone} gone`);
+                    if (hiddenPending > 0) parts.push(`${hiddenPending} pending verification`);
+                    out += `<div style="padding:8px;text-align:center;color:#6b7280;font-size:11px;font-style:italic;">
+                        ${parts.join(' · ')} hidden · <span style="cursor:pointer;text-decoration:underline;" id="w3b-show-gone">show all</span>
+                    </div>`;
+                }
+            }
         }
         return out;
     }
@@ -607,6 +884,49 @@
             store.set('w3_apikey', '');
             S.verified = {};
             S.settingsOpen = false;
+            render();
+        });
+
+        // Min-discount input: allow input events through without triggering
+        // the panel-level event handlers, then save + rescan on button click.
+        const minDiscInput = body.querySelector('#w3b-mindiscount-input');
+        if (minDiscInput) {
+            ['click','touchstart','touchend','mousedown','keydown','keyup','keypress','input','change']
+                .forEach(ev => minDiscInput.addEventListener(ev, e => e.stopPropagation()));
+        }
+        const minDiscSave = body.querySelector('#w3b-mindiscount-save');
+        if (minDiscSave) minDiscSave.addEventListener('click', () => {
+            const raw = Number(body.querySelector('#w3b-mindiscount-input')?.value);
+            const clean = (isFinite(raw) && raw >= 0 && raw <= 100) ? raw : 2;
+            store.set('w3_min_discount', clean);
+            S.settingsOpen = false;
+            // Rescan with new threshold against already-fetched dollar-bazaar list
+            // (avoids re-hitting weav3r's dollar-bazaars endpoint).
+            if (S.deals.length > 0) loadRealDeals();
+            render();
+        });
+
+        const includeDollarSave = body.querySelector('#w3b-includedollar-save');
+        if (includeDollarSave) includeDollarSave.addEventListener('click', () => {
+            const checked = body.querySelector('#w3b-includedollar-input')?.checked === true;
+            store.set('w3_include_dollar', checked);
+            S.settingsOpen = false;
+            if (S.deals.length > 0) loadRealDeals();
+            render();
+        });
+
+        const onlyBuyableSave = body.querySelector('#w3b-onlybuyable-save');
+        if (onlyBuyableSave) onlyBuyableSave.addEventListener('click', () => {
+            const checked = body.querySelector('#w3b-onlybuyable-input')?.checked === true;
+            store.set('w3_only_buyable', checked);
+            S.settingsOpen = false;
+            render();
+        });
+
+        // Inline "show all" link on the hidden summary line
+        const showGoneLink = body.querySelector('#w3b-show-gone');
+        if (showGoneLink) showGoneLink.addEventListener('click', () => {
+            store.set('w3_only_buyable', false);
             render();
         });
 
@@ -772,7 +1092,11 @@
         buildPanel();
         render();
         loadDeals();
-        setInterval(() => { if (!S.dealsLoading) loadDeals(); }, CFG.refreshMs);
+        // SSE takes over the refresh cadence — warboard pushes updates every
+        // ~30s. Fallback polling kept at a slow interval in case the SSE
+        // connection drops and doesn't reconnect for some reason.
+        connectWeav3rStream();
+        setInterval(() => { if (!S.dealsLoading && !S.sse) loadDeals(); }, CFG.refreshMs);
         // Build full item index via Torn API if key is set, else skip
         if (S.apiKey) setTimeout(buildIndexFromTornAPI, 2000);
     }

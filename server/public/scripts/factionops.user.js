@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.78
+// @version      4.9.79
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,7 +45,8 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// v4.9.78  - Feature: "Vault Requests" toggle in Settings → Notifications lets users opt out of push notifications for new vault-request postings from OC Spawn Assistance. Wired to the existing /api/push/preferences endpoint (server already honored the pref via isTypeEnabled — just wasn't user-reachable). Defaults on.
+// v4.9.79  - Revert 4.9.78: vault-request toggle moved to OC Spawn Assistance settings gear where the feature actually lives. FactionOps is war coordination; vault-request notifs belong with their originating feature.
+// v4.9.78  - Feature: "Vault Requests" toggle in Settings → Notifications (moved to OC Spawn Assistance in 4.9.79).
 // v4.9.77  - Feature: Energy bars in the Cooldowns panel now project forward from the last report timestamp using Torn's own regen metadata (ticktime/interval/increment/fulltime). Donator vs non-donator regen rate is baked into interval, so no per-member flag is needed. Sort order also uses projected energy so freshly topped-up members bubble up correctly.
 // v4.9.76  - Polish: Last-report stamp in Cooldowns panel now shows combined units ("2h15m", "1d3h") instead of collapsing to a single unit. Under an hour is still "Xm" or "Xs" — only kicks in at the hour boundary.
 // v4.9.75  - Feature: Faction Cooldowns rows now show "Xs/m/h/d" next to each member's name — time since their last bars/cooldowns report. Lets you see at a glance who's actively reporting vs cached from earlier. Ticks forward with the existing 60s re-render.
@@ -270,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.78';
+    const SCRIPT_VERSION = '4.9.79';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -4885,19 +4886,6 @@ body.wb-chain-active {
                 notification. Toasts are unaffected by this toggle.
             </div>
 
-            <div class="wb-settings-row">
-                <span>Vault Requests</span>
-                <label class="wb-toggle">
-                    <input type="checkbox" id="wb-toggle-vault-req-notif" checked>
-                    <span class="wb-toggle-slider"></span>
-                </label>
-            </div>
-            <div style="font-size:11px;opacity:0.6;margin-bottom:14px;">
-                Push notifications when a faction member posts a new
-                "$X from vault" request in OC Spawn Assistance. Turn off
-                if you don't handle vault payouts.
-            </div>
-
             <button class="wb-btn wb-btn-sm" id="fo-btn-test-toast" style="margin-bottom:14px;font-size:11px;">Test Toast Notification</button>
 
             <hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:14px 0;">
@@ -5040,39 +5028,6 @@ body.wb-chain-active {
         if (enemyAttackNotifToggle) {
             enemyAttackNotifToggle.addEventListener('change', (e) => {
                 setConfig('ENEMY_ATTACK_NOTIF', e.target.checked);
-            });
-        }
-
-        // Vault-request push prefs. Unlike the toggles above, this is a
-        // SERVER-side suppression (the push origin decides not to fire)
-        // because vault-request notifications are sent by the warboard
-        // server, not the client. So: GET the current pref on render,
-        // POST updates on change. Requires JWT.
-        const vaultReqNotifToggle = document.getElementById('wb-toggle-vault-req-notif');
-        if (vaultReqNotifToggle && state.jwtToken) {
-            httpRequest({
-                method: 'GET',
-                url: `${CONFIG.SERVER_URL}/api/push/preferences`,
-                headers: { 'Authorization': `Bearer ${state.jwtToken}` },
-                onload: (resp) => {
-                    try {
-                        const body = JSON.parse(resp.responseText || '{}');
-                        const prefs = body.preferences || {};
-                        // server default is true; explicit false means user opted out
-                        vaultReqNotifToggle.checked = prefs.vault_request !== false;
-                    } catch (_) { /* keep default-checked */ }
-                },
-            });
-            vaultReqNotifToggle.addEventListener('change', (e) => {
-                httpRequest({
-                    method: 'POST',
-                    url: `${CONFIG.SERVER_URL}/api/push/preferences`,
-                    headers: {
-                        'Authorization': `Bearer ${state.jwtToken}`,
-                        'Content-Type': 'application/json',
-                    },
-                    data: JSON.stringify({ preferences: { vault_request: e.target.checked } }),
-                });
             });
         }
 

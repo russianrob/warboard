@@ -16,6 +16,7 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { getOcSpawnData, getCachedCompletedCrimes } from "./oc-spawn.js";
+import * as vaultRequests from "./vault-requests.js";
 import { getData as getNerveData, updateConfig as updateNerveConfig } from "./nerve-tracker.js";
 import { hasXanaxSubscription, grantFactionAccess, getXanaxSubscription } from "./xanax-subscriptions.js";
 import { startChainMonitor } from "./chain-monitor.js";
@@ -2739,14 +2740,75 @@ function runSlotOptimizer(factionId, data) {
     }
   }
 
+  // Build a faction-wide level prior: avg CPR bucketed by the player's
+  // Torn level. Used to give new members a reasonable starting projection
+  // based on their level alone (level-80 new member more likely to handle
+  // a harder crime than a level-20 new member). Falls back to 50% when
+  // the bucket has no data.
+  const levelBuckets = {};   // bucketKey -> { sum, count, joinables: [] }
+  function levelBucketKey(lvl) {
+    if (!lvl) return 'unknown';
+    if (lvl < 20)  return '1-19';
+    if (lvl < 40)  return '20-39';
+    if (lvl < 60)  return '40-59';
+    if (lvl < 80)  return '60-79';
+    if (lvl < 100) return '80-99';
+    return '100+';
+  }
+  const memberArr = Array.isArray(members) ? members : Object.values(members);
+  const levelByUid = {};
+  for (const m of memberArr) {
+    levelByUid[String(m.id || m.playerId || m.uid)] = m.level || 0;
+  }
+  for (const [uid, c] of Object.entries(cprCache)) {
+    if ((c.samples || 0) < 3) continue;  // only established members shape the prior
+    const bucket = levelBucketKey(levelByUid[uid]);
+    if (!levelBuckets[bucket]) levelBuckets[bucket] = { sum: 0, count: 0, joinables: [] };
+    levelBuckets[bucket].sum += c.rawCpr || c.cpr || 0;
+    levelBuckets[bucket].count += 1;
+    if (typeof c.joinable === 'number') levelBuckets[bucket].joinables.push(c.joinable);
+  }
+  function priorCprForLevel(lvl) {
+    const bucket = levelBuckets[levelBucketKey(lvl)];
+    if (!bucket || bucket.count < 2) return 50;
+    return Math.round((bucket.sum / bucket.count) * 10) / 10;
+  }
+  // Median joinable of established members in this level bucket. A level-41
+  // new member should start projecting at the level that other level-40ish
+  // members in this faction typically handle — not be stuck at 1.
+  function priorJoinableForLevel(lvl) {
+    const bucket = levelBuckets[levelBucketKey(lvl)];
+    if (!bucket || bucket.joinables.length < 2) return 1;  // not enough data, stay conservative
+    const sorted = bucket.joinables.slice().sort((a, b) => a - b);
+    // Use median, not mean — more robust when a bucket has outliers
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0
+      ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+      : sorted[mid];
+  }
+
   // 2. Collect all free members with their CPR data
   const freeMems = [];
-  const memberArr = Array.isArray(members) ? members : Object.values(members);
   for (const m of memberArr) {
     if (m.inOC || m.status === 'inOC') continue; // already in an OC
     const uid = String(m.id || m.playerId || m.uid);
-    const cpr = cprCache[uid];
-    if (!cpr) continue;
+    let cpr = cprCache[uid];
+    // New-member synthetic profile: members with no completed-crime history
+    // were being dropped entirely by the optimizer. Give them a profile
+    // derived from level-based priors — both CPR and joinable level come
+    // from what other established members in their level bucket typically
+    // achieve. A level-41 new member should start around the level that
+    // other level-40-ish members typically handle, not be stuck at joinable=1.
+    if (!cpr) {
+      const priorCpr = priorCprForLevel(m.level);
+      const priorJoinable = priorJoinableForLevel(m.level);
+      cpr = {
+        cpr: priorCpr, samples: 0, topLevelSamples: 0,
+        highestLevel: priorJoinable,
+        joinable: priorJoinable,
+        entries: [],
+      };
+    }
     const joinable = cpr.joinable || 1;
     const cprVal = cpr.cpr || 0;
     // Build per-level CPR from entries
@@ -2758,12 +2820,17 @@ function runSlotOptimizer(factionId, data) {
     }
     // If CPR at current level >= 75%, they're ready for next level (boost pushes them to ~90%)
     const topLevelCpr = levelCprs[joinable] ? levelCprs[joinable].sum / levelCprs[joinable].count : cprVal;
-    const effectiveLevel = topLevelCpr >= 75 ? joinable + 1 : joinable;
+    // Only let effectiveLevel jump above joinable if we have enough samples
+    // AT that joinable level — one lucky completion at 90% shouldn't push
+    // a member into the next difficulty tier.
+    const topLevelSamples = levelCprs[joinable]?.count || 0;
+    const effectiveLevel = (topLevelCpr >= 75 && topLevelSamples >= 3) ? joinable + 1 : joinable;
     freeMems.push({
       uid, name: m.name || m.playerName || uid,
       cpr: cprVal, joinable, effectiveLevel, levelCprs,
       byPosition: cpr.byPosition || {},
       level: m.level || 0,
+      samples: cpr.samples || 0,
     });
   }
 
@@ -2848,6 +2915,8 @@ function runSlotOptimizer(factionId, data) {
       isEstimatedCpr: !exactPosCpr && !lvlCpr,
       hoursToExpiry: Math.round(((p.slot.expiredAt || Infinity) - Date.now() / 1000) / 3600 * 10) / 10,
       fillInfo: `${p.slot.filledSlots}/${p.slot.totalSlots}`,
+      // Exposed for dev-only diagnostic display (gated client-side to XID 137558):
+      samples: p.member.samples || 0,
     });
   }
 
@@ -2950,8 +3019,14 @@ function runAutoDispatcher(factionId, data, requestingPlayerId) {
       const s = slots[i];
       if (s.user_id || s.user?.id) continue; // slot already filled
 
-      // Can I join this level?
+      // Can I join this level? Hard cap on both ends:
+      //   - Skip if my joinable is BELOW the OC's difficulty (can't qualify)
+      //   - Skip if my joinable is MORE THAN 1 LEVEL ABOVE the OC's difficulty
+      //     (a level-8 player should never be dispatched to a level-2 OC just
+      //     because it's near-full + expiring — that's wasted CPR potential.
+      //     Same rule the slot-optimizer uses.)
       if (myJoinable < (crime.difficulty || 0)) continue;
+      if (myJoinable > (crime.difficulty || 0) + 1) continue;
 
       const posBase = s.position.replace(/\s*#\d+$/, '');
 
@@ -3971,7 +4046,7 @@ const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
 const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
 
 
-const OC_MIN_VERSION = '3.0.30';
+const OC_MIN_VERSION = '3.1.4';
 
 // Instant Xanax check: when a non-subscribed member refreshes, check THEIR events
 // for a recent Xanax send to RussianRob. If found, grant access immediately.
@@ -3996,7 +4071,16 @@ async function checkInstantXanax(apiKey, playerInfo) {
       if (age > 1800) continue;
       // Grant access
       const { grantFactionAccess } = await import('./xanax-subscriptions.js');
-      const granted = grantFactionAccess(playerInfo.factionId, playerInfo.playerName + "'s faction", qty, playerInfo.playerName);
+      const granted = grantFactionAccess(
+        playerInfo.factionId,
+        playerInfo.playerName + "'s faction",
+        qty,
+        playerInfo.playerName,
+        {
+          paidById:       playerInfo.playerId,
+          paidByPosition: playerInfo.factionPosition || '',
+        }
+      );
       if (granted) return true;
     }
   } catch (e) { console.warn('[oc/spawn-key] Instant Xanax check failed:', e.message); }
@@ -4032,7 +4116,21 @@ router.get("/api/oc/spawn-key", async (req, res) => {
         if (match && match.expiresAt) subscriptionExpiresAt = match.expiresAt;
       }
     }
-    return { playerId: playerInfo.playerId, playerName: playerInfo.playerName, isOwnerFaction: isFactionAllowed(fid), position: playerInfo.factionPosition || '', hasFactionAccess: playerInfo.hasFactionAccess || false, subscriptionExpiresAt };
+    // Tab visibility is gated on the OC-specific admin roles list
+    // (configurable via OC Settings → Admin roles). Defaults to leader +
+    // co-leader if never customized. Independent from the broadcast role
+    // list so leadership can delegate "tab access" separately from "shouts."
+    const adminRoles = store.getAdminRoles(fid).map(r => String(r).toLowerCase());
+    const pos = String(playerInfo.factionPosition || '').toLowerCase();
+    const hasAdminAccess = adminRoles.includes(pos);
+    return {
+      playerId: playerInfo.playerId,
+      playerName: playerInfo.playerName,
+      isOwnerFaction: isFactionAllowed(fid),
+      position: playerInfo.factionPosition || '',
+      hasFactionAccess: hasAdminAccess,
+      subscriptionExpiresAt,
+    };
   }
 
   // Block outdated script versions with a helpful update message
@@ -4453,6 +4551,266 @@ router.post("/api/nerve-tracker/config", requireAuth, (req, res) => {
     if (factionOffset == null) return res.status(400).json({ error: "factionOffset required" });
     updateNerveConfig({ factionOffset, apiKey });
     res.json({ ok: true, factionOffset: Number(factionOffset) });
+});
+
+// ── Admin roles for OC spawn-assistance tabs ───────────────────────────────
+// GET = list current admin roles for caller's faction
+// POST = replace the role list (caller must currently have admin access)
+router.get("/api/oc/admin-roles", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  return res.json({
+    roles: store.getAdminRoles(ctx.info.factionId),
+    yourPosition: ctx.info.factionPosition || '',
+  });
+});
+
+router.post("/api/oc/admin-roles", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info } = ctx;
+
+  // Bootstrapping rule: anyone in the CURRENT admin role list can edit it.
+  // Dev (XID 137558) can always edit.
+  const cur = store.getAdminRoles(info.factionId).map(r => String(r).toLowerCase());
+  const myPos = String(info.factionPosition || '').toLowerCase();
+  const isDev = String(info.playerId) === '137558';
+  if (!isDev && !cur.includes(myPos)) {
+    return res.status(403).json({ error: "Only existing admin-role members can edit the list." });
+  }
+
+  // Normalize incoming roles
+  const newRoles = (Array.isArray(req.body?.roles) ? req.body.roles : [])
+    .map(r => String(r).trim().toLowerCase()).filter(Boolean);
+
+  // Safeguard 1: never accept an empty list — would lock everyone out and
+  // fall back to the default. Force the user to acknowledge a default by
+  // explicitly typing "leader, co-leader" if that's what they want.
+  if (newRoles.length === 0) {
+    return res.status(400).json({
+      error: "Role list cannot be empty. Add at least one position (e.g. 'leader').",
+    });
+  }
+
+  // Safeguard 2: don't allow removing your own position unless you're dev.
+  // Prevents accidental self-lockout — if you want to step down, ask
+  // another admin to do the removal.
+  if (!isDev && !newRoles.includes(myPos)) {
+    return res.status(400).json({
+      error: `New list must still include your position ('${myPos}') so you don't lock yourself out. Ask another admin to remove you, or add it back and save again.`,
+    });
+  }
+
+  // Safeguard 3: detect mass-removal — if more than half the existing roles
+  // would be dropped in one save, require explicit confirm flag.
+  const removed = cur.filter(r => !newRoles.includes(r));
+  if (removed.length > 0 && removed.length >= cur.length / 2 && !req.body?.confirmRemove) {
+    return res.status(409).json({
+      error: `This save would remove ${removed.length} role(s): ${removed.join(', ')}. Resubmit with confirmRemove=true to proceed.`,
+      removing: removed,
+    });
+  }
+
+  const saved = store.setAdminRoles(info.factionId, newRoles);
+  console.log(`[oc/admin-roles] ${info.playerName} (${info.playerId}) faction ${info.factionId}: [${cur.join(', ')}] → [${saved.join(', ')}]`);
+  return res.json({ ok: true, roles: saved, removed });
+});
+
+// ── Vault requests (faction members ask for $X from the vault) ─────────────
+// Everyone in the faction sees pending requests. When Torn's currencynews
+// shows the requester received money ≥ their ask, the poller auto-removes
+// the request. Push notifications on submit, filterable to online-only.
+
+// Helper: resolve the caller's info from the spawn-key cache (5min TTL).
+async function resolveVaultCaller(req, res) {
+  const key = req.query.key || (req.body && req.body.key);
+  if (!key || key.length < 10) { res.status(400).json({ error: "Invalid key" }); return null; }
+  const suffix = key.slice(-8);
+  let info = _spawnKeyCache.get(suffix);
+  if (!info || (Date.now() - info.ts) > 5 * 60_000 || !info.playerId) {
+    try {
+      const tornInfo = await verifyTornApiKey(key);
+      if (!isFactionAllowed(tornInfo.factionId) && !PARTNER_FACTIONS.includes(String(tornInfo.factionId)) && !hasXanaxSubscription(tornInfo.factionId)) {
+        res.status(403).json({ error: "Access restricted" });
+        return null;
+      }
+      info = {
+        ts: Date.now(),
+        factionId: tornInfo.factionId,
+        playerName: tornInfo.playerName,
+        playerId: tornInfo.playerId,
+        factionPosition: tornInfo.factionPosition,
+        hasFactionAccess: tornInfo.hasFactionAccess,
+      };
+      store.storeApiKey(info.playerId, key);
+      _spawnKeyCache.set(suffix, info);
+    } catch (e) {
+      res.status(401).json({ error: e.message });
+      return null;
+    }
+  }
+  return { info, key };
+}
+
+// List pending requests for the caller's faction.
+router.get("/api/oc/vault-requests", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  // Piggy-back cleanup: use the caller's own key to poll their own
+  // faction's fundsnews and clear fulfilled requests. Works for ANY
+  // subscribed faction without any stored keys — each user's key only
+  // polls their own faction's events (same scope the user already has).
+  // Throttled to ≤1 poll per 5s per faction to avoid hammering Torn.
+  try {
+    await vaultRequests.pollFactionWithKey(ctx.info.factionId, ctx.key);
+  } catch (_) { /* non-fatal — list still returns */ }
+  return res.json({ requests: vaultRequests.listRequests(ctx.info.factionId) });
+});
+
+// Submit a new request. Amount auto-capped at caller's vault balance.
+router.post("/api/oc/vault-request", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info, key } = ctx;
+  let { amount, target } = req.body || {};
+  amount = Number(amount);
+  if (!isFinite(amount) || amount < 1) return res.status(400).json({ error: "Invalid amount" });
+  if (target !== 'online' && target !== 'both') target = 'both';
+
+  // Cap at the requester's own vault balance using their own key. If the
+  // balance fetch fails we reject the submission rather than let it through
+  // uncapped — "Infinity max" would mean a member could request any amount.
+  let maxAmount = null;
+  try {
+    maxAmount = await vaultRequests.fetchVaultBalance(info.factionId, info.playerId, key);
+  } catch (e) {
+    console.warn(`[vault-request] balance fetch failed for ${info.playerId}:`, e.message);
+    return res.status(503).json({ error: "Couldn't verify your vault balance — try again in a moment." });
+  }
+  if (!(maxAmount > 0)) {
+    return res.status(400).json({ error: "No vault balance available to request." });
+  }
+
+  const reqObj = vaultRequests.createRequest(info.factionId, {
+    requesterId: info.playerId,
+    requesterName: info.playerName,
+    amount,
+    target,
+    maxAmount,
+  });
+
+  // Fire push notifications only to members with shout/broadcast-allowed
+  // faction positions — i.e., those with vault-giving permissions. No
+  // point pinging regular members who can't fulfill the request anyway.
+  // Same role set the /api/broadcast endpoint uses.
+  (async () => {
+    try {
+      const basic = await fetchFactionBasic(info.factionId, key);
+      const allowedRoles = getAllowedBroadcastRoles(info.factionId)
+        .map(r => String(r).toLowerCase());
+      const targetIds = Object.entries(basic.members || {})
+        .filter(([, m]) => {
+          const pos = String(m.position || m.faction_position || '').toLowerCase();
+          return allowedRoles.includes(pos);
+        })
+        .map(([id]) => String(id));
+      // Dev (XID 137558) always gets notified regardless of role.
+      if (!targetIds.includes('137558')) targetIds.push('137558');
+      await vaultRequests.notifyNewRequest(reqObj, targetIds);
+    } catch (e) {
+      console.warn('[vault-request] notify failed:', e.message);
+    }
+  })();
+
+  return res.json({ ok: true, request: reqObj, cappedAt: maxAmount });
+});
+
+// Return the caller's personal faction-vault balance so the client can
+// show a "max: $X" hint + a $ tap-to-fill button without guessing.
+router.get("/api/oc/vault-balance", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  try {
+    const balance = await vaultRequests.fetchVaultBalance(
+      ctx.info.factionId, ctx.info.playerId, ctx.key
+    );
+    return res.json({ balance: Number(balance) || 0 });
+  } catch (e) {
+    return res.status(500).json({ error: e.message, balance: 0 });
+  }
+});
+
+// Cancel a request. Requester can cancel their own; faction-API-access/dev
+// can cancel any.
+router.delete("/api/oc/vault-request/:id", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info } = ctx;
+  const isAdmin = info.hasFactionAccess === true || String(info.playerId) === '137558';
+  const removed = vaultRequests.removeRequest(info.factionId, req.params.id, info.playerId, isAdmin);
+  if (!removed) return res.status(403).json({ error: "Not found or not authorized" });
+  return res.json({ ok: true, removed });
+});
+
+// Per-user push-notification preferences, auth'd by Torn API key so the
+// OC Spawn Assistance settings panel can read/write them without needing
+// a FactionOps JWT. Currently exposes vault_request only; extend the
+// whitelist as more OC-spawn-originated notification types appear.
+const OC_PUSH_PREF_KEYS = new Set(["vault_request"]);
+
+router.get("/api/oc/notification-prefs", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const all = push.getPreferences(ctx.info.playerId) || {};
+  const filtered = {};
+  for (const k of OC_PUSH_PREF_KEYS) if (k in all) filtered[k] = all[k];
+  return res.json({ preferences: filtered });
+});
+
+router.post("/api/oc/notification-prefs", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const prefs = (req.body && req.body.preferences) || {};
+  const safe = {};
+  for (const [k, v] of Object.entries(prefs)) {
+    if (OC_PUSH_PREF_KEYS.has(k) && typeof v === 'boolean') safe[k] = v;
+  }
+  push.setPreferences(ctx.info.playerId, safe);
+  const all = push.getPreferences(ctx.info.playerId) || {};
+  const filtered = {};
+  for (const k of OC_PUSH_PREF_KEYS) if (k in all) filtered[k] = all[k];
+  return res.json({ ok: true, preferences: filtered });
+});
+
+// Fire a test vault_request push to the caller so they can verify their
+// subscription is live. Bypasses the preference check on purpose — users
+// who've opted out still want the test button to work when they're
+// toggling things. Does NOT create or broadcast a real vault request.
+router.post("/api/oc/notification-test", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  try {
+    await push.sendToPlayer(ctx.info.playerId, {
+      title: "Vault Request — test",
+      body: `If you see this, vault-request notifications are working.`,
+      icon: "/icon-192.png",
+      badge: "/icon-badge.png",
+      tag: "vault-request-test",
+      data: { test: true, type: "vault_request" },
+    }, null);
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;

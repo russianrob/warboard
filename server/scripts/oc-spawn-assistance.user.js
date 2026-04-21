@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.12
+// @version      3.1.13
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.13 — Admin settings (gear) now has a "Vault-Request Notifications" toggle and a "Send Test Notification" button. Toggle is server-backed via /api/oc/notification-prefs (auth'd by Torn API key — no FactionOps JWT needed). Test button fires a real push to the caller so they can verify their subscription before relying on live alerts.
 // v3.1.12 — Vault-request amount input accepts shorthand: "500k" → 500,000, "2.5m" → 2,500,000, "1b" → 1,000,000,000. Also tolerates commas ("1,000"), leading $ ("$500"), and decimals. Input switched from type=number to type=text + inputmode=decimal so mobile still gets a numeric keypad.
 // v3.1.11 — TornPDA fix: header buttons (Refresh, settings gear, close ✕) bind both click + touchend with a 350ms dedupe. Flutter InAppWebView swallows synthesized click events on children of the drag-handle <h2>, which is why taps in TornPDA did nothing. Handlers still fire exactly once on desktop / mobile web / WebView.
 // v3.1.10 — Admin-roles config: in OC settings (gear), comma-separated faction positions that gate Admin/Manager/Engines tab visibility. Defaults to leader + co-leader. Replaces the API-key-tier check that was incorrectly granting tab access to anyone with a Limited+ key. Plus: $ button inside vault-request amount box auto-fills max balance; "Send anytime / Only when I'm online" is requester preference (push always goes to all admin-role members). "Send anytime / Only when I'm online" is now a requester preference about accepting money while offline (not notification filtering). Push notifications always go to everyone. Balance shown above form.
@@ -210,7 +211,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.12';
+    const SCRIPT_VERSION = '3.1.13';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -2022,6 +2023,20 @@
                 <div id="cfg-admin-roles-msg" style="font-size:10px;color:#6b7280;margin-top:4px;min-height:12px;"></div>
             </div>
 
+            <hr class="oc-setting-divider"/>
+            <div class="oc-setting-row">
+                <div class="oc-setting-info">
+                    <span class="oc-setting-label">Vault-Request Notifications</span>
+                    <div class="oc-setting-desc">Push notifications when a faction member posts a new "$X from vault" request. Server-side opt-out — turn off if you don't handle payouts.</div>
+                </div>
+                <label class="oc-toggle" style="display:inline-flex;align-items:center;cursor:pointer;">
+                    <input type="checkbox" id="cfg-vault-notif" checked style="width:16px;height:16px;cursor:pointer;accent-color:#74c69d;">
+                </label>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;margin-top:4px;">
+                <button id="cfg-vault-notif-test" class="oc-setting-save-btn" style="background:#1e3a5f;">Send Test Notification</button>
+                <span id="cfg-vault-notif-msg" style="font-size:10px;color:#6b7280;flex:1;min-height:12px;"></span>
+            </div>
 
             </div><!-- /oc-cfg-section -->
         </div>
@@ -2276,6 +2291,77 @@
         } catch (e) {
             if (msg) msg.textContent = `Error: ${e.message}`;
         }
+    });
+
+    // Vault-request notification toggle + test. Auth'd via Torn API key.
+    // Server stores the pref in push-preferences.json keyed by playerId;
+    // the vault-request sender consults it before dispatching to each
+    // recipient, so turning this off reliably suppresses the push.
+    async function hydrateVaultNotifToggle() {
+        const cb = document.getElementById('cfg-vault-notif');
+        if (!cb) return;
+        const apiKey = getApiKey();
+        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
+        try {
+            const r = await gmRequest(`${SERVER}/api/oc/notification-prefs?key=${encodeURIComponent(apiKey)}`);
+            if (r.ok) {
+                const prefs = r.data?.preferences || {};
+                // server default is on — only mark unchecked if explicitly false
+                cb.checked = prefs.vault_request !== false;
+            }
+        } catch (_) { /* keep default-checked */ }
+    }
+    hydrateVaultNotifToggle();
+
+    const vaultNotifCb = document.getElementById('cfg-vault-notif');
+    if (vaultNotifCb) vaultNotifCb.addEventListener('change', (e) => {
+        const apiKey = getApiKey();
+        const msgEl = document.getElementById('cfg-vault-notif-msg');
+        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
+            if (msgEl) msgEl.textContent = 'Save your API key first.';
+            return;
+        }
+        const enabled = e.target.checked;
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `${SERVER}/api/oc/notification-prefs`,
+            headers: { 'Content-Type': 'application/json' },
+            data: JSON.stringify({ key: apiKey, preferences: { vault_request: enabled } }),
+            onload: (resp) => {
+                if (msgEl) msgEl.textContent = resp.status >= 200 && resp.status < 300
+                    ? (enabled ? '✓ Notifications on' : '✓ Notifications off')
+                    : 'Save failed — try again';
+            },
+            onerror: () => { if (msgEl) msgEl.textContent = 'Network error'; },
+        });
+    });
+
+    const vaultNotifTestBtn = document.getElementById('cfg-vault-notif-test');
+    if (vaultNotifTestBtn) bindTap(vaultNotifTestBtn, () => {
+        const apiKey = getApiKey();
+        const msgEl = document.getElementById('cfg-vault-notif-msg');
+        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
+            if (msgEl) msgEl.textContent = 'Save your API key first.';
+            return;
+        }
+        if (msgEl) msgEl.textContent = 'Sending test…';
+        vaultNotifTestBtn.disabled = true;
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `${SERVER}/api/oc/notification-test?key=${encodeURIComponent(apiKey)}`,
+            headers: { 'Content-Type': 'application/json' },
+            data: '{}',
+            onload: (resp) => {
+                vaultNotifTestBtn.disabled = false;
+                if (msgEl) msgEl.textContent = resp.status >= 200 && resp.status < 300
+                    ? '✓ Test sent — if you don\'t see it, check that push is enabled in FactionOps.'
+                    : `Failed (${resp.status}). Make sure you're subscribed via FactionOps.`;
+            },
+            onerror: () => {
+                vaultNotifTestBtn.disabled = false;
+                if (msgEl) msgEl.textContent = 'Network error';
+            },
+        });
     });
 
     document.getElementById('oc-spawn-key-save').addEventListener('click', () => {
