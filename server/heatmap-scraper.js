@@ -4,15 +4,22 @@ import { recordSample } from './activity-heatmap.js';
 // Track active scrapers to prevent duplicate intervals for the same enemy faction
 const activeScrapers = new Set();
 
+// Dedicated key for heatmap scraping — keeps OWNER_API_KEY free from
+// this poller's load. Set via HEATMAP_API_KEY env var. Falls back to
+// whatever key the caller passes in, which ultimately falls back to
+// OWNER_API_KEY (legacy behaviour) if neither is configured.
+const HEATMAP_API_KEY = process.env.HEATMAP_API_KEY || '';
+
 /**
  * Starts an hourly scraper to monitor enemy faction activity.
  * @param {string|number} warId - The ID of the ranked war.
  * @param {string|number} enemyId - The Torn faction ID of the enemy.
- * @param {string} apiKey - The Torn API key to use for the request.
+ * @param {string} apiKeyFallback - Key to use if HEATMAP_API_KEY env is not set.
  * @param {string} [enemyName] - Optional faction name for better logging.
  * @returns {NodeJS.Timeout|null} The interval ID, or null if already running.
  */
-export function startHeatmapScraper(warId, enemyId, apiKey, enemyName = null) {
+export function startHeatmapScraper(warId, enemyId, apiKeyFallback, enemyName = null) {
+    const apiKey = HEATMAP_API_KEY || apiKeyFallback;
     const enemyIdStr = String(enemyId);
     let currentName = enemyName;
 
