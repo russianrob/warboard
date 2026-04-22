@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb30
+// @version      2.73.0-wb31
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2017,7 +2017,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb30",
+      scriptVersion: "2.73.0-wb31",
     };
     try {
       GM_xmlhttpRequest({
@@ -2344,7 +2344,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb30",
+        scriptVersion: "2.73.0-wb31",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2675,10 +2675,28 @@ if (!singleton) {
         let statusSpan = statusEl.querySelector(".ffs-travel-status");
         const valueSpan = statusEl.querySelector(".ffs-mq-value");
 
-        // wb30: country-view label shows direction. Returning → 'from UK',
-        // outbound → 'to UK'. Keeps "coming to or going from" context.
-        const countryLabel = countryText
-          ? (isReturning ? `from ${countryText}` : `to ${countryText}`)
+        // wb31: if we somehow don't have abbr yet, last-ditch parse it
+        // from the cell's saved original HTML. This handles the case
+        // where the detection loop ran on our own repainted cell and
+        // couldn't parse Torn's "Traveling to X" text anymore.
+        let effectiveCountry = countryText;
+        let effectiveReturning = isReturning;
+        if (!effectiveCountry && statusEl.dataset.ffsTravelOriginal) {
+          const orig = statusEl.dataset.ffsTravelOriginal;
+          const tmp = document.createElement("div");
+          tmp.innerHTML = orig;
+          const origText = (tmp.textContent || "").trim();
+          const rm = origText.match(/Returning to Torn from (.+)/i);
+          const tm = origText.match(/Traveling to (.+)/i);
+          if (rm) { effectiveCountry = rm[1].trim(); effectiveReturning = true; }
+          else if (tm) { effectiveCountry = tm[1].trim(); }
+          if (effectiveCountry) {
+            _ffsMemberAbbr[uid] = effectiveCountry;
+            _ffsMemberReturning[uid] = effectiveReturning;
+          }
+        }
+        const countryLabel = effectiveCountry
+          ? (effectiveReturning ? `from ${effectiveCountry}` : `to ${effectiveCountry}`)
           : "";
 
         if (statusSpan && valueSpan) {
@@ -2689,15 +2707,16 @@ if (!singleton) {
           if (valueSpan.textContent !== desired) {
             valueSpan.textContent = desired;
           }
-          statusSpan.classList.toggle("returning", isReturning);
+          statusSpan.classList.toggle("returning", effectiveReturning);
         } else {
           if (!statusEl.dataset.ffsTravelInjected) {
             statusEl.dataset.ffsTravelOriginal = statusEl.innerHTML;
             statusEl.dataset.ffsTravelInjected = "1";
           }
           const escLabel = countryLabel.replace(/"/g, "&quot;");
+          const retCls = effectiveReturning ? " returning" : "";
           statusEl.innerHTML =
-            `<span class="ffs-travel-status${returningCls}" `
+            `<span class="ffs-travel-status${retCls}" `
             + `data-ffs-time="${countdownText}" `
             + `data-ffs-country="${escLabel}" `
             + `data-ffs-show-country="0" `
@@ -2705,18 +2724,6 @@ if (!singleton) {
             + `${FFS_PLANE_SVG}`
             + `<span class="ffs-mq-value">${countdownText}</span>`
             + `</span>`;
-
-          const spanEl = statusEl.querySelector(".ffs-travel-status");
-          if (spanEl) {
-            spanEl.addEventListener("click", (ev) => {
-              ev.stopPropagation();
-              ev.preventDefault();
-              const was = spanEl.dataset.ffsShowCountry === "1";
-              spanEl.dataset.ffsShowCountry = was ? "0" : "1";
-              const v = spanEl.querySelector(".ffs-mq-value");
-              if (v) v.textContent = was ? spanEl.dataset.ffsTime : spanEl.dataset.ffsCountry;
-            });
-          }
         }
       } else if (statusEl.dataset.ffsTravelInjected) {
         // Member is no longer travelling — restore original.
@@ -2832,6 +2839,22 @@ if (!singleton) {
     // times from FFScouter (Torn's v2 hides them). Every 5s.
     ffs_detectAndFetchTravellersFromDom();
     setInterval(ffs_detectAndFetchTravellersFromDom, 5_000);
+
+    // wb31: event delegation for the country/time toggle click. Works
+    // even if Torn's React re-renders the cell and detaches the
+    // original click listener we added inline.
+    document.body.addEventListener("click", (ev) => {
+      const span = ev.target.closest && ev.target.closest(".ffs-travel-status");
+      if (!span) return;
+      ev.stopPropagation();
+      ev.preventDefault();
+      const was = span.dataset.ffsShowCountry === "1";
+      span.dataset.ffsShowCountry = was ? "0" : "1";
+      const v = span.querySelector(".ffs-mq-value");
+      if (!v) return;
+      const target = was ? span.dataset.ffsTime : span.dataset.ffsCountry;
+      v.textContent = target || (was ? "" : "…");
+    }, true);
   }
   ffs_initTravelCountdowns();
 
