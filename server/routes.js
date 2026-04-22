@@ -18,7 +18,6 @@ import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { getOcSpawnData, getCachedCompletedCrimes } from "./oc-spawn.js";
 import * as vaultRequests from "./vault-requests.js";
 import * as keyUsage from "./key-usage-log.js";
-import * as webhookBus from "./webhook-bus.js";
 import { hasXanaxSubscription, grantFactionAccess, getXanaxSubscription } from "./xanax-subscriptions.js";
 import { startChainMonitor } from "./chain-monitor.js";
 import * as push from "./push-notifications.js";
@@ -4793,15 +4792,6 @@ router.post("/api/oc/vault-request", async (req, res) => {
     maxAmount,
   });
 
-  // Fire webhook event — non-blocking, background delivery.
-  webhookBus.emit(info.factionId, "vault-request.created", {
-    requestId: reqObj.id,
-    requesterId: info.playerId,
-    requesterName: info.playerName,
-    amount: reqObj.amount,
-    target: reqObj.target,
-  });
-
   // Fire push notifications only to members with shout/broadcast-allowed
   // faction positions — i.e., those with vault-giving permissions. No
   // point pinging regular members who can't fulfill the request anyway.
@@ -4854,10 +4844,6 @@ router.delete("/api/oc/vault-request/:id", async (req, res) => {
   const isAdmin = info.hasFactionAccess === true || String(info.playerId) === '137558';
   const removed = vaultRequests.removeRequest(info.factionId, req.params.id, info.playerId, isAdmin);
   if (!removed) return res.status(403).json({ error: "Not found or not authorized" });
-  webhookBus.emit(info.factionId, "vault-request.canceled", {
-    requestId: req.params.id,
-    canceledBy: info.playerId,
-  });
   return res.json({ ok: true, removed });
 });
 

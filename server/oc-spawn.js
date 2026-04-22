@@ -60,14 +60,9 @@ async function fetchCompletedCrimes(factionId, apiKey) {
   return Object.values(data.crimes || {});
 }
 
-// Previous-snapshot map used for OC lifecycle webhook events.
-// factionId → Map<crimeId, { status, name, difficulty, slotCount, filledCount }>
-const _ocPrevSnapshot = new Map();
-
 async function fetchAvailableCrimes(factionId, apiKey) {
   const now = Date.now();
-  const fid = String(factionId);
-  const cached = availableCache.get(fid);
+  const cached = availableCache.get(String(factionId));
   if (cached && (now - cached.ts) < AVAILABLE_TTL_MS) return cached.crimes;
 
   const url = `https://api.torn.com/v2/faction/crimes?cat=available&key=${encodeURIComponent(apiKey)}`;
@@ -77,71 +72,7 @@ async function fetchAvailableCrimes(factionId, apiKey) {
   if (data.error) throw new Error(data.error.error);
 
   const crimes = Array.isArray(data.crimes) ? data.crimes : Object.values(data.crimes || {});
-  availableCache.set(fid, { ts: now, crimes });
-
-  // Webhook: detect transitions vs the previous snapshot and emit oc.*
-  // events. Only fires once per cache refresh (~AVAILABLE_TTL_MS) so the
-  // burst cost is bounded. Errors here should never break the caller.
-  try {
-    const prev = _ocPrevSnapshot.get(fid) || new Map();
-    const curr = new Map();
-    for (const c of crimes) {
-      const id = String(c.id);
-      const slotArr = Array.isArray(c.slots) ? c.slots : [];
-      const filled = slotArr.filter(s => (s.user_id ?? s.user?.id)).length;
-      curr.set(id, {
-        status: c.status || 'unknown',
-        name: c.name || '',
-        difficulty: c.difficulty || 0,
-        slotCount: slotArr.length,
-        filledCount: filled,
-      });
-    }
-
-    const { emit } = await import('./webhook-bus.js');
-
-    // Only diff when we had a prior snapshot — first poll is baseline.
-    if (_ocPrevSnapshot.has(fid)) {
-      // New crimes available
-      for (const [id, info] of curr) {
-        if (!prev.has(id)) {
-          emit(fid, 'oc.available', {
-            crimeId: id, name: info.name,
-            difficulty: info.difficulty, slotCount: info.slotCount,
-          });
-        }
-      }
-      // Assembled: was Recruiting with empty slots, now Planning/Executing
-      // with all slots filled. Also covers "filled" milestone within
-      // Recruiting if Torn keeps the status label but all slots populate.
-      for (const [id, info] of curr) {
-        const was = prev.get(id);
-        if (!was) continue;
-        const wasFull = was.filledCount >= was.slotCount && was.slotCount > 0;
-        const isFull  = info.filledCount >= info.slotCount && info.slotCount > 0;
-        if (!wasFull && isFull) {
-          emit(fid, 'oc.assembled', {
-            crimeId: id, name: info.name,
-            difficulty: info.difficulty, status: info.status,
-          });
-        }
-      }
-      // Completed: crime disappeared from `available` list OR status
-      // changed to a terminal value. Torn generally drops completed
-      // crimes from this endpoint, so absence is the primary signal.
-      for (const [id, was] of prev) {
-        if (!curr.has(id)) {
-          emit(fid, 'oc.completed', {
-            crimeId: id, name: was.name,
-            difficulty: was.difficulty,
-          });
-        }
-      }
-    }
-
-    _ocPrevSnapshot.set(fid, curr);
-  } catch (_) { /* webhook emission must not break spawn fetch */ }
-
+  availableCache.set(String(factionId), { ts: now, crimes });
   return crimes;
 }
 

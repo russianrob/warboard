@@ -220,29 +220,14 @@ async function pollOneFaction(factionId, apiKey) {
         const amount = parseInt(amtMatch[1].replace(/,/g, ''), 10);
         const recipientId = firstXid[1];
         const before = f.requests.length;
-        const fulfilled = [];
         f.requests = f.requests.filter(r => {
             if (String(r.requesterId) !== String(recipientId)) return true;
             if (r.amount > amount) return true;  // received less than asked — keep pending
-            fulfilled.push(r);
             return false;
         });
         if (f.requests.length < before) {
             fulfilledAny = true;
             console.log(`[vault-requests] fulfilled ${before - f.requests.length} request(s) for ${recipientId} on $${amount}`);
-            // Fire vault-request.fulfilled webhook per cleared request.
-            try {
-                const { emit } = await import('./webhook-bus.js');
-                for (const r of fulfilled) {
-                    emit(factionId, 'vault-request.fulfilled', {
-                        requestId: r.id,
-                        requesterId: r.requesterId,
-                        requesterName: r.requesterName,
-                        requestedAmount: r.amount,
-                        receivedAmount: amount,
-                    });
-                }
-            } catch (_) {}
         }
     }
 
