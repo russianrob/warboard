@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.35
+// @version      3.1.36
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.36 — Outcome EV table rows now link to the specific OC: the crime name is an anchor to /factions.php?step=your#/tab=crimes&crimeId=<id>, so "row with best Top end %" → one click → the exact OC in Torn's crimes list. Fill chip (e.g. 3/4) added next to each name so multiple same-named OCs at the same difficulty are distinguishable before clicking.
 // v3.1.35 — Click-to-sort on Outcome EV tables: click any of the three numeric column headers (Pass %, Top end %, Q score) to rank OCs by that metric. Default sort is Top end % descending so the highest-payout slate is always on top once data lands. Click the same header twice to flip direction. Arrow (▼/▲) shows which column/direction is currently active. Rows still fetching stay anchored at the bottom of descending sorts. Info-icon (?) clicks continue to open tooltips without triggering a sort.
 // v3.1.34 — Clickable info tooltips on Outcome EV column headers: click the ? next to Pass %, Top end %, or Q score for a short explanation of each metric. Reuses the existing CPR/scope tooltip pattern; tooltip closes on click-outside or second click on the same icon.
 // v3.1.33 — Outcome EV now renders in BOTH tabs: Admin tab shows Recruiting OCs (so admins can see expected EV as slates fill), Engines tab keeps Planning OCs (locked slates, numbers reflect actual outcome). Both panels share the same /api/oc/outcome fetch path and 15-min server cache. Recruiting panel footer warns about CPR-50 neutral for empty slots; Planning panel has no caveat since every slot is filled.
@@ -238,7 +239,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.35';
+    const SCRIPT_VERSION = '3.1.36';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4112,8 +4113,20 @@
         html += `<th class="oc-ev-sort" data-col="q"    style="cursor:pointer;">Q score <span class="oc-ev-sort-ind"></span> <span class="oc-ev-info" data-tt-title="Q score" data-tt="${ttQ}">?</span></th>`;
         html += `</tr></thead><tbody>`;
         for (const c of matching) {
+            // v3.1.36: OC name is a deep link into Torn's faction crimes
+            // page at the specific crime id, so admins can jump straight
+            // from "this row has the best Top end %" to "join this exact
+            // OC" without having to scroll through the Recruiting list.
+            // Fill chip (e.g. 3/4) added so multiple same-named OCs at
+            // the same level are distinguishable before clicking through.
+            const slotCount = Array.isArray(c.slots) ? c.slots.length : 0;
+            const filled = (c.slots || []).filter(s => (s.user_id ?? s.user?.id) != null).length;
+            const fillChip = slotCount
+                ? ` <span style="color:#6b7280;font-weight:400;font-size:10px;">(${filled}/${slotCount})</span>`
+                : '';
+            const href = `https://www.torn.com/factions.php?step=your#/tab=crimes&crimeId=${c.id}`;
             html += `<tr data-oc-outcome-id="${c.id}">`;
-            html += `<td><b style="color:#74c69d">${c.name}</b></td>`;
+            html += `<td><a href="${href}" target="_blank" style="color:#74c69d;font-weight:700;text-decoration:none;" title="Open OC ${c.id} on the Torn crimes page">${c.name}${fillChip}</a></td>`;
             html += `<td>${c.difficulty}</td>`;
             html += `<td class="oc-outcome-pass" style="color:#6b7280">…</td>`;
             html += `<td class="oc-outcome-top"  style="color:#6b7280">…</td>`;
