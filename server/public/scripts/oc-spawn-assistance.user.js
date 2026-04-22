@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.30
+// @version      3.1.31
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.31 — Outcome EV analyzer (admin tab only): every recruiting OC gets a row with Pass %, Top-end %, and a weighted Q-score (goodEnding1=1.0, goodEnding2=0.7, goodEnding3=0.4, everything else=0.2). Data comes from a new server endpoint /api/oc/outcome that proxies tornprobability.com's CalculateSuccess with 15-min caching. Per-slot CPRs come from each placed member's byPosition history (fallback: overall CPR → 50 neutral for empty slots). Visibility: table renders inside the Admin tab, which is already role-gated, so rank-and-file members never see it. Server endpoint enforces the same role gate as defence-in-depth (403 for non-admins hitting it directly).
 // v3.1.30 — MinCPR reset bug (and sibling settings): pushScopeOnly was hitting /api/oc/settings/update with only a `scope` query param, but that handler applied HARD-CODED defaults for every missing field — so every scope auto-detect tick silently reset mincpr → 60, cpr_boost → 15, active_days → 7, etc. Fixed on both sides: client pushScopeOnly now hits the dedicated /api/oc/scope endpoint, and /api/oc/settings/update now falls back to the stored value (not a constant) when a field is missing, so a partial push no longer clobbers untouched settings.
 // v3.1.29 — Missing-items UX fix: after a successful loan the card now fades and collapses out of the list within ~1.4s, instead of sitting there with a ✓ Loaned button until the next full refresh (which was up to ~60s away on the API + armory cache cadence). The underlying filter via mgr_recentlyLoaned was already correct; only the visual feedback was lagging. If that was the last missing item, the "All OC items allocated" message takes its place without waiting for a full reload.
 // v3.1.28 — Scope cleanup: auto-detect + auto-push is working correctly so dropped the verbose diagnostic logs (init snapshot, per-refresh overwrite decisions, strategy-fire lines). Kept the two useful console lines: "Detected scope change: X → Y (source: …)" and "pushed N to server". Strategy logs demoted to console.debug for Verbose-mode recovery if we ever need to diagnose again.
@@ -233,7 +234,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.30';
+    const SCRIPT_VERSION = '3.1.31';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3968,7 +3969,7 @@
         }, 1000);
     }
 
-    function renderBody(recs, eligible, skipped, scopeProjection, viewer, availableCrimes, weights, engines, members) {
+    function renderBody(recs, eligible, skipped, scopeProjection, viewer, availableCrimes, weights, engines, members, cprCache) {
         const total = eligible.length + skipped.length;
         const eli   = eligible.length;
         const free  = eligible.filter(m => !m.inOC).length;
@@ -4014,7 +4015,99 @@
                 Active=${CONFIG.ACTIVE_DAYS}d · Forecast=${CONFIG.FORECAST_HOURS}h · MinCPR=${CONFIG.MINCPR}% · Boost=${CONFIG.CPR_BOOST}%
                 &nbsp;·&nbsp; Updated: ${new Date().toLocaleTimeString()}
                 &nbsp;·&nbsp; <span style="color:#253525">CPR cached 6h server-side</span>
-            </p>`;
+            </p>
+            ${renderOutcomeAnalyzerShell(availableCrimes)}`;
+
+        // v3.1.31 (private): kick off per-OC outcome fetches after the shell
+        // is in the DOM. Admin-only endpoint — if viewer isn't admin, the
+        // server will 403 each call and the rows silently stay as 'no data'.
+        scheduleOutcomeAnalyzerFetches(availableCrimes, cprCache);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  OUTCOME ANALYZER (private admin build)
+    // ─────────────────────────────────────────────────────────────────────
+    // Renders a per-OC outcome EV table in the admin tab. Data comes from
+    // server's /api/oc/outcome, which proxies tornprobability.com's
+    // CalculateSuccess with our 15-min cache. Admin-gated server-side.
+    //
+    // For each recruiting OC, builds a CPR array in slot order using:
+    //   · filled slot → placed member's byPosition CPR for that exact role
+    //                    → fallback to their overall CPR
+    //                    → fallback to 50 (neutral)
+    //   · empty slot  → 50 (neutral placeholder)
+    // Shows success %, goodEnding1 (top-reward) %, and a weighted quality
+    // score where goodEnding1 counts 1.0, 2 counts 0.7, 3 counts 0.4, and
+    // goodEnding4/higher count 0.2.
+    function renderOutcomeAnalyzerShell(availableCrimes) {
+        const recruiting = normArr(availableCrimes).filter(c => c.status === 'Recruiting');
+        if (!recruiting.length) return '';
+        let html = `<h3>\u{1F3AF} Outcome EV</h3>`;
+        html += `<table class="oc-table"><thead><tr>`;
+        html += `<th>OC</th><th>Lvl</th><th>Pass %</th><th>Top end %</th><th>Q score</th>`;
+        html += `</tr></thead><tbody>`;
+        for (const c of recruiting) {
+            const id = String(c.id);
+            html += `<tr data-oc-outcome-id="${id}">`;
+            html += `<td><b style="color:#74c69d">${c.name}</b></td>`;
+            html += `<td>${c.difficulty}</td>`;
+            html += `<td class="oc-outcome-pass" style="color:#6b7280">…</td>`;
+            html += `<td class="oc-outcome-top"  style="color:#6b7280">…</td>`;
+            html += `<td class="oc-outcome-q"    style="color:#6b7280">…</td>`;
+            html += `</tr>`;
+        }
+        html += `</tbody></table>`;
+        return html;
+    }
+
+    async function scheduleOutcomeAnalyzerFetches(availableCrimes, cprCache) {
+        const recruiting = normArr(availableCrimes).filter(c => c.status === 'Recruiting');
+        if (!recruiting.length) return;
+        const apiKey = getApiKey();
+        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
+
+        for (const c of recruiting) {
+            const slots = Array.isArray(c.slots) ? c.slots : [];
+            const cprs = slots.map(s => {
+                const uid = s.user_id ?? s.user?.id;
+                if (!uid) return 50;
+                const cc = cprCache?.[String(uid)];
+                if (!cc) return 50;
+                const exactKey = `${c.name}::${s.position}`;
+                const pd = cc.byPosition?.[exactKey];
+                if (pd && typeof pd.cpr === 'number') return pd.cpr;
+                if (typeof cc.cpr === 'number') return cc.cpr;
+                return 50;
+            });
+            if (!cprs.length) continue;
+
+            const url = `${SERVER}/api/oc/outcome`
+                + `?key=${encodeURIComponent(apiKey)}`
+                + `&scenario=${encodeURIComponent(c.name)}`
+                + `&cprs=${cprs.join(',')}`;
+            try {
+                const r = await gmRequest(url);
+                if (!r.ok || !r.data || r.data.error) continue;
+                const d = r.data;
+                const passPct = (d.successChance ?? 0) * 100;
+                const topPct  = (d.goodEnding1 ?? 0) * 100;
+                const qScore  = (d.goodEnding1 ?? 0) * 1.0
+                              + (d.goodEnding2 ?? 0) * 0.7
+                              + (d.goodEnding3 ?? 0) * 0.4
+                              + Object.keys(d)
+                                  .filter(k => /^goodEnding[4-9]|goodEnding1[0-9]|goodEnding[34][05]/.test(k))
+                                  .reduce((a, k) => a + (d[k] ?? 0) * 0.2, 0);
+                const row = document.querySelector(`tr[data-oc-outcome-id="${c.id}"]`);
+                if (!row) continue;
+                const colour = (v) => v >= 70 ? '#4ade80' : v >= 45 ? '#e5b567' : '#ef4444';
+                const pass = row.querySelector('.oc-outcome-pass');
+                const top  = row.querySelector('.oc-outcome-top');
+                const q    = row.querySelector('.oc-outcome-q');
+                if (pass) { pass.style.color = colour(passPct); pass.textContent = passPct.toFixed(1) + '%'; }
+                if (top)  { top.style.color  = colour(topPct * 2); top.textContent  = topPct.toFixed(1) + '%'; }
+                if (q)    { q.style.color    = colour(qScore * 100); q.textContent  = qScore.toFixed(3); }
+            } catch (_) { /* swallow; leave row as '…' */ }
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4546,7 +4639,7 @@
                 fetchVaultBalance(apiKey),
             ]);
 
-            renderBody(recs, eligible, skipped, scopeProjection, viewer, availableCrimes, weights, engines, members);
+            renderBody(recs, eligible, skipped, scopeProjection, viewer, availableCrimes, weights, engines, members, cprCache);
             bindVaultRequestHandlers(apiKey, viewer);
 
             // Tab visibility: Admin/Manager/Metrics/Engines are gated together

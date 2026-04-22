@@ -4664,6 +4664,7 @@ router.get("/api/oc/outcome", async (req, res) => {
   const cprs = cprsRaw.split(",").map((s) => Number(s.trim())).filter((n) => Number.isFinite(n));
   if (cprs.length === 0) return res.status(400).json({ error: "Invalid cprs" });
 
+  console.log(`[oc/outcome] ${info.playerName} scenario="${scenario}" cprs=${cprs.join(',')} admin=${isDev || adminRoles.includes(pos)}`);
   const out = await calculateOutcome(scenario, cprs);
   if (out?.error) return res.status(502).json({ error: out.error });
   return res.json(out);
