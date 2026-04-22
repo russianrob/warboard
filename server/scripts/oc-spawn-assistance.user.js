@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.29
+// @version      3.1.30
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.30 — MinCPR reset bug (and sibling settings): pushScopeOnly was hitting /api/oc/settings/update with only a `scope` query param, but that handler applied HARD-CODED defaults for every missing field — so every scope auto-detect tick silently reset mincpr → 60, cpr_boost → 15, active_days → 7, etc. Fixed on both sides: client pushScopeOnly now hits the dedicated /api/oc/scope endpoint, and /api/oc/settings/update now falls back to the stored value (not a constant) when a field is missing, so a partial push no longer clobbers untouched settings.
 // v3.1.29 — Missing-items UX fix: after a successful loan the card now fades and collapses out of the list within ~1.4s, instead of sitting there with a ✓ Loaned button until the next full refresh (which was up to ~60s away on the API + armory cache cadence). The underlying filter via mgr_recentlyLoaned was already correct; only the visual feedback was lagging. If that was the last missing item, the "All OC items allocated" message takes its place without waiting for a full reload.
 // v3.1.28 — Scope cleanup: auto-detect + auto-push is working correctly so dropped the verbose diagnostic logs (init snapshot, per-refresh overwrite decisions, strategy-fire lines). Kept the two useful console lines: "Detected scope change: X → Y (source: …)" and "pushed N to server". Strategy logs demoted to console.debug for Verbose-mode recovery if we ever need to diagnose again.
 // v3.1.27 — Scope auto-push: when the DOM reader catches a fresh scope value (e.g. 14 from the Recruiting tab's currentScopes element), the script now debounce-pushes it to /api/oc/settings/update with the caller's API key, 1.5s debounce. Side effect: everyone else in the faction sees the fresh value on their next refresh — no one has to open the Recruiting tab themselves. Also makes the "revert to 11 on reload" class of bug impossible since the server's saved value matches the last detection.
@@ -232,7 +233,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.29';
+    const SCRIPT_VERSION = '3.1.30';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1670,8 +1671,13 @@
         if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
         if (scope === null || scope === undefined) return;
         try {
+            // v3.1.30: hit the dedicated /api/oc/scope endpoint. Previous
+            // versions posted to /api/oc/settings/update with only `scope`,
+            // which on the old server handler silently reset every other
+            // OC setting (mincpr → 60, cpr_boost → 15, etc.) because the
+            // handler applied hard-coded defaults for missing query params.
             const p = new URLSearchParams({ key: apiKey, scope: String(scope) });
-            await gmRequest(`${SERVER}/api/oc/settings/update?${p}`);
+            await gmRequest(`${SERVER}/api/oc/scope?${p}`);
             console.log(`[OC Spawn][scope] pushed ${scope} to server`);
         } catch (e) {
             console.warn('[OC Spawn][scope] push failed:', e.message);

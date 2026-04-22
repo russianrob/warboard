@@ -4634,18 +4634,33 @@ router.get("/api/oc/settings/update", async (req, res) => {
   } else if (!isFactionAllowed(info.factionId)) {
     return res.status(403).json({ error: "Settings can only be changed by faction members." });
   }
-  const num = (k, d) => { const v = parseInt(req.query[k], 10); return isNaN(v) ? d : v; };
-  const bool = (k) => req.query[k] === 'true' || req.query[k] === '1';
+  // v3.1.30 fix: fall back to the STORED value (not a hard-coded default)
+  // when a field is missing from the query. Otherwise a partial push (e.g.
+  // pushScopeOnly sending just `scope`) silently clobbers every other
+  // setting — mincpr snaps back to 60, cpr_boost to 15, etc. — every time
+  // the Recruiting-tab scope detector fires.
+  const cur = store.getFactionSettings(info.factionId) || {};
+  const num = (k, storedKey, fallback) => {
+    if (req.query[k] === undefined) {
+      return cur[storedKey] !== undefined ? cur[storedKey] : fallback;
+    }
+    const v = parseInt(req.query[k], 10);
+    return isNaN(v) ? (cur[storedKey] !== undefined ? cur[storedKey] : fallback) : v;
+  };
+  const scopeProvided = req.query.scope !== undefined;
   const scopeRaw = parseInt(req.query.scope, 10);
+  const scopeValue = !scopeProvided
+    ? (cur.oc_scope !== undefined ? cur.oc_scope : null)
+    : (isNaN(scopeRaw) ? null : Math.max(0, Math.min(100, scopeRaw)));
   store.updateFactionSettings(info.factionId, {
-    oc_active_days:         num("active_days",         7),
-    oc_forecast_hours:      num("forecast_hours",      24),
-    oc_mincpr:              num("mincpr",               60),
-    oc_cpr_boost:           num("cpr_boost",            15),
-    oc_lookback_days:       num("lookback_days",        90),
-    oc_high_weight_pct:     num("high_weight_pct",      25),
-    oc_high_weight_mincpr:  num("high_weight_mincpr",   75),
-    oc_scope:               isNaN(scopeRaw) ? null : Math.max(0, Math.min(100, scopeRaw)),
+    oc_active_days:         num("active_days",         "oc_active_days",         7),
+    oc_forecast_hours:      num("forecast_hours",      "oc_forecast_hours",      24),
+    oc_mincpr:              num("mincpr",              "oc_mincpr",              60),
+    oc_cpr_boost:           num("cpr_boost",           "oc_cpr_boost",           15),
+    oc_lookback_days:       num("lookback_days",       "oc_lookback_days",       90),
+    oc_high_weight_pct:     num("high_weight_pct",     "oc_high_weight_pct",     25),
+    oc_high_weight_mincpr:  num("high_weight_mincpr",  "oc_high_weight_mincpr",  75),
+    oc_scope:               scopeValue,
   });
   console.log("[oc/settings] " + info.playerName + " updated faction " + info.factionId + " OC settings");
   return res.json({ ok: true });
