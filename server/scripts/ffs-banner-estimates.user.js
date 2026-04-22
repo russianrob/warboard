@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb14
+// @version      2.73.0-wb15
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,13 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb15 — New: travel arrival estimator on profile pages. Ported
+//              from the modded FFS variant (greasyfork 537486). When a
+//              target is travelling, calls ffscouter.com's player-flights
+//              endpoint and paints live TCT countdown + arrival window
+//              + travel method + fuel-book icon into the 'Traveling to X'
+//              description. Tiks every second. Requires the same FFS
+//              key already configured in Settings.
 // 2.73.0-wb14 — New: FFS sort button on war.php + factions.php member
 //              lists. Mirrors BSP's "BSP" sort button UX — click once
 //              for strongest→weakest, click again to flip. Sort key is
@@ -1349,6 +1356,116 @@ if (!singleton) {
     info_line.innerHTML = detailed_message;
   }
 
+  // ─────────────────────────────────────────────────────────────────────
+  // WARBOARD FORK (wb15): travel arrival estimator — ported from the
+  // modded FFS variant (greasyfork 537486). Calls ffscouter.com's
+  // /api/v1/player-flights endpoint when the target profile page shows
+  // them travelling, then paints a live TCT countdown + arrival-window
+  // (earliest / latest) + travel method + fuel-book hint into the
+  // "Traveling to X" description block.
+  // ─────────────────────────────────────────────────────────────────────
+  function format_countdown(unixSec) {
+    const remaining = Math.max(0, unixSec - Date.now() / 1000);
+    const h = Math.floor(remaining / 3600);
+    const m = Math.floor((remaining % 3600) / 60);
+    const s = Math.floor(remaining % 60);
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  }
+
+  function inject_flight_info(player_id) {
+    if (!key || !player_id) return;
+
+    function try_inject() {
+      if (document.getElementById("ff-scouter-flight-info")) return true;
+      const statusBlock = document.querySelector(".profile-status");
+      if (!statusBlock || !statusBlock.classList.contains("travelling")) return false;
+      const descriptionDiv = statusBlock.querySelector(".profile-container .description");
+      if (!descriptionDiv) return false;
+      if (descriptionDiv.dataset.ffFlightInjected) return true;
+      descriptionDiv.dataset.ffFlightInjected = "1";
+
+      const url = `${BASE_URL}/api/v1/player-flights?key=${key}&target=${player_id}`;
+      rD_xmlhttpRequest({
+        method: "GET",
+        url,
+        onload: function (response) {
+          if (!response || response.status !== 200) return;
+          let data;
+          try { data = JSON.parse(response.responseText); } catch { return; }
+          if (!data || data.error || !data.current) return;
+          const flight = data.current;
+          const earliest = flight.earliest_arrival_time;
+          const latest = flight.latest_arrival_time;
+          const method = flight.travel_method || "Unknown";
+          const bookUsed = flight.book_likely_being_used;
+
+          const mainDesc = descriptionDiv.querySelector(".main-desc");
+          if (mainDesc) {
+            const methodTag = document.createElement("span");
+            methodTag.style.cssText = "opacity:0.65;font-size:0.9em;margin-left:4px;";
+            if (bookUsed === true) {
+              methodTag.innerHTML = `· ${method} <span style="font-size:10px;background:#1a6fa8;color:#fff;padding:1px 4px;border-radius:3px;vertical-align:middle;">\u{1F4D6}</span>`;
+            } else {
+              methodTag.textContent = `· ${method}`;
+            }
+            mainDesc.appendChild(methodTag);
+          }
+
+          const row1 = document.createElement("div");
+          row1.id = "ff-scouter-flight-info";
+          row1.style.cssText = "display:flex;gap:8px;";
+          const countdownSpan = document.createElement("span");
+          countdownSpan.id = "ff-scouter-flight-countdown";
+          countdownSpan.style.cssText = "font-weight:bold;font-variant-numeric:tabular-nums;";
+          const winSpan = document.createElement("span");
+          winSpan.id = "ff-scouter-flight-window";
+          winSpan.style.cssText = "font-size:11px;opacity:0.65;font-variant-numeric:tabular-nums;";
+          row1.appendChild(countdownSpan);
+          row1.appendChild(winSpan);
+          descriptionDiv.appendChild(row1);
+
+          function tick() {
+            const cdEl = document.getElementById("ff-scouter-flight-countdown");
+            const wEl = document.getElementById("ff-scouter-flight-window");
+            if (!cdEl) return;
+            const now = Date.now() / 1000;
+            if (earliest && latest) {
+              const earlyLeft = earliest - now;
+              const lateLeft = latest - now;
+              if (lateLeft <= 0) {
+                cdEl.textContent = "Landing imminent";
+                cdEl.style.color = "#f0a500";
+              } else if (earlyLeft <= 0) {
+                cdEl.textContent = `\u2264 ${format_countdown(latest)}`;
+                cdEl.style.color = "#f0a500";
+              } else {
+                cdEl.textContent = `${format_countdown(earliest)} \u2013 ${format_countdown(latest)}`;
+              }
+              if (wEl) {
+                const fmt = (d) => `${d.getUTCHours().toString().padStart(2,"0")}:${d.getUTCMinutes().toString().padStart(2,"0")} TCT`;
+                wEl.textContent = `(${fmt(new Date(earliest*1000))} \u2013 ${fmt(new Date(latest*1000))})`;
+              }
+            } else {
+              cdEl.textContent = "Arrival time unknown";
+            }
+            setTimeout(tick, 1000);
+          }
+          tick();
+        },
+        onerror: function () {},
+      });
+      return true;
+    }
+
+    if (try_inject()) return;
+    const obs = new MutationObserver(function () {
+      if (try_inject()) obs.disconnect();
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+
   function inject_stats_history_button(player_id) {
     if (!player_id) return;
     if (ffSettingsGet("ff-history-enabled") === "false") return;
@@ -1624,6 +1741,12 @@ if (!singleton) {
     // Also try immediately in case it's already loaded
     inject_stats_history_button(target_id);
 
+    // wb15: travel arrival estimator — only on profile pages (match1),
+    // not attack pages (match2). Safe no-op when target isn't travelling.
+    if (match1) {
+      inject_flight_info(target_id);
+    }
+
     if (!key) {
       set_message("[FF Scouter V2]: Limited API key needed - click to add");
     }
@@ -1851,7 +1974,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb14",
+      scriptVersion: "2.73.0-wb15",
     };
     try {
       GM_xmlhttpRequest({
@@ -2178,7 +2301,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb14",
+        scriptVersion: "2.73.0-wb15",
       };
       GM_xmlhttpRequest({
         method: "POST",
