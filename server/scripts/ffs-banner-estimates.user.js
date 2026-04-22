@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb26
+// @version      2.73.0-wb27
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -199,7 +199,6 @@ if (!singleton) {
       white-space: nowrap;
       font-size: 11px;
       max-width: 100%;
-      overflow: hidden;
     }
     .ffs-travel-status .ffs-plane {
       width: 10px; height: 10px; fill: currentColor; flex-shrink: 0;
@@ -208,7 +207,31 @@ if (!singleton) {
     .ffs-travel-status .ffs-abbr {
       opacity: 0.8; font-size: 9px; margin-right: 1px;
     }
-    .status:has(.ffs-travel-status) { white-space: nowrap; overflow: hidden; }
+    /* wb27: marquee scroll for overflowing travel status. Wrapper
+       has overflow:hidden; the inner track gets animated via JS
+       only when content doesn't fit. */
+    .status:has(.ffs-travel-marquee) {
+      white-space: nowrap; overflow: hidden;
+      position: relative;
+    }
+    .ffs-travel-marquee {
+      display: inline-block; white-space: nowrap; overflow: hidden;
+      max-width: 100%; vertical-align: middle;
+    }
+    .ffs-travel-marquee .ffs-mq-track {
+      display: inline-block; white-space: nowrap; padding-left: 0;
+      will-change: transform;
+    }
+    .ffs-travel-marquee.overflow .ffs-mq-track {
+      animation: ffs-mq-scroll var(--ffs-mq-dur, 10s) linear infinite;
+    }
+    /* 0–15% pause on start, 45–55% pause at end, 85–100% pause back.
+       translateX uses --ffs-mq-shift in px so we can tune per-row. */
+    @keyframes ffs-mq-scroll {
+      0%, 12%   { transform: translateX(0); }
+      45%, 55%  { transform: translateX(var(--ffs-mq-shift, 0px)); }
+      88%, 100% { transform: translateX(0); }
+    }
   `);
   GM_addStyle(`
             .ff-scouter-indicator {
@@ -2016,7 +2039,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb26",
+      scriptVersion: "2.73.0-wb27",
     };
     try {
       GM_xmlhttpRequest({
@@ -2343,7 +2366,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb26",
+        scriptVersion: "2.73.0-wb27",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2544,7 +2567,9 @@ if (!singleton) {
         if (retMatch) { loc = retMatch[1]; returning = true; }
         else if (trvMatch) { loc = trvMatch[1]; }
         else if (abroadMatch) { loc = abroadMatch[1]; }
-        _ffsMemberAbbr[uid] = ffs_abbreviateCountry(loc.trim());
+        // wb27: use the FULL country name — marquee will scroll it if
+        // the status cell is too narrow, instead of truncating.
+        _ffsMemberAbbr[uid] = loc.trim();
         _ffsMemberReturning[uid] = returning;
       }
 
@@ -2667,10 +2692,33 @@ if (!singleton) {
         const remaining = until * 1000 - Date.now();
         const abbr = _ffsMemberAbbr[uid] || "";
         const returningCls = _ffsMemberReturning[uid] ? " returning" : "";
+        // wb27: wrap in a marquee-capable track so long country names
+        // scroll instead of getting clipped. The overflow class + shift
+        // are applied after the paint below based on measured widths.
         statusEl.innerHTML =
-          `<span class="ffs-travel-status${returningCls}">${FFS_PLANE_SVG}`
+          `<span class="ffs-travel-marquee"><span class="ffs-mq-track">`
+          + `<span class="ffs-travel-status${returningCls}">${FFS_PLANE_SVG}`
           + `<span class="ffs-abbr">${abbr}</span>`
-          + `<span>${ffs_formatCountdown(remaining)}</span></span>`;
+          + `<span>${ffs_formatCountdown(remaining)}</span></span>`
+          + `</span></span>`;
+        // Post-paint: detect overflow and enable the marquee animation
+        // with a per-row shift so it scrolls exactly the hidden amount.
+        const marquee = statusEl.querySelector(".ffs-travel-marquee");
+        const track = statusEl.querySelector(".ffs-mq-track");
+        if (marquee && track) {
+          // RAF so layout has stabilised before we measure.
+          requestAnimationFrame(() => {
+            const overflowPx = track.scrollWidth - marquee.clientWidth;
+            if (overflowPx > 2) {
+              marquee.classList.add("overflow");
+              marquee.style.setProperty("--ffs-mq-shift", `-${overflowPx + 4}px`);
+              // Duration scales with how much there is to scroll: 3s base
+              // + 50ms per overflowed pixel. Caps at 15s.
+              const dur = Math.min(15, 3 + overflowPx * 0.05);
+              marquee.style.setProperty("--ffs-mq-dur", `${dur.toFixed(1)}s`);
+            }
+          });
+        }
       } else if (statusEl.dataset.ffsTravelInjected) {
         // Member is no longer travelling — restore original.
         statusEl.innerHTML = statusEl.dataset.ffsTravelOriginal;
