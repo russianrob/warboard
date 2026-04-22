@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb10
+// @version      2.73.0-wb11
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,14 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb11 — Delayed probes: wb10 init probe on the individual profile
+//              page reported 0 honor elements AND 0 name elements — the
+//              React tree hadn't hydrated yet at script-execution time.
+//              Now probes at init + 1s + 3s + 10s, tagged so we can see
+//              when honor finally renders and what it's called. Also
+//              added nameSample to capture profile-name-wrapper selectors
+//              as an alternative injection point if the honor display
+//              really is absent on /profiles.php?XID=….
 // 2.73.0-wb10 — Init probe diagnostic: user reports NO FFS arrow + no chip
 //              on individual /profiles.php?XID=… pages. That means FFS
 //              itself isn't painting there (not our fork's bug). Added
@@ -1820,7 +1828,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb10",
+      scriptVersion: "2.73.0-wb11",
     };
     try {
       GM_xmlhttpRequest({
@@ -2088,20 +2096,27 @@ if (!singleton) {
 
   check_mutation(document.body);
 
-  // wb10: one-shot init probe — fires on every page load so we can see
-  // whether the script is reaching a given URL and what honor-related
-  // elements exist in its DOM, independent of the paint path. Lets us
-  // diagnose "chip doesn't show on profile pages" by comparing the
-  // probe against pages where the chip DOES work.
-  (function ffs_init_probe() {
+  // wb11: delayed probes. Profile pages render late (React hydration);
+  // init-time probe on wb10 showed 0 honor elements, but we know they
+  // appear later. Fire at 0s (parity with wb10) + 1s + 3s + 10s so we
+  // catch whenever Torn renders the honor.
+  function ffs_probe(tag) {
     try {
       const honorClasses = [];
       document.querySelectorAll('[class*="honor" i]').forEach(el => {
         const sel = el.tagName + "." + String(el.className || "").slice(0, 80);
         if (honorClasses.length < 12) honorClasses.push(sel);
       });
+      // Also probe for name-related elements so we know where to
+      // inject if honor is truly absent on profile pages.
+      const nameClasses = [];
+      document.querySelectorAll('[class*="name" i], [class*="user" i], [class*="profile-wrapper" i]').forEach(el => {
+        if (nameClasses.length >= 8) return;
+        const sel = el.tagName + "." + String(el.className || "").slice(0, 80);
+        nameClasses.push(sel);
+      });
       const payload = {
-        tag: "init",
+        tag,
         href: location.href,
         pathname: location.pathname,
         bodyLen: document.body?.innerHTML?.length ?? 0,
@@ -2110,7 +2125,8 @@ if (!singleton) {
         anyHonor: document.querySelectorAll('[class*="honor" i]').length,
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
-        scriptVersion: "2.73.0-wb10",
+        nameSample: nameClasses,
+        scriptVersion: "2.73.0-wb11",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2120,7 +2136,11 @@ if (!singleton) {
         onload: function(){}, onerror: function(){},
       });
     } catch (_) {}
-  })();
+  }
+  ffs_probe("init");
+  setTimeout(() => ffs_probe("1s"), 1000);
+  setTimeout(() => ffs_probe("3s"), 3000);
+  setTimeout(() => ffs_probe("10s"), 10000);
 
   function get_cached_targets(staleok) {
     const value = rD_getValue(TARGET_KEY);
