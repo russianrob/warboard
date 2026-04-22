@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.38
+// @version      3.1.39
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -242,7 +242,7 @@
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
-    const SCRIPT_VERSION = '3.1.38';
+    const SCRIPT_VERSION = '3.1.39';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4087,7 +4087,7 @@
     //
     // Columns:
     //   Pass %    — scenario successChance (full slate clears all checkpoints)
-    //   Top end % — goodEnding1 probability (top-tier payout)
+    //   Top end % — top-tier payout probability (goodEnding1 in the upstream API)
     //   Q score   — weighted good-ending sum: gE1×1.0 + gE2×0.7 + gE3×0.4
     //               + all remaining good endings ×0.2. Single number for
     //               comparing expected reward quality across OCs.
@@ -4104,9 +4104,9 @@
         }
         // Click-to-toggle tooltips on column headers explain each metric.
         const ttPass = 'Probability the full slate clears every checkpoint and the OC succeeds. Derived by tornprobability.com from the per-slot CPR array.';
-        const ttTop  = 'Probability of hitting goodEnding1 — the highest-payout outcome. A successful OC still forks into multiple reward tiers; this is the chance of landing on the best one.';
-        const ttQ    = 'Weighted quality score (roughly 0–1). goodEnding1 counts 1.0, goodEnding2 counts 0.7, goodEnding3 counts 0.4, every other good ending counts 0.2. Single number for comparing expected reward across OCs.';
-        const ttHit  = 'Historical top-tier hit rate for this scenario: % of the faction\'s successful completions whose money payout landed in the top quartile for this OC type. Proxy for goodEnding1 hits since Torn doesn\'t label outcome tiers directly. Needs at least 4 successful completions of this scenario to show; otherwise displays as —.';
+        const ttTop  = 'Probability of hitting the top-tier payout — the highest-reward outcome. A successful OC still forks into multiple reward tiers; this is the chance of landing on the best one.';
+        const ttQ    = 'Weighted quality score (roughly 0–1). Top-tier payout counts 1.0, 2nd-tier 0.7, 3rd-tier 0.4, every other successful tier 0.2. Single number for comparing expected reward across OCs.';
+        const ttHit  = 'Historical top-tier hit rate for this scenario: % of the faction\'s successful completions whose money payout landed in the top quartile for this OC type. Used as a proxy for top-tier hits since Torn doesn\'t label outcome tiers directly. Needs at least 4 successful completions of this scenario to show; otherwise displays as —.';
         // v3.1.35: click-to-sort on the three numeric columns. Default
         // sort is Top end % descending, applied once the async fetches
         // populate the cells. Click a header again to flip direction.
