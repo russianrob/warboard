@@ -4015,32 +4015,71 @@ function runMemberReliability(factionId, data) {
   };
 }
 
-const _factionKeyCache = new Map(); // factionId  → { keys: [apiKey, ...], lastIndex: 0 } — pool of up to 10 verified faction-access keys
+// OC-spawn-only faction-access key cache. Seeded when a Full-access
+// member hits /api/oc/spawn-key. Strictly separated from the FactionOps
+// persisted pool — those keys are opted in for war coordination, not
+// OC-spawn fallback. See earlier discussion: mental model is "FactionOps
+// pool serves FactionOps; OC spawn cross-references its own cache."
+//
+// TTL: entries older than 24h since last use are evicted when the cache
+// is read. Freshly-used keys are preferred in fallback rotation so
+// stale entries don't tie up slots.
+const _factionKeyCache = new Map(); // factionId → Map<apiKey, { addedAt, lastUsedAt }>
 const FACTION_KEY_POOL_MAX = 10;
+const FACTION_KEY_TTL_MS   = 24 * 60 * 60 * 1000;
 
-function addFactionKey(fid, key) {
+function _getFactionPool(fid) {
   fid = String(fid);
   let pool = _factionKeyCache.get(fid);
-  if (!pool) { pool = { keys: [], lastIndex: 0 }; _factionKeyCache.set(fid, pool); }
-  // Don't add duplicates
-  if (pool.keys.includes(key)) return;
-  // If full, replace the oldest
-  if (pool.keys.length >= FACTION_KEY_POOL_MAX) pool.keys.shift();
-  pool.keys.push(key);
+  if (!pool) { pool = new Map(); _factionKeyCache.set(fid, pool); }
+  return pool;
 }
 
-function getNextFactionKey(fid) {
+function _pruneFactionPool(pool) {
+  const cutoff = Date.now() - FACTION_KEY_TTL_MS;
+  for (const [k, info] of pool) {
+    if (info.lastUsedAt < cutoff) pool.delete(k);
+  }
+}
+
+function addFactionKey(fid, key) {
+  const pool = _getFactionPool(fid);
+  _pruneFactionPool(pool);
+  const now = Date.now();
+  if (pool.has(key)) {
+    // Refresh lastUsedAt so re-verification keeps the entry alive.
+    pool.get(key).lastUsedAt = now;
+    return;
+  }
+  // Evict oldest-used when full.
+  if (pool.size >= FACTION_KEY_POOL_MAX) {
+    let oldest = null, oldestTs = Infinity;
+    for (const [k, info] of pool) {
+      if (info.lastUsedAt < oldestTs) { oldest = k; oldestTs = info.lastUsedAt; }
+    }
+    if (oldest) pool.delete(oldest);
+  }
+  pool.set(key, { addedAt: now, lastUsedAt: now });
+}
+
+/** Freshness-ordered list of currently-valid keys, most-recently-used first. */
+function getFactionKeys(fid) {
+  const pool = _getFactionPool(fid);
+  _pruneFactionPool(pool);
+  return [...pool.entries()]
+    .sort((a, b) => b[1].lastUsedAt - a[1].lastUsedAt)
+    .map(([k]) => k);
+}
+
+/** Mark a key as used — called when the fallback actually dispatches it. */
+function touchFactionKey(fid, key) {
   const pool = _factionKeyCache.get(String(fid));
-  if (!pool || pool.keys.length === 0) return null;
-  pool.lastIndex = (pool.lastIndex + 1) % pool.keys.length;
-  return pool.keys[pool.lastIndex];
+  if (pool && pool.has(key)) pool.get(key).lastUsedAt = Date.now();
 }
 
 function removeFactionKey(fid, key) {
   const pool = _factionKeyCache.get(String(fid));
-  if (!pool) return;
-  pool.keys = pool.keys.filter(k => k !== key);
-  if (pool.lastIndex >= pool.keys.length) pool.lastIndex = 0;
+  if (pool) pool.delete(key);
 }
 const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
 const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
@@ -4227,15 +4266,15 @@ router.get("/api/oc/spawn-key", async (req, res) => {
   } catch (err) {
     // If member's own key failed, try keys from the faction pool
     const fid = String(playerInfo.factionId);
-    // Merge the ephemeral in-memory pool (populated when a faction-access
-    // user hits this endpoint) with the persisted opt-in player-key pool.
-    // The persisted pool survives server restarts — without it, a reload
-    // wipes the in-memory cache and the next low-access-key user gets a
-    // premature "not high enough" failure even though subscribed teammates
-    // with full-access keys have opted into the pool.
-    const inMemKeys = (_factionKeyCache.get(fid)?.keys) || [];
-    const persistedKeys = store.getPooledKeysForFaction(fid).map(e => e.key);
-    const keysToTry = Array.from(new Set([...inMemKeys, ...persistedKeys])).filter(k => k !== key);
+    // OC-spawn-only fallback: try keys cached from other Full-access
+    // members' recent refreshes. Strict separation — we no longer fall
+    // through to the FactionOps persisted pool, which is reserved for
+    // war coordination. Cold-start tradeoff: until one Full-access member
+    // hits Refresh after a reload, Limited-tier members will see an
+    // "insufficient access" error on OC data. Normal-operation coverage
+    // is unaffected because leader/banker refreshes continuously seed
+    // the cache.
+    const keysToTry = getFactionKeys(fid).filter(k => k !== key);
     if (keysToTry.length > 0) {
       // Log WHY we're falling back so debug output ties pool 429s back to the
       // original caller whose key triggered the retry.
@@ -4243,6 +4282,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       for (const poolKey of keysToTry) {
         try {
           keyUsage.logCall(poolKey, 'faction/spawn (fallback)', `oc-spawn-fallback:for:${playerInfo.playerName}`);
+          touchFactionKey(fid, poolKey);
           const data = await getOcSpawnData(playerInfo.factionId, poolKey);
           // Apply faction settings to retry path too
           const fS2 = store.getFactionSettings(playerInfo.factionId);
