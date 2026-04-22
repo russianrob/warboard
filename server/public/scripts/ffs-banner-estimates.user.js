@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb3
+// @version      2.73.0-wb4
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -24,6 +24,16 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb4 — Cross-reference fallback: wb3 only showed the chip when
+//              FFS returned bs_estimate_human, which is a premium-tier
+//              field that's missing for most targets. Now chip resolves
+//              from 3 sources in priority order:
+//                1) FFS bs_estimate_human (if present)
+//                2) FFS bs_estimate raw (formatted as short-form kmb)
+//                3) BSP's TDup.battleStatsPredictor.cache.prediction.<id>
+//                   (read from localStorage — same data BSP displays on
+//                   the honor bar, so wherever BSP shows a number, we do)
+//              Chip tooltip reveals which source fed it.
 // 2.73.0-wb3 — Correction: user clarified the 'banner' is the HONOR BAR
 //              strip, not above the name. Removed the name-banner
 //              injection (wb1/wb2) entirely. Instead: show_cached_values
@@ -1679,14 +1689,24 @@ if (!singleton) {
         });
         $(element).append(img);
 
-        // WARBOARD FORK (wb3): also stamp the bs_estimate_human on the
-        // honor-bar indicator itself, right next to the FF arrow. This is
-        // "FFS numbers on the banner" — the honor bar IS the banner strip.
+        // WARBOARD FORK (wb3/wb4): also stamp an estimate chip on the
+        // honor-bar indicator next to the FF arrow. This is the "FFS
+        // numbers on the banner" request — honor bar IS the banner.
+        //
+        // Multi-source resolution (wb4): not every target has a FFS
+        // bs_estimate from ffscouter.com (it's a premium-tier field), so
+        // we fall back to BSP's prediction stored in localStorage — that's
+        // the same data BSP itself shows on the honor bar. Priority:
+        //   1. cached.bs_estimate_human (already-formatted FFS string)
+        //   2. cached.bs_estimate (FFS raw number → format ourselves)
+        //   3. BSP's TDup.battleStatsPredictor.cache.prediction.<id>
         $(element).find(".ff-scouter-est-inline").remove();
-        if (cached.bs_estimate_human) {
+        const chipInfo = ffs_resolve_estimate_chip(player_id, cached);
+        if (chipInfo) {
           const estSpan = $("<span>", {
             class: "ff-scouter-est-inline",
-            text: cached.bs_estimate_human,
+            title: chipInfo.source,
+            text: chipInfo.label,
           }).css({
             "margin-left": "6px",
             "padding": "1px 6px",
@@ -1704,6 +1724,53 @@ if (!singleton) {
         }
       }
     }
+  }
+
+  // WARBOARD FORK (wb4): resolve an estimate chip string from the best
+  // available source. Returns { label, source } or null if no data.
+  function ffs_format_number_short(n) {
+    if (n == null || !isFinite(n)) return null;
+    if (n >= 1e9) return (n / 1e9).toFixed(n >= 1e10 ? 1 : 2) + "b";
+    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 1 : 2) + "m";
+    if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "k";
+    return String(Math.round(n));
+  }
+
+  function ffs_read_bsp_prediction(player_id) {
+    try {
+      const raw = localStorage.getItem(
+        "tdup.battleStatsPredictor.cache.prediction." + player_id
+      );
+      if (!raw) return null;
+      const pred = JSON.parse(raw);
+      // BSP's prediction shape varies — handle both TBS (total battle
+      // stats) and nested alternatives gracefully.
+      let tbs = pred?.TBS ?? pred?.tbs ?? pred?.Total ?? null;
+      if (typeof tbs === "string") tbs = parseFloat(tbs.replace(/,/g, ""));
+      if (tbs == null || !isFinite(tbs)) return null;
+      return tbs;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function ffs_resolve_estimate_chip(player_id, cached) {
+    // 1) FFS server-provided human string (premium tiers only)
+    if (cached && cached.bs_estimate_human) {
+      return { label: cached.bs_estimate_human, source: "FFS estimate" };
+    }
+    // 2) FFS raw number
+    if (cached && typeof cached.bs_estimate === "number") {
+      const s = ffs_format_number_short(cached.bs_estimate);
+      if (s) return { label: s, source: "FFS estimate (raw)" };
+    }
+    // 3) BSP prediction from localStorage
+    const bspTbs = ffs_read_bsp_prediction(player_id);
+    if (bspTbs != null) {
+      const s = ffs_format_number_short(bspTbs);
+      if (s) return { label: s, source: "BSP prediction" };
+    }
+    return null;
   }
 
   async function apply_ff_gauge(elements) {
