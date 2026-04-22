@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb37
+// @version      2.73.0-wb38
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -207,6 +207,12 @@ if (!singleton) {
       width: 10px; height: 10px; fill: currentColor; flex-shrink: 0;
     }
     .ffs-travel-status.returning .ffs-plane { transform: scaleX(-1); }
+    /* wb38: mini-profile countdown chip — same SVG plane, sized to match
+       surrounding text so it no longer clips against the card's header. */
+    .ffs-mini-countdown .ffs-plane {
+      width: 10px; height: 10px; fill: currentColor;
+      vertical-align: -1px;
+    }
     /* wb29: default shows countdown; click toggles to country name. */
     .ffs-travel-status .ffs-mq-value { white-space: nowrap; }
     .status:has(.ffs-travel-status) { overflow: hidden; white-space: nowrap; }
@@ -2017,7 +2023,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb37",
+      scriptVersion: "2.73.0-wb38",
     };
     try {
       GM_xmlhttpRequest({
@@ -2344,7 +2350,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb37",
+        scriptVersion: "2.73.0-wb38",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2815,12 +2821,23 @@ if (!singleton) {
           if (!host) host = mini.querySelector(".description") || mini;
           chip = document.createElement("span");
           chip.className = "ffs-mini-countdown";
+          // color:inherit so the chip picks up the surrounding "Traveling
+          // to X" header's text color (white on the dark theme) instead
+          // of standing out in green.
           chip.style.cssText =
-            "display:inline-block;margin-left:6px;color:#4ade80;"
-            + "font-weight:600;font-size:12px;";
+            "display:inline-block;margin-left:6px;color:inherit;"
+            + "font-weight:600;font-size:12px;line-height:1.4;"
+            + "vertical-align:middle;white-space:nowrap;";
           host.appendChild(chip);
         }
-        chip.textContent = `\u2708 ${countdownText}`;
+        // wb38: use SVG plane (same one the row paint uses) instead of
+        // the bare U+2708 codepoint — the emoji variant rendered clipped
+        // at the top of the chip on some UA fonts.
+        if (!chip.querySelector("svg")) {
+          chip.innerHTML = `${FFS_PLANE_SVG}<span class="ffs-mini-countdown-val"></span>`;
+        }
+        const valEl = chip.querySelector(".ffs-mini-countdown-val");
+        if (valEl) valEl.textContent = " " + countdownText;
       } else if (chip) {
         chip.remove();
       }
