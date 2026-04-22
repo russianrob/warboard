@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb24
+// @version      2.73.0-wb25
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2011,7 +2011,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb24",
+      scriptVersion: "2.73.0-wb25",
     };
     try {
       GM_xmlhttpRequest({
@@ -2338,7 +2338,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb24",
+        scriptVersion: "2.73.0-wb25",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2437,6 +2437,110 @@ if (!singleton) {
       delete _ffsMemberAbbr[member.id];
       delete _ffsMemberReturning[member.id];
     }
+  }
+
+  // wb25: per-member FFScouter flight fetcher. Torn's v2 faction/members
+  // endpoint returns status.until=null and status.details=null for
+  // travelling members, so we source the landing time from FFScouter's
+  // player-flights endpoint instead (same one wb15 uses for profile-
+  // page countdowns).
+  const _ffsFlightFetchInflight = new Set();
+  const _ffsFlightFetchFailures = new Map(); // uid → lastFailTs
+  async function ffs_fetchFlightForMember(uid) {
+    if (_ffsMemberCountdowns[uid]) return; // already have arrival time
+    if (_ffsFlightFetchInflight.has(uid)) return;
+    // Back off for 60s after a failure per uid so we don't hammer.
+    const lastFail = _ffsFlightFetchFailures.get(uid) || 0;
+    if (Date.now() - lastFail < 60_000) return;
+    _ffsFlightFetchInflight.add(uid);
+    try {
+      const url = `${BASE_URL}/api/v1/player-flights?key=${key}&target=${uid}`;
+      await new Promise((resolve) => {
+        rD_xmlhttpRequest({
+          method: "GET",
+          url,
+          onload: (resp) => {
+            try {
+              if (!resp || resp.status !== 200) throw new Error("HTTP " + resp?.status);
+              const data = JSON.parse(resp.responseText);
+              if (!data || data.error || !data.current) throw new Error(data?.error || "no current");
+              const f = data.current;
+              // Use latest_arrival_time as the authoritative landing moment
+              // (consistent with Torn's own "Landing" message timing).
+              const landingTs = f.latest_arrival_time || f.earliest_arrival_time;
+              if (landingTs) {
+                _ffsMemberCountdowns[uid] = landingTs;
+                // Travel direction: if current.destination_country_code is
+                // "xxx" then they're Returning (landing back in Torn). The
+                // ffscouter endpoint mostly uses arrival coords, so keep
+                // whatever was recorded from the DOM/Torn-API scrape.
+              }
+            } catch (e) {
+              _ffsFlightFetchFailures.set(uid, Date.now());
+            }
+            resolve();
+          },
+          onerror: () => {
+            _ffsFlightFetchFailures.set(uid, Date.now());
+            resolve();
+          },
+        });
+      });
+    } finally {
+      _ffsFlightFetchInflight.delete(uid);
+    }
+  }
+
+  function ffs_detectAndFetchTravellersFromDom() {
+    if (!key) return;
+    // Walk every row with a profile link + status cell containing "Traveling"
+    // or "Returning". This works even when Torn's v2 API hides the landing
+    // time (null status.until) — we just need to know WHICH members are
+    // travelling and then ask ffscouter for each one's arrival.
+    const rows = document.querySelectorAll(
+      ".enemy-faction .members-list li, "
+      + ".your-faction .members-list li, "
+      + ".members-list .table-row, "
+      + ".members-list li, "
+      + "[class*='members-list' i] .table-row, "
+      + "[class*='members-list' i] li, "
+      + "[class*='members-cont' i] li"
+    );
+    const seen = new Set();
+    rows.forEach((row) => {
+      const a = row.querySelector('a[href*="XID="]');
+      if (!a) return;
+      const m = a.href.match(/XID=(\d+)/);
+      if (!m) return;
+      const uid = m[1];
+      if (seen.has(uid)) return;
+      seen.add(uid);
+      const statusEl = row.querySelector(".status")
+        || row.querySelector('[class*="status" i]');
+      if (!statusEl) return;
+      const text = (statusEl.textContent || "").trim();
+      // Also accept abbreviated forms Torn sometimes uses.
+      if (!/travel|returning|in\s+[A-Z]/i.test(text)) return;
+
+      // Derive country + returning hint from the status text, so we can
+      // paint "✈ UK hh:mm:ss" without needing a separate Torn API call.
+      if (!_ffsMemberAbbr[uid]) {
+        let loc = "", returning = false;
+        const retMatch = text.match(/Returning to Torn from (.+)/i);
+        const trvMatch = text.match(/Traveling to (.+)/i);
+        const abroadMatch = text.match(/^In (.+)/i);
+        if (retMatch) { loc = retMatch[1]; returning = true; }
+        else if (trvMatch) { loc = trvMatch[1]; }
+        else if (abroadMatch) { loc = abroadMatch[1]; }
+        _ffsMemberAbbr[uid] = ffs_abbreviateCountry(loc.trim());
+        _ffsMemberReturning[uid] = returning;
+      }
+
+      // Only fire ffscouter fetch for actively-in-flight members.
+      if (/travel|returning/i.test(text)) {
+        ffs_fetchFlightForMember(uid);
+      }
+    });
   }
 
   async function ffs_updateFactionTravelData(factionId) {
@@ -2664,6 +2768,11 @@ if (!singleton) {
     }
     pollAll();
     setInterval(pollAll, FFS_TRAVEL_POLL_MS);
+
+    // wb25: also scan the DOM for travelling members + pull their landing
+    // times from FFScouter (Torn's v2 hides them). Every 5s.
+    ffs_detectAndFetchTravellersFromDom();
+    setInterval(ffs_detectAndFetchTravellersFromDom, 5_000);
   }
   ffs_initTravelCountdowns();
 
