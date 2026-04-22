@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb39
+// @version      2.73.0-wb41
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2023,7 +2023,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb39",
+      scriptVersion: "2.73.0-wb41",
     };
     try {
       GM_xmlhttpRequest({
@@ -2350,7 +2350,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb39",
+        scriptVersion: "2.73.0-wb41",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2899,14 +2899,39 @@ if (!singleton) {
         const m = (a.href || "").match(/factions\.php\?ID=(\d+)/);
         if (m) factionIds.add(m[1]);
       });
+      // wb41: war-page specific selectors — the /war/rank and /war/faction
+      // routes don't expose an ID= anchor for the enemy faction, so pull
+      // it from the war faction tiles / banners which carry the ID in
+      // their own href or data-* attributes. Covers a few React build
+      // variants.
+      document.querySelectorAll(
+        "[class*='warList' i] a[href*='factions.php'], "
+        + "[class*='warFaction' i] a[href*='factions.php'], "
+        + "[class*='enemyFaction' i] a[href*='factions.php'], "
+        + "[class*='ourFaction' i] a[href*='factions.php'], "
+        + "[class*='warFaction' i] [data-id], "
+        + "[class*='warFaction' i] [data-faction-id]"
+      ).forEach(el => {
+        const href = el.href || "";
+        const m1 = href.match(/ID=(\d+)/);
+        if (m1) factionIds.add(m1[1]);
+        const dId = el.dataset?.id || el.dataset?.factionId;
+        if (dId && /^\d+$/.test(String(dId))) factionIds.add(String(dId));
+      });
       // Faction page: URL-scoped to a single faction.
       const fm = location.search.match(/ID=(\d+)/);
       if (fm && location.pathname.startsWith("/factions.php")) factionIds.add(fm[1]);
       // Own faction page (step=your) — no ID= in URL, resolve via API.
-      if (location.search.includes("step=your")) {
+      // Also covers the war page, which lives under step=your too.
+      if (location.search.includes("step=your") || /\/war\//.test(location.hash)) {
         const own = await ffs_resolveOwnFactionId();
         if (own) factionIds.add(own);
       }
+      // wb41: parse /war/rank|faction IDs from the hash itself (e.g.
+      // #/war/rank/12345 or #/tab=war&id=12345), covering routes where
+      // Torn doesn't render a clickable faction tile.
+      const hashM = location.hash.match(/(?:war|id)[=\/]\s*(\d{2,})/i);
+      if (hashM) factionIds.add(hashM[1]);
 
       // wb18: DOM probe to see what classes Torn is actually rendering,
       // so we can fix row selectors if they aren't matching.
@@ -2932,10 +2957,15 @@ if (!singleton) {
     pollAll();
     setInterval(pollAll, FFS_TRAVEL_POLL_MS);
 
-    // wb25: also scan the DOM for travelling members + pull their landing
-    // times from FFScouter (Torn's v2 hides them). Every 5s.
+    // wb25: DOM scan for travelling members — catches anyone the API
+    // poll didn't cover (e.g. enemy faction on the war page, where the
+    // faction ID can be hard to resolve from the DOM).
+    // wb41: drop cadence from 5s → 1.5s so war-page cold start fills
+    // countdowns within ~1–2s instead of up to 5s. Each call dedupes via
+    // _ffsFlightFetchInflight + _ffsMemberCountdowns, so extra ticks
+    // don't duplicate fetches.
     ffs_detectAndFetchTravellersFromDom();
-    setInterval(ffs_detectAndFetchTravellersFromDom, 5_000);
+    setInterval(ffs_detectAndFetchTravellersFromDom, 1_500);
 
     // wb33: event delegation — also loosens the click target (anywhere
     // on the status cell, not just the inner span) and logs the click
