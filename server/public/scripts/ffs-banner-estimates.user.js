@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb9
+// @version      2.73.0-wb10
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,14 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb10 — Init probe diagnostic: user reports NO FFS arrow + no chip
+//              on individual /profiles.php?XID=… pages. That means FFS
+//              itself isn't painting there (not our fork's bug). Added
+//              a one-shot 'ffs-banner-init' POST on every page load
+//              reporting URL, honor-text-wrap count, honorWrap count,
+//              and the first 12 honor-classed element selectors. Lets
+//              us see on the server side whether the script reaches
+//              profile pages at all and what honor structure lives there.
 // 2.73.0-wb9 — Overflow-visible fix: overlay chip showed on faction
 //              list / lookup pages but was clipped on individual profile
 //              pages (/profiles.php?XID=…) because the honor-bar
@@ -1812,7 +1820,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb9",
+      scriptVersion: "2.73.0-wb10",
     };
     try {
       GM_xmlhttpRequest({
@@ -2079,6 +2087,40 @@ if (!singleton) {
   });
 
   check_mutation(document.body);
+
+  // wb10: one-shot init probe — fires on every page load so we can see
+  // whether the script is reaching a given URL and what honor-related
+  // elements exist in its DOM, independent of the paint path. Lets us
+  // diagnose "chip doesn't show on profile pages" by comparing the
+  // probe against pages where the chip DOES work.
+  (function ffs_init_probe() {
+    try {
+      const honorClasses = [];
+      document.querySelectorAll('[class*="honor" i]').forEach(el => {
+        const sel = el.tagName + "." + String(el.className || "").slice(0, 80);
+        if (honorClasses.length < 12) honorClasses.push(sel);
+      });
+      const payload = {
+        tag: "init",
+        href: location.href,
+        pathname: location.pathname,
+        bodyLen: document.body?.innerHTML?.length ?? 0,
+        honorTextWrapCount: document.querySelectorAll(".honor-text-wrap").length,
+        honorWrapCount: document.querySelectorAll(".honorWrap").length,
+        anyHonor: document.querySelectorAll('[class*="honor" i]').length,
+        userNameCount: document.querySelectorAll(".user.name").length,
+        honorSample: honorClasses,
+        scriptVersion: "2.73.0-wb10",
+      };
+      GM_xmlhttpRequest({
+        method: "POST",
+        url: "https://tornwar.com/api/debug/client-log",
+        headers: { "Content-Type": "application/json" },
+        data: JSON.stringify({ tag: "ffs-banner-init", data: payload }),
+        onload: function(){}, onerror: function(){},
+      });
+    } catch (_) {}
+  })();
 
   function get_cached_targets(staleok) {
     const value = rD_getValue(TARGET_KEY);
