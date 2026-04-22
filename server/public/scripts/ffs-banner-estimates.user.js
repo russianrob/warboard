@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb11
+// @version      2.73.0-wb12
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,14 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb12 — Force-paint retry: wb11 probes proved the profile page
+//              DOES have a .honor-text-wrap (rendered between 0s and 1s
+//              by React), but the upstream MutationObserver wasn't
+//              catching it. Each delayed probe (1s/3s/10s) now also
+//              scans for any .honor-text-wrap missing our
+//              .ff-scouter-indicator class and paints it directly via
+//              apply_ff_gauge. Closes the gap between late-rendered
+//              honors and the paint path.
 // 2.73.0-wb11 — Delayed probes: wb10 init probe on the individual profile
 //              page reported 0 honor elements AND 0 name elements — the
 //              React tree hadn't hydrated yet at script-execution time.
@@ -2101,6 +2109,15 @@ if (!singleton) {
   // appear later. Fire at 0s (parity with wb10) + 1s + 3s + 10s so we
   // catch whenever Torn renders the honor.
   function ffs_probe(tag) {
+    // wb12: whenever a delayed probe finds honor elements that the
+    // MutationObserver missed, trigger a paint on them directly.
+    try {
+      const unpainted = Array.from(document.querySelectorAll(".honor-text-wrap"))
+        .filter(el => !el.classList.contains("ff-scouter-indicator"));
+      if (unpainted.length > 0) {
+        apply_ff_gauge(unpainted);
+      }
+    } catch (_) {}
     try {
       const honorClasses = [];
       document.querySelectorAll('[class*="honor" i]').forEach(el => {
