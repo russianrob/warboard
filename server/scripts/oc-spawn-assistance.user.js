@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.33
+// @version      3.1.34
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.34 — Clickable info tooltips on Outcome EV column headers: click the ? next to Pass %, Top end %, or Q score for a short explanation of each metric. Reuses the existing CPR/scope tooltip pattern; tooltip closes on click-outside or second click on the same icon.
 // v3.1.33 — Outcome EV now renders in BOTH tabs: Admin tab shows Recruiting OCs (so admins can see expected EV as slates fill), Engines tab keeps Planning OCs (locked slates, numbers reflect actual outcome). Both panels share the same /api/oc/outcome fetch path and 15-min server cache. Recruiting panel footer warns about CPR-50 neutral for empty slots; Planning panel has no caveat since every slot is filled.
 // v3.1.32 — Outcome EV moved to Engines tab + repurposed the Slot Optimizer toggle. Previous v3.1.31 placement in the Admin tab is removed. The "Slot Optimizer" engine now renders as "Outcome EV" and shows per-OC Pass %, Top-end %, and Q score for OCs in Planning status (fully filled, waiting to launch or already running). No more CPR-50 fallback noise since every Planning slot has a real placed member. Legacy server toggle key eng-slot-optimizer reused so existing engine state persists; the server's old member-to-slot assignment payload is ignored client-side.
 // v3.1.31 — Outcome EV analyzer (admin tab only): every recruiting OC gets a row with Pass %, Top-end %, and a weighted Q-score (goodEnding1=1.0, goodEnding2=0.7, goodEnding3=0.4, everything else=0.2). Data comes from a new server endpoint /api/oc/outcome that proxies tornprobability.com's CalculateSuccess with 15-min caching. Per-slot CPRs come from each placed member's byPosition history (fallback: overall CPR → 50 neutral for empty slots). Visibility: table renders inside the Admin tab, which is already role-gated, so rank-and-file members never see it. Server endpoint enforces the same role gate as defence-in-depth (403 for non-admins hitting it directly).
@@ -236,7 +237,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.33';
+    const SCRIPT_VERSION = '3.1.34';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1802,6 +1803,11 @@
         #oc-cpr-tooltip th, #oc-scope-tooltip th { color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; padding: 2px 4px; border-bottom: 1px solid #1a2e20; text-align: left; }
         #oc-cpr-tooltip td, #oc-scope-tooltip td { padding: 3px 4px; font-size: 11px; color: #f3f4f6; }
         #oc-cpr-tooltip .oc-tt-note, #oc-scope-tooltip .oc-tt-note { color: #6b7280; font-size: 10px; margin-top: 7px; border-top: 1px solid #1a2e20; padding-top: 5px; }
+        /* v3.1.34: click-to-toggle tooltip for Outcome EV column headers */
+        #oc-ev-tooltip { position: fixed; z-index: 10002; background: #131f18; border: 1px solid #2d4a3e; border-radius: 8px; padding: 10px 12px; font-size: 11px; color: #d1d5db; box-shadow: 0 4px 20px rgba(0,0,0,.7); max-width: 300px; display: none; line-height: 1.4; }
+        #oc-ev-tooltip .oc-tt-title { font-weight: 600; color: #f3f4f6; margin-bottom: 5px; font-size: 12px; }
+        .oc-ev-info { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; margin-left: 4px; border-radius: 50%; background: #2d4a3e; color: #9ca3af; font-size: 10px; font-weight: 700; cursor: pointer; user-select: none; vertical-align: middle; }
+        .oc-ev-info:hover { background: #3d5a4e; color: #f3f4f6; }
         /* Misc */
         #oc-spawn-status { color: #6b7280; font-style: italic; margin: -6px 0 10px; font-size: 10px; }
         #oc-spawn-refresh { background: #152018; color: #74c69d; border: 1px solid #2d4a3e; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 11px; font-family: inherit; font-weight: 600; }
@@ -2165,6 +2171,39 @@
     const recTooltipEl = document.createElement('div');
     recTooltipEl.id = 'oc-rec-tooltip';
     document.body.appendChild(recTooltipEl);
+
+    // v3.1.34: shared click-to-toggle tooltip for Outcome EV column
+    // headers. Same panel reused for every info icon; moves to wherever
+    // was clicked. Clicking outside closes it.
+    const evTooltipEl = document.createElement('div');
+    evTooltipEl.id = 'oc-ev-tooltip';
+    document.body.appendChild(evTooltipEl);
+    document.addEventListener('click', (e) => {
+        const info = e.target.closest && e.target.closest('.oc-ev-info');
+        if (info) {
+            e.preventDefault();
+            e.stopPropagation();
+            const tt = info.dataset.tt || '';
+            const title = info.dataset.ttTitle || '';
+            if (evTooltipEl.style.display === 'block' && evTooltipEl.dataset.anchor === info.dataset.tt) {
+                evTooltipEl.style.display = 'none';
+                return;
+            }
+            evTooltipEl.innerHTML = (title ? `<div class="oc-tt-title">${title}</div>` : '') + `<div>${tt}</div>`;
+            evTooltipEl.dataset.anchor = info.dataset.tt;
+            const r = info.getBoundingClientRect();
+            const top = Math.min(window.innerHeight - 160, r.bottom + 4);
+            const left = Math.min(window.innerWidth - 300, r.left);
+            evTooltipEl.style.top = top + 'px';
+            evTooltipEl.style.left = left + 'px';
+            evTooltipEl.style.display = 'block';
+            return;
+        }
+        // Click outside closes
+        if (!e.target.closest('#oc-ev-tooltip')) {
+            evTooltipEl.style.display = 'none';
+        }
+    }, true);
 
     // Shared handler for any ".oc-msg-btn" click: copy the preset message
     // to the clipboard and open Torn's compose page for the target XID.
@@ -4058,8 +4097,15 @@
             html += `<div style="color:#6b7280;font-size:11px;">${hint}</div></div>`;
             return html;
         }
+        // Click-to-toggle tooltips on column headers explain each metric.
+        const ttPass = 'Probability the full slate clears every checkpoint and the OC succeeds. Derived by tornprobability.com from the per-slot CPR array.';
+        const ttTop  = 'Probability of hitting goodEnding1 — the highest-payout outcome. A successful OC still forks into multiple reward tiers; this is the chance of landing on the best one.';
+        const ttQ    = 'Weighted quality score (roughly 0–1). goodEnding1 counts 1.0, goodEnding2 counts 0.7, goodEnding3 counts 0.4, every other good ending counts 0.2. Single number for comparing expected reward across OCs.';
         html += `<table class="oc-table"><thead><tr>`;
-        html += `<th>OC</th><th>Lvl</th><th>Pass %</th><th>Top end %</th><th>Q score</th>`;
+        html += `<th>OC</th><th>Lvl</th>`;
+        html += `<th>Pass % <span class="oc-ev-info" data-tt-title="Pass %" data-tt="${ttPass}">?</span></th>`;
+        html += `<th>Top end % <span class="oc-ev-info" data-tt-title="Top end %" data-tt="${ttTop}">?</span></th>`;
+        html += `<th>Q score <span class="oc-ev-info" data-tt-title="Q score" data-tt="${ttQ}">?</span></th>`;
         html += `</tr></thead><tbody>`;
         for (const c of matching) {
             html += `<tr data-oc-outcome-id="${c.id}">`;
