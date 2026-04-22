@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb29
+// @version      2.73.0-wb30
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2017,7 +2017,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb29",
+      scriptVersion: "2.73.0-wb30",
     };
     try {
       GM_xmlhttpRequest({
@@ -2344,7 +2344,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb29",
+        scriptVersion: "2.73.0-wb30",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2675,26 +2675,31 @@ if (!singleton) {
         let statusSpan = statusEl.querySelector(".ffs-travel-status");
         const valueSpan = statusEl.querySelector(".ffs-mq-value");
 
+        // wb30: country-view label shows direction. Returning → 'from UK',
+        // outbound → 'to UK'. Keeps "coming to or going from" context.
+        const countryLabel = countryText
+          ? (isReturning ? `from ${countryText}` : `to ${countryText}`)
+          : "";
+
         if (statusSpan && valueSpan) {
-          // Update in place.
-          statusSpan.dataset.ffsCountry = countryText;
+          statusSpan.dataset.ffsCountry = countryLabel;
           statusSpan.dataset.ffsTime = countdownText;
           const showCountry = statusSpan.dataset.ffsShowCountry === "1";
-          const desired = showCountry ? countryText : countdownText;
+          const desired = showCountry ? countryLabel : countdownText;
           if (valueSpan.textContent !== desired) {
             valueSpan.textContent = desired;
           }
           statusSpan.classList.toggle("returning", isReturning);
         } else {
-          // First paint for this row.
           if (!statusEl.dataset.ffsTravelInjected) {
             statusEl.dataset.ffsTravelOriginal = statusEl.innerHTML;
             statusEl.dataset.ffsTravelInjected = "1";
           }
+          const escLabel = countryLabel.replace(/"/g, "&quot;");
           statusEl.innerHTML =
             `<span class="ffs-travel-status${returningCls}" `
             + `data-ffs-time="${countdownText}" `
-            + `data-ffs-country="${countryText.replace(/"/g, "&quot;")}" `
+            + `data-ffs-country="${escLabel}" `
             + `data-ffs-show-country="0" `
             + `title="Click to toggle country / time">`
             + `${FFS_PLANE_SVG}`
