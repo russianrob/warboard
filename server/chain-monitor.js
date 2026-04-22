@@ -27,6 +27,8 @@ const nextChain = (war) =>
 // Client chain forwarding removed — server always polls directly.
 const CHAIN_ALERT_THRESHOLD = 60; // seconds — fire warning when chain timer <= this
 const CHAIN_PANIC_THRESHOLD = 30; // seconds — fire panic when chain timer <= this
+// Monotonic cursor used to rotate pool keys per chain-poll call.
+let _chainPollCursor = 0;
 const CHAIN_MIN_HITS = 10;        // only alert when chain >= 10 (real chain)
 const CHAIN_ALERT_COOLDOWN_MS = 30_000; // max one alert push per 30s per war
 const CHAIN_PANIC_COOLDOWN_MS = 20_000; // max one panic push per 20s per war
@@ -69,7 +71,11 @@ export function startChainMonitor(io, warId) {
     const war = store.getWar(warId);
     if (!war || !war.factionId) { scheduleNext(nextChain(war)); return; }
 
-    const apiKey = store.getPollingKey(war.factionId, "chain");
+    // Round-robin across pool keys. Previously purpose-hashed to a fixed
+    // slot, which meant "chain" polling burned a single key's 100/min
+    // budget forever. Per-war cursor rotates each call.
+    _chainPollCursor = (_chainPollCursor + 1) | 0;
+    const apiKey = store.getPollingKey(war.factionId, "chain", _chainPollCursor);
     if (!apiKey) { scheduleNext(nextChain(war)); return; }
 
     try {

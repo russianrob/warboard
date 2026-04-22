@@ -78,6 +78,20 @@ const enemyAttacksBackoffs = new Map();
 const enemyProfileTimeouts = new Map();
 const enemyProfileCursors = new Map();
 
+// Round-robin cursor per (warId, purpose) used to spread pool-key load
+// across ALL opted-in keys instead of hashing each purpose to a fixed
+// slot. Without this, purposes like "chain", "war-status", "attacks-feed"
+// each got pinned to one specific key in the pool — that key carried the
+// entire sustained poll load for that purpose and saturated at 100/min
+// regardless of pool size.
+const poolRotationCursors = new Map();
+function nextPoolCursor(warId, purpose) {
+  const k = `${warId}:${purpose}`;
+  const n = (poolRotationCursors.get(k) || 0) + 1;
+  poolRotationCursors.set(k, n);
+  return n;
+}
+
 const MAX_ACTIVITY_LOG = 5760; // 24 hours at 15s intervals
 
 // Legacy compat
@@ -108,10 +122,11 @@ export function startWarStatusMonitor(io, warId) {
       return;
     }
 
-    // Rotate across opted-in pool keys (different purpose tags land on
-    // different keys so pollers spread load). Falls through to faction
-    // dedicated / any stored key when the pool is empty.
-    const apiKey = store.getPollingKey(war.factionId, "war-status");
+    // True round-robin across opted-in pool keys via a per-(war,purpose)
+    // cursor. Previously used purpose-hashed selection which pinned
+    // "war-status" to one fixed key; that key carried 100% of war-status
+    // polling traffic and saturated at 100/min.
+    const apiKey = store.getPollingKey(war.factionId, "war-status", nextPoolCursor(warId, "war-status"));
     if (!apiKey) { scheduleNext(nextWarStatus(war)); return; }
 
     try {
@@ -246,7 +261,7 @@ function startEnemyAttacksMonitor(io, warId) {
       scheduleNext(nextEnemyAttacks(war));
       return;
     }
-    const apiKey = store.getPollingKey(war.factionId, "enemy-attacks");
+    const apiKey = store.getPollingKey(war.factionId, "enemy-attacks", nextPoolCursor(warId, "enemy-attacks"));
     if (!apiKey) { scheduleNext(nextEnemyAttacks(war)); return; }
 
     let cursor = enemyAttacksCursors.get(warId);
@@ -329,7 +344,7 @@ function startAttacksFeedMonitor(io, warId) {
       return;
     }
 
-    const apiKey = store.getPollingKey(war.factionId, "attacks-feed");
+    const apiKey = store.getPollingKey(war.factionId, "attacks-feed", nextPoolCursor(warId, "attacks-feed"));
     if (!apiKey) {
       scheduleNext(nextAttacksFeed(war));
       return;
