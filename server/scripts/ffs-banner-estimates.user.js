@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb25
+// @version      2.73.0-wb26
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -194,16 +194,21 @@ if (!singleton) {
   // wb16: CSS for the travel-countdown status badge on member lists.
   GM_addStyle(`
     .ffs-travel-status {
-      display: inline-flex; align-items: center; gap: 3px;
+      display: inline-flex; align-items: center; gap: 2px;
       font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      font-size: 11px;
+      max-width: 100%;
+      overflow: hidden;
     }
     .ffs-travel-status .ffs-plane {
-      width: 12px; height: 12px; fill: currentColor; flex-shrink: 0;
+      width: 10px; height: 10px; fill: currentColor; flex-shrink: 0;
     }
     .ffs-travel-status.returning .ffs-plane { transform: scaleX(-1); }
     .ffs-travel-status .ffs-abbr {
-      opacity: 0.8; font-size: 10px; margin-right: 2px;
+      opacity: 0.8; font-size: 9px; margin-right: 1px;
     }
+    .status:has(.ffs-travel-status) { white-space: nowrap; overflow: hidden; }
   `);
   GM_addStyle(`
             .ff-scouter-indicator {
@@ -2011,7 +2016,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb25",
+      scriptVersion: "2.73.0-wb26",
     };
     try {
       GM_xmlhttpRequest({
@@ -2338,7 +2343,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb25",
+        scriptVersion: "2.73.0-wb26",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2376,11 +2381,18 @@ if (!singleton) {
   }
 
   function ffs_formatCountdown(ms) {
+    // wb26: compact adaptive format so the countdown fits a narrow
+    // status column. ≥1h → 1h23m (5 chars). <1h → 23:45 (5 chars).
+    // <1m → 0:45 (4 chars). Same width across rows keeps list tidy.
     const s = Math.max(0, Math.floor(ms / 1000));
-    const h = String(Math.floor(s / 3600)).padStart(2, "0");
-    const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
-    const sec = String(s % 60).padStart(2, "0");
-    return `${h}:${m}:${sec}`;
+    if (s >= 3600) {
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      return `${h}h${String(m).padStart(2, "0")}m`;
+    }
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${String(sec).padStart(2, "0")}`;
   }
 
   const FFS_PLANE_SVG = '<svg class="ffs-plane" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M482.3 192c34.2 0 93.7 29 93.7 64c0 36-59.5 64-93.7 64l-116.6 0L265.2 495.9c-5.7 10-16.3 16.1-27.8 16.1l-56.2 0c-10.6 0-18.3-10.2-15.4-20.4l49-171.6L112 320 68.8 377.6c-3 4-7.8 6.4-12.8 6.4l-42 0c-7.8 0-14-6.3-14-14c0-1.3 .2-2.6 .5-3.9L32 256 .5 145.9c-.4-1.3-.5-2.6-.5-3.9c0-7.8 6.3-14 14-14l42 0c5 0 9.8 2.4 12.8 6.4L112 192l102.9 0-49-171.6C162.9 10.2 170.6 0 181.2 0l56.2 0c11.5 0 22.1 6.2 27.8 16.1L365.7 192l116.6 0z"/></svg>';
