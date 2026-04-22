@@ -15,7 +15,7 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 /** Mask an API key for safe logging — shows only last 4 chars. */
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
-import { getOcSpawnData, getCachedCompletedCrimes } from "./oc-spawn.js";
+import { getOcSpawnData, getCachedCompletedCrimes, calculateOutcome } from "./oc-spawn.js";
 import * as vaultRequests from "./vault-requests.js";
 import * as keyUsage from "./key-usage-log.js";
 import { hasXanaxSubscription, grantFactionAccess, getXanaxSubscription } from "./xanax-subscriptions.js";
@@ -4613,6 +4613,60 @@ router.get("/api/oc/engines/update", async (req, res) => {
   });
   console.log(`[oc/engines] ${info.playerName} updated engines for faction ${info.factionId}`);
   return res.json({ ok: true });
+});
+
+// -- GET /api/oc/outcome (PRIVATE admin build) -----------------------------
+// Returns the full outcome probability distribution for a given OC
+// scenario + per-slot CPR array, sourced from tornprobability.com's
+// CalculateSuccess endpoint via a 15-min server-side cache.
+//
+// Admin-gated: caller must be in the faction's configured admin-roles
+// list OR be the dev account. Never exposed to regular members — seeing
+// expected-reward numbers creates adverse selection where everyone
+// clusters into the high-EV OCs and low-tier slates starve.
+//
+// Query params:
+//   key       — Torn API key (validated + faction-bound)
+//   scenario  — OC name matching GetSupportedScenarios (e.g. "Blast from the Past")
+//   cprs      — comma-separated CPRs in slot order, e.g. "70,65,80,72,68,75"
+router.get("/api/oc/outcome", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const key = req.query.key;
+  if (!key || key.length < 10) return res.status(400).json({ error: "Invalid key" });
+  const suffix = key.slice(-8);
+  let info = _spawnKeyCache.get(suffix);
+  if (!info || (Date.now() - info.ts) > 5 * 60_000) {
+    try {
+      const tornInfo = await verifyTornApiKey(key);
+      info = {
+        ts: Date.now(),
+        factionId: tornInfo.factionId,
+        playerName: tornInfo.playerName,
+        playerId: tornInfo.playerId,
+        factionPosition: tornInfo.factionPosition,
+        hasFactionAccess: tornInfo.hasFactionAccess,
+      };
+      _spawnKeyCache.set(suffix, info);
+    } catch (err) { return res.status(401).json({ error: err.message }); }
+  }
+  // Admin gate: must be in configured admin-roles OR dev.
+  const isDev = String(info.playerId) === "137558";
+  const adminRoles = store.getAdminRoles(info.factionId).map((r) => String(r).toLowerCase());
+  const pos = String(info.factionPosition || "").toLowerCase();
+  if (!isDev && !adminRoles.includes(pos)) {
+    return res.status(403).json({ error: "Admin role required" });
+  }
+
+  const scenario = String(req.query.scenario || "").trim();
+  const cprsRaw = String(req.query.cprs || "").trim();
+  if (!scenario) return res.status(400).json({ error: "Missing scenario" });
+  if (!cprsRaw) return res.status(400).json({ error: "Missing cprs" });
+  const cprs = cprsRaw.split(",").map((s) => Number(s.trim())).filter((n) => Number.isFinite(n));
+  if (cprs.length === 0) return res.status(400).json({ error: "Invalid cprs" });
+
+  const out = await calculateOutcome(scenario, cprs);
+  if (out?.error) return res.status(502).json({ error: out.error });
+  return res.json(out);
 });
 
 // -- GET /api/oc/settings/update --------------------------------------------

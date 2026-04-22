@@ -187,6 +187,47 @@ function buildCprCache(completedCrimes, currentPlacements = {}) {
  * Used by routes.js engines (slot optimizer, failure risk, etc.) for OC history.
  * Returns [] if no cached data yet (caller should handle gracefully).
  */
+// ── OC Outcome Distribution (private admin build) ────────────────────────
+// Proxies tornprobability.com's CalculateSuccess endpoint for a given
+// scenario + CPR-per-slot array and returns the full outcome distribution
+// (success/failure plus per-ending probabilities).
+//
+// Deliberately admin-only in routes.js — surfacing expected-reward
+// probabilities to every faction member creates adverse selection
+// (members cluster into high-EV OCs, low-tier slates starve). This helper
+// is plumbing only; no public endpoint exposes it without role check.
+//
+// Cached per (scenario, rounded-CPR-tuple). CPRs rounded to whole numbers
+// so near-identical slates share a cache entry.
+const _outcomeCache = new Map();
+const OUTCOME_TTL_MS = 15 * 60 * 1000;
+export async function calculateOutcome(scenario, cprs) {
+  if (!scenario || !Array.isArray(cprs) || cprs.length === 0) {
+    return { error: "missing scenario or cprs" };
+  }
+  const rounded = cprs.map((v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(0, Math.min(100, Math.round(n)));
+  });
+  const key = scenario + "|" + rounded.join(",");
+  const cached = _outcomeCache.get(key);
+  if (cached && (Date.now() - cached.ts) < OUTCOME_TTL_MS) return cached.data;
+  try {
+    const res = await fetch("https://tornprobability.com:3000/api/CalculateSuccess", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scenario, parameters: rounded }),
+    });
+    if (!res.ok) return { error: "upstream " + res.status };
+    const data = await res.json();
+    _outcomeCache.set(key, { data, ts: Date.now() });
+    return data;
+  } catch (e) {
+    return { error: String(e?.message || e) };
+  }
+}
+
 export function getCachedCompletedCrimes(factionId) {
   const cached = factionOcsCache.get(factionId);
   if (cached && cached.completedCrimes) return cached.completedCrimes;
