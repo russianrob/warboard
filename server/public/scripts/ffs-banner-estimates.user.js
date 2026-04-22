@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb18
+// @version      2.73.0-wb19
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2011,7 +2011,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb18",
+      scriptVersion: "2.73.0-wb19",
     };
     try {
       GM_xmlhttpRequest({
@@ -2338,7 +2338,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb18",
+        scriptVersion: "2.73.0-wb19",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2430,15 +2430,38 @@ if (!singleton) {
       }
       const list = Array.isArray(data.members) ? data.members : [];
       let travelingCount = 0;
+      let recorded = 0;
+      let firstTravellingSample = null;
       for (const m of list) {
+        const wasRecordedCount = Object.keys(_ffsMemberCountdowns).length;
         ffs_recordMemberTravel(m);
-        if (m?.status?.state === "Traveling") travelingCount++;
+        if (Object.keys(_ffsMemberCountdowns).length > wasRecordedCount) recorded++;
+        if (m?.status?.state === "Traveling") {
+          travelingCount++;
+          if (!firstTravellingSample) {
+            // Stash the first travelling member's shape so we can see
+            // exactly what fields are available.
+            firstTravellingSample = {
+              keys: Object.keys(m),
+              id: m.id,
+              user_id: m.user_id,
+              name: m.name,
+              statusKeys: Object.keys(m.status || {}),
+              statusState: m.status?.state,
+              statusDescription: m.status?.description,
+              statusUntil: m.status?.until,
+              statusLast: m.status?.last,
+            };
+          }
+        }
       }
       ffs_travelDiag({
         source: "fetch-ok",
         factionId,
         membersCount: list.length,
         travelingCount,
+        recorded,
+        firstTravellingSample,
       });
     } catch (e) {
       ffs_travelDiag({ source: "fetch-threw", factionId, err: String(e?.message || e) });
