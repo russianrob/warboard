@@ -584,15 +584,20 @@ export function getPollInterval(factionId, purpose) {
     "attacks-feed":  { min: 15_000, max: 60_000 }, // our faction's attacks feed
     "enemy-attacks": { min: 10_000, max: 30_000 }, // (unused — Torn blocks other factions' attacks)
     // Per-enemy profile round-robin. Concurrency scales with pool size
-    // up to the cap in war-status-monitor.js (currently 25), so every
-    // tick fires min(n, ids.length, 25) parallel requests. Per-key rate
-    // is 60000/tick_ms per minute; 700ms floor keeps that under Torn's
-    // 100/min per-key limit (≈85/min/key, 15% buffer).
-    // pool=1:  1500ms tick → 37.5s full sweep (25 enemies serial).
-    // pool=7:  700ms floor  → 2.8s full sweep (ceil(25/7)=4 ticks).
-    // pool=13: 700ms floor  → 1.4s full sweep (ceil(25/13)=2 ticks).
-    // pool=25: 700ms floor  → 0.7s full sweep (1 tick at cap).
-    "enemy-profile": { min: 700, max: 1500 },
+    // up to the cap in war-status-monitor.js. At each tick we fire
+    // min(n, ids.length, 20) parallel requests — one call per key per
+    // tick at full concurrency. Per-key rate at floor = 60/floor_sec.
+    //
+    // Prior 700ms floor put per-key rate at ~86/min — which only works
+    // if the key owner isn't using their own key. In practice owners
+    // burn 20-50/min in their browser (OC spawn, link-formatter, etc.),
+    // so 86/min + 30/min = 429. 2000ms floor = ~30/min/key, leaving
+    // 70/min headroom for owner browser activity.
+    //
+    // Sweep latency trade-off with 70 enemies, 7-key pool, 2s floor:
+    // ceil(70/7) * 2s = 20s full sweep. Torn's member-basic cache is
+    // 30s anyway, so 20s is as tight as this endpoint rewards.
+    "enemy-profile": { min: 2000, max: 3500 },
   };
   const c = config[purpose] || config["war-status"];
   // Divide the conservative max by pool size, floor at min.
