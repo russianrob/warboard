@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb6
+// @version      2.73.0-wb7
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,15 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb7 — Visibility fix: wb3-6 appended the chip as a CHILD of
+//              .honor-text-wrap, which is sized to fit only the 20px
+//              arrow and overflow-clips anything beyond. Chip was in
+//              the DOM but invisible (diagnostics confirmed 49 chips
+//              created on a 70-member faction page, user saw none).
+//              Now inserts as a FOLLOWING SIBLING of the honor-text-wrap
+//              so the chip flows in the parent's layout next to the
+//              honor image. Also bumped opacity 0.55 → 0.65 and added
+//              z-index:2 for layering above adjacent Torn styling.
 // 2.73.0-wb6 — Remote diagnostics channel: script now also POSTs each
 //              honor-bar paint attempt to https://tornwar.com/api/debug/
 //              client-log tagged 'ffs-banner-diag'. Server logs via pm2
@@ -1716,44 +1725,30 @@ if (!singleton) {
         // doesn't paint. Logs to the standard browser console (not
         // gated behind ffdebug) so users can self-diagnose with
         // devtools open.
+        // wb7: remove ANY previous chip for this element (both old
+        // child-mode and new sibling-mode) so we don't stack duplicates.
         $(element).find(".ff-scouter-est-inline").remove();
+        if (element.nextElementSibling && element.nextElementSibling.classList.contains("ff-scouter-est-inline")) {
+          element.nextElementSibling.remove();
+        }
         const chipInfo = ffs_resolve_estimate_chip(player_id, cached);
-        // wb6: also POST diagnostic back to warboard so we can read it
-        // server-side via pm2 logs. Fire-and-forget; no auth; rate-limited
-        // by IP on the server. Only fires in the first 5 minutes after
-        // page load to avoid flooding.
         try { ffs_post_diag(player_id, cached, chipInfo, element); } catch (_) {}
-        console.log("[FFS Banner wb6] honor-bar paint for",
-          player_id,
-          "| FFS fields:", {
-            value: cached.value,
-            bs_estimate: cached.bs_estimate,
-            bs_estimate_human: cached.bs_estimate_human,
-            distribution_human: cached.distribution_human,
-          },
-          "| BSP cache:", (function() {
-            try { return localStorage.getItem("tdup.battleStatsPredictor.cache.prediction." + player_id) ? "present" : "absent"; } catch(_){return "n/a";}
-          })(),
-          "| chip result:", chipInfo || "NONE - no data source fired");
         if (chipInfo) {
-          const estSpan = $("<span>", {
-            class: "ff-scouter-est-inline",
-            title: chipInfo.source,
-            text: chipInfo.label,
-          }).css({
-            "margin-left": "6px",
-            "padding": "1px 6px",
-            "border-radius": "3px",
-            "font-size": "11px",
-            "font-weight": "700",
-            "background": "rgba(0,0,0,0.55)",
-            "color": "#fff",
-            "vertical-align": "middle",
-            "display": "inline-block",
-            "line-height": "14px",
-            "white-space": "nowrap",
-          });
-          $(element).append(estSpan);
+          const estSpan = document.createElement("span");
+          estSpan.className = "ff-scouter-est-inline";
+          estSpan.title = chipInfo.source;
+          estSpan.textContent = chipInfo.label;
+          estSpan.style.cssText =
+            "margin-left:6px;padding:1px 6px;border-radius:3px;"
+            + "font-size:11px;font-weight:700;background:rgba(0,0,0,0.65);"
+            + "color:#fff;vertical-align:middle;display:inline-block;"
+            + "line-height:14px;white-space:nowrap;position:relative;z-index:2;";
+          // wb7: APPEND AS SIBLING after the honor-text-wrap, not inside
+          // it. The container is sized for just the 20px arrow and has
+          // overflow clipping — children beyond that are invisible.
+          // Placing the chip as a following sibling lets it flow in the
+          // parent's layout beside the honor image.
+          element.parentNode.insertBefore(estSpan, element.nextSibling);
         }
       }
     }
