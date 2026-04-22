@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb38
+// @version      2.73.0-wb39
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2023,7 +2023,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb38",
+      scriptVersion: "2.73.0-wb39",
     };
     try {
       GM_xmlhttpRequest({
@@ -2350,7 +2350,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb38",
+        scriptVersion: "2.73.0-wb39",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2830,14 +2830,10 @@ if (!singleton) {
             + "vertical-align:middle;white-space:nowrap;";
           host.appendChild(chip);
         }
-        // wb38: use SVG plane (same one the row paint uses) instead of
-        // the bare U+2708 codepoint — the emoji variant rendered clipped
-        // at the top of the chip on some UA fonts.
-        if (!chip.querySelector("svg")) {
-          chip.innerHTML = `${FFS_PLANE_SVG}<span class="ffs-mini-countdown-val"></span>`;
-        }
-        const valEl = chip.querySelector(".ffs-mini-countdown-val");
-        if (valEl) valEl.textContent = " " + countdownText;
+        // wb39: reverted to the U+2708 emoji plane — wb38's SVG swap was
+        // a reaction to a clipping report that turned out to be fixable
+        // via line-height alone.
+        chip.textContent = `\u2708 ${countdownText}`;
       } else if (chip) {
         chip.remove();
       }
