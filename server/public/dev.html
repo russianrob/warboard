@@ -117,8 +117,11 @@ if (expected !== req.headers["x-warboard-signature"]) reject();
 <tr><td><code>vault-request.fulfilled</code></td><td>Auto-cleared when money transferred</td><td><code>requestId, amount</code></td></tr>
 <tr><td><code>vault-request.canceled</code></td><td>Deleted by requester or admin</td><td><code>requestId</code></td></tr>
 <tr><td><code>chain.milestone</code></td><td>Chain hits 10, 25, 50, 100, 250, ...</td><td><code>current, warId</code></td></tr>
-<tr><td><code>war.started</code></td><td>Ranked war detected</td><td><code>warId, enemyFactionId, enemyName</code></td></tr>
-<tr><td><code>war.ended</code></td><td>War concluded</td><td><code>warId, winner, duration</code></td></tr>
+<tr><td><code>war.started</code></td><td>WarScanner first detects active ranked war</td><td><code>warId, enemyFactionId, enemyName, startsAt, target</code></td></tr>
+<tr><td><code>war.ended</code></td><td>War score poll detects active → ended transition</td><td><code>warId, result, myScore, enemyScore, durationMs</code></td></tr>
+<tr><td><code>oc.available</code></td><td>New OC crime appears in faction's available list</td><td><code>crimeId, name, difficulty, slotCount</code></td></tr>
+<tr><td><code>oc.assembled</code></td><td>All slots of an OC become filled</td><td><code>crimeId, name, difficulty, status</code></td></tr>
+<tr><td><code>oc.completed</code></td><td>OC leaves the available list (executed or expired)</td><td><code>crimeId, name, difficulty</code></td></tr>
 </table>
 
 <p>Subscribe to wildcards (<code>vault-request.*</code>) or all events (<code>*</code>).</p>
