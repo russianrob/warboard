@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb22
+// @version      2.73.0-wb23
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2011,7 +2011,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb22",
+      scriptVersion: "2.73.0-wb23",
     };
     try {
       GM_xmlhttpRequest({
@@ -2338,7 +2338,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb22",
+        scriptVersion: "2.73.0-wb23",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2590,20 +2590,19 @@ if (!singleton) {
     async function ffs_resolveOwnFactionId() {
       if (_ffsOwnFactionId) return _ffsOwnFactionId;
       try {
-        // v2 API returns { profile: { faction: { faction_id, ... } } }
-        // for user?selections=basic. wb20 diag confirmed topKeys=['profile'].
-        const r = await fetch(`https://api.torn.com/v2/user?selections=basic&key=${encodeURIComponent(key)}`);
+        // wb23: user?selections=basic doesn't include faction info. Use
+        // /v2/faction?selections=basic which returns the caller's OWN
+        // faction when no ID is given.
+        const r = await fetch(`https://api.torn.com/v2/faction?selections=basic&key=${encodeURIComponent(key)}`);
         const d = await r.json();
-        const faction = d?.profile?.faction ?? d?.faction;
-        const fid = faction?.faction_id ?? faction?.id;
+        const basic = d?.basic ?? d;
+        const fid = basic?.id ?? basic?.ID ?? d?.ID ?? d?.id;
         ffs_travelDiag({ source: "own-faction-resolve", response: {
           hasError: !!d?.error,
           errorMsg: d?.error?.error,
-          hasProfile: !!d?.profile,
-          hasFaction: !!faction,
           factionId: fid,
           topKeys: d ? Object.keys(d).slice(0, 10) : [],
-          profileKeys: d?.profile ? Object.keys(d.profile).slice(0, 10) : null,
+          basicKeys: basic && typeof basic === "object" ? Object.keys(basic).slice(0, 10) : null,
         }});
         if (d && !d.error && fid) {
           _ffsOwnFactionId = String(fid);
