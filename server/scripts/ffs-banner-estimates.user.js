@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb16
+// @version      2.73.0-wb17
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,12 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb17 — Diagnose + broaden wb16 travel countdown: user reports
+//              status still says 'Traveling'. Added ffs-travel-diag posts
+//              at init, each poll, each fetch outcome, and each paint
+//              cycle (first 20 only). Also broadened faction-id detection
+//              (React mangled class names vary) and status-cell selector
+//              fallback to [class*='status' i].
 // 2.73.0-wb16 — New: replace "Traveling" status text on war.php and
 //              factions.php member lists with a live HH:MM:SS countdown
 //              to arrival, prefixed with a plane icon + country
@@ -1996,7 +2002,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb16",
+      scriptVersion: "2.73.0-wb17",
     };
     try {
       GM_xmlhttpRequest({
@@ -2323,7 +2329,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb16",
+        scriptVersion: "2.73.0-wb17",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2405,10 +2411,46 @@ if (!singleton) {
   async function ffs_updateFactionTravelData(factionId) {
     try {
       const data = await ffs_fetchFactionMembers(factionId);
-      if (!data || data.error) return;
+      if (!data || data.error) {
+        ffs_travelDiag({
+          source: "fetch-error",
+          factionId,
+          err: data?.error?.error || "no-data",
+        });
+        return;
+      }
       const list = Array.isArray(data.members) ? data.members : [];
-      for (const m of list) ffs_recordMemberTravel(m);
-    } catch (_) { /* silent — retry next poll */ }
+      let travelingCount = 0;
+      for (const m of list) {
+        ffs_recordMemberTravel(m);
+        if (m?.status?.state === "Traveling") travelingCount++;
+      }
+      ffs_travelDiag({
+        source: "fetch-ok",
+        factionId,
+        membersCount: list.length,
+        travelingCount,
+      });
+    } catch (e) {
+      ffs_travelDiag({ source: "fetch-threw", factionId, err: String(e?.message || e) });
+    }
+  }
+
+  // wb17: periodic diag post so we can see whether the paint fires and
+  // how many rows / travelling members it finds.
+  let _ffsTravelDiagCount = 0;
+  function ffs_travelDiag(payload) {
+    if (_ffsTravelDiagCount > 20) return;
+    _ffsTravelDiagCount++;
+    try {
+      GM_xmlhttpRequest({
+        method: "POST",
+        url: "https://tornwar.com/api/debug/client-log",
+        headers: { "Content-Type": "application/json" },
+        data: JSON.stringify({ tag: "ffs-travel-diag", data: payload }),
+        onload: function(){}, onerror: function(){},
+      });
+    } catch (_) {}
   }
 
   function ffs_paintTravelCountdowns() {
@@ -2420,17 +2462,20 @@ if (!singleton) {
       + ".members-list .table-row, "
       + ".members-list li"
     );
+    let painted = 0, skippedNoAnchor = 0, skippedNoStatus = 0, notTraveling = 0;
     rows.forEach(row => {
       const a = row.querySelector('a[href*="XID="]');
-      if (!a) return;
+      if (!a) { skippedNoAnchor++; return; }
       const m = a.href.match(/XID=(\d+)/);
-      if (!m) return;
+      if (!m) { skippedNoAnchor++; return; }
       const uid = m[1];
-      const statusEl = row.querySelector(".status");
-      if (!statusEl) return;
+      const statusEl = row.querySelector(".status")
+        || row.querySelector('[class*="status" i]');
+      if (!statusEl) { skippedNoStatus++; return; }
 
       const until = _ffsMemberCountdowns[uid];
       if (until) {
+        painted++;
         if (!statusEl.dataset.ffsTravelInjected) {
           statusEl.dataset.ffsTravelOriginal = statusEl.innerHTML;
           statusEl.dataset.ffsTravelInjected = "1";
@@ -2447,13 +2492,26 @@ if (!singleton) {
         statusEl.innerHTML = statusEl.dataset.ffsTravelOriginal;
         delete statusEl.dataset.ffsTravelOriginal;
         delete statusEl.dataset.ffsTravelInjected;
+      } else {
+        notTraveling++;
       }
+    });
+    // Diag: only on the first 20 paint cycles after page load.
+    ffs_travelDiag({
+      href: location.href,
+      rowCount: rows.length,
+      painted, skippedNoAnchor, skippedNoStatus, notTraveling,
+      travellingKnown: Object.keys(_ffsMemberCountdowns).length,
     });
   }
 
   function ffs_initTravelCountdowns() {
     if (!/\/(war|factions)\.php/.test(location.pathname)) return;
-    if (!key) return; // needs the FFS-registered Torn key
+    if (!key) {
+      ffs_travelDiag({ source: "init", skipped: "no-key", href: location.href });
+      return;
+    }
+    ffs_travelDiag({ source: "init", started: true, href: location.href });
 
     // Ticker: repaint every 1s so countdowns stay live.
     setInterval(ffs_paintTravelCountdowns, 1000);
@@ -2462,17 +2520,30 @@ if (!singleton) {
     // currently visible on the page.
     async function pollAll() {
       const factionIds = new Set();
-      // War page: read faction IDs from the header links.
+      // War page: read faction IDs from any element whose class name
+      // contains "FactionName" (Torn's React mangle varies) or from
+      // any faction link matching factions.php?ID=.
       document.querySelectorAll(
-        ".opponentFactionName___vhESM, .currentFactionName___eq7n8, "
-        + "[class*='FactionName'] a[href*='ID=']"
-      ).forEach(a => {
-        const m = (a.href || "").match(/ID=(\d+)/);
+        "[class*='FactionName'], [class*='factionName'], a[href*='factions.php?ID=']"
+      ).forEach(el => {
+        const href = el.href || el.querySelector("a")?.href || "";
+        const m = href.match(/ID=(\d+)/);
+        if (m) factionIds.add(m[1]);
+      });
+      // Also probe Torn's war page state via any link with ID= in URL
+      // around the members-list containers.
+      document.querySelectorAll(".members-list a[href*='ID=']").forEach(a => {
+        const m = (a.href || "").match(/factions\.php\?ID=(\d+)/);
         if (m) factionIds.add(m[1]);
       });
       // Faction page: URL-scoped to a single faction.
       const fm = location.search.match(/ID=(\d+)/);
       if (fm && location.pathname.startsWith("/factions.php")) factionIds.add(fm[1]);
+      ffs_travelDiag({
+        source: "poll",
+        factionIds: Array.from(factionIds),
+        href: location.href,
+      });
       for (const fid of factionIds) {
         await ffs_updateFactionTravelData(fid);
       }
