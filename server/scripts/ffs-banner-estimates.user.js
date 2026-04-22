@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb17
+// @version      2.73.0-wb18
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,15 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb18 — Travel countdown fixes: wb17 diag on /factions.php?step=your
+//              returned zero faction IDs and zero rows. Two fixes:
+//              1. Own-faction-id resolver — when on step=your the URL
+//                 has no ID=, so call /v2/user?selections=basic via the
+//                 configured FFS key (one-shot, cached).
+//              2. Broader row selectors using [class*='members-list' i]
+//                 etc. to catch Torn's React-mangled class names.
+//              Also: poll diag now reports ownFactionResolved and a
+//              sample of matched list-like elements for further fixes.
 // 2.73.0-wb17 — Diagnose + broaden wb16 travel countdown: user reports
 //              status still says 'Traveling'. Added ffs-travel-diag posts
 //              at init, each poll, each fetch outcome, and each paint
@@ -2002,7 +2011,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb17",
+      scriptVersion: "2.73.0-wb18",
     };
     try {
       GM_xmlhttpRequest({
@@ -2329,7 +2338,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb17",
+        scriptVersion: "2.73.0-wb18",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2454,13 +2463,20 @@ if (!singleton) {
   }
 
   function ffs_paintTravelCountdowns() {
-    // Matches member list rows on war.php (.enemy-faction / .your-faction)
-    // and on factions.php (.members-list > .table-body > .table-row).
+    // Matches member list rows on:
+    //   war.php                      (.enemy-faction / .your-faction)
+    //   factions.php?ID=XX           (.members-list > .table-body > .table-row)
+    //   factions.php?step=your       (varies — broad fallback below)
     const rows = document.querySelectorAll(
       ".enemy-faction .members-list li, "
       + ".your-faction .members-list li, "
       + ".members-list .table-row, "
-      + ".members-list li"
+      + ".members-list li, "
+      // wb18: broader fallback — any row-ish element inside a
+      // member-list-ish container that also has a profile-link child.
+      + "[class*='members-list' i] .table-row, "
+      + "[class*='members-list' i] li, "
+      + "[class*='members-cont' i] li"
     );
     let painted = 0, skippedNoAnchor = 0, skippedNoStatus = 0, notTraveling = 0;
     rows.forEach(row => {
@@ -2518,6 +2534,22 @@ if (!singleton) {
 
     // Data fetch loop: poll Torn API every 30s, extract all faction IDs
     // currently visible on the page.
+    // wb18: ownFactionId — resolved once via Torn's own API when we're
+    // on /factions.php?step=your (URL has no ID=). Cached for the session.
+    let _ffsOwnFactionId = null;
+    async function ffs_resolveOwnFactionId() {
+      if (_ffsOwnFactionId) return _ffsOwnFactionId;
+      try {
+        const r = await fetch(`https://api.torn.com/user/?selections=basic&key=${encodeURIComponent(key)}`);
+        const d = await r.json();
+        if (d && !d.error && d.faction?.faction_id) {
+          _ffsOwnFactionId = String(d.faction.faction_id);
+          return _ffsOwnFactionId;
+        }
+      } catch (_) {}
+      return null;
+    }
+
     async function pollAll() {
       const factionIds = new Set();
       // War page: read faction IDs from any element whose class name
@@ -2530,8 +2562,6 @@ if (!singleton) {
         const m = href.match(/ID=(\d+)/);
         if (m) factionIds.add(m[1]);
       });
-      // Also probe Torn's war page state via any link with ID= in URL
-      // around the members-list containers.
       document.querySelectorAll(".members-list a[href*='ID=']").forEach(a => {
         const m = (a.href || "").match(/factions\.php\?ID=(\d+)/);
         if (m) factionIds.add(m[1]);
@@ -2539,10 +2569,28 @@ if (!singleton) {
       // Faction page: URL-scoped to a single faction.
       const fm = location.search.match(/ID=(\d+)/);
       if (fm && location.pathname.startsWith("/factions.php")) factionIds.add(fm[1]);
+      // Own faction page (step=your) — no ID= in URL, resolve via API.
+      if (location.search.includes("step=your")) {
+        const own = await ffs_resolveOwnFactionId();
+        if (own) factionIds.add(own);
+      }
+
+      // wb18: DOM probe to see what classes Torn is actually rendering,
+      // so we can fix row selectors if they aren't matching.
+      const listSamples = [];
+      document.querySelectorAll("ul, ol, [class*='member' i], [class*='list' i]").forEach(el => {
+        if (listSamples.length >= 10) return;
+        if (!el.className || typeof el.className !== "string") return;
+        const cn = el.className.slice(0, 80);
+        if (/member|list/i.test(cn)) listSamples.push(el.tagName + "." + cn);
+      });
+
       ffs_travelDiag({
         source: "poll",
         factionIds: Array.from(factionIds),
         href: location.href,
+        ownFactionResolved: _ffsOwnFactionId,
+        listSamples,
       });
       for (const fid of factionIds) {
         await ffs_updateFactionTravelData(fid);
