@@ -3313,6 +3313,48 @@ function loadOcHistory(factionId) {
   return merged;
 }
 
+// v3.1.38: empirical "top-tier hit rate" per scenario, computed from
+// faction's historical completions. Since Torn doesn't label outcomes
+// by ending tier (goodEnding1 vs 2 vs 3 …), we bucket by payout:
+// completions whose money reward is in the top quartile for that
+// scenario are counted as "top-tier hits." It's a rough proxy for
+// goodEnding1 because top endings consistently yield the highest
+// cash payouts. Works once a scenario has at least a handful of
+// successful completions; returns null below the min-sample floor.
+function computeScenarioHitRates(factionId) {
+  const hist = loadOcHistory(factionId);
+  const byName = {};
+  for (const h of hist) {
+    const money = h.rewards?.money;
+    if (!Number.isFinite(money) || money <= 0) continue; // skip failures + no-reward
+    const name = (h.crimeName || '').trim();
+    if (!name) continue;
+    if (!byName[name]) byName[name] = [];
+    byName[name].push(money);
+  }
+  const MIN_SAMPLES = 4;
+  const out = {};
+  for (const [name, payouts] of Object.entries(byName)) {
+    if (payouts.length < MIN_SAMPLES) {
+      out[name] = { count: payouts.length, topCount: null, rate: null, threshold: null };
+      continue;
+    }
+    const sorted = [...payouts].sort((a, b) => a - b);
+    // Top quartile threshold (75th percentile). Completions ≥ threshold
+    // are counted as top-tier hits.
+    const qIdx = Math.floor(sorted.length * 0.75);
+    const threshold = sorted[qIdx];
+    const topCount = payouts.filter(p => p >= threshold).length;
+    out[name] = {
+      count: payouts.length,
+      topCount,
+      rate: topCount / payouts.length,
+      threshold,
+    };
+  }
+  return out;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  FAILURE RISK ENGINE
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -4330,7 +4372,11 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       engines.autoDispatcher = runAutoDispatcher(fid, data, playerInfo.playerId);
     }
 
-    return res.json({ ...data, viewer: viewerObj, engines });
+    // v3.1.38: empirical top-tier hit rates per scenario (from completed
+    // OC payouts). Lets the client show predicted vs observed alongside.
+    const hitRates = computeScenarioHitRates(playerInfo.factionId);
+
+    return res.json({ ...data, viewer: viewerObj, engines, hitRates });
   } catch (err) {
     // If member's own key failed, try keys from the faction pool
     const fid = String(playerInfo.factionId);

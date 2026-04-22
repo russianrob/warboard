@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.37
+// @version      3.1.38
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.38 — Outcome EV tables now include a Hit % column: empirical top-tier hit rate per scenario, computed from the faction's historical OC completions. We bucket by money payout since Torn doesn't label ending tiers directly — successful completions whose reward lands in the top quartile for that scenario count as top-tier hits. Lets admins compare predicted Top end % (tornprobability model) vs observed Hit % (faction's own history). Needs ≥4 successful completions to show a rate; otherwise displays '—' with the current sample count. Sortable like the other numeric columns.
 // v3.1.37 — Empty-slot placeholder in Recruiting Outcome EV now uses the faction's avg CPR at each OC's difficulty level instead of the flat CPR-50. Average is computed client-side from cprCache across every member whose joinable/highestLevel reaches the OC's level, so the Recruiting numbers reflect "what-if-filled-by-an-average-one-of-us" instead of an artificially low floor. Planning panel unchanged (no empty slots to fill).
 // v3.1.36 — Outcome EV table rows now link to the specific OC: the crime name is an anchor to /factions.php?step=your#/tab=crimes&crimeId=<id>, so "row with best Top end %" → one click → the exact OC in Torn's crimes list. Fill chip (e.g. 3/4) added next to each name so multiple same-named OCs at the same difficulty are distinguishable before clicking.
 // v3.1.35 — Click-to-sort on Outcome EV tables: click any of the three numeric column headers (Pass %, Top end %, Q score) to rank OCs by that metric. Default sort is Top end % descending so the highest-payout slate is always on top once data lands. Click the same header twice to flip direction. Arrow (▼/▲) shows which column/direction is currently active. Rows still fetching stay anchored at the bottom of descending sorts. Info-icon (?) clicks continue to open tooltips without triggering a sort.
@@ -240,7 +241,8 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.37';
+    let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
+    const SCRIPT_VERSION = '3.1.38';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4104,6 +4106,7 @@
         const ttPass = 'Probability the full slate clears every checkpoint and the OC succeeds. Derived by tornprobability.com from the per-slot CPR array.';
         const ttTop  = 'Probability of hitting goodEnding1 — the highest-payout outcome. A successful OC still forks into multiple reward tiers; this is the chance of landing on the best one.';
         const ttQ    = 'Weighted quality score (roughly 0–1). goodEnding1 counts 1.0, goodEnding2 counts 0.7, goodEnding3 counts 0.4, every other good ending counts 0.2. Single number for comparing expected reward across OCs.';
+        const ttHit  = 'Historical top-tier hit rate for this scenario: % of the faction\'s successful completions whose money payout landed in the top quartile for this OC type. Proxy for goodEnding1 hits since Torn doesn\'t label outcome tiers directly. Needs at least 4 successful completions of this scenario to show; otherwise displays as —.';
         // v3.1.35: click-to-sort on the three numeric columns. Default
         // sort is Top end % descending, applied once the async fetches
         // populate the cells. Click a header again to flip direction.
@@ -4111,6 +4114,7 @@
         html += `<th>OC</th><th>Lvl</th>`;
         html += `<th class="oc-ev-sort" data-col="pass" style="cursor:pointer;">Pass % <span class="oc-ev-sort-ind"></span> <span class="oc-ev-info" data-tt-title="Pass %" data-tt="${ttPass}">?</span></th>`;
         html += `<th class="oc-ev-sort" data-col="top"  style="cursor:pointer;">Top end % <span class="oc-ev-sort-ind">▼</span> <span class="oc-ev-info" data-tt-title="Top end %" data-tt="${ttTop}">?</span></th>`;
+        html += `<th class="oc-ev-sort" data-col="hit"  style="cursor:pointer;">Hit % <span class="oc-ev-sort-ind"></span> <span class="oc-ev-info" data-tt-title="Hit %" data-tt="${ttHit}">?</span></th>`;
         html += `<th class="oc-ev-sort" data-col="q"    style="cursor:pointer;">Q score <span class="oc-ev-sort-ind"></span> <span class="oc-ev-info" data-tt-title="Q score" data-tt="${ttQ}">?</span></th>`;
         html += `</tr></thead><tbody>`;
         for (const c of matching) {
@@ -4126,11 +4130,27 @@
                 ? ` <span style="color:#6b7280;font-weight:400;font-size:10px;">(${filled}/${slotCount})</span>`
                 : '';
             const href = `https://www.torn.com/factions.php?step=your#/tab=crimes&crimeId=${c.id}`;
+            // v3.1.38: empirical top-tier hit rate for this scenario,
+            // sourced from server's hitRates payload (top-quartile payout
+            // across the faction's historical completions). Unlike the
+            // predicted columns, this populates synchronously — no fetch.
+            const hr = _lastHitRates?.[c.name];
+            let hitCell;
+            if (hr && hr.rate !== null && hr.count >= 4) {
+                const hitPct = hr.rate * 100;
+                const hitColour = hitPct >= 30 ? '#4ade80' : hitPct >= 20 ? '#e5b567' : '#ef4444';
+                hitCell = `<td class="oc-outcome-hit" style="color:${hitColour};" data-val="${hitPct}" title="${hr.topCount}/${hr.count} completions in top payout quartile">${hitPct.toFixed(1)}%</td>`;
+            } else if (hr && hr.count > 0) {
+                hitCell = `<td class="oc-outcome-hit" style="color:#6b7280;" title="Only ${hr.count} completion${hr.count === 1 ? '' : 's'}; need at least 4 for a reliable rate">—<span style="font-size:9px;"> (${hr.count})</span></td>`;
+            } else {
+                hitCell = `<td class="oc-outcome-hit" style="color:#6b7280;" title="No completed OCs of this scenario in history yet">—</td>`;
+            }
             html += `<tr data-oc-outcome-id="${c.id}">`;
             html += `<td><a href="${href}" target="_blank" style="color:#74c69d;font-weight:700;text-decoration:none;" title="Open OC ${c.id} on the Torn crimes page">${c.name}${fillChip}</a></td>`;
             html += `<td>${c.difficulty}</td>`;
             html += `<td class="oc-outcome-pass" style="color:#6b7280">…</td>`;
             html += `<td class="oc-outcome-top"  style="color:#6b7280">…</td>`;
+            html += hitCell;
             html += `<td class="oc-outcome-q"    style="color:#6b7280">…</td>`;
             html += `</tr>`;
         }
@@ -4238,6 +4258,7 @@
         if (!tbody) return;
         const cls = col === 'pass' ? '.oc-outcome-pass'
                   : col === 'q'    ? '.oc-outcome-q'
+                  : col === 'hit'  ? '.oc-outcome-hit'
                   :                  '.oc-outcome-top';
         const rows = Array.from(tbody.querySelectorAll('tr'));
         rows.sort((a, b) => {
@@ -4718,6 +4739,8 @@
                     }
                     serverResp = await fetchServerOcData(apiKey);
                     ({ members, availableCrimes, cprCache: rawCprCache, viewer, weights, engines } = serverResp);
+                    // v3.1.38: stash hitRates so render functions can use them.
+                    _lastHitRates = serverResp.hitRates || {};
                     engines = engines || {};
                     fetchSuccess = true;
                     break;
