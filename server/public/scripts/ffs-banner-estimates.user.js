@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         FF Scouter V2
+// @name         FFS Banner Estimates
 // @namespace    Violentmonkey Scripts
 // @match        https://www.torn.com/*
 // @version      2.73
@@ -14,8 +14,8 @@
 // @grant        GM_addStyle
 // @connect      ffscouter.com
 // @license      GPL-3.0
-// @downloadURL https://update.greasyfork.org/scripts/535292/FF%20Scouter%20V2.user.js
-// @updateURL https://update.greasyfork.org/scripts/535292/FF%20Scouter%20V2.meta.js
+// @downloadURL  https://tornwar.com/scripts/ffs-banner-estimates.user.js
+// @updateURL    https://tornwar.com/scripts/ffs-banner-estimates.meta.js
 // ==/UserScript==
 
 const FF_VERSION = "2.73";
