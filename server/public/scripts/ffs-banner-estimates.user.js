@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb12
+// @version      2.73.0-wb13
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,14 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb13 — XID injection for page-subject honor: wb12 force-paint
+//              worked in theory but apply_ff_gauge's internal resolver
+//              expected player_id to come from a descendant anchor. On
+//              individual /profiles.php?XID=… pages the honor element
+//              has no profile-link inside (subject is the page owner).
+//              Now we inject a hidden anchor with the URL XID just
+//              before calling apply_ff_gauge so the resolver finds it.
+//              Marked with data-ffs-fork-inject so it's traceable.
 // 2.73.0-wb12 — Force-paint retry: wb11 probes proved the profile page
 //              DOES have a .honor-text-wrap (rendered between 0s and 1s
 //              by React), but the upstream MutationObserver wasn't
@@ -1836,7 +1844,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb12",
+      scriptVersion: "2.73.0-wb13",
     };
     try {
       GM_xmlhttpRequest({
@@ -2109,12 +2117,32 @@ if (!singleton) {
   // appear later. Fire at 0s (parity with wb10) + 1s + 3s + 10s so we
   // catch whenever Torn renders the honor.
   function ffs_probe(tag) {
-    // wb12: whenever a delayed probe finds honor elements that the
-    // MutationObserver missed, trigger a paint on them directly.
+    // wb12/wb13: paint unpainted honor-text-wraps at each delayed tick.
+    // apply_ff_gauge normally resolves player_id from child anchors, but
+    // on individual /profiles.php?XID=… pages the honor element has no
+    // profile-link descendant — the profile subject IS the page owner,
+    // so XID comes from location.href. Tag the element with a data-
+    // attribute we can detect in get_player_id_in_element, or — simpler —
+    // stash an anchor inside so the existing resolver works.
     try {
       const unpainted = Array.from(document.querySelectorAll(".honor-text-wrap"))
         .filter(el => !el.classList.contains("ff-scouter-indicator"));
       if (unpainted.length > 0) {
+        const profileXidMatch = /\/profiles\.php\?XID=(\d+)/i.exec(location.href);
+        if (profileXidMatch) {
+          const pid = profileXidMatch[1];
+          // Inject an invisible anchor so get_player_id_in_element can
+          // find the XID for the page-subject honor. Idempotent check.
+          for (const el of unpainted) {
+            if (!el.querySelector('a[href*="XID="]')) {
+              const hiddenA = document.createElement("a");
+              hiddenA.href = `/profiles.php?XID=${pid}`;
+              hiddenA.style.display = "none";
+              hiddenA.setAttribute("data-ffs-fork-inject", "1");
+              el.appendChild(hiddenA);
+            }
+          }
+        }
         apply_ff_gauge(unpainted);
       }
     } catch (_) {}
@@ -2143,7 +2171,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb12",
+        scriptVersion: "2.73.0-wb13",
       };
       GM_xmlhttpRequest({
         method: "POST",
