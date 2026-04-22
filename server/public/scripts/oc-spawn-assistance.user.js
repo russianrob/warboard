@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.32
+// @version      3.1.33
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.33 — Outcome EV now renders in BOTH tabs: Admin tab shows Recruiting OCs (so admins can see expected EV as slates fill), Engines tab keeps Planning OCs (locked slates, numbers reflect actual outcome). Both panels share the same /api/oc/outcome fetch path and 15-min server cache. Recruiting panel footer warns about CPR-50 neutral for empty slots; Planning panel has no caveat since every slot is filled.
 // v3.1.32 — Outcome EV moved to Engines tab + repurposed the Slot Optimizer toggle. Previous v3.1.31 placement in the Admin tab is removed. The "Slot Optimizer" engine now renders as "Outcome EV" and shows per-OC Pass %, Top-end %, and Q score for OCs in Planning status (fully filled, waiting to launch or already running). No more CPR-50 fallback noise since every Planning slot has a real placed member. Legacy server toggle key eng-slot-optimizer reused so existing engine state persists; the server's old member-to-slot assignment payload is ignored client-side.
 // v3.1.31 — Outcome EV analyzer (admin tab only): every recruiting OC gets a row with Pass %, Top-end %, and a weighted Q-score (goodEnding1=1.0, goodEnding2=0.7, goodEnding3=0.4, everything else=0.2). Data comes from a new server endpoint /api/oc/outcome that proxies tornprobability.com's CalculateSuccess with 15-min caching. Per-slot CPRs come from each placed member's byPosition history (fallback: overall CPR → 50 neutral for empty slots). Visibility: table renders inside the Admin tab, which is already role-gated, so rank-and-file members never see it. Server endpoint enforces the same role gate as defence-in-depth (403 for non-admins hitting it directly).
 // v3.1.30 — MinCPR reset bug (and sibling settings): pushScopeOnly was hitting /api/oc/settings/update with only a `scope` query param, but that handler applied HARD-CODED defaults for every missing field — so every scope auto-detect tick silently reset mincpr → 60, cpr_boost → 15, active_days → 7, etc. Fixed on both sides: client pushScopeOnly now hits the dedicated /api/oc/scope endpoint, and /api/oc/settings/update now falls back to the stored value (not a constant) when a field is missing, so a partial push no longer clobbers untouched settings.
@@ -235,7 +236,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.32';
+    const SCRIPT_VERSION = '3.1.33';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4024,7 +4025,12 @@
                 Active=${CONFIG.ACTIVE_DAYS}d · Forecast=${CONFIG.FORECAST_HOURS}h · MinCPR=${CONFIG.MINCPR}% · Boost=${CONFIG.CPR_BOOST}%
                 &nbsp;·&nbsp; Updated: ${new Date().toLocaleTimeString()}
                 &nbsp;·&nbsp; <span style="color:#253525">CPR cached 6h server-side</span>
-            </p>`;
+            </p>
+            ${renderOutcomeEvEngineShell(availableCrimes, 'Recruiting', 'Recruiting OCs')}`;
+
+        // v3.1.33: kick off /api/oc/outcome fetches for Recruiting OCs so
+        // the admin tab's EV table fills in asynchronously.
+        scheduleOutcomeEvFetches(availableCrimes, cprCache, 'Recruiting');
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -4041,18 +4047,21 @@
     //   Q score   — weighted good-ending sum: gE1×1.0 + gE2×0.7 + gE3×0.4
     //               + all remaining good endings ×0.2. Single number for
     //               comparing expected reward quality across OCs.
-    function renderOutcomeEvEngineShell(availableCrimes) {
-        const planning = normArr(availableCrimes).filter(c => c.status === 'Planning');
+    function renderOutcomeEvEngineShell(availableCrimes, status = 'Planning', label = 'Planning OCs') {
+        const matching = normArr(availableCrimes).filter(c => c.status === status);
         let html = `<div style="margin:12px 0;border:1px solid #2d6a4f;border-radius:8px;padding:10px;background:#0a1f14;">`;
-        html += `<div style="font-size:12px;font-weight:700;color:#4ade80;margin-bottom:6px;">\u{1F3AF} Outcome EV <span style="font-size:10px;font-weight:400;color:#9ca3af;margin-left:4px;">Planning OCs</span></div>`;
-        if (!planning.length) {
-            html += `<div style="color:#6b7280;font-size:11px;">No Planning OCs right now — fill an OC to see its outcome distribution.</div></div>`;
+        html += `<div style="font-size:12px;font-weight:700;color:#4ade80;margin-bottom:6px;">\u{1F3AF} Outcome EV <span style="font-size:10px;font-weight:400;color:#9ca3af;margin-left:4px;">${label}</span></div>`;
+        if (!matching.length) {
+            const hint = status === 'Recruiting'
+                ? 'No Recruiting OCs right now.'
+                : 'No Planning OCs right now — fill an OC to see its outcome distribution.';
+            html += `<div style="color:#6b7280;font-size:11px;">${hint}</div></div>`;
             return html;
         }
         html += `<table class="oc-table"><thead><tr>`;
         html += `<th>OC</th><th>Lvl</th><th>Pass %</th><th>Top end %</th><th>Q score</th>`;
         html += `</tr></thead><tbody>`;
-        for (const c of planning) {
+        for (const c of matching) {
             html += `<tr data-oc-outcome-id="${c.id}">`;
             html += `<td><b style="color:#74c69d">${c.name}</b></td>`;
             html += `<td>${c.difficulty}</td>`;
@@ -4061,17 +4070,21 @@
             html += `<td class="oc-outcome-q"    style="color:#6b7280">…</td>`;
             html += `</tr>`;
         }
-        html += `</tbody></table></div>`;
+        html += `</tbody></table>`;
+        if (status === 'Recruiting') {
+            html += `<div style="color:#6b7280;font-size:10px;margin-top:6px;">Empty slots use CPR 50 as neutral — numbers firm up as slots fill.</div>`;
+        }
+        html += `</div>`;
         return html;
     }
 
-    async function scheduleOutcomeEvFetches(availableCrimes, cprCache) {
-        const planning = normArr(availableCrimes).filter(c => c.status === 'Planning');
-        if (!planning.length) return;
+    async function scheduleOutcomeEvFetches(availableCrimes, cprCache, status = 'Planning') {
+        const matching = normArr(availableCrimes).filter(c => c.status === status);
+        if (!matching.length) return;
         const apiKey = getApiKey();
         if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
 
-        for (const c of planning) {
+        for (const c of matching) {
             const slots = Array.isArray(c.slots) ? c.slots : [];
             const cprs = slots.map(s => {
                 const uid = s.user_id ?? s.user?.id;
