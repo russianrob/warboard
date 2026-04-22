@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.21
+// @version      3.6.22
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -19,6 +19,11 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.22 - Faction copy simplified: shows (Stats: N) instead of dual FFS+BSP
+//           labels. FFS used when available, falls back to BSP only if FFS has
+//           no data. W/L ratio removed from output. Cleaner one-liner for
+//           sharing — readers no longer need to parse which source produced
+//           the number.
 // v3.6.21 - Faction copy: swap stat order to (FFS: X · BSP: Y). FFS listed first
 //           since crowd-sourced estimates are usually more accurate for unfamiliar
 //           factions; BSP often falls back to rank-based guesses when there's no
@@ -971,21 +976,6 @@
                     if (level != null) extras.push(`Lvl ${level}`);
 
                     const pStats = await getPersonalStats(id);
-                    // W/L ratio — cheap gut-check against the BSP/FFS
-                    // numbers. A target with 2M wins / 10k losses is
-                    // top-tier regardless of what either predictor says.
-                    // Formatted as "W/L 2.1M/10k" keeping it compact.
-                    const fmtCount = (n) => {
-                        if (n == null) return null;
-                        if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M';
-                        if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k';
-                        return String(n);
-                    };
-                    if (pStats && pStats.attackswon != null && pStats.attackslost != null) {
-                        const w = fmtCount(pStats.attackswon);
-                        const l = fmtCount(pStats.attackslost);
-                        if (w && l) extras.push(`W/L ${w}/${l}`);
-                    }
                     if (pStats && pStats.xantaken != null) extras.push(`Xan: ${pStats.xantaken.toLocaleString()}`);
                     if (pStats && pStats.boostersused != null) extras.push(`Boosters: ${pStats.boostersused.toLocaleString()}`);
                 } catch (apiErr) {
@@ -1108,13 +1098,11 @@
                 ? (ff.human && typeof ff.human === 'string' ? ff.human : fmtTbs(ff.total))
                 : null;
 
-            // FFS first when both are available — crowd-sourced estimates
-            // are usually closer to truth for unfamiliar factions (BSP's
-            // without-direct-attack-data fallback is often a rank-based
-            // guess). When only BSP is available, show BSP.
-            if (bspStr && ffStr) return `(FFS: ${ffStr} · BSP: ${bspStr})`;
-            if (ffStr)           return `(FFS: ${ffStr})`;
-            if (bspStr)          return `(BSP: ${bspStr})`;
+            // Unified (Stats: N) display — FFS preferred (crowd-sourced
+            // estimates are usually more accurate for unfamiliar factions),
+            // falls back to BSP when FFS has no data for this user.
+            if (ffStr)  return `(Stats: ${ffStr})`;
+            if (bspStr) return `(Stats: ${bspStr})`;
             return "(Stats: N/A)";
         } catch (e) {
             if (debug) console.error('Torn Profile Link Formatter: formatDualStats error', e);
