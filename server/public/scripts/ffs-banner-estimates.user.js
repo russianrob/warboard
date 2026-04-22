@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         FFS Banner Estimates
-// @namespace    Violentmonkey Scripts
+// @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73
-// @author       rDacted, Weav3r, xentac, Glasnost
-// @description  Shows the expected Fair Fight score against targets and faction war status
+// @version      2.73.0-wb1
+// @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
+// @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -17,6 +17,21 @@
 // @downloadURL  https://tornwar.com/scripts/ffs-banner-estimates.user.js
 // @updateURL    https://tornwar.com/scripts/ffs-banner-estimates.meta.js
 // ==/UserScript==
+
+// =============================================================================
+// FFS BANNER ESTIMATES — CHANGELOG
+// =============================================================================
+// Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
+//   https://greasyfork.org/en/scripts/535292
+//
+// 2.73.0-wb1 — New: paint FFS estimated stats on the profile name banner
+//              (right below .buttons-wrap, same slot BSP uses via
+//              TDup_BSPProfileInjection). Reads from the FFS IndexedDB
+//              cache like the rest of the script — no extra API calls.
+//              Shows: Est. Stats value · FF score · difficulty · age when
+//              stale. Safe no-op when FFS has no cached data for the user.
+// =============================================================================
+
 
 const FF_VERSION = "2.73";
 const API_INTERVAL = 30000;
@@ -1678,6 +1693,65 @@ if (!singleton) {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────
+  // WARBOARD FORK ADDITION (wb1): paint FFS estimated stats onto the
+  // profile name banner — same real estate BSP uses via
+  // TDup_BSPProfileInjection. Renders under .buttons-wrap on
+  // profiles.php?XID=… pages. Safe no-op if FFS cache has no estimate.
+  // ─────────────────────────────────────────────────────────────────────
+  async function apply_to_profile_banner(buttonsWrap) {
+    if (!buttonsWrap) return;
+    if (buttonsWrap.dataset.ffsBannerPainted === "1") return;
+    if (!/torn\.com\/profiles\.php/i.test(window.location.href)) return;
+
+    // Prefer the XID query param over any link — on your own profile
+    // the only XID reference is in the URL, not in child anchors.
+    const xidMatch = window.location.href.match(/XID=(\d+)/);
+    const player_id = xidMatch ? parseInt(xidMatch[1], 10)
+                               : get_player_id_in_element(buttonsWrap);
+    if (!player_id) return;
+    buttonsWrap.dataset.ffsBannerPainted = "1";
+
+    // Pull from cache first for instant paint, then refresh in background.
+    const render = async () => {
+      const cached = await get_cached_value(player_id);
+      if (!cached || cached.value == null) return;
+
+      let statBadge = buttonsWrap.parentNode.querySelector(".ff-scouter-banner-stats");
+      if (!statBadge) {
+        statBadge = document.createElement("div");
+        statBadge.className = "ff-scouter-banner-stats";
+        statBadge.style.cssText = "margin:6px 0;padding:6px 10px;border-radius:6px;"
+          + "font-family:inherit;display:inline-block;line-height:1.35;";
+        buttonsWrap.parentNode.insertBefore(statBadge, buttonsWrap.nextSibling);
+      }
+
+      const bg  = get_ff_colour(cached.value);
+      const fg  = get_contrast_color(bg);
+      const est = cached.bs_estimate_human || "—";
+      const ff  = get_ff_string(cached);
+      const diff = get_difficulty_text(cached.value);
+      const now = Date.now() / 1000;
+      const ageSec = now - (cached.last_updated || 0);
+      let ageNote = "";
+      if (ageSec > 24 * 60 * 60) {
+        const days = Math.round(ageSec / (24 * 60 * 60));
+        ageNote = ` · ${days}d old`;
+      }
+      statBadge.style.background = bg;
+      statBadge.style.color = fg;
+      statBadge.innerHTML =
+        `<span style="font-weight:700;">Est. Stats:</span> `
+        + `<span style="font-weight:600;">${est}</span>`
+        + ` <span style="opacity:.75;">· FF ${ff} (${diff})${ageNote}</span>`;
+    };
+
+    render();
+    try {
+      await update_ff_cache([player_id], render);
+    } catch (_) { /* offline / no key → cached-only paint stays */ }
+  }
+
   async function apply_to_mini_profile(mini) {
     // Get the user id, and the details
     // Then in profile-container.description append a new span with the text. Win
@@ -1727,6 +1801,13 @@ if (!singleton) {
   const check_mutation = async function (node) {
     if (!node.querySelectorAll) {
       return;
+    }
+    // WARBOARD FORK (wb1): if we're on a profile page and a buttons-wrap
+    // has appeared, paint the estimated-stats banner. Uses the same
+    // selector BSP targets so the visual slot is familiar.
+    if (/torn\.com\/profiles\.php/i.test(window.location.href)) {
+      const buttonsWraps = Array.from(node.querySelectorAll(".buttons-wrap"));
+      for (const bw of buttonsWraps) apply_to_profile_banner(bw);
     }
     var honor_bars = Array.from(node.querySelectorAll(".honor-text-wrap"));
     var name_elems = Array.from(node.querySelectorAll(".user.name"));
