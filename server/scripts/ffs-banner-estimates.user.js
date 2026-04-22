@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb8
+// @version      2.73.0-wb9
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,14 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb9 — Overflow-visible fix: overlay chip showed on faction
+//              list / lookup pages but was clipped on individual profile
+//              pages (/profiles.php?XID=…) because the honor-bar
+//              container there has overflow:hidden. Now when we attach
+//              the .ff-scouter-indicator class we also force
+//              overflow:visible on both the honor-text-wrap and its
+//              immediate parent (.honorWrap on profile pages). Chip
+//              should now be visible everywhere FFS paints its arrow.
 // 2.73.0-wb8 — Overlay style per user request ('overlap like BSP does').
 //              Chip is now position:absolute anchored to the bottom-center
 //              of .honor-text-wrap (which is already position:relative via
@@ -1694,6 +1702,16 @@ if (!singleton) {
       if (!element.classList.contains("indicator-lines")) {
         element.classList.add("indicator-lines");
         element.style.setProperty("--arrow-width", "20px");
+        // wb9: force visible overflow so our absolute-positioned chip
+        // (anchored bottom-center, translated 50% downward) doesn't get
+        // clipped by the honor-bar container on profile pages. Also
+        // force the parent (.honorWrap on profile pages, varies
+        // elsewhere) to allow visible overflow so the chip can extend
+        // past the immediate container.
+        element.style.overflow = "visible";
+        if (element.parentElement) {
+          element.parentElement.style.overflow = "visible";
+        }
 
         // Ugly - does removing this break anything?
         element.classList.remove("small");
@@ -1794,7 +1812,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb8",
+      scriptVersion: "2.73.0-wb9",
     };
     try {
       GM_xmlhttpRequest({
