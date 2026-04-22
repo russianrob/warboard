@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.20
+// @version      3.6.21
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -19,6 +19,11 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v3.6.21 - Faction copy: swap stat order to (FFS: X · BSP: Y). FFS listed first
+//           since crowd-sourced estimates are usually more accurate for unfamiliar
+//           factions; BSP often falls back to rank-based guesses when there's no
+//           direct attack history against the target. Both still shown when
+//           available so readers can still see the spread.
 // v3.6.20 - Faction copy now shows BOTH BSP and FFS side-by-side ("(BSP: 345k · FFS: 534k)") so pasted output lets any reader eyeball the spread without needing a live overlay. Also adds W/L ratio from attackswon/attackslost (free — same personalstats API call as Xan/Boosters) as a gut-check against stat predictions. Single-source format kept for profile-page / list-item one-liners.
 // v3.6.19 - Fix middle-of-list missing Xan/Boosters: 1-2-3s retry backoffs were too short vs. Torn's 60s rolling rate-limit window. Added a shared _rateLimitedUntil cooldown (30s per code:5) that ALL pending calls respect before firing. Retries now wait 30s each, so the window has time to drain instead of exhausting retries inside the blackout.
 // v3.6.18 - Version bump to trigger userscript auto-update (no code changes vs 3.6.17)
@@ -1103,9 +1108,13 @@
                 ? (ff.human && typeof ff.human === 'string' ? ff.human : fmtTbs(ff.total))
                 : null;
 
-            if (bspStr && ffStr) return `(BSP: ${bspStr} · FFS: ${ffStr})`;
-            if (bspStr)          return `(BSP: ${bspStr})`;
+            // FFS first when both are available — crowd-sourced estimates
+            // are usually closer to truth for unfamiliar factions (BSP's
+            // without-direct-attack-data fallback is often a rank-based
+            // guess). When only BSP is available, show BSP.
+            if (bspStr && ffStr) return `(FFS: ${ffStr} · BSP: ${bspStr})`;
             if (ffStr)           return `(FFS: ${ffStr})`;
+            if (bspStr)          return `(BSP: ${bspStr})`;
             return "(Stats: N/A)";
         } catch (e) {
             if (debug) console.error('Torn Profile Link Formatter: formatDualStats error', e);
