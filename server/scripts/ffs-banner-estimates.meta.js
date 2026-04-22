@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         FFS Banner Estimates
-// @namespace    Violentmonkey Scripts
+// @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73
-// @author       rDacted, Weav3r, xentac, Glasnost
-// @description  Shows the expected Fair Fight score against targets and faction war status
+// @version      2.73.0-wb1
+// @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
+// @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
