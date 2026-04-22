@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb15
+// @version      2.73.0-wb16
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,14 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb16 — New: replace "Traveling" status text on war.php and
+//              factions.php member lists with a live HH:MM:SS countdown
+//              to arrival, prefixed with a plane icon + country
+//              abbreviation (e.g. ✈ UK  02:14:37). Uses Torn's own
+//              v2 /faction/{id}/members endpoint (status.until provides
+//              the landing UNIX time). Polls every 30s per visible
+//              faction, ticks every 1s for the countdown repaint.
+//              Restores the original status HTML when a member lands.
 // 2.73.0-wb15 — New: travel arrival estimator on profile pages. Ported
 //              from the modded FFS variant (greasyfork 537486). When a
 //              target is travelling, calls ffscouter.com's player-flights
@@ -168,6 +176,20 @@ const TOAST_LOG = "log";
 let singleton = document.getElementById("ff-scouter-run-once");
 if (!singleton) {
   console.log(`[FF Scouter V2] FF Scouter version ${FF_VERSION} starting`);
+  // wb16: CSS for the travel-countdown status badge on member lists.
+  GM_addStyle(`
+    .ffs-travel-status {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-variant-numeric: tabular-nums;
+    }
+    .ffs-travel-status .ffs-plane {
+      width: 12px; height: 12px; fill: currentColor; flex-shrink: 0;
+    }
+    .ffs-travel-status.returning .ffs-plane { transform: scaleX(-1); }
+    .ffs-travel-status .ffs-abbr {
+      opacity: 0.8; font-size: 10px; margin-right: 2px;
+    }
+  `);
   GM_addStyle(`
             .ff-scouter-indicator {
             position: relative;
@@ -1974,7 +1996,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb15",
+      scriptVersion: "2.73.0-wb16",
     };
     try {
       GM_xmlhttpRequest({
@@ -2301,7 +2323,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb15",
+        scriptVersion: "2.73.0-wb16",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2316,6 +2338,149 @@ if (!singleton) {
   setTimeout(() => ffs_probe("1s"), 1000);
   setTimeout(() => ffs_probe("3s"), 3000);
   setTimeout(() => ffs_probe("10s"), 10000);
+
+  // ─────────────────────────────────────────────────────────────────────
+  // WARBOARD FORK (wb16): replace "Traveling to X" status text with a
+  // live arrival-time countdown. Ported from the modded FFS variant's
+  // updateMemberStatus / updateAllMemberTimers. Uses Torn's v2 faction
+  // members endpoint (status.until provides the landing UNIX time);
+  // re-polls every 30s per faction and re-renders countdown every 1s.
+  // ─────────────────────────────────────────────────────────────────────
+  const FFS_TRAVEL_POLL_MS = 30_000;
+  const _ffsMemberCountdowns = {};     // userID → unix landing time
+  const _ffsMemberAbbr = {};           // userID → country abbrev
+  const _ffsMemberReturning = {};      // userID → bool
+  const _ffsOriginalStatusHtml = {};   // liElement reference → original innerHTML
+
+  function ffs_abbreviateCountry(name) {
+    if (!name) return "";
+    if (name.trim().toLowerCase() === "switzerland") return "Switz";
+    const words = name.trim().split(/\s+/);
+    if (words.length === 1) return words[0];
+    return words.map((w) => w[0].toUpperCase()).join("");
+  }
+
+  function ffs_formatCountdown(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const h = String(Math.floor(s / 3600)).padStart(2, "0");
+    const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+    const sec = String(s % 60).padStart(2, "0");
+    return `${h}:${m}:${sec}`;
+  }
+
+  const FFS_PLANE_SVG = '<svg class="ffs-plane" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M482.3 192c34.2 0 93.7 29 93.7 64c0 36-59.5 64-93.7 64l-116.6 0L265.2 495.9c-5.7 10-16.3 16.1-27.8 16.1l-56.2 0c-10.6 0-18.3-10.2-15.4-20.4l49-171.6L112 320 68.8 377.6c-3 4-7.8 6.4-12.8 6.4l-42 0c-7.8 0-14-6.3-14-14c0-1.3 .2-2.6 .5-3.9L32 256 .5 145.9c-.4-1.3-.5-2.6-.5-3.9c0-7.8 6.3-14 14-14l42 0c5 0 9.8 2.4 12.8 6.4L112 192l102.9 0-49-171.6C162.9 10.2 170.6 0 181.2 0l56.2 0c11.5 0 22.1 6.2 27.8 16.1L365.7 192l116.6 0z"/></svg>';
+
+  function ffs_fetchFactionMembers(factionId) {
+    // key is the FFS-registered Torn API key — same one used elsewhere
+    // in this script. Works with Limited/Full Access.
+    if (!key) return Promise.reject(new Error("no key"));
+    const url = `https://api.torn.com/v2/faction/${factionId}/members?striptags=true&key=${encodeURIComponent(key)}`;
+    return fetch(url).then(r => r.json());
+  }
+
+  function ffs_recordMemberTravel(member) {
+    if (!member || !member.status) return;
+    const state = member.status.state;
+    if (state === "Traveling") {
+      const desc = member.status.description || "";
+      let loc = "", returning = false;
+      if (desc.startsWith("Returning to Torn from ")) {
+        loc = desc.replace("Returning to Torn from ", "");
+        returning = true;
+      } else if (desc.startsWith("Traveling to ")) {
+        loc = desc.replace("Traveling to ", "");
+      }
+      _ffsMemberAbbr[member.id] = ffs_abbreviateCountry(loc);
+      _ffsMemberReturning[member.id] = returning;
+      if (member.status.until && parseInt(member.status.until, 10) > 0) {
+        _ffsMemberCountdowns[member.id] = parseInt(member.status.until, 10);
+      }
+    } else {
+      delete _ffsMemberCountdowns[member.id];
+      delete _ffsMemberAbbr[member.id];
+      delete _ffsMemberReturning[member.id];
+    }
+  }
+
+  async function ffs_updateFactionTravelData(factionId) {
+    try {
+      const data = await ffs_fetchFactionMembers(factionId);
+      if (!data || data.error) return;
+      const list = Array.isArray(data.members) ? data.members : [];
+      for (const m of list) ffs_recordMemberTravel(m);
+    } catch (_) { /* silent — retry next poll */ }
+  }
+
+  function ffs_paintTravelCountdowns() {
+    // Matches member list rows on war.php (.enemy-faction / .your-faction)
+    // and on factions.php (.members-list > .table-body > .table-row).
+    const rows = document.querySelectorAll(
+      ".enemy-faction .members-list li, "
+      + ".your-faction .members-list li, "
+      + ".members-list .table-row, "
+      + ".members-list li"
+    );
+    rows.forEach(row => {
+      const a = row.querySelector('a[href*="XID="]');
+      if (!a) return;
+      const m = a.href.match(/XID=(\d+)/);
+      if (!m) return;
+      const uid = m[1];
+      const statusEl = row.querySelector(".status");
+      if (!statusEl) return;
+
+      const until = _ffsMemberCountdowns[uid];
+      if (until) {
+        if (!statusEl.dataset.ffsTravelInjected) {
+          statusEl.dataset.ffsTravelOriginal = statusEl.innerHTML;
+          statusEl.dataset.ffsTravelInjected = "1";
+        }
+        const remaining = until * 1000 - Date.now();
+        const abbr = _ffsMemberAbbr[uid] || "";
+        const returningCls = _ffsMemberReturning[uid] ? " returning" : "";
+        statusEl.innerHTML =
+          `<span class="ffs-travel-status${returningCls}">${FFS_PLANE_SVG}`
+          + `<span class="ffs-abbr">${abbr}</span>`
+          + `<span>${ffs_formatCountdown(remaining)}</span></span>`;
+      } else if (statusEl.dataset.ffsTravelInjected) {
+        // Member is no longer travelling — restore original.
+        statusEl.innerHTML = statusEl.dataset.ffsTravelOriginal;
+        delete statusEl.dataset.ffsTravelOriginal;
+        delete statusEl.dataset.ffsTravelInjected;
+      }
+    });
+  }
+
+  function ffs_initTravelCountdowns() {
+    if (!/\/(war|factions)\.php/.test(location.pathname)) return;
+    if (!key) return; // needs the FFS-registered Torn key
+
+    // Ticker: repaint every 1s so countdowns stay live.
+    setInterval(ffs_paintTravelCountdowns, 1000);
+
+    // Data fetch loop: poll Torn API every 30s, extract all faction IDs
+    // currently visible on the page.
+    async function pollAll() {
+      const factionIds = new Set();
+      // War page: read faction IDs from the header links.
+      document.querySelectorAll(
+        ".opponentFactionName___vhESM, .currentFactionName___eq7n8, "
+        + "[class*='FactionName'] a[href*='ID=']"
+      ).forEach(a => {
+        const m = (a.href || "").match(/ID=(\d+)/);
+        if (m) factionIds.add(m[1]);
+      });
+      // Faction page: URL-scoped to a single faction.
+      const fm = location.search.match(/ID=(\d+)/);
+      if (fm && location.pathname.startsWith("/factions.php")) factionIds.add(fm[1]);
+      for (const fid of factionIds) {
+        await ffs_updateFactionTravelData(fid);
+      }
+    }
+    pollAll();
+    setInterval(pollAll, FFS_TRAVEL_POLL_MS);
+  }
+  ffs_initTravelCountdowns();
 
   // ─────────────────────────────────────────────────────────────────────
   // WARBOARD FORK (wb14): FFS sort button on war/faction member lists.
