@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb7
+// @version      2.73.0-wb8
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,15 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb8 — Overlay style per user request ('overlap like BSP does').
+//              Chip is now position:absolute anchored to the bottom-center
+//              of .honor-text-wrap (which is already position:relative via
+//              .ff-scouter-indicator). The chip sits half-over, half-under
+//              the bottom edge of the honor image — identical visual
+//              pattern to BSP's TDup_BSPProfileInjection overlay.
+//              z-index:5 + text-shadow so it reads clearly over any honor
+//              image. pointer-events:none so it doesn't hijack hover on
+//              the honor. Diag now reports estOverlayCount separately.
 // 2.73.0-wb7 — Visibility fix: wb3-6 appended the chip as a CHILD of
 //              .honor-text-wrap, which is sized to fit only the 20px
 //              arrow and overflow-clips anything beyond. Chip was in
@@ -1725,30 +1734,35 @@ if (!singleton) {
         // doesn't paint. Logs to the standard browser console (not
         // gated behind ffdebug) so users can self-diagnose with
         // devtools open.
-        // wb7: remove ANY previous chip for this element (both old
-        // child-mode and new sibling-mode) so we don't stack duplicates.
-        $(element).find(".ff-scouter-est-inline").remove();
-        if (element.nextElementSibling && element.nextElementSibling.classList.contains("ff-scouter-est-inline")) {
-          element.nextElementSibling.remove();
+        // wb8: paint chip as an ABSOLUTE OVERLAY on the honor bar — same
+        // visual style BSP uses. Element is .honor-text-wrap which we've
+        // already made position:relative via .ff-scouter-indicator, so
+        // a position:absolute child with fixed offsets floats visually
+        // on top of the honor image without being clipped or wrapped.
+        // Cleanup: remove ALL prior chip positions (old child inline,
+        // sibling, and overlay) so reruns don't stack.
+        $(element).find(".ff-scouter-est-inline, .ff-scouter-est-overlay").remove();
+        let sib = element.nextElementSibling;
+        while (sib && sib.classList && (sib.classList.contains("ff-scouter-est-inline") || sib.classList.contains("ff-scouter-est-overlay"))) {
+          const next = sib.nextElementSibling;
+          sib.remove();
+          sib = next;
         }
         const chipInfo = ffs_resolve_estimate_chip(player_id, cached);
         try { ffs_post_diag(player_id, cached, chipInfo, element); } catch (_) {}
         if (chipInfo) {
-          const estSpan = document.createElement("span");
-          estSpan.className = "ff-scouter-est-inline";
-          estSpan.title = chipInfo.source;
-          estSpan.textContent = chipInfo.label;
-          estSpan.style.cssText =
-            "margin-left:6px;padding:1px 6px;border-radius:3px;"
-            + "font-size:11px;font-weight:700;background:rgba(0,0,0,0.65);"
-            + "color:#fff;vertical-align:middle;display:inline-block;"
-            + "line-height:14px;white-space:nowrap;position:relative;z-index:2;";
-          // wb7: APPEND AS SIBLING after the honor-text-wrap, not inside
-          // it. The container is sized for just the 20px arrow and has
-          // overflow clipping — children beyond that are invisible.
-          // Placing the chip as a following sibling lets it flow in the
-          // parent's layout beside the honor image.
-          element.parentNode.insertBefore(estSpan, element.nextSibling);
+          const overlay = document.createElement("span");
+          overlay.className = "ff-scouter-est-overlay";
+          overlay.title = chipInfo.source;
+          overlay.textContent = chipInfo.label;
+          overlay.style.cssText =
+            "position:absolute;left:50%;bottom:0;transform:translate(-50%, 50%);"
+            + "padding:1px 6px;border-radius:3px;"
+            + "font-size:10px;font-weight:700;"
+            + "background:rgba(0,0,0,0.78);color:#fff;"
+            + "white-space:nowrap;line-height:12px;pointer-events:none;"
+            + "z-index:5;text-shadow:0 1px 1px rgba(0,0,0,0.8);";
+          element.appendChild(overlay);
         }
       }
     }
@@ -1779,7 +1793,8 @@ if (!singleton) {
       honorTextWrapCount: document.querySelectorAll(".honor-text-wrap").length,
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
-      scriptVersion: "2.73.0-wb6",
+      estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
+      scriptVersion: "2.73.0-wb8",
     };
     try {
       GM_xmlhttpRequest({
