@@ -4627,7 +4627,14 @@ router.get("/api/oc/scope", async (req, res) => {
   }
   const scopeRaw = parseInt(req.query.scope, 10);
   if (isNaN(scopeRaw)) return res.status(400).json({ error: "Missing scope" });
-  store.updateFactionSettings(info.factionId, { oc_scope: Math.max(0, Math.min(100, scopeRaw)) });
+  const prev = store.getFactionSettings(info.factionId)?.oc_scope;
+  const next = Math.max(0, Math.min(100, scopeRaw));
+  store.updateFactionSettings(info.factionId, { oc_scope: next });
+  // Audit trail: who pushed which scope value and what it replaced.
+  // Useful for tracking down the "my scope keeps resetting to X" class of
+  // bug where auto-detection picks up a stale/wrong value from the DOM.
+  const src = (req.query.source || req.get('x-scope-source') || 'auto').toString().slice(0, 32);
+  console.log(`[oc/scope] ${info.playerName} (${info.playerId}) pushed scope ${prev ?? 'null'} -> ${next} for faction ${info.factionId} [source=${src}]`);
   return res.json({ ok: true });
 });
 
