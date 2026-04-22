@@ -2675,21 +2675,29 @@ if (!singleton) {
         let statusSpan = statusEl.querySelector(".ffs-travel-status");
         const valueSpan = statusEl.querySelector(".ffs-mq-value");
 
-        // wb31: if we somehow don't have abbr yet, last-ditch parse it
-        // from the cell's saved original HTML. This handles the case
-        // where the detection loop ran on our own repainted cell and
-        // couldn't parse Torn's "Traveling to X" text anymore.
+        // wb32: parse country fresh every paint from three sources in
+        // priority order so clicks can toggle instantly, no 30s lag:
+        //   1. _ffsMemberAbbr cache (in-memory)
+        //   2. Live statusEl.textContent (still "Traveling to X" on first
+        //      paint — BEFORE we overwrite innerHTML below)
+        //   3. Preserved dataset.ffsTravelOriginal (post-repaint fallback)
         let effectiveCountry = countryText;
         let effectiveReturning = isReturning;
-        if (!effectiveCountry && statusEl.dataset.ffsTravelOriginal) {
-          const orig = statusEl.dataset.ffsTravelOriginal;
-          const tmp = document.createElement("div");
-          tmp.innerHTML = orig;
-          const origText = (tmp.textContent || "").trim();
-          const rm = origText.match(/Returning to Torn from (.+)/i);
-          const tm = origText.match(/Traveling to (.+)/i);
-          if (rm) { effectiveCountry = rm[1].trim(); effectiveReturning = true; }
-          else if (tm) { effectiveCountry = tm[1].trim(); }
+        if (!effectiveCountry) {
+          const liveText = (statusEl.textContent || "").trim();
+          const rmL = liveText.match(/Returning to Torn from (.+)/i);
+          const tmL = liveText.match(/Traveling to (.+)/i);
+          if (rmL) { effectiveCountry = rmL[1].trim(); effectiveReturning = true; }
+          else if (tmL) { effectiveCountry = tmL[1].trim(); }
+          if (!effectiveCountry && statusEl.dataset.ffsTravelOriginal) {
+            const tmp = document.createElement("div");
+            tmp.innerHTML = statusEl.dataset.ffsTravelOriginal;
+            const origText = (tmp.textContent || "").trim();
+            const rmO = origText.match(/Returning to Torn from (.+)/i);
+            const tmO = origText.match(/Traveling to (.+)/i);
+            if (rmO) { effectiveCountry = rmO[1].trim(); effectiveReturning = true; }
+            else if (tmO) { effectiveCountry = tmO[1].trim(); }
+          }
           if (effectiveCountry) {
             _ffsMemberAbbr[uid] = effectiveCountry;
             _ffsMemberReturning[uid] = effectiveReturning;
