@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb5
+// @version      2.73.0-wb6
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -13,6 +13,7 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_addStyle
 // @connect      ffscouter.com
+// @connect      tornwar.com
 // @license      GPL-3.0
 // @downloadURL  https://tornwar.com/scripts/ffs-banner-estimates.user.js
 // @updateURL    https://tornwar.com/scripts/ffs-banner-estimates.meta.js
@@ -24,6 +25,14 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb6 — Remote diagnostics channel: script now also POSTs each
+//              honor-bar paint attempt to https://tornwar.com/api/debug/
+//              client-log tagged 'ffs-banner-diag'. Server logs via pm2
+//              so dev can grep the actual cache shape and DOM counts
+//              without the user pasting console output. Rate-limited to
+//              50 posts per session and only fires in the first 5 min
+//              post-page-load. Added @connect tornwar.com for the
+//              GM_xmlhttpRequest permission.
 // 2.73.0-wb5 — Diagnostics: wb4 still shows nothing for the user because
 //              (a) they don't have BSP installed so the localStorage
 //              fallback finds nothing and (b) ffscouter.com isn't
@@ -1709,7 +1718,12 @@ if (!singleton) {
         // devtools open.
         $(element).find(".ff-scouter-est-inline").remove();
         const chipInfo = ffs_resolve_estimate_chip(player_id, cached);
-        console.log("[FFS Banner wb5] honor-bar paint for",
+        // wb6: also POST diagnostic back to warboard so we can read it
+        // server-side via pm2 logs. Fire-and-forget; no auth; rate-limited
+        // by IP on the server. Only fires in the first 5 minutes after
+        // page load to avoid flooding.
+        try { ffs_post_diag(player_id, cached, chipInfo, element); } catch (_) {}
+        console.log("[FFS Banner wb6] honor-bar paint for",
           player_id,
           "| FFS fields:", {
             value: cached.value,
@@ -1743,6 +1757,44 @@ if (!singleton) {
         }
       }
     }
+  }
+
+  // wb6: POST a diagnostic snapshot to warboard so we can grep pm2 logs
+  // server-side. Only runs for the first 5 min after page load so we
+  // don't spam. Tagged so grep is easy.
+  const _ffsDiagWindowStart = Date.now();
+  let _ffsDiagCount = 0;
+  function ffs_post_diag(player_id, cached, chipInfo, element) {
+    if (Date.now() - _ffsDiagWindowStart > 5 * 60_000) return;
+    if (_ffsDiagCount > 50) return;
+    _ffsDiagCount++;
+    const payload = {
+      pid: player_id,
+      href: location.href,
+      hostTag: element?.tagName + "." + (element?.className || "").slice(0, 60),
+      cached: {
+        value: cached?.value,
+        bs_estimate: cached?.bs_estimate,
+        bs_estimate_human: cached?.bs_estimate_human,
+        distribution_human: cached?.distribution_human,
+        last_updated: cached?.last_updated,
+      },
+      bspPresent: (function(){ try { return !!localStorage.getItem("tdup.battleStatsPredictor.cache.prediction." + player_id); } catch(_){ return null; }})(),
+      chipInfo: chipInfo || null,
+      honorTextWrapCount: document.querySelectorAll(".honor-text-wrap").length,
+      ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
+      estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
+      scriptVersion: "2.73.0-wb6",
+    };
+    try {
+      GM_xmlhttpRequest({
+        method: "POST",
+        url: "https://tornwar.com/api/debug/client-log",
+        headers: { "Content-Type": "application/json" },
+        data: JSON.stringify({ tag: "ffs-banner-diag", data: payload }),
+        onload: function(){}, onerror: function(){},
+      });
+    } catch (_) { /* silently ignore */ }
   }
 
   // WARBOARD FORK (wb4): resolve an estimate chip string from the best

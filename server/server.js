@@ -404,6 +404,27 @@ app.post("/api/weav3r/pool/opt-out", async (req, res) => {
   }
 });
 
+// Anonymous diagnostic channel for in-browser userscripts. Accepts a small
+// JSON body and logs it with a tag we can grep from pm2. Used temporarily
+// to debug why a feature fires or doesn't on a user's browser without
+// needing them to paste console output.
+const _diagHits = new Map(); // ip → { count, firstAt }
+app.post("/api/debug/client-log", express.json({ limit: "4kb" }), (req, res) => {
+  const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
+  const now = Date.now();
+  const bucket = _diagHits.get(ip) || { count: 0, firstAt: now };
+  if (now - bucket.firstAt > 60_000) { bucket.count = 0; bucket.firstAt = now; }
+  bucket.count++;
+  _diagHits.set(ip, bucket);
+  if (bucket.count > 60) return res.status(429).end(); // 60/min per IP cap
+  const tag = String(req.body?.tag || 'client-diag').slice(0, 40);
+  let payload;
+  try { payload = JSON.stringify(req.body?.data || {}).slice(0, 1500); }
+  catch (_) { payload = '<unserializable>'; }
+  console.log(`[${tag}] ${payload}`);
+  res.status(204).end();
+});
+
 app.use(routes);
 
 // Health check
