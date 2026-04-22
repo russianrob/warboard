@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb19
+// @version      2.73.0-wb20
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2011,7 +2011,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb19",
+      scriptVersion: "2.73.0-wb20",
     };
     try {
       GM_xmlhttpRequest({
@@ -2338,7 +2338,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb19",
+        scriptVersion: "2.73.0-wb20",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2563,13 +2563,24 @@ if (!singleton) {
     async function ffs_resolveOwnFactionId() {
       if (_ffsOwnFactionId) return _ffsOwnFactionId;
       try {
-        const r = await fetch(`https://api.torn.com/user/?selections=basic&key=${encodeURIComponent(key)}`);
+        // v2 API — v1 might not be allowed anymore.
+        const r = await fetch(`https://api.torn.com/v2/user?selections=basic&key=${encodeURIComponent(key)}`);
         const d = await r.json();
-        if (d && !d.error && d.faction?.faction_id) {
-          _ffsOwnFactionId = String(d.faction.faction_id);
+        ffs_travelDiag({ source: "own-faction-resolve", response: {
+          hasError: !!d?.error,
+          errorMsg: d?.error?.error,
+          hasFaction: !!d?.faction,
+          factionId: d?.faction?.id ?? d?.faction?.faction_id,
+          topKeys: d ? Object.keys(d).slice(0, 10) : [],
+        }});
+        const fid = d?.faction?.id ?? d?.faction?.faction_id;
+        if (d && !d.error && fid) {
+          _ffsOwnFactionId = String(fid);
           return _ffsOwnFactionId;
         }
-      } catch (_) {}
+      } catch (e) {
+        ffs_travelDiag({ source: "own-faction-resolve", err: String(e?.message || e) });
+      }
       return null;
     }
 
