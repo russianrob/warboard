@@ -30,6 +30,9 @@ import { startMembershipSchedule, stopMembershipSchedule } from "./membership-ch
 import { startXanaxSubscriptions, stopXanaxSubscriptions, getActiveSubscribedFactionIds } from "./xanax-subscriptions.js";
 import { startWeav3rCache, getWeav3rSnapshot, subscribeToWeav3r, kickVerifyOnPoolGrowth } from "./weav3r-cache.js";
 import * as weav3rPool from "./weav3r-pool.js";
+import * as webhookBus from "./webhook-bus.js";
+import * as devPlatform from "./dev-platform.js";
+import { verifyTornApiKey } from "./auth.js";
 import * as vaultRequests from "./vault-requests.js";
 import { startSubscriptionManager, stopSubscriptionManager } from "./subscription-manager.js";
 import * as store from "./store.js";
@@ -402,6 +405,124 @@ app.post("/api/weav3r/pool/opt-out", async (req, res) => {
   } catch (e) {
     res.status(401).json({ error: e.message });
   }
+});
+
+// ── Developer platform: PAT issuance + v1 API + webhooks ──────────────
+// Exchange a Torn API key for a long-lived Personal Access Token.
+app.post("/api/dev/pat", async (req, res) => {
+  try {
+    const { key, scopes, name } = req.body || {};
+    const result = await devPlatform.issuePat({ apiKey: key, scopes, name });
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get("/api/dev/pat/list", async (req, res) => {
+  const key = req.query.key;
+  if (!key) return res.status(400).json({ error: "key required" });
+  try {
+    const info = await verifyTornApiKey(String(key));
+    res.json({ pats: devPlatform.listPatsForPlayer(info.playerId) });
+  } catch (e) {
+    res.status(401).json({ error: e.message });
+  }
+});
+
+app.post("/api/dev/pat/revoke", async (req, res) => {
+  const { key, patId } = req.body || {};
+  if (!key || !patId) return res.status(400).json({ error: "key and patId required" });
+  try {
+    const info = await verifyTornApiKey(String(key));
+    const ok = devPlatform.revokePat(info.playerId, patId);
+    res.json({ ok });
+  } catch (e) {
+    res.status(401).json({ error: e.message });
+  }
+});
+
+// Serve the OpenAPI spec. __dirname already declared at the top of this file.
+app.get("/api/v1/openapi.json", (_req, res) => {
+  try {
+    const spec = readFileSync(join(__dirname, "openapi.json"), "utf8");
+    res.type("application/json").send(spec);
+  } catch (e) {
+    res.status(500).json({ error: "spec unavailable" });
+  }
+});
+
+// v1 versioned wrappers over existing OC spawn. Requires PAT with read:oc scope.
+app.get("/api/v1/oc/spawn", devPlatform.requirePat(["read:oc"]), async (req, res) => {
+  try {
+    const factionId = String(req.query.factionId || req.pat.ownerFactionId);
+    const { getOcSpawnData } = await import("./oc-spawn.js");
+    // v1 uses the PAT-owner's verified faction-scope automatically; cross-faction
+    // queries will return 403 unless the PAT owner has access to that faction.
+    if (factionId !== req.pat.ownerFactionId) {
+      return res.status(403).json({ error: "PAT not scoped to this factionId" });
+    }
+    // For v1 we delegate to the internal helper but need a Full-access key.
+    // Easiest: reuse the faction-key cache the /api/oc/spawn-key endpoint
+    // already populates. If empty, return 503 — dev can retry once any
+    // Full-access faction member has refreshed.
+    const { getFactionKeys } = await import("./routes.js");
+    // Since getFactionKeys isn't exported, use the OWNER_API_KEY fallback
+    // for now. Future: expose proper key-resolution helper.
+    const key = process.env.OWNER_API_KEY;
+    if (!key) return res.status(503).json({ error: "No faction-access key available" });
+    const data = await getOcSpawnData(factionId, key);
+    res.json({ factionId, ...data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/v1/faction/:factionId/war", devPlatform.requirePat(["read:faction"]), (req, res) => {
+  const fid = String(req.params.factionId);
+  if (fid !== req.pat.ownerFactionId) {
+    return res.status(403).json({ error: "PAT not scoped to this factionId" });
+  }
+  // Minimal response from existing store.
+  import("./store.js").then(store => {
+    const ownerWar = [...store.getAllWars?.() || []].find(w => String(w.factionId) === fid);
+    res.json({ factionId: fid, war: ownerWar || null });
+  }).catch(e => res.status(500).json({ error: e.message }));
+});
+
+// Webhooks CRUD (PAT-authed with manage:webhooks scope).
+app.get("/api/webhooks", devPlatform.requirePat(["manage:webhooks"]), (req, res) => {
+  res.json({ webhooks: webhookBus.list(req.pat.ownerFactionId) });
+});
+
+app.post("/api/webhooks", devPlatform.requirePat(["manage:webhooks"]), (req, res) => {
+  try {
+    const wh = webhookBus.create(req.pat.ownerFactionId, req.body || {});
+    // IMPORTANT: only call returns FULL secret. Subsequent list() masks it.
+    res.json({
+      id: wh.id, url: wh.url, events: wh.events,
+      description: wh.description, createdAt: wh.createdAt,
+      secret: wh.secret,
+      note: "Save the secret now — it will be shown only once. Use it to verify X-Warboard-Signature HMAC on incoming POSTs.",
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.delete("/api/webhooks/:id", devPlatform.requirePat(["manage:webhooks"]), (req, res) => {
+  const ok = webhookBus.remove(req.pat.ownerFactionId, req.params.id);
+  res.json({ ok });
+});
+
+app.post("/api/webhooks/:id/test", devPlatform.requirePat(["manage:webhooks"]), (req, res) => {
+  const ok = webhookBus.sendTest(req.pat.ownerFactionId, req.params.id);
+  res.json({ ok });
+});
+
+app.post("/api/webhooks/:id/reenable", devPlatform.requirePat(["manage:webhooks"]), (req, res) => {
+  const ok = webhookBus.reenable(req.pat.ownerFactionId, req.params.id);
+  res.json({ ok });
 });
 
 app.use(routes);

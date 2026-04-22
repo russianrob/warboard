@@ -1,0 +1,128 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Warboard API",
+    "version": "1.0.0",
+    "description": "Public API for third-party developers building on Warboard. All endpoints require a Personal Access Token (PAT) issued via /api/dev/pat with your Torn API key.\n\nBase URL: https://tornwar.com\n\nEvents can also be consumed via Webhooks — register a receiver URL via /api/webhooks and Warboard will POST signed JSON payloads on faction events.",
+    "contact": { "name": "RussianRob [137558]" }
+  },
+  "servers": [ { "url": "https://tornwar.com" } ],
+  "security": [ { "bearerAuth": [] } ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "wb_pat_<opaque>"
+      }
+    }
+  },
+  "paths": {
+    "/api/dev/pat": {
+      "post": {
+        "summary": "Issue a Personal Access Token",
+        "description": "Exchange your Torn API key for a long-lived PAT scoped to the given permissions. Returns the token ONCE — save it immediately.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["key", "scopes"],
+                "properties": {
+                  "key":    { "type": "string", "description": "Your Torn API key (Limited Access or higher)" },
+                  "scopes": {
+                    "type": "array",
+                    "items": { "type": "string", "enum": ["read:faction","read:oc","read:bars","subscribe:events","manage:webhooks"] }
+                  },
+                  "name":   { "type": "string", "description": "Human-readable name for this token" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Token issued" } }
+      }
+    },
+    "/api/dev/pat/list": {
+      "get": {
+        "summary": "List your active PATs",
+        "security": [],
+        "parameters": [ { "name": "key", "in": "query", "required": true, "schema": { "type": "string" } } ],
+        "responses": { "200": { "description": "List of PATs (without token material)" } }
+      }
+    },
+    "/api/dev/pat/revoke": {
+      "post": {
+        "summary": "Revoke a PAT",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object", "required": ["key","patId"],
+            "properties": { "key": { "type": "string" }, "patId": { "type": "string" } }
+          }}}
+        },
+        "responses": { "200": { "description": "Revoked" } }
+      }
+    },
+    "/api/v1/oc/spawn": {
+      "get": {
+        "summary": "OC spawn data for a faction",
+        "description": "Returns current OC slots, members, and recommendations. Requires scope: read:oc.",
+        "parameters": [
+          { "name": "factionId", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "OC spawn snapshot" } }
+      }
+    },
+    "/api/v1/faction/{factionId}/war": {
+      "get": {
+        "summary": "Current war state for faction",
+        "description": "Requires scope: read:faction.",
+        "parameters": [
+          { "name": "factionId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "War state" } }
+      }
+    },
+    "/api/webhooks": {
+      "get": {
+        "summary": "List webhooks for your faction",
+        "description": "Requires scope: manage:webhooks.",
+        "responses": { "200": { "description": "List of webhooks" } }
+      },
+      "post": {
+        "summary": "Register a new webhook",
+        "description": "Faction events POST to your URL as JSON with HMAC-SHA256 signature in X-Warboard-Signature header. Requires scope: manage:webhooks.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object", "required": ["url","events"],
+            "properties": {
+              "url":         { "type": "string", "description": "https:// URL to deliver to" },
+              "events":      { "type": "array", "items": { "type": "string" }, "description": "Event types to subscribe to. Supports '*' and 'vault-request.*' wildcards." },
+              "description": { "type": "string" }
+            }
+          }}}
+        },
+        "responses": { "200": { "description": "Webhook created — response contains the secret; save it immediately." } }
+      }
+    },
+    "/api/webhooks/{id}": {
+      "delete": {
+        "summary": "Delete a webhook",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": { "200": { "description": "Deleted" } }
+      }
+    },
+    "/api/webhooks/{id}/test": {
+      "post": {
+        "summary": "Send a test event to this webhook",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": { "200": { "description": "Test dispatched" } }
+      }
+    }
+  }
+}
