@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb27
+// @version      2.73.0-wb28
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2039,7 +2039,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb27",
+      scriptVersion: "2.73.0-wb28",
     };
     try {
       GM_xmlhttpRequest({
@@ -2366,7 +2366,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb27",
+        scriptVersion: "2.73.0-wb28",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2685,39 +2685,57 @@ if (!singleton) {
       const until = _ffsMemberCountdowns[uid];
       if (until) {
         painted++;
-        if (!statusEl.dataset.ffsTravelInjected) {
-          statusEl.dataset.ffsTravelOriginal = statusEl.innerHTML;
-          statusEl.dataset.ffsTravelInjected = "1";
-        }
         const remaining = until * 1000 - Date.now();
+        const countdownText = ffs_formatCountdown(remaining);
         const abbr = _ffsMemberAbbr[uid] || "";
-        const returningCls = _ffsMemberReturning[uid] ? " returning" : "";
-        // wb27: wrap in a marquee-capable track so long country names
-        // scroll instead of getting clipped. The overflow class + shift
-        // are applied after the paint below based on measured widths.
-        statusEl.innerHTML =
-          `<span class="ffs-travel-marquee"><span class="ffs-mq-track">`
-          + `<span class="ffs-travel-status${returningCls}">${FFS_PLANE_SVG}`
-          + `<span class="ffs-abbr">${abbr}</span>`
-          + `<span>${ffs_formatCountdown(remaining)}</span></span>`
-          + `</span></span>`;
-        // Post-paint: detect overflow and enable the marquee animation
-        // with a per-row shift so it scrolls exactly the hidden amount.
-        const marquee = statusEl.querySelector(".ffs-travel-marquee");
-        const track = statusEl.querySelector(".ffs-mq-track");
-        if (marquee && track) {
-          // RAF so layout has stabilised before we measure.
-          requestAnimationFrame(() => {
-            const overflowPx = track.scrollWidth - marquee.clientWidth;
-            if (overflowPx > 2) {
-              marquee.classList.add("overflow");
-              marquee.style.setProperty("--ffs-mq-shift", `-${overflowPx + 4}px`);
-              // Duration scales with how much there is to scroll: 3s base
-              // + 50ms per overflowed pixel. Caps at 15s.
-              const dur = Math.min(15, 3 + overflowPx * 0.05);
-              marquee.style.setProperty("--ffs-mq-dur", `${dur.toFixed(1)}s`);
-            }
-          });
+        const isReturning = !!_ffsMemberReturning[uid];
+        const returningCls = isReturning ? " returning" : "";
+
+        // wb28: build the marquee DOM ONCE per member and then only
+        // patch the countdown text on subsequent ticks. Rebuilding
+        // innerHTML every second (wb27) destroyed the marquee
+        // animation state and made it reset to 0 every tick.
+        let existingCountdown = statusEl.querySelector(".ffs-mq-countdown");
+        let existingAbbr = statusEl.querySelector(".ffs-abbr");
+
+        if (existingCountdown && existingAbbr) {
+          // Update in place — only patch what changes.
+          if (existingCountdown.textContent !== countdownText) {
+            existingCountdown.textContent = countdownText;
+          }
+          if (existingAbbr.textContent !== abbr) {
+            existingAbbr.textContent = abbr;
+          }
+          const statusSpan = statusEl.querySelector(".ffs-travel-status");
+          if (statusSpan) {
+            statusSpan.classList.toggle("returning", isReturning);
+          }
+        } else {
+          // First paint for this row — build the marquee DOM.
+          if (!statusEl.dataset.ffsTravelInjected) {
+            statusEl.dataset.ffsTravelOriginal = statusEl.innerHTML;
+            statusEl.dataset.ffsTravelInjected = "1";
+          }
+          statusEl.innerHTML =
+            `<span class="ffs-travel-marquee"><span class="ffs-mq-track">`
+            + `<span class="ffs-travel-status${returningCls}">${FFS_PLANE_SVG}`
+            + `<span class="ffs-abbr">${abbr}</span>`
+            + `<span class="ffs-mq-countdown">${countdownText}</span></span>`
+            + `</span></span>`;
+
+          const marquee = statusEl.querySelector(".ffs-travel-marquee");
+          const track = statusEl.querySelector(".ffs-mq-track");
+          if (marquee && track) {
+            requestAnimationFrame(() => {
+              const overflowPx = track.scrollWidth - marquee.clientWidth;
+              if (overflowPx > 2) {
+                marquee.classList.add("overflow");
+                marquee.style.setProperty("--ffs-mq-shift", `-${overflowPx + 4}px`);
+                const dur = Math.min(15, 3 + overflowPx * 0.05);
+                marquee.style.setProperty("--ffs-mq-dur", `${dur.toFixed(1)}s`);
+              }
+            });
+          }
         }
       } else if (statusEl.dataset.ffsTravelInjected) {
         // Member is no longer travelling — restore original.
