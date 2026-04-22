@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.34
+// @version      3.1.35
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.35 — Click-to-sort on Outcome EV tables: click any of the three numeric column headers (Pass %, Top end %, Q score) to rank OCs by that metric. Default sort is Top end % descending so the highest-payout slate is always on top once data lands. Click the same header twice to flip direction. Arrow (▼/▲) shows which column/direction is currently active. Rows still fetching stay anchored at the bottom of descending sorts. Info-icon (?) clicks continue to open tooltips without triggering a sort.
 // v3.1.34 — Clickable info tooltips on Outcome EV column headers: click the ? next to Pass %, Top end %, or Q score for a short explanation of each metric. Reuses the existing CPR/scope tooltip pattern; tooltip closes on click-outside or second click on the same icon.
 // v3.1.33 — Outcome EV now renders in BOTH tabs: Admin tab shows Recruiting OCs (so admins can see expected EV as slates fill), Engines tab keeps Planning OCs (locked slates, numbers reflect actual outcome). Both panels share the same /api/oc/outcome fetch path and 15-min server cache. Recruiting panel footer warns about CPR-50 neutral for empty slots; Planning panel has no caveat since every slot is filled.
 // v3.1.32 — Outcome EV moved to Engines tab + repurposed the Slot Optimizer toggle. Previous v3.1.31 placement in the Admin tab is removed. The "Slot Optimizer" engine now renders as "Outcome EV" and shows per-OC Pass %, Top-end %, and Q score for OCs in Planning status (fully filled, waiting to launch or already running). No more CPR-50 fallback noise since every Planning slot has a real placed member. Legacy server toggle key eng-slot-optimizer reused so existing engine state persists; the server's old member-to-slot assignment payload is ignored client-side.
@@ -237,7 +238,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.34';
+    const SCRIPT_VERSION = '3.1.35';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4101,11 +4102,14 @@
         const ttPass = 'Probability the full slate clears every checkpoint and the OC succeeds. Derived by tornprobability.com from the per-slot CPR array.';
         const ttTop  = 'Probability of hitting goodEnding1 — the highest-payout outcome. A successful OC still forks into multiple reward tiers; this is the chance of landing on the best one.';
         const ttQ    = 'Weighted quality score (roughly 0–1). goodEnding1 counts 1.0, goodEnding2 counts 0.7, goodEnding3 counts 0.4, every other good ending counts 0.2. Single number for comparing expected reward across OCs.';
-        html += `<table class="oc-table"><thead><tr>`;
+        // v3.1.35: click-to-sort on the three numeric columns. Default
+        // sort is Top end % descending, applied once the async fetches
+        // populate the cells. Click a header again to flip direction.
+        html += `<table class="oc-table oc-ev-table" data-sort-col="top" data-sort-dir="desc"><thead><tr>`;
         html += `<th>OC</th><th>Lvl</th>`;
-        html += `<th>Pass % <span class="oc-ev-info" data-tt-title="Pass %" data-tt="${ttPass}">?</span></th>`;
-        html += `<th>Top end % <span class="oc-ev-info" data-tt-title="Top end %" data-tt="${ttTop}">?</span></th>`;
-        html += `<th>Q score <span class="oc-ev-info" data-tt-title="Q score" data-tt="${ttQ}">?</span></th>`;
+        html += `<th class="oc-ev-sort" data-col="pass" style="cursor:pointer;">Pass % <span class="oc-ev-sort-ind"></span> <span class="oc-ev-info" data-tt-title="Pass %" data-tt="${ttPass}">?</span></th>`;
+        html += `<th class="oc-ev-sort" data-col="top"  style="cursor:pointer;">Top end % <span class="oc-ev-sort-ind">▼</span> <span class="oc-ev-info" data-tt-title="Top end %" data-tt="${ttTop}">?</span></th>`;
+        html += `<th class="oc-ev-sort" data-col="q"    style="cursor:pointer;">Q score <span class="oc-ev-sort-ind"></span> <span class="oc-ev-info" data-tt-title="Q score" data-tt="${ttQ}">?</span></th>`;
         html += `</tr></thead><tbody>`;
         for (const c of matching) {
             html += `<tr data-oc-outcome-id="${c.id}">`;
@@ -4167,12 +4171,69 @@
                 const pass = row.querySelector('.oc-outcome-pass');
                 const top  = row.querySelector('.oc-outcome-top');
                 const q    = row.querySelector('.oc-outcome-q');
-                if (pass) { pass.style.color = colour(passPct); pass.textContent = passPct.toFixed(1) + '%'; }
-                if (top)  { top.style.color  = colour(topPct * 2); top.textContent  = topPct.toFixed(1) + '%'; }
-                if (q)    { q.style.color    = colour(qScore * 100); q.textContent  = qScore.toFixed(3); }
+                if (pass) { pass.style.color = colour(passPct); pass.textContent = passPct.toFixed(1) + '%'; pass.dataset.val = passPct; }
+                if (top)  { top.style.color  = colour(topPct * 2); top.textContent  = topPct.toFixed(1) + '%'; top.dataset.val = topPct; }
+                if (q)    { q.style.color    = colour(qScore * 100); q.textContent  = qScore.toFixed(3); q.dataset.val = qScore; }
+                // Re-apply whichever sort is currently active on this
+                // specific table, so rankings update as data arrives.
+                sortOutcomeEvTable(row.closest('.oc-ev-table'));
             } catch (_) { /* swallow; row stays as '…' */ }
         }
     }
+
+    // v3.1.35: sort helper for the Outcome EV tables. Reads current sort
+    // state from the table's data-sort-col / data-sort-dir attributes,
+    // pulls each row's value from the matching <td data-val="..."> on
+    // the target column, sorts, and re-appends. Rows still in the '…'
+    // placeholder state are treated as -Infinity so they bubble to the
+    // bottom of a descending sort (where "no data" is least useful).
+    function sortOutcomeEvTable(table) {
+        if (!table) return;
+        const col = table.dataset.sortCol || 'top';
+        const dir = table.dataset.sortDir === 'asc' ? 'asc' : 'desc';
+        const tbody = table.querySelector('tbody');
+        if (!tbody) return;
+        const cls = col === 'pass' ? '.oc-outcome-pass'
+                  : col === 'q'    ? '.oc-outcome-q'
+                  :                  '.oc-outcome-top';
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort((a, b) => {
+            const ta = a.querySelector(cls);
+            const tb = b.querySelector(cls);
+            const va = ta && ta.dataset.val !== undefined ? Number(ta.dataset.val) : -Infinity;
+            const vb = tb && tb.dataset.val !== undefined ? Number(tb.dataset.val) : -Infinity;
+            return dir === 'asc' ? (va - vb) : (vb - va);
+        });
+        for (const r of rows) tbody.appendChild(r);
+        // Update header indicators
+        for (const th of table.querySelectorAll('.oc-ev-sort')) {
+            const ind = th.querySelector('.oc-ev-sort-ind');
+            if (!ind) continue;
+            if (th.dataset.col === col) ind.textContent = dir === 'asc' ? '▲' : '▼';
+            else ind.textContent = '';
+        }
+    }
+
+    // Click delegation for sortable Outcome EV column headers. Ignores
+    // clicks on the nested info-icon (that has its own handler).
+    document.addEventListener('click', (e) => {
+        const th = e.target.closest && e.target.closest('.oc-ev-sort');
+        if (!th) return;
+        if (e.target.closest('.oc-ev-info')) return;  // info icon owns its own click
+        const table = th.closest('.oc-ev-table');
+        if (!table) return;
+        const col = th.dataset.col;
+        if (!col) return;
+        const curCol = table.dataset.sortCol || 'top';
+        const curDir = table.dataset.sortDir === 'asc' ? 'asc' : 'desc';
+        if (curCol === col) {
+            table.dataset.sortDir = curDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            table.dataset.sortCol = col;
+            table.dataset.sortDir = 'desc';
+        }
+        sortOutcomeEvTable(table);
+    });
 
     // ═══════════════════════════════════════════════════════════════════════
     //  MAIN
