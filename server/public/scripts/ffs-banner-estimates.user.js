@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb28
+// @version      2.73.0-wb29
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -199,39 +199,17 @@ if (!singleton) {
       white-space: nowrap;
       font-size: 11px;
       max-width: 100%;
+      cursor: pointer;
+      user-select: none;
     }
+    .ffs-travel-status:hover { filter: brightness(1.2); }
     .ffs-travel-status .ffs-plane {
       width: 10px; height: 10px; fill: currentColor; flex-shrink: 0;
     }
     .ffs-travel-status.returning .ffs-plane { transform: scaleX(-1); }
-    .ffs-travel-status .ffs-abbr {
-      opacity: 0.8; font-size: 9px; margin-right: 1px;
-    }
-    /* wb27: marquee scroll for overflowing travel status. Wrapper
-       has overflow:hidden; the inner track gets animated via JS
-       only when content doesn't fit. */
-    .status:has(.ffs-travel-marquee) {
-      white-space: nowrap; overflow: hidden;
-      position: relative;
-    }
-    .ffs-travel-marquee {
-      display: inline-block; white-space: nowrap; overflow: hidden;
-      max-width: 100%; vertical-align: middle;
-    }
-    .ffs-travel-marquee .ffs-mq-track {
-      display: inline-block; white-space: nowrap; padding-left: 0;
-      will-change: transform;
-    }
-    .ffs-travel-marquee.overflow .ffs-mq-track {
-      animation: ffs-mq-scroll var(--ffs-mq-dur, 10s) linear infinite;
-    }
-    /* 0–15% pause on start, 45–55% pause at end, 85–100% pause back.
-       translateX uses --ffs-mq-shift in px so we can tune per-row. */
-    @keyframes ffs-mq-scroll {
-      0%, 12%   { transform: translateX(0); }
-      45%, 55%  { transform: translateX(var(--ffs-mq-shift, 0px)); }
-      88%, 100% { transform: translateX(0); }
-    }
+    /* wb29: default shows countdown; click toggles to country name. */
+    .ffs-travel-status .ffs-mq-value { white-space: nowrap; }
+    .status:has(.ffs-travel-status) { overflow: hidden; white-space: nowrap; }
   `);
   GM_addStyle(`
             .ff-scouter-indicator {
@@ -2039,7 +2017,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb28",
+      scriptVersion: "2.73.0-wb29",
     };
     try {
       GM_xmlhttpRequest({
@@ -2366,7 +2344,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb28",
+        scriptVersion: "2.73.0-wb29",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2687,53 +2665,51 @@ if (!singleton) {
         painted++;
         const remaining = until * 1000 - Date.now();
         const countdownText = ffs_formatCountdown(remaining);
-        const abbr = _ffsMemberAbbr[uid] || "";
+        const countryText = _ffsMemberAbbr[uid] || "";
         const isReturning = !!_ffsMemberReturning[uid];
         const returningCls = isReturning ? " returning" : "";
 
-        // wb28: build the marquee DOM ONCE per member and then only
-        // patch the countdown text on subsequent ticks. Rebuilding
-        // innerHTML every second (wb27) destroyed the marquee
-        // animation state and made it reset to 0 every tick.
-        let existingCountdown = statusEl.querySelector(".ffs-mq-countdown");
-        let existingAbbr = statusEl.querySelector(".ffs-abbr");
+        // wb29: marquee abandoned. Default: just plane + countdown.
+        // Click toggles to country name. State persists on the
+        // element via dataset.ffsShowCountry.
+        let statusSpan = statusEl.querySelector(".ffs-travel-status");
+        const valueSpan = statusEl.querySelector(".ffs-mq-value");
 
-        if (existingCountdown && existingAbbr) {
-          // Update in place — only patch what changes.
-          if (existingCountdown.textContent !== countdownText) {
-            existingCountdown.textContent = countdownText;
+        if (statusSpan && valueSpan) {
+          // Update in place.
+          statusSpan.dataset.ffsCountry = countryText;
+          statusSpan.dataset.ffsTime = countdownText;
+          const showCountry = statusSpan.dataset.ffsShowCountry === "1";
+          const desired = showCountry ? countryText : countdownText;
+          if (valueSpan.textContent !== desired) {
+            valueSpan.textContent = desired;
           }
-          if (existingAbbr.textContent !== abbr) {
-            existingAbbr.textContent = abbr;
-          }
-          const statusSpan = statusEl.querySelector(".ffs-travel-status");
-          if (statusSpan) {
-            statusSpan.classList.toggle("returning", isReturning);
-          }
+          statusSpan.classList.toggle("returning", isReturning);
         } else {
-          // First paint for this row — build the marquee DOM.
+          // First paint for this row.
           if (!statusEl.dataset.ffsTravelInjected) {
             statusEl.dataset.ffsTravelOriginal = statusEl.innerHTML;
             statusEl.dataset.ffsTravelInjected = "1";
           }
           statusEl.innerHTML =
-            `<span class="ffs-travel-marquee"><span class="ffs-mq-track">`
-            + `<span class="ffs-travel-status${returningCls}">${FFS_PLANE_SVG}`
-            + `<span class="ffs-abbr">${abbr}</span>`
-            + `<span class="ffs-mq-countdown">${countdownText}</span></span>`
-            + `</span></span>`;
+            `<span class="ffs-travel-status${returningCls}" `
+            + `data-ffs-time="${countdownText}" `
+            + `data-ffs-country="${countryText.replace(/"/g, "&quot;")}" `
+            + `data-ffs-show-country="0" `
+            + `title="Click to toggle country / time">`
+            + `${FFS_PLANE_SVG}`
+            + `<span class="ffs-mq-value">${countdownText}</span>`
+            + `</span>`;
 
-          const marquee = statusEl.querySelector(".ffs-travel-marquee");
-          const track = statusEl.querySelector(".ffs-mq-track");
-          if (marquee && track) {
-            requestAnimationFrame(() => {
-              const overflowPx = track.scrollWidth - marquee.clientWidth;
-              if (overflowPx > 2) {
-                marquee.classList.add("overflow");
-                marquee.style.setProperty("--ffs-mq-shift", `-${overflowPx + 4}px`);
-                const dur = Math.min(15, 3 + overflowPx * 0.05);
-                marquee.style.setProperty("--ffs-mq-dur", `${dur.toFixed(1)}s`);
-              }
+          const spanEl = statusEl.querySelector(".ffs-travel-status");
+          if (spanEl) {
+            spanEl.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              ev.preventDefault();
+              const was = spanEl.dataset.ffsShowCountry === "1";
+              spanEl.dataset.ffsShowCountry = was ? "0" : "1";
+              const v = spanEl.querySelector(".ffs-mq-value");
+              if (v) v.textContent = was ? spanEl.dataset.ffsTime : spanEl.dataset.ffsCountry;
             });
           }
         }
