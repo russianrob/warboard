@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb4
+// @version      2.73.0-wb5
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -24,6 +24,16 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb5 — Diagnostics: wb4 still shows nothing for the user because
+//              (a) they don't have BSP installed so the localStorage
+//              fallback finds nothing and (b) ffscouter.com isn't
+//              returning bs_estimate / bs_estimate_human for their
+//              targets. Added console.log every time show_cached_values
+//              paints a honor bar, dumping the full FFS cached object
+//              + whether BSP localStorage had anything. This lets us
+//              see EXACTLY what the ffcache holds and decide the next
+//              fallback (likely: compute target ≈ user_total / ff if
+//              neither source has an estimate).
 // 2.73.0-wb4 — Cross-reference fallback: wb3 only showed the chip when
 //              FFS returned bs_estimate_human, which is a premium-tier
 //              field that's missing for most targets. Now chip resolves
@@ -1689,19 +1699,28 @@ if (!singleton) {
         });
         $(element).append(img);
 
-        // WARBOARD FORK (wb3/wb4): also stamp an estimate chip on the
-        // honor-bar indicator next to the FF arrow. This is the "FFS
-        // numbers on the banner" request — honor bar IS the banner.
+        // WARBOARD FORK (wb3/wb4/wb5): stamp an estimate chip next to
+        // the FF arrow on the honor bar.
         //
-        // Multi-source resolution (wb4): not every target has a FFS
-        // bs_estimate from ffscouter.com (it's a premium-tier field), so
-        // we fall back to BSP's prediction stored in localStorage — that's
-        // the same data BSP itself shows on the honor bar. Priority:
-        //   1. cached.bs_estimate_human (already-formatted FFS string)
-        //   2. cached.bs_estimate (FFS raw number → format ourselves)
-        //   3. BSP's TDup.battleStatsPredictor.cache.prediction.<id>
+        // wb5: verbose diagnostic logging so we can see EXACTLY what FFS
+        // stored in its cache for each target and why a chip does or
+        // doesn't paint. Logs to the standard browser console (not
+        // gated behind ffdebug) so users can self-diagnose with
+        // devtools open.
         $(element).find(".ff-scouter-est-inline").remove();
         const chipInfo = ffs_resolve_estimate_chip(player_id, cached);
+        console.log("[FFS Banner wb5] honor-bar paint for",
+          player_id,
+          "| FFS fields:", {
+            value: cached.value,
+            bs_estimate: cached.bs_estimate,
+            bs_estimate_human: cached.bs_estimate_human,
+            distribution_human: cached.distribution_human,
+          },
+          "| BSP cache:", (function() {
+            try { return localStorage.getItem("tdup.battleStatsPredictor.cache.prediction." + player_id) ? "present" : "absent"; } catch(_){return "n/a";}
+          })(),
+          "| chip result:", chipInfo || "NONE - no data source fired");
         if (chipInfo) {
           const estSpan = $("<span>", {
             class: "ff-scouter-est-inline",
