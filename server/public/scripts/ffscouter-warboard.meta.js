@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         FF Scouter V2 — Warboard Fork
-// @namespace    tornwar.com
+// @name         FF Scouter V2
+// @namespace    Violentmonkey Scripts
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb1
-// @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
-// @description  Shows the expected Fair Fight score against targets and faction war status. Warboard fork.
+// @version      2.73
+// @author       rDacted, Weav3r, xentac, Glasnost
+// @description  Shows the expected Fair Fight score against targets and faction war status
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -14,6 +14,7 @@
 // @grant        GM_addStyle
 // @connect      ffscouter.com
 // @license      GPL-3.0
-// @downloadURL  https://tornwar.com/scripts/ffscouter-warboard.user.js
-// @updateURL    https://tornwar.com/scripts/ffscouter-warboard.meta.js
+// @downloadURL https://update.greasyfork.org/scripts/535292/FF%20Scouter%20V2.user.js
+// @updateURL https://update.greasyfork.org/scripts/535292/FF%20Scouter%20V2.meta.js
 // ==/UserScript==
+

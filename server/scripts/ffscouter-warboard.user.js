@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         FF Scouter V2 — Warboard Fork
-// @namespace    tornwar.com
+// @name         FF Scouter V2
+// @namespace    Violentmonkey Scripts
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb1
+// @version      2.73
 // @author       rDacted, Weav3r, xentac, Glasnost
 // @description  Shows the expected Fair Fight score against targets and faction war status
 // @grant        GM_xmlhttpRequest
@@ -14,26 +14,9 @@
 // @grant        GM_addStyle
 // @connect      ffscouter.com
 // @license      GPL-3.0
-// @downloadURL  https://tornwar.com/scripts/ffscouter-warboard.user.js
-// @updateURL    https://tornwar.com/scripts/ffscouter-warboard.meta.js
+// @downloadURL https://update.greasyfork.org/scripts/535292/FF%20Scouter%20V2.user.js
+// @updateURL https://update.greasyfork.org/scripts/535292/FF%20Scouter%20V2.meta.js
 // ==/UserScript==
-
-// =============================================================================
-// WARBOARD FORK — FF Scouter V2
-// =============================================================================
-// Upstream: https://greasyfork.org/en/scripts/535292  (GPL-3.0)
-// Original authors: rDacted, Weav3r, xentac, Glasnost
-// Fork hosted at:   https://tornwar.com/scripts/ffscouter-warboard.user.js
-//
-// This fork exists so we can make Warboard-specific modifications to the
-// clean upstream V2 (not the GFOUR "BS Estimates modded" variant). All
-// changes must be documented in the CHANGELOG below. License stays GPL-3.0.
-//
-// CHANGELOG
-// -----------------------------------------------------------------------------
-// 2.73.0-wb1 — Initial fork of upstream FF Scouter V2 (2.73). No code changes,
-//              only rename + retarget update channel to tornwar.com.
-// =============================================================================
 
 const FF_VERSION = "2.73";
 const API_INTERVAL = 30000;
