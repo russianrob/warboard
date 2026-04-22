@@ -1836,7 +1836,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb11",
+      scriptVersion: "2.73.0-wb12",
     };
     try {
       GM_xmlhttpRequest({
@@ -2143,7 +2143,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb11",
+        scriptVersion: "2.73.0-wb12",
       };
       GM_xmlhttpRequest({
         method: "POST",
