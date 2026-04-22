@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb33
+// @version      2.73.0-wb34
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2017,7 +2017,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb33",
+      scriptVersion: "2.73.0-wb34",
     };
     try {
       GM_xmlhttpRequest({
@@ -2344,7 +2344,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb33",
+        scriptVersion: "2.73.0-wb34",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2459,10 +2459,10 @@ if (!singleton) {
   // page countdowns).
   const _ffsFlightFetchInflight = new Set();
   const _ffsFlightFetchFailures = new Map(); // uid → lastFailTs
+  let _ffsFlightDiagCount = 0;
   async function ffs_fetchFlightForMember(uid) {
-    if (_ffsMemberCountdowns[uid]) return; // already have arrival time
+    if (_ffsMemberCountdowns[uid]) return;
     if (_ffsFlightFetchInflight.has(uid)) return;
-    // Back off for 60s after a failure per uid so we don't hammer.
     const lastFail = _ffsFlightFetchFailures.get(uid) || 0;
     if (Date.now() - lastFail < 60_000) return;
     _ffsFlightFetchInflight.add(uid);
@@ -2473,28 +2473,44 @@ if (!singleton) {
           method: "GET",
           url,
           onload: (resp) => {
+            let outcome = "ok", err = null, landingTs = null, keys = null;
             try {
               if (!resp || resp.status !== 200) throw new Error("HTTP " + resp?.status);
               const data = JSON.parse(resp.responseText);
-              if (!data || data.error || !data.current) throw new Error(data?.error || "no current");
+              if (data) keys = Object.keys(data);
+              if (!data || data.error) throw new Error(data?.error || "error");
+              if (!data.current) throw new Error("no current (not travelling per FFS)");
               const f = data.current;
-              // Use latest_arrival_time as the authoritative landing moment
-              // (consistent with Torn's own "Landing" message timing).
-              const landingTs = f.latest_arrival_time || f.earliest_arrival_time;
+              landingTs = f.latest_arrival_time || f.earliest_arrival_time;
               if (landingTs) {
                 _ffsMemberCountdowns[uid] = landingTs;
-                // Travel direction: if current.destination_country_code is
-                // "xxx" then they're Returning (landing back in Torn). The
-                // ffscouter endpoint mostly uses arrival coords, so keep
-                // whatever was recorded from the DOM/Torn-API scrape.
+              } else {
+                throw new Error("current present but no arrival timestamps");
               }
             } catch (e) {
+              outcome = "failed";
+              err = String(e?.message || e);
               _ffsFlightFetchFailures.set(uid, Date.now());
+            }
+            // Diag first N fetches so we see why fetches don't populate.
+            if (_ffsFlightDiagCount < 8) {
+              _ffsFlightDiagCount++;
+              ffs_travelDiag({
+                source: "flight-fetch",
+                uid, outcome, err,
+                landingTs,
+                respStatus: resp?.status,
+                respBody: resp?.responseText ? String(resp.responseText).slice(0, 240) : null,
+              });
             }
             resolve();
           },
-          onerror: () => {
+          onerror: (err) => {
             _ffsFlightFetchFailures.set(uid, Date.now());
+            if (_ffsFlightDiagCount < 8) {
+              _ffsFlightDiagCount++;
+              ffs_travelDiag({ source: "flight-fetch", uid, outcome: "network-error", err: String(err?.error || err) });
+            }
             resolve();
           },
         });
