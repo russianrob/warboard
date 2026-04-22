@@ -13,8 +13,14 @@ const db = {
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Dedupe war.started webhook emission: WarScanner sweeps every few
+// minutes and will keep seeing the same active war — we only want the
+// event on first detection. Cleared when the process restarts.
+const _lastSeenWars = new Set();
+
 async function scanFactions() {
     console.log('[WarScanner] Starting ranked war scan sweep...');
+    // dedupe war.started webhook emission per warId across sweeps
     
     try {
         const factions = await db.getAllRegisteredFactions();
@@ -45,6 +51,20 @@ async function scanFactions() {
                             const enemyName = warData.factions[enemyId]?.name || 'Unknown';
                             console.log(`[WarScanner] Active Ranked War detected! WarID: ${warId}, Enemy: ${enemyName} (${enemyId})`);
                             startHeatmapScraper(warId, enemyId, faction.apiKey, enemyName);
+                            // Webhook event — fires once per newly-detected war.
+                            // _lastSeenWars dedupes so WarScanner sweep doesn't
+                            // emit repeatedly for the same ongoing war.
+                            try {
+                                if (!_lastSeenWars.has(warId)) {
+                                    _lastSeenWars.add(warId);
+                                    const { emit } = await import('./webhook-bus.js');
+                                    emit(factionIdStr, 'war.started', {
+                                        warId, enemyFactionId: enemyId, enemyName,
+                                        startsAt: warData.war?.start ?? null,
+                                        target: warData.war?.target ?? null,
+                                    });
+                                }
+                            } catch (_) {}
                         }
                     }
                 }

@@ -121,6 +121,25 @@ export function startChainMonitor(io, warId) {
         }
       }
 
+      // ── Webhook: chain.milestone — fires the moment chain crosses a
+      // bonus threshold (10, 25, 50, 100, …). Compared to the "imminent"
+      // push alert which warns 1-2 hits BEFORE the milestone, this fires
+      // exactly ON the milestone so webhook consumers see "we just hit 100".
+      if (!isCoolingDown && chain.current >= CHAIN_MIN_HITS) {
+        const prevValue = prevChain.current || 0;
+        for (const threshold of BONUS_HITS) {
+          if (prevValue < threshold && chain.current >= threshold) {
+            try {
+              const { emit } = await import('./webhook-bus.js');
+              emit(war.factionId, 'chain.milestone', {
+                warId, current: chain.current, milestone: threshold,
+                timeout: chain.timeout, cooldown: chain.cooldown,
+              });
+            } catch (_) {}
+          }
+        }
+      }
+
       // ── War score check (every 60s) ──
       const lastCheck = lastScoreCheck.get(warId) || 0;
       if (Date.now() - lastCheck > WAR_SCORE_CHECK_INTERVAL) {
@@ -137,6 +156,14 @@ export function startChainMonitor(io, warId) {
             war.warResult = myScore > enemyScore ? 'victory' : myScore < enemyScore ? 'defeat' : 'draw';
             store.saveState();
             console.log(`[chain] War ended: ${war.factionId} vs ${war.enemyFactionId} — ${war.warResult.toUpperCase()} (${myScore} vs ${enemyScore})`);
+            try {
+              const { emit } = await import('./webhook-bus.js');
+              emit(war.factionId, 'war.ended', {
+                warId, enemyFactionId: war.enemyFactionId,
+                result: war.warResult, myScore, enemyScore,
+                durationMs: war.warEndedAt - (war.warStartedAt || war.warEndedAt),
+              });
+            } catch (_) {}
             // Broadcast war-ended event to all clients
             if (io) {
               io.to(`war_${warId}`).emit('war_ended', {
