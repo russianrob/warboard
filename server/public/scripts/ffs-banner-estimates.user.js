@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb23
+// @version      2.73.0-wb24
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2011,7 +2011,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb23",
+      scriptVersion: "2.73.0-wb24",
     };
     try {
       GM_xmlhttpRequest({
@@ -2338,7 +2338,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb23",
+        scriptVersion: "2.73.0-wb24",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2407,11 +2407,13 @@ if (!singleton) {
       }
       _ffsMemberAbbr[member.id] = ffs_abbreviateCountry(loc);
       _ffsMemberReturning[member.id] = returning;
-      // wb21: Torn v2 returns status.until=null for Traveling. The
-      // landing timestamp lives inside status.details. Accept multiple
-      // possible locations so layout changes don't break us.
-      const s = member.status;
-      const d = (s && typeof s.details === "object") ? s.details : {};
+      // wb24: fix TypeError — `typeof null === "object"` in JS, so the
+      // old guard didn't prevent d.until from throwing when details=null.
+      // Also: the last-action unix timestamp (member.last_action.timestamp)
+      // combined with a hard-coded travel duration per method MIGHT work
+      // as a proxy if Torn stops returning until.
+      const s = member.status || {};
+      const d = (s.details && typeof s.details === "object") ? s.details : {};
       const candidates = [
         s.until,
         d.until,
