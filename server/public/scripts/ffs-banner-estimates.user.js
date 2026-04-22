@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb1
+// @version      2.73.0-wb2
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -24,6 +24,13 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb2 — Fix: wb1's .buttons-wrap target was below the name banner
+//              and on some layouts didn't exist at all. Now probes multiple
+//              selectors (user-information, profile-wrapper, etc.) and
+//              injects at the TOP of the match so the badge sits next to
+//              the name. Also handles SPA navigation (XID change →
+//              wipe + repaint) and logs via ffdebug when no cached
+//              data is available, to make "I don't see it" debuggable.
 // 2.73.0-wb1 — New: paint FFS estimated stats on the profile name banner
 //              (right below .buttons-wrap, same slot BSP uses via
 //              TDup_BSPProfileInjection). Reads from the FFS IndexedDB
@@ -1694,41 +1701,74 @@ if (!singleton) {
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // WARBOARD FORK ADDITION (wb1): paint FFS estimated stats onto the
-  // profile name banner — same real estate BSP uses via
-  // TDup_BSPProfileInjection. Renders under .buttons-wrap on
-  // profiles.php?XID=… pages. Safe no-op if FFS cache has no estimate.
+  // WARBOARD FORK ADDITION (wb1/wb2): paint FFS estimated stats onto the
+  // profile NAME banner on /profiles.php?XID=…
+  //
+  // wb2: try multiple injection selectors since Torn's profile layout
+  // varies by user (classic vs alternative display, desktop vs PDA). We
+  // look at the actual name-wrapper region, not just buttons-wrap,
+  // because the name banner sits ABOVE buttons-wrap.
   // ─────────────────────────────────────────────────────────────────────
-  async function apply_to_profile_banner(buttonsWrap) {
-    if (!buttonsWrap) return;
-    if (buttonsWrap.dataset.ffsBannerPainted === "1") return;
+  function ffs_find_profile_inject_target() {
+    // Ordered by preference: highest priority = closest to the name.
+    const candidates = [
+      '[class^="profile-wrapper_"] [class^="user-information"]',
+      '.user-information',
+      '.content-wrapper .user-information',
+      '.profile-wrapper [class*="name"]',
+      '.profile-wrapper',
+      '.content-wrapper .profile-wrapper',
+      '.buttons-wrap', // BSP's target — fallback
+    ];
+    for (const sel of candidates) {
+      const el = document.querySelector(sel);
+      if (el) return el;
+    }
+    return null;
+  }
+
+  let _ffsBannerPaintedForId = null;
+  async function apply_to_profile_banner(_ignored) {
     if (!/torn\.com\/profiles\.php/i.test(window.location.href)) return;
-
-    // Prefer the XID query param over any link — on your own profile
-    // the only XID reference is in the URL, not in child anchors.
     const xidMatch = window.location.href.match(/XID=(\d+)/);
-    const player_id = xidMatch ? parseInt(xidMatch[1], 10)
-                               : get_player_id_in_element(buttonsWrap);
-    if (!player_id) return;
-    buttonsWrap.dataset.ffsBannerPainted = "1";
+    if (!xidMatch) return;
+    const player_id = parseInt(xidMatch[1], 10);
 
-    // Pull from cache first for instant paint, then refresh in background.
+    // Torn's SPA can navigate without reload; clear badge if XID changed.
+    if (_ffsBannerPaintedForId !== player_id) {
+      document.querySelectorAll(".ff-scouter-banner-stats").forEach(n => n.remove());
+      _ffsBannerPaintedForId = null;
+    }
+    if (document.querySelector(".ff-scouter-banner-stats")) return;
+
+    const host = ffs_find_profile_inject_target();
+    if (!host) return;
+
+    ffdebug("[FFS Banner wb] injecting for player " + player_id + " via " + host.tagName + "." + (host.className || ""));
+
     const render = async () => {
       const cached = await get_cached_value(player_id);
-      if (!cached || cached.value == null) return;
+      if (!cached || cached.value == null) {
+        ffdebug("[FFS Banner wb] no cached FF data for " + player_id + " — nothing to paint");
+        return;
+      }
 
-      let statBadge = buttonsWrap.parentNode.querySelector(".ff-scouter-banner-stats");
-      if (!statBadge) {
-        statBadge = document.createElement("div");
-        statBadge.className = "ff-scouter-banner-stats";
-        statBadge.style.cssText = "margin:6px 0;padding:6px 10px;border-radius:6px;"
-          + "font-family:inherit;display:inline-block;line-height:1.35;";
-        buttonsWrap.parentNode.insertBefore(statBadge, buttonsWrap.nextSibling);
+      let badge = document.querySelector(".ff-scouter-banner-stats");
+      if (!badge) {
+        badge = document.createElement("div");
+        badge.className = "ff-scouter-banner-stats";
+        badge.style.cssText =
+          "margin:8px 0;padding:8px 12px;border-radius:6px;"
+          + "font-family:inherit;display:block;line-height:1.45;font-size:13px;"
+          + "box-shadow:inset 0 0 0 1px rgba(255,255,255,0.1);";
+        // Insert at the top of the host element so it sits next to the name.
+        host.insertBefore(badge, host.firstChild);
+        _ffsBannerPaintedForId = player_id;
       }
 
       const bg  = get_ff_colour(cached.value);
       const fg  = get_contrast_color(bg);
-      const est = cached.bs_estimate_human || "—";
+      const est = cached.bs_estimate_human || "?";
       const ff  = get_ff_string(cached);
       const diff = get_difficulty_text(cached.value);
       const now = Date.now() / 1000;
@@ -1738,18 +1778,18 @@ if (!singleton) {
         const days = Math.round(ageSec / (24 * 60 * 60));
         ageNote = ` · ${days}d old`;
       }
-      statBadge.style.background = bg;
-      statBadge.style.color = fg;
-      statBadge.innerHTML =
-        `<span style="font-weight:700;">Est. Stats:</span> `
-        + `<span style="font-weight:600;">${est}</span>`
-        + ` <span style="opacity:.75;">· FF ${ff} (${diff})${ageNote}</span>`;
+      badge.style.background = bg;
+      badge.style.color = fg;
+      badge.innerHTML =
+        `<span style="font-weight:700;">FFS Est. Stats:</span> `
+        + `<span style="font-weight:700;font-size:15px;">${est}</span>`
+        + ` <span style="opacity:.85;">· FF ${ff} (${diff})${ageNote}</span>`;
     };
 
     render();
     try {
       await update_ff_cache([player_id], render);
-    } catch (_) { /* offline / no key → cached-only paint stays */ }
+    } catch (_) {}
   }
 
   async function apply_to_mini_profile(mini) {
@@ -1802,12 +1842,12 @@ if (!singleton) {
     if (!node.querySelectorAll) {
       return;
     }
-    // WARBOARD FORK (wb1): if we're on a profile page and a buttons-wrap
-    // has appeared, paint the estimated-stats banner. Uses the same
-    // selector BSP targets so the visual slot is familiar.
+    // WARBOARD FORK (wb2): on profile pages, keep trying to paint the
+    // name-banner FFS badge on every mutation. The target is located
+    // via a multi-selector probe (see ffs_find_profile_inject_target)
+    // so Torn's layout variations don't defeat us.
     if (/torn\.com\/profiles\.php/i.test(window.location.href)) {
-      const buttonsWraps = Array.from(node.querySelectorAll(".buttons-wrap"));
-      for (const bw of buttonsWraps) apply_to_profile_banner(bw);
+      apply_to_profile_banner();
     }
     var honor_bars = Array.from(node.querySelectorAll(".honor-text-wrap"));
     var name_elems = Array.from(node.querySelectorAll(".user.name"));
