@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb35
+// @version      2.73.0-wb36
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2017,7 +2017,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb35",
+      scriptVersion: "2.73.0-wb36",
     };
     try {
       GM_xmlhttpRequest({
@@ -2344,7 +2344,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb35",
+        scriptVersion: "2.73.0-wb36",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2776,6 +2776,48 @@ if (!singleton) {
     });
   }
 
+  // wb36: paint live landing-time countdowns inside mini-profile cards
+  // (the tooltip that appears when hovering a name/portrait anywhere on
+  // Torn). On open, trigger an FFScouter flight fetch for that uid; each
+  // tick, inject/update a "✈ hh:mm:ss" chip into the card's description
+  // block. Same data source as the row paint — piggybacks on
+  // _ffsMemberCountdowns so repaints stay cheap.
+  function ffs_paintMiniProfileCountdowns() {
+    if (!key) return;
+    const minis = document.querySelectorAll(
+      '[class^="profile-mini-_userProfileWrapper_"]'
+    );
+    minis.forEach((mini) => {
+      const uid = String(get_player_id_in_element(mini) || "");
+      if (!uid) return;
+      // Fire flight fetch on first sight of this mini-profile; function
+      // internally dedupes inflight + respects the 60s failure cooldown.
+      ffs_fetchFlightForMember(uid);
+
+      const until = _ffsMemberCountdowns[uid];
+      let chip = mini.querySelector(".ffs-mini-countdown");
+      if (until) {
+        const remaining = until * 1000 - Date.now();
+        const countdownText = ffs_formatCountdown(remaining);
+        if (!chip) {
+          const description = mini.querySelector(".description") || mini;
+          chip = document.createElement("span");
+          chip.className = "ffs-mini-countdown";
+          chip.style.cssText =
+            "display:block;margin-top:4px;color:#4ade80;"
+            + "font-weight:600;font-size:12px;";
+          description.appendChild(chip);
+        }
+        const country = _ffsMemberAbbr[uid] || "";
+        const ret = !!_ffsMemberReturning[uid];
+        const prefix = country ? (ret ? `from ${country} — ` : `to ${country} — `) : "";
+        chip.textContent = `\u2708 ${prefix}${countdownText}`;
+      } else if (chip) {
+        chip.remove();
+      }
+    });
+  }
+
   function ffs_initTravelCountdowns() {
     if (!/\/(war|factions)\.php/.test(location.pathname)) return;
     if (!key) {
@@ -2904,6 +2946,13 @@ if (!singleton) {
     }, true);
   }
   ffs_initTravelCountdowns();
+
+  // wb36: mini-profile countdown ticker — runs on every Torn page,
+  // since mini-profiles can appear anywhere (chat, messages, forums,
+  // attacks log, etc.), not just war/faction pages.
+  if (key) {
+    setInterval(ffs_paintMiniProfileCountdowns, 1000);
+  }
 
   // ─────────────────────────────────────────────────────────────────────
   // WARBOARD FORK (wb14): FFS sort button on war/faction member lists.
