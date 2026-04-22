@@ -4379,8 +4379,18 @@ router.get("/api/oc/spawn-key", async (req, res) => {
           }
           return res.json({ ...data, viewer: buildViewer(playerInfo), engines: retryEngines });
         } catch (retryErr) {
-          console.error(`[oc/spawn-key] pool key failed for faction ${fid}:`, retryErr.message);
-          removeFactionKey(fid, poolKey); // Remove dead key from pool
+          // 429 ("Too many requests" / "code 5") is transient saturation —
+          // keep the key in the cache, just try the next one this call.
+          // Evict only on auth-like failures (invalid key, revoked, insufficient
+          // access) where retrying this key would permanently fail.
+          const msg = String(retryErr.message || '');
+          const isRateLimit = /Too many requests|code 5/i.test(msg);
+          if (isRateLimit) {
+            console.warn(`[oc/spawn-key] pool key ****${poolKey.slice(-4)} rate-limited for faction ${fid} — keeping in cache, trying next`);
+          } else {
+            console.error(`[oc/spawn-key] pool key ****${poolKey.slice(-4)} failed for faction ${fid}: ${msg} — evicting`);
+            removeFactionKey(fid, poolKey);
+          }
         }
       }
     }
