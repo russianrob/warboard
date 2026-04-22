@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb21
+// @version      2.73.0-wb22
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2011,7 +2011,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb21",
+      scriptVersion: "2.73.0-wb22",
     };
     try {
       GM_xmlhttpRequest({
@@ -2338,7 +2338,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb21",
+        scriptVersion: "2.73.0-wb22",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2590,17 +2590,21 @@ if (!singleton) {
     async function ffs_resolveOwnFactionId() {
       if (_ffsOwnFactionId) return _ffsOwnFactionId;
       try {
-        // v2 API — v1 might not be allowed anymore.
+        // v2 API returns { profile: { faction: { faction_id, ... } } }
+        // for user?selections=basic. wb20 diag confirmed topKeys=['profile'].
         const r = await fetch(`https://api.torn.com/v2/user?selections=basic&key=${encodeURIComponent(key)}`);
         const d = await r.json();
+        const faction = d?.profile?.faction ?? d?.faction;
+        const fid = faction?.faction_id ?? faction?.id;
         ffs_travelDiag({ source: "own-faction-resolve", response: {
           hasError: !!d?.error,
           errorMsg: d?.error?.error,
-          hasFaction: !!d?.faction,
-          factionId: d?.faction?.id ?? d?.faction?.faction_id,
+          hasProfile: !!d?.profile,
+          hasFaction: !!faction,
+          factionId: fid,
           topKeys: d ? Object.keys(d).slice(0, 10) : [],
+          profileKeys: d?.profile ? Object.keys(d.profile).slice(0, 10) : null,
         }});
-        const fid = d?.faction?.id ?? d?.faction?.faction_id;
         if (d && !d.error && fid) {
           _ffsOwnFactionId = String(fid);
           return _ffsOwnFactionId;
