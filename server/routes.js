@@ -4024,9 +4024,69 @@ function runMemberReliability(factionId, data) {
 // TTL: entries older than 24h since last use are evicted when the cache
 // is read. Freshly-used keys are preferred in fallback rotation so
 // stale entries don't tie up slots.
+//
+// Persisted to disk so a pm2 reload doesn't wipe the cache and create a
+// cold-start gap where Limited-tier members see "insufficient access"
+// until a Full-access member refreshes. Writes are debounced so the
+// disk isn't hit on every fallback touch.
 const _factionKeyCache = new Map(); // factionId → Map<apiKey, { addedAt, lastUsedAt }>
 const FACTION_KEY_POOL_MAX = 10;
 const FACTION_KEY_TTL_MS   = 24 * 60 * 60 * 1000;
+const OC_SPAWN_KEYS_FILE   = pathJoin(process.env.DATA_DIR || './data', 'oc-spawn-keys.json');
+
+let _persistTimer = null;
+
+function _persistFactionKeysToDisk() {
+  try {
+    const out = {};
+    const cutoff = Date.now() - FACTION_KEY_TTL_MS;
+    for (const [fid, pool] of _factionKeyCache) {
+      const fresh = {};
+      for (const [key, info] of pool) {
+        if (info.lastUsedAt >= cutoff) fresh[key] = info;
+      }
+      if (Object.keys(fresh).length) out[fid] = fresh;
+    }
+    const dir = pathDirname(OC_SPAWN_KEYS_FILE);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(OC_SPAWN_KEYS_FILE, JSON.stringify(out, null, 2), "utf8");
+  } catch (e) {
+    console.warn("[oc-spawn-keys] persist failed:", e.message);
+  }
+}
+
+function _schedulePersistFactionKeys() {
+  if (_persistTimer) return;
+  _persistTimer = setTimeout(() => {
+    _persistTimer = null;
+    _persistFactionKeysToDisk();
+  }, 2000);
+}
+
+function _loadFactionKeysFromDisk() {
+  try {
+    if (!existsSync(OC_SPAWN_KEYS_FILE)) return;
+    const raw = readFileSync(OC_SPAWN_KEYS_FILE, "utf8");
+    const obj = JSON.parse(raw);
+    const cutoff = Date.now() - FACTION_KEY_TTL_MS;
+    let loaded = 0, dropped = 0;
+    for (const [fid, keys] of Object.entries(obj || {})) {
+      const pool = new Map();
+      for (const [key, info] of Object.entries(keys || {})) {
+        const lastUsedAt = Number(info?.lastUsedAt) || 0;
+        const addedAt    = Number(info?.addedAt) || lastUsedAt;
+        if (!key || lastUsedAt < cutoff) { dropped++; continue; }
+        pool.set(key, { addedAt, lastUsedAt });
+        loaded++;
+      }
+      if (pool.size) _factionKeyCache.set(fid, pool);
+    }
+    console.log(`[oc-spawn-keys] hydrated ${loaded} key(s) across ${_factionKeyCache.size} faction(s) (dropped ${dropped} stale)`);
+  } catch (e) {
+    console.warn("[oc-spawn-keys] load failed:", e.message);
+  }
+}
+_loadFactionKeysFromDisk();
 
 function _getFactionPool(fid) {
   fid = String(fid);
@@ -4049,6 +4109,7 @@ function addFactionKey(fid, key) {
   if (pool.has(key)) {
     // Refresh lastUsedAt so re-verification keeps the entry alive.
     pool.get(key).lastUsedAt = now;
+    _schedulePersistFactionKeys();
     return;
   }
   // Evict oldest-used when full.
@@ -4060,6 +4121,7 @@ function addFactionKey(fid, key) {
     if (oldest) pool.delete(oldest);
   }
   pool.set(key, { addedAt: now, lastUsedAt: now });
+  _schedulePersistFactionKeys();
 }
 
 /** Freshness-ordered list of currently-valid keys, most-recently-used first. */
@@ -4074,12 +4136,18 @@ function getFactionKeys(fid) {
 /** Mark a key as used — called when the fallback actually dispatches it. */
 function touchFactionKey(fid, key) {
   const pool = _factionKeyCache.get(String(fid));
-  if (pool && pool.has(key)) pool.get(key).lastUsedAt = Date.now();
+  if (pool && pool.has(key)) {
+    pool.get(key).lastUsedAt = Date.now();
+    _schedulePersistFactionKeys();
+  }
 }
 
 function removeFactionKey(fid, key) {
   const pool = _factionKeyCache.get(String(fid));
-  if (pool) pool.delete(key);
+  if (pool) {
+    pool.delete(key);
+    _schedulePersistFactionKeys();
+  }
 }
 const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
 const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
