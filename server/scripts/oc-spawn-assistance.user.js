@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.31
+// @version      3.1.32
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -18,6 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.32 — Outcome EV moved to Engines tab + repurposed the Slot Optimizer toggle. Previous v3.1.31 placement in the Admin tab is removed. The "Slot Optimizer" engine now renders as "Outcome EV" and shows per-OC Pass %, Top-end %, and Q score for OCs in Planning status (fully filled, waiting to launch or already running). No more CPR-50 fallback noise since every Planning slot has a real placed member. Legacy server toggle key eng-slot-optimizer reused so existing engine state persists; the server's old member-to-slot assignment payload is ignored client-side.
 // v3.1.31 — Outcome EV analyzer (admin tab only): every recruiting OC gets a row with Pass %, Top-end %, and a weighted Q-score (goodEnding1=1.0, goodEnding2=0.7, goodEnding3=0.4, everything else=0.2). Data comes from a new server endpoint /api/oc/outcome that proxies tornprobability.com's CalculateSuccess with 15-min caching. Per-slot CPRs come from each placed member's byPosition history (fallback: overall CPR → 50 neutral for empty slots). Visibility: table renders inside the Admin tab, which is already role-gated, so rank-and-file members never see it. Server endpoint enforces the same role gate as defence-in-depth (403 for non-admins hitting it directly).
 // v3.1.30 — MinCPR reset bug (and sibling settings): pushScopeOnly was hitting /api/oc/settings/update with only a `scope` query param, but that handler applied HARD-CODED defaults for every missing field — so every scope auto-detect tick silently reset mincpr → 60, cpr_boost → 15, active_days → 7, etc. Fixed on both sides: client pushScopeOnly now hits the dedicated /api/oc/scope endpoint, and /api/oc/settings/update now falls back to the stored value (not a constant) when a field is missing, so a partial push no longer clobbers untouched settings.
 // v3.1.29 — Missing-items UX fix: after a successful loan the card now fades and collapses out of the list within ~1.4s, instead of sitting there with a ✓ Loaned button until the next full refresh (which was up to ~60s away on the API + armory cache cadence). The underlying filter via mgr_recentlyLoaned was already correct; only the visual feedback was lagging. If that was the last missing item, the "All OC items allocated" message takes its place without waiting for a full reload.
@@ -234,7 +235,7 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
-    const SCRIPT_VERSION = '3.1.31';
+    const SCRIPT_VERSION = '3.1.32';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -2875,7 +2876,7 @@
     // ═══════════════════════════════════════════════════════════════════════
     //  ENGINE RENDERERS
     // ═══════════════════════════════════════════════════════════════════════
-    function renderEnginesTab(engines, viewer) {
+    function renderEnginesTab(engines, viewer, availableCrimes, cprCache) {
         engines = engines || {};
         let html = `<div style="padding:4px 0;">`;
 
@@ -2883,7 +2884,11 @@
         html += `<div style="font-size:11px;font-weight:600;color:#f3f4f6;margin-bottom:8px;">Enable/Disable Engines</div>`;
 
         html += `<div style="font-size:10px;color:#9ca3af;margin-bottom:6px;font-weight:600;">Optimization</div>`;
-        html += `<label class="oc-engine-toggle"><input type="checkbox" id="eng-slot-optimizer" ${CONFIG.ENGINE_SLOT_OPTIMIZER ? 'checked' : ''}/> <span>Slot Optimizer</span><span class="oc-engine-desc">Auto-calculate best member-to-slot assignments</span></label>`;
+        // v3.1.32: Slot Optimizer replaced by Outcome EV — same toggle id
+        // (eng-slot-optimizer) so existing server-side engine state persists,
+        // but the rendered panel is now per-OC outcome probabilities for
+        // Planning crimes instead of member-to-slot assignments.
+        html += `<label class="oc-engine-toggle"><input type="checkbox" id="eng-slot-optimizer" ${CONFIG.ENGINE_SLOT_OPTIMIZER ? 'checked' : ''}/> <span>Outcome EV</span><span class="oc-engine-desc">Per-OC Pass %, Top-end %, and Q score for Planning crimes</span></label>`;
         html += `<label class="oc-engine-toggle"><input type="checkbox" id="eng-cpr-forecaster" ${CONFIG.ENGINE_CPR_FORECASTER ? 'checked' : ''}/> <span>CPR Forecaster</span><span class="oc-engine-desc">Project member CPR trends over time</span></label>`;
 
         html += `<div style="font-size:10px;color:#9ca3af;margin:8px 0 6px;font-weight:600;">Risk</div>`;
@@ -2902,7 +2907,11 @@
         // Engine results
         if (engines.slotOptimizer || engines.failureRisk || engines.cprForecaster || engines.memberProjector || engines.memberReliability) {
             html += `<div style="margin-top:12px;border-top:1px solid #374151;padding-top:10px;">`;
-            if (engines.slotOptimizer) html += renderSlotOptimizer(engines.slotOptimizer, viewer);
+            // v3.1.32: Slot Optimizer engine toggle now renders Outcome EV
+            // instead. engines.slotOptimizer still arrives from the server
+            // (member-to-slot assignment data) but we ignore it — the new
+            // panel derives everything from availableCrimes + cprCache.
+            if (engines.slotOptimizer) html += renderOutcomeEvEngineShell(availableCrimes);
             if (engines.failureRisk) html += renderFailureRisk(engines.failureRisk);
             if (engines.cprForecaster) html += renderCprForecaster(engines.cprForecaster);
             if (engines.memberProjector) html += renderMemberProjector(engines.memberProjector);
@@ -4015,40 +4024,36 @@
                 Active=${CONFIG.ACTIVE_DAYS}d · Forecast=${CONFIG.FORECAST_HOURS}h · MinCPR=${CONFIG.MINCPR}% · Boost=${CONFIG.CPR_BOOST}%
                 &nbsp;·&nbsp; Updated: ${new Date().toLocaleTimeString()}
                 &nbsp;·&nbsp; <span style="color:#253525">CPR cached 6h server-side</span>
-            </p>
-            ${renderOutcomeAnalyzerShell(availableCrimes)}`;
-
-        // v3.1.31 (private): kick off per-OC outcome fetches after the shell
-        // is in the DOM. Admin-only endpoint — if viewer isn't admin, the
-        // server will 403 each call and the rows silently stay as 'no data'.
-        scheduleOutcomeAnalyzerFetches(availableCrimes, cprCache);
+            </p>`;
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  OUTCOME ANALYZER (private admin build)
+    //  OUTCOME EV (Engines tab; replaces Slot Optimizer)
     // ─────────────────────────────────────────────────────────────────────
-    // Renders a per-OC outcome EV table in the admin tab. Data comes from
-    // server's /api/oc/outcome, which proxies tornprobability.com's
-    // CalculateSuccess with our 15-min cache. Admin-gated server-side.
+    // Renders per-OC outcome probability table in the Engines tab, for OCs
+    // in Planning status (fully filled, waiting to launch or already
+    // running). Every slot has a real placed member, so no CPR-50 fallback
+    // noise — numbers reflect the actual slate.
     //
-    // For each recruiting OC, builds a CPR array in slot order using:
-    //   · filled slot → placed member's byPosition CPR for that exact role
-    //                    → fallback to their overall CPR
-    //                    → fallback to 50 (neutral)
-    //   · empty slot  → 50 (neutral placeholder)
-    // Shows success %, goodEnding1 (top-reward) %, and a weighted quality
-    // score where goodEnding1 counts 1.0, 2 counts 0.7, 3 counts 0.4, and
-    // goodEnding4/higher count 0.2.
-    function renderOutcomeAnalyzerShell(availableCrimes) {
-        const recruiting = normArr(availableCrimes).filter(c => c.status === 'Recruiting');
-        if (!recruiting.length) return '';
-        let html = `<h3>\u{1F3AF} Outcome EV</h3>`;
+    // Columns:
+    //   Pass %    — scenario successChance (full slate clears all checkpoints)
+    //   Top end % — goodEnding1 probability (top-tier payout)
+    //   Q score   — weighted good-ending sum: gE1×1.0 + gE2×0.7 + gE3×0.4
+    //               + all remaining good endings ×0.2. Single number for
+    //               comparing expected reward quality across OCs.
+    function renderOutcomeEvEngineShell(availableCrimes) {
+        const planning = normArr(availableCrimes).filter(c => c.status === 'Planning');
+        let html = `<div style="margin:12px 0;border:1px solid #2d6a4f;border-radius:8px;padding:10px;background:#0a1f14;">`;
+        html += `<div style="font-size:12px;font-weight:700;color:#4ade80;margin-bottom:6px;">\u{1F3AF} Outcome EV <span style="font-size:10px;font-weight:400;color:#9ca3af;margin-left:4px;">Planning OCs</span></div>`;
+        if (!planning.length) {
+            html += `<div style="color:#6b7280;font-size:11px;">No Planning OCs right now — fill an OC to see its outcome distribution.</div></div>`;
+            return html;
+        }
         html += `<table class="oc-table"><thead><tr>`;
         html += `<th>OC</th><th>Lvl</th><th>Pass %</th><th>Top end %</th><th>Q score</th>`;
         html += `</tr></thead><tbody>`;
-        for (const c of recruiting) {
-            const id = String(c.id);
-            html += `<tr data-oc-outcome-id="${id}">`;
+        for (const c of planning) {
+            html += `<tr data-oc-outcome-id="${c.id}">`;
             html += `<td><b style="color:#74c69d">${c.name}</b></td>`;
             html += `<td>${c.difficulty}</td>`;
             html += `<td class="oc-outcome-pass" style="color:#6b7280">…</td>`;
@@ -4056,17 +4061,17 @@
             html += `<td class="oc-outcome-q"    style="color:#6b7280">…</td>`;
             html += `</tr>`;
         }
-        html += `</tbody></table>`;
+        html += `</tbody></table></div>`;
         return html;
     }
 
-    async function scheduleOutcomeAnalyzerFetches(availableCrimes, cprCache) {
-        const recruiting = normArr(availableCrimes).filter(c => c.status === 'Recruiting');
-        if (!recruiting.length) return;
+    async function scheduleOutcomeEvFetches(availableCrimes, cprCache) {
+        const planning = normArr(availableCrimes).filter(c => c.status === 'Planning');
+        if (!planning.length) return;
         const apiKey = getApiKey();
         if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
 
-        for (const c of recruiting) {
+        for (const c of planning) {
             const slots = Array.isArray(c.slots) ? c.slots : [];
             const cprs = slots.map(s => {
                 const uid = s.user_id ?? s.user?.id;
@@ -4095,7 +4100,7 @@
                               + (d.goodEnding2 ?? 0) * 0.7
                               + (d.goodEnding3 ?? 0) * 0.4
                               + Object.keys(d)
-                                  .filter(k => /^goodEnding[4-9]|goodEnding1[0-9]|goodEnding[34][05]/.test(k))
+                                  .filter(k => /^goodEnding([4-9]|1[0-9]|[34][05])$/.test(k))
                                   .reduce((a, k) => a + (d[k] ?? 0) * 0.2, 0);
                 const row = document.querySelector(`tr[data-oc-outcome-id="${c.id}"]`);
                 if (!row) continue;
@@ -4106,7 +4111,7 @@
                 if (pass) { pass.style.color = colour(passPct); pass.textContent = passPct.toFixed(1) + '%'; }
                 if (top)  { top.style.color  = colour(topPct * 2); top.textContent  = topPct.toFixed(1) + '%'; }
                 if (q)    { q.style.color    = colour(qScore * 100); q.textContent  = qScore.toFixed(3); }
-            } catch (_) { /* swallow; leave row as '…' */ }
+            } catch (_) { /* swallow; row stays as '…' */ }
         }
     }
 
@@ -4659,7 +4664,13 @@
             if (enginesTab) enginesTab.style.display = canAdmin ? '' : 'none';
 
             // Render Engines tab content
-            document.getElementById('oc-tab-engines').innerHTML = renderEnginesTab(engines, viewer);
+            document.getElementById('oc-tab-engines').innerHTML = renderEnginesTab(engines, viewer, availableCrimes, cprCache);
+            // v3.1.32: if Outcome EV engine is on (uses legacy slot-optimizer
+            // flag), kick off per-OC probability fetches against our
+            // server proxy. Rows fill in as /api/oc/outcome responses land.
+            if (engines && engines.slotOptimizer) {
+                scheduleOutcomeEvFetches(availableCrimes, cprCache);
+            }
 
             // Render Auto-Dispatcher banner (personalized, above all tabs)
             if (engines && engines.autoDispatcher) {
