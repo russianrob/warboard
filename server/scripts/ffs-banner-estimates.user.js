@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb20
+// @version      2.73.0-wb21
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2011,7 +2011,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb20",
+      scriptVersion: "2.73.0-wb21",
     };
     try {
       GM_xmlhttpRequest({
@@ -2338,7 +2338,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb20",
+        scriptVersion: "2.73.0-wb21",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2407,8 +2407,28 @@ if (!singleton) {
       }
       _ffsMemberAbbr[member.id] = ffs_abbreviateCountry(loc);
       _ffsMemberReturning[member.id] = returning;
-      if (member.status.until && parseInt(member.status.until, 10) > 0) {
-        _ffsMemberCountdowns[member.id] = parseInt(member.status.until, 10);
+      // wb21: Torn v2 returns status.until=null for Traveling. The
+      // landing timestamp lives inside status.details. Accept multiple
+      // possible locations so layout changes don't break us.
+      const s = member.status;
+      const d = (s && typeof s.details === "object") ? s.details : {};
+      const candidates = [
+        s.until,
+        d.until,
+        d.arrival_time,
+        d.arrival,
+        d.arrival_at,
+        d.end,
+        d.timestamp,
+        d.eta,
+      ];
+      let until = null;
+      for (const v of candidates) {
+        const n = parseInt(v, 10);
+        if (isFinite(n) && n > 0) { until = n; break; }
+      }
+      if (until) {
+        _ffsMemberCountdowns[member.id] = until;
       }
     } else {
       delete _ffsMemberCountdowns[member.id];
@@ -2451,6 +2471,13 @@ if (!singleton) {
               statusDescription: m.status?.description,
               statusUntil: m.status?.until,
               statusLast: m.status?.last,
+              statusDetails: m.status?.details,
+              statusDetailsType: typeof m.status?.details,
+              statusDetailsKeys: m.status?.details && typeof m.status.details === "object"
+                ? Object.keys(m.status.details) : null,
+              planeImageType: m.status?.plane_image_type,
+              // Full serialized status object, 500 char cap.
+              statusJSON: (function(){ try { return JSON.stringify(m.status).slice(0, 500); } catch(_){return null;}})(),
             };
           }
         }
