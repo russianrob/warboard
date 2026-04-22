@@ -2,9 +2,9 @@
 // @name         FF Scouter V2 — Warboard Fork
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.76.0-wb1
-// @author       rDacted, Weav3r, xentac, Glasnost - modded by GFOUR (fork by RussianRob)
-// @description  Shows the expected Fair Fight score against targets and faction war status, with Battle Stats estimates on honor bars. Warboard fork.
+// @version      2.73.0-wb1
+// @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
+// @description  Shows the expected Fair Fight score against targets and faction war status. Warboard fork.
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue

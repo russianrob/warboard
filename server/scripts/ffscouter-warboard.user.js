@@ -2,9 +2,9 @@
 // @name         FF Scouter V2 — Warboard Fork
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.76.0-wb1
-// @author       rDacted, Weav3r, xentac, Glasnost - modded by GFOUR
-// @description  Shows the expected Fair Fight score against targets and faction war status, with Battle Stats estimates on honor bars
+// @version      2.73.0-wb1
+// @author       rDacted, Weav3r, xentac, Glasnost
+// @description  Shows the expected Fair Fight score against targets and faction war status
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -19,23 +19,23 @@
 // ==/UserScript==
 
 // =============================================================================
-// WARBOARD FORK — FF Scouter V2 + BS Estimates
+// WARBOARD FORK — FF Scouter V2
 // =============================================================================
-// Upstream: https://greasyfork.org/en/scripts/537486  (GPL-3.0)
-// Original authors: rDacted, Weav3r, xentac, Glasnost — modded by GFOUR
+// Upstream: https://greasyfork.org/en/scripts/535292  (GPL-3.0)
+// Original authors: rDacted, Weav3r, xentac, Glasnost
 // Fork hosted at:   https://tornwar.com/scripts/ffscouter-warboard.user.js
 //
-// This fork exists so we can make Warboard-specific modifications. All
-// changes must be documented in the CHANGELOG below. The license remains
-// GPL-3.0 — any modifications we ship stay under that license.
+// This fork exists so we can make Warboard-specific modifications to the
+// clean upstream V2 (not the GFOUR "BS Estimates modded" variant). All
+// changes must be documented in the CHANGELOG below. License stays GPL-3.0.
 //
 // CHANGELOG
 // -----------------------------------------------------------------------------
-// 2.76.0-wb1 — Initial fork of upstream 2.76. No code changes yet, just rename
-//              and retarget update channel to tornwar.com.
+// 2.73.0-wb1 — Initial fork of upstream FF Scouter V2 (2.73). No code changes,
+//              only rename + retarget update channel to tornwar.com.
 // =============================================================================
 
-const FF_VERSION = "2.72";
+const FF_VERSION = "2.73";
 const API_INTERVAL = 30000;
 const FF_TARGET_STALENESS = 24 * 60 * 60 * 1000; // Refresh the target list every day
 const TARGET_KEY = "ffscouterv2-targets";
@@ -59,7 +59,6 @@ if (!singleton) {
             position: relative;
             display: block;
             padding: 0;
-            overflow: visible;
             }
 
             .ff-scouter-vertical-line-low-upper,
@@ -400,27 +399,6 @@ if (!singleton) {
 				letter-spacing: 0.3px;
 				pointer-events: none;
 			}
-
-            /* Competition/Elimination page specific styles */
-            .dataGridRow___FAAJF .ff-scouter-indicator {
-                overflow: visible;
-            }
-
-            .dataGridRow___FAAJF .ff-scouter-bs-estimate {
-                font-size: 11px !important;
-                padding: 1px 3px !important;
-                bottom: 0px !important;
-            }
-
-            .dataGridRow___FAAJF .ff-scouter-arrow {
-                width: 12px !important;
-            }
-
-            /* Compact mode for grid layouts */
-            [class*="teamRow"] .ff-scouter-indicator,
-            [class*="dataGridRow"] .ff-scouter-indicator {
-                min-height: 20px;
-            }
         `);
 
   var BASE_URL = "https://ffscouter.com";
@@ -748,18 +726,11 @@ if (!singleton) {
   }
 
   function inject_info_line(h4, info_line) {
-    if (h4.textContent === "Attacking") {
-      h4.parentNode.parentNode.after(info_line);
+    const linksTopWrap = h4.parentNode.querySelector(".links-top-wrap");
+    if (linksTopWrap) {
+      linksTopWrap.parentNode.insertBefore(info_line, linksTopWrap.nextSibling);
     } else {
-      const linksTopWrap = h4.parentNode.querySelector(".links-top-wrap");
-      if (linksTopWrap) {
-        linksTopWrap.parentNode.insertBefore(
-          info_line,
-          linksTopWrap.nextSibling,
-        );
-      } else {
-        h4.after(info_line);
-      }
+      h4.after(info_line);
     }
   }
 
@@ -1271,125 +1242,6 @@ if (!singleton) {
     info_line.innerHTML = detailed_message;
   }
 
-  function format_countdown(unix_seconds) {
-    const remaining = Math.max(0, unix_seconds - Date.now() / 1000);
-    if (remaining <= 0) return "landed";
-    const h = Math.floor(remaining / 3600);
-    const m = Math.floor((remaining % 3600) / 60);
-    const s = Math.floor(remaining % 60);
-    if (h > 0) return `${h}h ${m}m ${s}s`;
-    if (m > 0) return `${m}m ${s}s`;
-    return `${s}s`;
-  }
-
-  function inject_flight_info(player_id) {
-    if (!key || !player_id) return;
-
-    function try_inject() {
-      if (document.getElementById("ff-scouter-flight-info")) return true;
-
-      const statusBlock = document.querySelector(".profile-status");
-      if (!statusBlock || !statusBlock.classList.contains("travelling")) return false;
-
-      const descriptionDiv = statusBlock.querySelector(".profile-container .description");
-      if (!descriptionDiv) return false;
-      if (descriptionDiv.dataset.ffFlightInjected) return true;
-      descriptionDiv.dataset.ffFlightInjected = "1";
-
-      const url = `${BASE_URL}/api/v1/player-flights?key=${key}&target=${player_id}`;
-      rD_xmlhttpRequest({
-        method: "GET",
-        url: url,
-        onload: function (response) {
-          if (!response || response.status === 403 || response.status === 503) return;
-          if (response.status !== 200) return;
-
-          let data;
-          try { data = JSON.parse(response.responseText); } catch { return; }
-          if (!data || data.error || !data.current) return;
-
-          const flight = data.current;
-          const earliest = flight.earliest_arrival_time;
-          const latest = flight.latest_arrival_time;
-          const method = flight.travel_method || "Unknown";
-          const bookUsed = flight.book_likely_being_used;
-
-          // Append "· PI" (or "· PI 📖") directly onto the "Traveling to X" span
-          const mainDesc = descriptionDiv.querySelector(".main-desc");
-          if (mainDesc) {
-            const methodTag = document.createElement("span");
-            methodTag.style.cssText = "opacity:0.65;font-size:0.9em;margin-left:4px;";
-            if (bookUsed === true) {
-              methodTag.innerHTML = `· ${method} <span style="font-size:10px;background:#1a6fa8;color:#fff;padding:1px 4px;border-radius:3px;vertical-align:middle;">📖</span>`;
-            } else {
-              methodTag.textContent = `· ${method}`;
-            }
-            mainDesc.appendChild(methodTag);
-          }
-
-          // Countdown line (left) + TCT window (right)
-          const row1 = document.createElement("div");
-          row1.id = "ff-scouter-flight-info";
-          row1.style.cssText = "display:flex;gap:8px;";
-
-          const countdownSpan = document.createElement("span");
-          countdownSpan.id = "ff-scouter-flight-countdown";
-          countdownSpan.style.cssText = "font-weight:bold;font-variant-numeric:tabular-nums;";
-
-          const winSpan = document.createElement("span");
-          winSpan.id = "ff-scouter-flight-window";
-          winSpan.style.cssText = "font-size:11px;opacity:0.65;font-variant-numeric:tabular-nums;";
-
-          row1.appendChild(countdownSpan);
-          row1.appendChild(winSpan);
-          descriptionDiv.appendChild(row1);
-
-          // Live ticker
-          function tick() {
-            const cdEl = document.getElementById("ff-scouter-flight-countdown");
-            const wEl = document.getElementById("ff-scouter-flight-window");
-            if (!cdEl) return;
-
-            const now = Date.now() / 1000;
-            if (earliest && latest) {
-              const earlyLeft = earliest - now;
-              const lateLeft = latest - now;
-              if (lateLeft <= 0) {
-                cdEl.textContent = "Landing imminent";
-                cdEl.style.color = "#f0a500";
-              } else if (earlyLeft <= 0) {
-                cdEl.textContent = `≤ ${format_countdown(latest)}`;
-                cdEl.style.color = "#f0a500";
-              } else {
-                cdEl.textContent = `${format_countdown(earliest)} – ${format_countdown(latest)}`;
-              }
-              if (wEl) {
-                const fmt = (d) => `${d.getUTCHours().toString().padStart(2,"0")}:${d.getUTCMinutes().toString().padStart(2,"0")} TCT`;
-                wEl.textContent = `(${fmt(new Date(earliest*1000))} – ${fmt(new Date(latest*1000))})`;
-              }
-            } else {
-              cdEl.textContent = "Arrival time unknown";
-            }
-            setTimeout(tick, 1000);
-          }
-          tick();
-        },
-        onerror: function () {},
-      });
-
-      return true;
-    }
-
-    // Try immediately (profile-status may already be in DOM)
-    if (try_inject()) return;
-
-    // Otherwise wait for it to appear
-    const obs = new MutationObserver(function () {
-      if (try_inject()) obs.disconnect();
-    });
-    obs.observe(document.body, { childList: true, subtree: true });
-  }
-
   function inject_stats_history_button(player_id) {
     if (!player_id) return;
     if (ffSettingsGet("ff-history-enabled") === "false") return;
@@ -1509,7 +1361,117 @@ if (!singleton) {
   }
 
   async function apply_fair_fight_info(_) {
-    // FF/Est columns removed - info is shown via the honor bar badge instead
+    const showBSDefault =
+      (ffSettingsGet("factions-col-display") || "fair_fight") ===
+      "battle_stats";
+    var ff_li = document.createElement("li");
+    ff_li.tabIndex = "0";
+    ff_li.classList.add("table-cell");
+    ff_li.classList.add("lvl");
+    ff_li.classList.add("torn-divider");
+    ff_li.classList.add("divider-vertical");
+    ff_li.classList.add("c-pointer");
+    ff_li.classList.add(
+      showBSDefault ? "ff-scouter-ff-hidden" : "ff-scouter-ff-visible",
+    );
+    ff_li.onclick = () => {
+      $(".ff-scouter-ff-visible").each(function (_, value) {
+        value.classList.remove("ff-scouter-ff-visible");
+        value.classList.add("ff-scouter-ff-hidden");
+      });
+      $(".ff-scouter-est-hidden").each(function (_, value) {
+        value.classList.remove("ff-scouter-est-hidden");
+        value.classList.add("ff-scouter-est-visible");
+      });
+    };
+
+    ff_li.appendChild(document.createTextNode("FF"));
+    var est_li = document.createElement("li");
+    est_li.tabIndex = "0";
+    est_li.classList.add("table-cell");
+    est_li.classList.add("lvl");
+    est_li.classList.add("torn-divider");
+    est_li.classList.add("divider-vertical");
+    est_li.classList.add("c-pointer");
+    est_li.classList.add(
+      showBSDefault ? "ff-scouter-est-visible" : "ff-scouter-est-hidden",
+    );
+    est_li.onclick = () => {
+      $(".ff-scouter-ff-hidden").each(function (_, value) {
+        value.classList.remove("ff-scouter-ff-hidden");
+        value.classList.add("ff-scouter-ff-visible");
+      });
+      $(".ff-scouter-est-visible").each(function (_, value) {
+        value.classList.remove("ff-scouter-est-visible");
+        value.classList.add("ff-scouter-est-hidden");
+      });
+    };
+
+    est_li.appendChild(document.createTextNode("Est"));
+
+    if ($(".table-header > .lvl").length == 0) {
+      // The .member-list doesn't have a .lvl, give up
+      return;
+    }
+    $(".table-header > .lvl")[0].after(ff_li, est_li);
+
+    const player_ids = [];
+    $(".table-body > .table-row > .member").each(async function (_, value) {
+      var url = value.querySelectorAll('a[href^="/profiles"]')[0].href;
+      var player_id = url.match(/.*XID=(?<player_id>\d+)/).groups.player_id;
+      player_ids.push(parseInt(player_id));
+    });
+
+    const cached_values = await ffcache.get(player_ids);
+
+    $(".table-body > .table-row > .member").each(async function (_, value) {
+      var url = value.querySelectorAll('a[href^="/profiles"]')[0].href;
+      var player_id = parseInt(
+        url.match(/.*XID=(?<player_id>\d+)/).groups.player_id,
+      );
+
+      var fair_fight_div = document.createElement("div");
+
+      fair_fight_div.classList.add("table-cell");
+
+      fair_fight_div.classList.add("lvl");
+      fair_fight_div.classList.add(
+        showBSDefault ? "ff-scouter-ff-hidden" : "ff-scouter-ff-visible",
+      );
+
+      var estimate_div = document.createElement("div");
+      estimate_div.classList.add("table-cell");
+      estimate_div.classList.add("lvl");
+      estimate_div.classList.add(
+        showBSDefault ? "ff-scouter-est-visible" : "ff-scouter-est-hidden",
+      );
+      const cached = cached_values[player_id];
+
+      if (cached && cached.value) {
+        const ff = cached.value;
+        const ff_string = get_ff_string_short(cached, player_id);
+        const background_colour = get_ff_colour(ff);
+        const text_colour = get_contrast_color(background_colour);
+        fair_fight_div.style.backgroundColor = background_colour;
+        fair_fight_div.style.color = text_colour;
+        fair_fight_div.style.fontWeight = "bold";
+        fair_fight_div.innerHTML = ff_string;
+
+        if (cached.bs_estimate_human) {
+          estimate_div.style.backgroundColor = background_colour;
+          estimate_div.style.color = text_colour;
+          estimate_div.style.fontWeight = "bold";
+          estimate_div.innerHTML = cached.bs_estimate_human;
+          if (cached.distribution_human) {
+            const ageStr = get_age_human(cached.distribution_last_updated);
+            const agePart = ageStr ? ` (${ageStr} old)` : "";
+            estimate_div.title = `Top Stats: ${cached.distribution_human}${agePart}`;
+          }
+        }
+      }
+
+      value.nextSibling.after(fair_fight_div, estimate_div);
+    });
   }
 
   async function get_cache_misses(player_ids) {
@@ -1554,11 +1516,6 @@ if (!singleton) {
     });
     // Also try immediately in case it's already loaded
     inject_stats_history_button(target_id);
-
-    // Inject flight info on profile pages only (not attack pages)
-    if (match1) {
-      inject_flight_info(target_id);
-    }
 
     if (!key) {
       set_message("[FF Scouter V2]: Limited API key needed - click to add");
@@ -1651,24 +1608,6 @@ if (!singleton) {
     return percent;
   }
 
-  function formatBattleStats(value) {
-    if (!value) return null;
-    if (value >= 1e9) {
-      return (value / 1e9).toFixed(2).replace(/\.00$/, '') + 'b';
-    } else if (value >= 1e6) {
-      return (value / 1e6).toFixed(2).replace(/\.00$/, '') + 'm';
-    } else if (value >= 1e3) {
-      return (value / 1e3).toFixed(2).replace(/\.00$/, '') + 'k';
-    } else {
-      return value.toString();
-    }
-  }
-
-  function isCompactLayout(element) {
-    return element.closest('[class*="dataGridRow"]') !== null ||
-           element.closest('[class*="teamRow"]') !== null;
-  }
-
   async function show_cached_values(elements) {
     // Rescan player ids because the competition page can rewrite them
     elements = elements.map((e) => {
@@ -1726,44 +1665,6 @@ if (!singleton) {
           class: "ff-scouter-arrow",
         });
         $(element).append(img);
-
-        // --- BS Estimate badge (mod by GFOUR) ---
-        $(element).find('.ff-scouter-bs-estimate').remove();
-        if (cached.bs_estimate || cached.bs_estimate_human) {
-          const bsValue = cached.bs_estimate_human ||
-            (cached.bs_estimate ? formatBattleStats(cached.bs_estimate) : null);
-
-          if (bsValue) {
-            const compact = isCompactLayout(element);
-
-            let backgroundColor;
-            if (percent < 33) {
-              backgroundColor = '#26bcf5'; // Blue
-            } else if (percent < 66) {
-              backgroundColor = '#28c628'; // Green
-            } else {
-              backgroundColor = '#c62828'; // Red
-            }
-
-            const bsEstimate = $('<div>', { class: "ff-scouter-bs-estimate", text: bsValue, css: {
-              'position': 'absolute',
-              'bottom': compact ? '-2px' : '0px',
-              'right': '0',
-              'font-size': '11px',
-              'line-height': '12px',
-              'color': 'white',
-              'background-color': backgroundColor,
-              'padding': '1px 3px',
-              'border-radius': '2px',
-              'pointer-events': 'none',
-              'z-index': '100',
-              'font-weight': '600',
-              'white-space': 'nowrap'
-            } });
-            $(element).append(bsEstimate);
-          }
-        }
-        // --- end BS Estimate badge ---
       }
     }
   }
@@ -2612,6 +2513,22 @@ if (!singleton) {
       apiKeyDiv.appendChild(apiKeyInput);
     }
 
+    content.appendChild(apiKeyDiv);
+
+    const premiumDiv = document.createElement("div");
+    premiumDiv.className = "ff-settings-entry ff-settings-entry-large";
+
+    const premiumLabel = document.createElement("label");
+    premiumLabel.setAttribute("for", "ff-premium");
+    premiumLabel.textContent = "FF Scouter Premium:";
+    premiumLabel.className = "ff-settings-label ff-settings-label-inline";
+    premiumDiv.appendChild(premiumLabel);
+
+    content.appendChild(premiumDiv);
+
+    const verifyDiv = document.createElement("div");
+    verifyDiv.className = "ff-settings-entry ff-settings-entry-large";
+
     checkKeyButton = document.createElement("button");
     checkKeyButton.textContent = "Verify";
     checkKeyButton.className =
@@ -2679,9 +2596,9 @@ if (!singleton) {
       });
     });
 
-    apiKeyDiv.appendChild(checkKeyButton);
+    verifyDiv.appendChild(checkKeyButton);
 
-    content.appendChild(apiKeyDiv);
+    content.appendChild(verifyDiv);
 
     const rangesDiv = document.createElement("div");
     rangesDiv.className = "ff-settings-entry ff-settings-entry-large";
@@ -3249,15 +3166,20 @@ if (!singleton) {
   function applyPremiumBadge(is_premium) {
     const existing = document.getElementById("ff-premium-badge");
     if (existing) existing.remove();
-    if (!is_premium) return;
     const badge = document.createElement("span");
     badge.id = "ff-premium-badge";
-    badge.textContent = "Premium Enabled";
-    badge.style.cssText =
-      "display:inline-block;background:#4CAF50;color:#fff;font-size:11px;font-weight:bold;padding:2px 8px;border-radius:4px;margin-left:8px;vertical-align:middle;";
-    const apiKeyLabel = document.querySelector('label[for="ff-api-key"]');
-    if (apiKeyLabel) {
-      apiKeyLabel.parentNode.insertBefore(badge, apiKeyLabel.nextSibling);
+    if (is_premium) {
+      badge.textContent = "Enabled";
+      badge.style.cssText =
+        "display:inline-block;background:#4CAF50;color:#fff;font-size:11px;font-weight:bold;padding:2px 8px;border-radius:4px;vertical-align:middle;";
+    } else {
+      badge.textContent = "Disabled";
+      badge.style.cssText =
+        "display:inline-block;background:#C62828;color:#fff;font-size:11px;font-weight:bold;padding:2px 8px;border-radius:4px;vertical-align:middle;";
+    }
+    const premiumLabel = document.querySelector('label[for="ff-premium"]');
+    if (premiumLabel) {
+      premiumLabel.parentNode.insertBefore(badge, premiumLabel.nextSibling);
     }
   }
 
