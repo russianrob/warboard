@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.39
+// @version      3.1.40
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -242,7 +242,7 @@
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
-    const SCRIPT_VERSION = '3.1.39';
+    const SCRIPT_VERSION = '3.1.40';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4107,10 +4107,15 @@
         const ttTop  = 'Probability of hitting the top-tier payout — the highest-reward outcome. A successful OC still forks into multiple reward tiers; this is the chance of landing on the best one.';
         const ttQ    = 'Weighted quality score (roughly 0–1). Top-tier payout counts 1.0, 2nd-tier 0.7, 3rd-tier 0.4, every other successful tier 0.2. Single number for comparing expected reward across OCs.';
         const ttHit  = 'Historical top-tier hit rate for this scenario: % of the faction\'s successful completions whose money payout landed in the top quartile for this OC type. Used as a proxy for top-tier hits since Torn doesn\'t label outcome tiers directly. Needs at least 4 successful completions of this scenario to show; otherwise displays as —.';
-        // v3.1.35: click-to-sort on the three numeric columns. Default
-        // sort is Top end % descending, applied once the async fetches
-        // populate the cells. Click a header again to flip direction.
-        html += `<table class="oc-table oc-ev-table" data-sort-col="top" data-sort-dir="desc"><thead><tr>`;
+        // v3.1.40: wrap the table in overflow-x:auto so a wide OC name
+        // or the six-column layout can't push past the container border
+        // on narrower panels (mobile, side-docked tabs). Scrolls
+        // horizontally only when the content actually overflows.
+        html += `<div style="overflow-x:auto;max-width:100%;">`;
+        // v3.1.35: click-to-sort on the numeric columns. Default sort is
+        // Top end % descending, applied once the async fetches populate
+        // the cells. Click a header again to flip direction.
+        html += `<table class="oc-table oc-ev-table" data-sort-col="top" data-sort-dir="desc" style="width:100%;"><thead><tr>`;
         html += `<th>OC</th><th>Lvl</th>`;
         html += `<th class="oc-ev-sort" data-col="pass" style="cursor:pointer;">Pass % <span class="oc-ev-sort-ind"></span> <span class="oc-ev-info" data-tt-title="Pass %" data-tt="${ttPass}">?</span></th>`;
         html += `<th class="oc-ev-sort" data-col="top"  style="cursor:pointer;">Top end % <span class="oc-ev-sort-ind">▼</span> <span class="oc-ev-info" data-tt-title="Top end %" data-tt="${ttTop}">?</span></th>`;
@@ -4155,10 +4160,11 @@
             html += `</tr>`;
         }
         html += `</tbody></table>`;
+        html += `</div>`; // close overflow-x wrapper
         if (status === 'Recruiting') {
             html += `<div style="color:#6b7280;font-size:10px;margin-top:6px;">Empty slots use your faction's avg CPR at each OC's level — numbers firm up as real members fill the slots.</div>`;
         }
-        html += `</div>`;
+        html += `</div>`; // close outer bordered box
         return html;
     }
 
