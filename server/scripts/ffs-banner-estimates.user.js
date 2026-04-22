@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb13
+// @version      2.73.0-wb14
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,13 @@
 // Upstream: FF Scouter V2 (GPL-3.0, rDacted/Weav3r/xentac/Glasnost)
 //   https://greasyfork.org/en/scripts/535292
 //
+// 2.73.0-wb14 — New: FFS sort button on war.php + factions.php member
+//              lists. Mirrors BSP's "BSP" sort button UX — click once
+//              for strongest→weakest, click again to flip. Sort key is
+//              FFS bs_estimate with FF score as fallback; rows missing
+//              any FFS data sink to the bottom. Button auto-injects on
+//              page load via a 15s polling probe so it works on Torn's
+//              late-rendered React lists.
 // 2.73.0-wb13 — XID injection for page-subject honor: wb12 force-paint
 //              worked in theory but apply_ff_gauge's internal resolver
 //              expected player_id to come from a descendant anchor. On
@@ -1844,7 +1851,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb13",
+      scriptVersion: "2.73.0-wb14",
     };
     try {
       GM_xmlhttpRequest({
@@ -2171,7 +2178,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb13",
+        scriptVersion: "2.73.0-wb14",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2186,6 +2193,113 @@ if (!singleton) {
   setTimeout(() => ffs_probe("1s"), 1000);
   setTimeout(() => ffs_probe("3s"), 3000);
   setTimeout(() => ffs_probe("10s"), 10000);
+
+  // ─────────────────────────────────────────────────────────────────────
+  // WARBOARD FORK (wb14): FFS sort button on war/faction member lists.
+  // Same visual + UX pattern as BSP's "BSP" sort button — click once to
+  // sort strongest→weakest, click again to flip. Sort key is FFS
+  // bs_estimate (or value/FF score if bs_estimate is absent). Works on:
+  //   - .members-cont (war.php)
+  //   - .members-list (factions.php)
+  // ─────────────────────────────────────────────────────────────────────
+  async function ffs_inject_sort_buttons() {
+    const containers = [
+      ...document.querySelectorAll(".members-cont"),
+      ...document.querySelectorAll(".members-list"),
+    ].filter(el => {
+      if (el.closest(".raid-members-list")) return false;
+      const desc = el.closest(".desc-wrap");
+      if (desc && !desc.matches('[class*="warDesc"]')) return false;
+      return true;
+    });
+
+    for (const cont of containers) {
+      const header = cont.querySelector(".member");
+      if (!header) continue;
+      if (header.querySelector(".ff-scouter-sort-btn")) continue;
+
+      const btn = document.createElement("button");
+      btn.className = "ff-scouter-sort-btn";
+      btn.dataset.sortDesc = "1"; // first click: strongest → weakest
+      btn.textContent = "↓ FFS";
+      btn.style.cssText =
+        "margin-left:6px;padding:1px 6px;border-radius:3px;"
+        + "font-size:11px;font-weight:700;background:#2a3fff;color:#fff;"
+        + "border:0;cursor:pointer;line-height:14px;vertical-align:middle;";
+
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+        ffs_sort_list(cont, btn);
+      });
+
+      // Mirror BSP's insertion — right after the first child of header.
+      header.insertBefore(btn, header.children[1] || null);
+    }
+  }
+
+  async function ffs_sort_list(container, btn) {
+    const descNow = btn.dataset.sortDesc === "1";
+    // Flip for next click.
+    btn.dataset.sortDesc = descNow ? "0" : "1";
+    btn.textContent = descNow ? "↑ FFS" : "↓ FFS";
+
+    // War pages: rows live under .members-list inside the container.
+    // Faction pages: rows live under .table-body inside .members-list.
+    let rowContainer = container.querySelector(".members-list");
+    if (!rowContainer) rowContainer = container.querySelector(".table-body");
+    if (!rowContainer) return;
+
+    const rows = Array.from(rowContainer.children);
+    const playerIds = [];
+    const rowMeta = rows.map(row => {
+      const a = row.querySelector('a[href*="XID="]');
+      if (!a) return { row, pid: null };
+      const m = a.href.match(/XID=(\d+)/);
+      const pid = m ? parseInt(m[1], 10) : null;
+      if (pid) playerIds.push(pid);
+      return { row, pid };
+    });
+
+    // Pull FFS cache for all rows in one shot.
+    const cache = await ffcache.get(playerIds);
+
+    function rowScore(meta) {
+      if (!meta.pid) return null;
+      const c = cache[meta.pid];
+      if (!c) return null;
+      // Prefer bs_estimate (absolute stats); fall back to FF score
+      // (ratio) so targets without an estimate still sort reasonably.
+      if (typeof c.bs_estimate === "number" && isFinite(c.bs_estimate)) return c.bs_estimate;
+      if (typeof c.value === "number" && isFinite(c.value)) return c.value;
+      return null;
+    }
+
+    rowMeta.sort((a, b) => {
+      const sa = rowScore(a);
+      const sb = rowScore(b);
+      // Rows missing scores sink to the bottom regardless of direction.
+      if (sa == null && sb == null) return 0;
+      if (sa == null) return 1;
+      if (sb == null) return -1;
+      return descNow ? sb - sa : sa - sb;
+    });
+
+    // Reattach in new order.
+    for (const m of rowMeta) rowContainer.appendChild(m.row);
+  }
+
+  // Periodically re-probe for the member lists — Torn's SPA re-renders
+  // and the header row we inject into can vanish. 500ms × 30 = 15s
+  // covers late React hydration on war/faction pages.
+  if (/\/(war|factions)\.php/.test(location.pathname)) {
+    let tries = 0;
+    const iv = setInterval(() => {
+      tries++;
+      ffs_inject_sort_buttons();
+      if (tries >= 30) clearInterval(iv);
+    }, 500);
+  }
 
   function get_cached_targets(staleok) {
     const value = rD_getValue(TARGET_KEY);
