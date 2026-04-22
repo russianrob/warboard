@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb34
+// @version      2.73.0-wb35
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2017,7 +2017,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb34",
+      scriptVersion: "2.73.0-wb35",
     };
     try {
       GM_xmlhttpRequest({
@@ -2344,7 +2344,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb34",
+        scriptVersion: "2.73.0-wb35",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2418,7 +2418,10 @@ if (!singleton) {
       } else if (desc.startsWith("Traveling to ")) {
         loc = desc.replace("Traveling to ", "");
       }
-      _ffsMemberAbbr[member.id] = ffs_abbreviateCountry(loc);
+      // wb35: store FULL country name (no abbreviation) to match the
+      // DOM-derived cache in ffs_detectAndFetchTravellersFromDom, so the
+      // click-to-toggle UX always sees the same string regardless of source.
+      _ffsMemberAbbr[member.id] = loc.trim();
       _ffsMemberReturning[member.id] = returning;
       // wb24: fix TypeError — `typeof null === "object"` in JS, so the
       // old guard didn't prevent d.until from throwing when details=null.
@@ -2444,6 +2447,12 @@ if (!singleton) {
       }
       if (until) {
         _ffsMemberCountdowns[member.id] = until;
+      } else {
+        // wb35: Torn v2 returns status.until=null for travelling members,
+        // so ask FFScouter for the landing time directly instead of waiting
+        // for the DOM text to contain "Traveling to X" (which doesn't appear
+        // on war/rank pages).
+        ffs_fetchFlightForMember(String(member.id));
       }
     } else {
       delete _ffsMemberCountdowns[member.id];
