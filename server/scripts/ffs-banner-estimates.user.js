@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb32
+// @version      2.73.0-wb33
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2017,7 +2017,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb32",
+      scriptVersion: "2.73.0-wb33",
     };
     try {
       GM_xmlhttpRequest({
@@ -2344,7 +2344,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb32",
+        scriptVersion: "2.73.0-wb33",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2848,19 +2848,33 @@ if (!singleton) {
     ffs_detectAndFetchTravellersFromDom();
     setInterval(ffs_detectAndFetchTravellersFromDom, 5_000);
 
-    // wb31: event delegation for the country/time toggle click. Works
-    // even if Torn's React re-renders the cell and detaches the
-    // original click listener we added inline.
+    // wb33: event delegation — also loosens the click target (anywhere
+    // on the status cell, not just the inner span) and logs the click
+    // to server-side diag so we can see what's in dataset at click time.
     document.body.addEventListener("click", (ev) => {
-      const span = ev.target.closest && ev.target.closest(".ffs-travel-status");
+      const span = ev.target.closest && (
+        ev.target.closest(".ffs-travel-status") ||
+        (ev.target.closest(".status")?.querySelector(".ffs-travel-status"))
+      );
       if (!span) return;
       ev.stopPropagation();
       ev.preventDefault();
       const was = span.dataset.ffsShowCountry === "1";
       span.dataset.ffsShowCountry = was ? "0" : "1";
       const v = span.querySelector(".ffs-mq-value");
-      if (!v) return;
       const target = was ? span.dataset.ffsTime : span.dataset.ffsCountry;
+      // Diag: capture the click state before mutation so we can see
+      // what the user actually toggled to.
+      ffs_travelDiag({
+        source: "click",
+        wasShowCountry: was,
+        dsTime: span.dataset.ffsTime,
+        dsCountry: span.dataset.ffsCountry,
+        resolvedTarget: target,
+        hadValueSpan: !!v,
+        memberAbbrSize: Object.keys(_ffsMemberAbbr).length,
+      });
+      if (!v) return;
       v.textContent = target || (was ? "" : "…");
     }, true);
   }
