@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb43
+// @version      2.73.0-wb44
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -216,6 +216,27 @@ if (!singleton) {
     /* wb29: default shows countdown; click toggles to country name. */
     .ffs-travel-status .ffs-mq-value { white-space: nowrap; }
     .status:has(.ffs-travel-status) { overflow: hidden; white-space: nowrap; }
+    /* wb44: hospital / jail release-timer chip. Similar shape to the
+       travel chip but red-tinted. Flash animation when <5 min remain
+       so revive callers spot imminent releases at a glance. */
+    .ffs-hosp-status {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 1px 4px 1px 3px; border-radius: 3px;
+      background: rgba(220, 38, 38, .22); color: #fca5a5;
+      font-weight: 600; font-size: 11px;
+      max-width: 100%;
+    }
+    .ffs-hosp-status.jail { background: rgba(100, 116, 139, .25); color: #cbd5e1; }
+    .ffs-hosp-status.imminent {
+      animation: ffs-hosp-pulse 1s ease-in-out infinite;
+      background: rgba(220, 38, 38, .45);
+      color: #fff;
+    }
+    @keyframes ffs-hosp-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, .6); }
+      50%      { box-shadow: 0 0 0 4px rgba(220, 38, 38, 0); }
+    }
+    .status:has(.ffs-hosp-status) { overflow: hidden; white-space: nowrap; }
   `);
   GM_addStyle(`
             .ff-scouter-indicator {
@@ -2023,7 +2044,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb43",
+      scriptVersion: "2.73.0-wb44",
     };
     try {
       GM_xmlhttpRequest({
@@ -2350,7 +2371,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb43",
+        scriptVersion: "2.73.0-wb44",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2378,6 +2399,53 @@ if (!singleton) {
   const _ffsMemberAbbr = {};           // userID → country abbrev
   const _ffsMemberReturning = {};      // userID → bool
   const _ffsOriginalStatusHtml = {};   // liElement reference → original innerHTML
+  // wb44: hospital / jail release-time tracking (ported from Torn War Stuff
+  // Enhanced — live HH:MM:SS countdown + flash when <5 min remain).
+  const _ffsMemberHospitalUntil = {};  // userID → unix release time
+  const _ffsMemberHospitalState = {};  // userID → 'Hospital' | 'Jail'
+
+  // wb44: localStorage cache so countdowns appear instantly on reload
+  // without waiting for the 30s poll. Keyed per-faction so scouting
+  // multiple factions doesn't cross-pollute. TTL 5min — older data is
+  // discarded since arrival times / release times would be wrong.
+  const FFS_CACHE_TTL_MS = 5 * 60_000;
+  const _ffsCacheKey = (fid) => `ffs_status_cache_v1_${fid}`;
+  let _ffsCacheSaveTimer = null;
+  function ffs_saveStatusCache(factionId) {
+    if (!factionId) return;
+    if (_ffsCacheSaveTimer) return;
+    _ffsCacheSaveTimer = setTimeout(() => {
+      _ffsCacheSaveTimer = null;
+      try {
+        const payload = {
+          ts: Date.now(),
+          countdowns: _ffsMemberCountdowns,
+          abbr: _ffsMemberAbbr,
+          returning: _ffsMemberReturning,
+          hospitalUntil: _ffsMemberHospitalUntil,
+          hospitalState: _ffsMemberHospitalState,
+        };
+        localStorage.setItem(_ffsCacheKey(factionId), JSON.stringify(payload));
+      } catch (_) { /* quota or storage disabled */ }
+    }, 2000);
+  }
+  function ffs_loadStatusCache(factionId) {
+    if (!factionId) return;
+    try {
+      const raw = localStorage.getItem(_ffsCacheKey(factionId));
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (!data || !data.ts || (Date.now() - data.ts) > FFS_CACHE_TTL_MS) {
+        localStorage.removeItem(_ffsCacheKey(factionId));
+        return;
+      }
+      Object.assign(_ffsMemberCountdowns, data.countdowns || {});
+      Object.assign(_ffsMemberAbbr, data.abbr || {});
+      Object.assign(_ffsMemberReturning, data.returning || {});
+      Object.assign(_ffsMemberHospitalUntil, data.hospitalUntil || {});
+      Object.assign(_ffsMemberHospitalState, data.hospitalState || {});
+    } catch (_) { /* malformed cache — ignore */ }
+  }
 
   function ffs_abbreviateCountry(name) {
     if (!name) return "";
@@ -2464,6 +2532,17 @@ if (!singleton) {
       delete _ffsMemberCountdowns[member.id];
       delete _ffsMemberAbbr[member.id];
       delete _ffsMemberReturning[member.id];
+    }
+    // wb44: hospital / jail release tracking. Independent of travel.
+    if (state === "Hospital" || state === "Jail") {
+      const until = parseInt(member.status.until, 10);
+      if (isFinite(until) && until > 0) {
+        _ffsMemberHospitalUntil[member.id] = until;
+        _ffsMemberHospitalState[member.id] = state;
+      }
+    } else {
+      delete _ffsMemberHospitalUntil[member.id];
+      delete _ffsMemberHospitalState[member.id];
     }
   }
 
@@ -2642,6 +2721,9 @@ if (!singleton) {
         recorded,
         firstTravellingSample,
       });
+      // wb44: persist latest countdowns + hospital state to localStorage
+      // so a reload pre-fills instantly without waiting for the 30s poll.
+      ffs_saveStatusCache(factionId);
     } catch (e) {
       ffs_travelDiag({ source: "fetch-threw", factionId, err: String(e?.message || e) });
     }
@@ -2786,7 +2868,61 @@ if (!singleton) {
         delete statusEl.dataset.ffsTravelOriginal;
         delete statusEl.dataset.ffsTravelInjected;
       } else {
-        notTraveling++;
+        // wb44: hospital / jail release timer. Active only when member
+        // isn't travelling (travel takes priority on the same cell).
+        const hospUntil = _ffsMemberHospitalUntil[uid];
+        const hospState = _ffsMemberHospitalState[uid] || 'Hospital';
+        if (hospUntil) {
+          const remaining = hospUntil - Math.floor(Date.now() / 1000);
+          if (remaining <= 0) {
+            // Release moment passed — clean up and let React own the cell.
+            delete _ffsMemberHospitalUntil[uid];
+            delete _ffsMemberHospitalState[uid];
+            if (statusEl.dataset.ffsHospInjected) {
+              const orig = statusEl.dataset.ffsHospOriginal;
+              if (orig && orig.trim()) statusEl.innerHTML = orig;
+              delete statusEl.dataset.ffsHospOriginal;
+              delete statusEl.dataset.ffsHospInjected;
+            }
+            return;
+          }
+          const h = Math.floor(remaining / 3600);
+          const m = Math.floor((remaining % 3600) / 60);
+          const s = remaining % 60;
+          const timeStr = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+          const imminent = remaining < 300;
+          const jail = hospState === 'Jail';
+          let hospSpan = statusEl.querySelector('.ffs-hosp-status');
+          if (hospSpan) {
+            const valueSpan = hospSpan.querySelector('.ffs-hosp-val');
+            if (valueSpan && valueSpan.textContent !== timeStr) valueSpan.textContent = timeStr;
+            hospSpan.classList.toggle('imminent', imminent);
+            hospSpan.classList.toggle('jail', jail);
+          } else {
+            if (!statusEl.dataset.ffsHospInjected) {
+              const snapshot = statusEl.innerHTML;
+              if (!snapshot || !snapshot.trim()) return;
+              statusEl.dataset.ffsHospOriginal = snapshot;
+              statusEl.dataset.ffsHospInjected = "1";
+            }
+            const cls = 'ffs-hosp-status' + (jail ? ' jail' : '') + (imminent ? ' imminent' : '');
+            const icon = jail ? '\u{1F512}' : '\u{1F3E5}';
+            statusEl.innerHTML =
+              `<span class="${cls}" title="${hospState} release">`
+              + `<span class="ffs-hosp-icon">${icon}</span>`
+              + `<span class="ffs-hosp-val">${timeStr}</span>`
+              + `</span>`;
+          }
+          painted++;
+        } else if (statusEl.dataset.ffsHospInjected) {
+          // Member no longer hospitalised — restore original.
+          const orig = statusEl.dataset.ffsHospOriginal;
+          if (orig && orig.trim()) statusEl.innerHTML = orig;
+          delete statusEl.dataset.ffsHospOriginal;
+          delete statusEl.dataset.ffsHospInjected;
+        } else {
+          notTraveling++;
+        }
       }
     });
     // Diag: only on the first 20 paint cycles after page load.
@@ -2933,6 +3069,9 @@ if (!singleton) {
         }});
         if (d && !d.error && fid) {
           _ffsOwnFactionId = String(fid);
+          // wb44: prepopulate countdowns from last session's localStorage
+          // cache so the chip appears instantly, before the 30s poll lands.
+          ffs_loadStatusCache(_ffsOwnFactionId);
           return _ffsOwnFactionId;
         }
       } catch (e) {
@@ -3021,6 +3160,10 @@ if (!singleton) {
         listSamples,
       });
       for (const fid of factionIds) {
+        // wb44: prepopulate from last session's cache before the fetch
+        // so chips appear within 1s of page load even on scouted
+        // factions, not just our own.
+        ffs_loadStatusCache(fid);
         await ffs_updateFactionTravelData(fid);
       }
     }
