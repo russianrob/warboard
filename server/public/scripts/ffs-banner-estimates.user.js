@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb50
+// @version      2.73.0-wb51
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2051,7 +2051,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb50",
+      scriptVersion: "2.73.0-wb51",
     };
     try {
       GM_xmlhttpRequest({
@@ -2189,6 +2189,15 @@ if (!singleton) {
     }
     var honor_bars = Array.from(node.querySelectorAll(".honor-text-wrap"));
     var name_elems = Array.from(node.querySelectorAll(".user.name"));
+    // wb51: skip FFS gauge injection on the Crimes tab. User feedback
+    // that the stats chip in each OC slot clutters the crime card
+    // layout. Scope check matches tab=crimes in either the hash
+    // (Torn's React router) or the query string (legacy deep link).
+    const onCrimesTab = /tab=crimes/i.test(location.hash + location.search)
+      || !!document.getElementById('faction-crimes-root');
+    if (onCrimesTab) {
+      return;
+    }
     if (honor_bars.length > 0) {
       await apply_ff_gauge(
         Array.from(node.querySelectorAll(".honor-text-wrap")),
@@ -2373,7 +2382,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb50",
+        scriptVersion: "2.73.0-wb51",
       };
       GM_xmlhttpRequest({
         method: "POST",
