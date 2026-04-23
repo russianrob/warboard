@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb47
+// @version      2.73.0-wb48
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2051,7 +2051,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb47",
+      scriptVersion: "2.73.0-wb48",
     };
     try {
       GM_xmlhttpRequest({
@@ -2378,7 +2378,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb47",
+        scriptVersion: "2.73.0-wb48",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2942,6 +2942,67 @@ if (!singleton) {
       painted, skippedNoAnchor, skippedNoStatus, notTraveling,
       travellingKnown: Object.keys(_ffsMemberCountdowns).length,
     });
+    // wb48: after the paint pass, reorder each member-list so hospital/
+    // jail members with the soonest release float to the top. Ported
+    // from Torn War Stuff Enhanced — enables revive-hunting by visual
+    // scan instead of manual timer math.
+    ffs_sortRowsByHospitalRelease(rows);
+  }
+
+  // wb48: keep track of last-sorted signature per container so we skip
+  // DOM writes when nothing's changed (avoids visual thrash on every 1s
+  // paint tick).
+  const _ffsSortSignatures = new WeakMap();
+  function ffs_sortRowsByHospitalRelease(rowList) {
+    if (!rowList || rowList.length === 0) return;
+    // Group rows by their parent container so we only reorder within
+    // each list (enemy-faction vs your-faction etc.).
+    const groups = new Map();
+    rowList.forEach((row) => {
+      const parent = row.parentElement;
+      if (!parent) return;
+      if (!groups.has(parent)) groups.set(parent, []);
+      groups.get(parent).push(row);
+    });
+
+    for (const [parent, rows] of groups) {
+      // Compute a sort key per row. Lower = higher in the list.
+      //   Hospital: release-unix (earliest release first)
+      //   Jail:     release-unix + 1e10 (after all hospital)
+      //   Traveling (with known landing): landing-unix + 2e10
+      //   Other:    Infinity
+      const keyed = rows.map((row, idx) => {
+        const a = row.querySelector('a[href*="XID="]');
+        const m = a?.href?.match(/XID=(\d+)/);
+        const uid = m?.[1];
+        let key = Infinity;
+        if (uid) {
+          if (_ffsMemberHospitalUntil[uid]) {
+            const base = _ffsMemberHospitalUntil[uid];
+            key = _ffsMemberHospitalState[uid] === 'Jail' ? base + 1e10 : base;
+          } else if (_ffsMemberCountdowns[uid]) {
+            key = _ffsMemberCountdowns[uid] + 2e10;
+          }
+        }
+        return { row, key, idx };
+      });
+      // Stable sort — use index tie-breaker so equal-key rows keep order.
+      keyed.sort((a, b) => (a.key - b.key) || (a.idx - b.idx));
+      // Signature = concatenation of keys in sorted order. If unchanged
+      // since last pass, skip the DOM reorder.
+      const sig = keyed.map(k => k.key).join('|');
+      if (_ffsSortSignatures.get(parent) === sig) continue;
+      _ffsSortSignatures.set(parent, sig);
+      // Skip DOM writes if already in desired order.
+      let changed = false;
+      for (let i = 0; i < keyed.length; i++) {
+        if (parent.children[i] !== keyed[i].row) { changed = true; break; }
+      }
+      if (!changed) continue;
+      const frag = document.createDocumentFragment();
+      for (const k of keyed) frag.appendChild(k.row);
+      parent.appendChild(frag);
+    }
   }
 
   // wb36: paint live landing-time countdowns inside mini-profile cards.
