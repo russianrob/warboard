@@ -103,6 +103,18 @@ const authLimiter = rateLimit({
 });
 app.use('/api/auth', authLimiter);
 
+// v4.9.96: public API tier — per-IP rate limit since callers may be
+// unauthenticated tools. Complements per-caller-key limits enforced
+// inside each public route handler.
+const publicApiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120, // 2/sec sustained per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Public API rate limit — slow down' },
+});
+app.use('/api/public', publicApiLimiter);
+
 // General limiter on all routes as a backstop.
 // 500/15min (≈33/min) is too tight for authenticated clients — an active
 // faction member with a couple of tabs open easily burns through that in

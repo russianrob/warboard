@@ -4829,6 +4829,197 @@ router.get("/api/oc/delays", async (req, res) => {
 });
 
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  PUBLIC API — anyone with a Torn API key can use these
+// ═══════════════════════════════════════════════════════════════════════════
+// Design:
+//   - Caller identifies themselves with their Torn API key (any tier).
+//   - Server uses its own FFScouter key for upstream FFS lookups; caller
+//     doesn't need to be FFScouter-registered.
+//   - Per-caller rate limits + shared cache so one person's query
+//     benefits everyone (every public endpoint's marginal cost → 0).
+//   - CORS wide open so any tool can hit these without a proxy.
+
+const _publicRateBuckets = new Map(); // keySuffix → { count, windowStart }
+function publicRateLimit(keySuffix, maxPerMin = 30) {
+  const now = Date.now();
+  const b = _publicRateBuckets.get(keySuffix);
+  if (!b || now - b.windowStart > 60_000) {
+    _publicRateBuckets.set(keySuffix, { count: 1, windowStart: now });
+    return { ok: true, remaining: maxPerMin - 1, resetInMs: 60_000 };
+  }
+  if (b.count >= maxPerMin) {
+    return { ok: false, remaining: 0, resetInMs: 60_000 - (now - b.windowStart) };
+  }
+  b.count++;
+  return { ok: true, remaining: maxPerMin - b.count, resetInMs: 60_000 - (now - b.windowStart) };
+}
+
+async function resolvePublicCaller(req, res) {
+  res.set("Access-Control-Allow-Origin", "*");
+  const key = req.query.key || req.get("x-torn-key") || (req.body && req.body.key);
+  if (!key || String(key).length < 10) {
+    res.status(400).json({ error: "Missing Torn API key (pass as ?key= or X-Torn-Key header)" });
+    return null;
+  }
+  const suffix = String(key).slice(-8);
+  let info = _spawnKeyCache.get(suffix);
+  if (!info || (Date.now() - info.ts) > 5 * 60_000) {
+    try {
+      const tornInfo = await verifyTornApiKey(key);
+      info = {
+        ts: Date.now(),
+        factionId: tornInfo.factionId,
+        playerName: tornInfo.playerName,
+        playerId: tornInfo.playerId,
+        factionPosition: tornInfo.factionPosition,
+        hasFactionAccess: tornInfo.hasFactionAccess,
+      };
+      _spawnKeyCache.set(suffix, info);
+    } catch (err) {
+      res.status(401).json({ error: err.message });
+      return null;
+    }
+  }
+  return { info, key: String(key), suffix };
+}
+
+// ── GET /api/public/flight/:playerId ─────────────────────────────────
+// Returns tight landing-time prediction for a Torn player currently in
+// transit, using our FFScouter integration. Abroad (not in flight)
+// returns destination with landingAt=0.
+router.get("/api/public/flight/:playerId", async (req, res) => {
+  const ctx = await resolvePublicCaller(req, res);
+  if (!ctx) return;
+  const rate = publicRateLimit(ctx.suffix, 60);
+  res.set("X-RateLimit-Remaining", String(rate.remaining));
+  if (!rate.ok) {
+    res.status(429).json({ error: "Rate limit exceeded", resetInSec: Math.ceil(rate.resetInMs / 1000) });
+    return;
+  }
+  const playerId = String(req.params.playerId || "").replace(/[^0-9]/g, "");
+  if (!playerId) return res.status(400).json({ error: "Invalid player ID" });
+  const factionFfsKey = (store.getFactionSettings(ctx.info.factionId)?.oc_ffs_key) || "";
+  const info = await fetchFlightInfo(playerId, ctx.key, factionFfsKey);
+  if (!info) return res.status(502).json({ error: "FFScouter unreachable or no data" });
+  return res.json({
+    playerId,
+    landingAt: info.landingAt,          // unix seconds, 0 if not in flight
+    destination: info.destination,      // country name or '' if home
+    returning: info.returning,          // true = heading back to Torn
+    method: info.method,                // 'Airline' | 'PI' | ...
+    takeoffAt: Math.floor((info.takeoffTime || 0) / 1000),
+  });
+});
+
+// ── GET /api/public/war/:factionId ───────────────────────────────────
+// Current ranked-war snapshot for the given faction. Score, lead,
+// target, and a rough projected-end based on current differential.
+router.get("/api/public/war/:factionId", async (req, res) => {
+  const ctx = await resolvePublicCaller(req, res);
+  if (!ctx) return;
+  const rate = publicRateLimit(ctx.suffix, 30);
+  res.set("X-RateLimit-Remaining", String(rate.remaining));
+  if (!rate.ok) {
+    res.status(429).json({ error: "Rate limit exceeded", resetInSec: Math.ceil(rate.resetInMs / 1000) });
+    return;
+  }
+  const fid = String(req.params.factionId || "").replace(/[^0-9]/g, "");
+  if (!fid) return res.status(400).json({ error: "Invalid faction ID" });
+  try {
+    const rw = await fetchRankedWar(fid, ctx.key);
+    if (!rw) return res.json({ factionId: fid, inWar: false });
+    // Normalize shape: rw may be { warId, factions: {id: {score, chain}}, war: {target, start, end} }
+    const warObj = rw.war || rw;
+    const factions = rw.factions || {};
+    const entries = Object.entries(factions).map(([id, f]) => ({
+      factionId: id,
+      name: f.name || '',
+      score: Number(f.score) || 0,
+      chain: Number(f.chain) || 0,
+    }));
+    entries.sort((a, b) => b.score - a.score);
+    const [leader, trailer] = entries;
+    const lead = (leader && trailer) ? leader.score - trailer.score : 0;
+    const target = Number(warObj.target) || 0;
+    const startTs = Number(warObj.start) || 0;
+    const now = Math.floor(Date.now() / 1000);
+    let projectedEnd = null;
+    if (leader && target > 0) {
+      const pointsToGo = Math.max(0, target - leader.score);
+      const elapsed = startTs > 0 ? Math.max(1, now - startTs) : 1;
+      const rate = leader.score / elapsed; // points / second
+      if (rate > 0 && pointsToGo > 0) {
+        projectedEnd = now + Math.round(pointsToGo / rate);
+      } else if (pointsToGo === 0) {
+        projectedEnd = now; // effectively won
+      }
+    }
+    return res.json({
+      factionId: fid,
+      inWar: true,
+      warId: rw.warId || rw.id || null,
+      startedAt: startTs,
+      endsAt: Number(warObj.end) || null,
+      target,
+      factions: entries,
+      leader: leader ? leader.factionId : null,
+      leadScore: lead,
+      projectedEndUnix: projectedEnd,
+    });
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+});
+
+// ── GET /api/public/oc/spawn ─────────────────────────────────────────
+// Returns OC spawn-assistance data for the caller's own faction. Uses
+// the caller's Torn key to fetch faction members + completed crimes;
+// no internal allowlist or subscription gate.
+router.get("/api/public/oc/spawn", async (req, res) => {
+  const ctx = await resolvePublicCaller(req, res);
+  if (!ctx) return;
+  const rate = publicRateLimit(ctx.suffix, 10);
+  res.set("X-RateLimit-Remaining", String(rate.remaining));
+  if (!rate.ok) {
+    res.status(429).json({ error: "Rate limit exceeded", resetInSec: Math.ceil(rate.resetInMs / 1000) });
+    return;
+  }
+  try {
+    const data = await getOcSpawnData(ctx.info.factionId, ctx.key);
+    // Strip the raw cprCache byPosition blobs — keep the summary stats
+    // only (cpr, joinable, highestLevel) to keep response size down.
+    const leanCpr = {};
+    for (const [uid, d] of Object.entries(data.cprCache || {})) {
+      leanCpr[uid] = {
+        cpr: d.cpr,
+        joinable: d.joinable,
+        highestLevel: d.highestLevel,
+        estimated: !!d.estimated,
+      };
+    }
+    return res.json({
+      factionId: ctx.info.factionId,
+      factionName: data.factionName || null,
+      members: (data.members || []).map((m) => ({
+        id: m.id, name: m.name, level: m.level,
+        status: m.status?.state || null,
+        days_in_faction: m.days_in_faction,
+      })),
+      cprs: leanCpr,
+      availableCrimes: (data.availableCrimes || []).map((c) => ({
+        id: c.id, name: c.name, difficulty: c.difficulty, status: c.status,
+        slots: (c.slots || []).map((s) => ({
+          position: s.position,
+          userId: s.user_id ?? s.user?.id ?? null,
+        })),
+      })),
+    });
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+});
+
 // -- GET /api/oc/settings ---------------------------------------------------
 router.get("/api/oc/settings", async (req, res) => {
   res.set("Access-Control-Allow-Origin", "*");
