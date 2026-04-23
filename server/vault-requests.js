@@ -153,7 +153,12 @@ export async function notifyNewRequest(req, allFactionMemberIds) {
             type: 'vault_request',
             requestId: req.id,
             factionId: req.factionId,
-            url: 'https://www.torn.com/factions.php?step=your&type=1#/tab=armoury&start=0&sub=donations',
+            // Controls tab hosts the 'Give to faction member' form, which
+            // tryAutofillVaultPayout() in oc-spawn-assistance is already
+            // wired to hydrate from sessionStorage. Landing on the
+            // armoury's donations subtab forced a second tap to get to
+            // the actual give-money flow.
+            url: 'https://www.torn.com/factions.php?step=your&type=1#/tab=controls',
         },
     }, 'vault_request');
 }
