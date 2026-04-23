@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.94
+// @version      4.9.95
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.94';
+    const SCRIPT_VERSION = '4.9.95';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -8096,12 +8096,24 @@ body.wb-chain-active {
 
             if (isExpanded) {
                 unavailList.style.display = '';
+                // v4.9.95: sort the unavailable section — traveling
+                // members with the soonest landing float to the top,
+                // then members without landing data (abroad / unknown),
+                // then jailed (by hospital-style remaining time). This
+                // is where traveling members actually live; the main
+                // attackable list had been getting all the sort love.
+                const sortedUnavail = [...unavailableIds].sort((a, b) => {
+                    const pa = sortPriority(a), pb = sortPriority(b);
+                    if (pa !== pb) return pa - pb;
+                    return sortTimerValue(a) - sortTimerValue(b);
+                });
                 // Remove stale
                 unavailList.querySelectorAll('[data-fo-id]').forEach(r => {
                     if (!unavailableIds.includes(r.dataset.foId)) r.remove();
                 });
-                // Add/update
-                for (const tid of unavailableIds) {
+                // Add/update in sorted order, then reorder DOM to match.
+                const unavailRows = [];
+                for (const tid of sortedUnavail) {
                     let row = unavailList.querySelector(`[data-fo-id="${tid}"]`);
                     if (row) {
                         updateOverlayRow(row, tid);
@@ -8110,6 +8122,15 @@ body.wb-chain-active {
                         row.style.opacity = '0.45';
                         unavailList.appendChild(row);
                     }
+                    unavailRows.push(row);
+                }
+                // Reorder DOM: insert rows in sorted order only if the
+                // current order doesn't match (avoids layout thrash).
+                let prevNode = null;
+                for (const row of unavailRows) {
+                    const expectedNext = prevNode ? prevNode.nextSibling : unavailList.firstChild;
+                    if (row !== expectedNext) unavailList.insertBefore(row, expectedNext);
+                    prevNode = row;
                 }
             } else {
                 unavailList.style.display = 'none';
