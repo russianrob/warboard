@@ -4504,6 +4504,7 @@ async function resolveSpawnKeyInfo(req, res) {
 router.post("/api/oc/flyer-delay", async (req, res) => {
   const info = await resolveSpawnKeyInfo(req, res);
   if (!info) return;
+  const callerKey = req.query.key || (req.body && req.body.key);
   const { crimeId, memberId, memberName, crimeName, readyAt } = (req.body || {});
   if (!crimeId || !memberId) return res.status(400).json({ error: "crimeId and memberId are required" });
   const fid = String(info.factionId);
@@ -4522,7 +4523,9 @@ router.post("/api/oc/flyer-delay", async (req, res) => {
   // move it earlier in time when we learn better data.
   let firstObservedAt = Number(prev?.firstObservedAt) || now;
   try {
-    const takeoffTime = await fetchFlyerTakeoffTime(String(memberId));
+    const fS = store.getFactionSettings(info.factionId);
+    const factionFfsKey = fS?.oc_ffs_key || '';
+    const takeoffTime = await fetchFlyerTakeoffTime(String(memberId), callerKey, factionFfsKey);
     if (takeoffTime > 0) {
       const readyAtMs = Number(readyAt) > 0 ? Number(readyAt) * 1000 : 0;
       // The member only started *blocking* once both:
@@ -4548,6 +4551,13 @@ router.post("/api/oc/flyer-delay", async (req, res) => {
     crimeName:  String(crimeName  || prev?.crimeName  || crimeId),
   });
   scheduleFlyerDelaysSave();
+  // v3.1.48 diag: log every flyer-delay POST so we can see why delays
+  // aren't landing at expected values. Includes pre/post firstObserved.
+  if (!global._flyerDelayDiagCount) global._flyerDelayDiagCount = 0;
+  if (global._flyerDelayDiagCount < 40) {
+    global._flyerDelayDiagCount++;
+    console.log(`[flyer-delay] ${memberName || memberId} crime=${crimeId} member=${memberId} readyAt=${readyAt || 0} prevFirst=${prev?.firstObservedAt || 'none'} newFirst=${firstObservedAt} delay=${serverDelay}s`);
+  }
   return res.json({ ok: true, delayedSec: serverDelay });
 });
 
@@ -4557,23 +4567,44 @@ router.post("/api/oc/flyer-delay", async (req, res) => {
 // FFScouter) as the server-side credential.
 const _flyerTakeoffCache = new Map(); // uid → { takeoffTime, ts }
 const FLYER_TAKEOFF_TTL_MS = 5 * 60_000;
-async function fetchFlyerTakeoffTime(uid) {
+async function fetchFlyerTakeoffTime(uid, preferredKey, factionKey) {
   const now = Date.now();
   const cached = _flyerTakeoffCache.get(uid);
   if (cached && (now - cached.ts) < FLYER_TAKEOFF_TTL_MS) return cached.takeoffTime;
-  const key = process.env.OWNER_API_KEY;
-  if (!key) return 0;
-  try {
-    const r = await fetch(`https://ffscouter.com/api/v1/player-flights?key=${encodeURIComponent(key)}&target=${encodeURIComponent(uid)}`);
-    if (!r.ok) return 0;
-    const d = await r.json();
-    const t = Number(d?.current?.takeoff_time) || 0;
-    const takeoffTime = t > 0 ? t * 1000 : 0;
-    _flyerTakeoffCache.set(uid, { takeoffTime, ts: now });
-    return takeoffTime;
-  } catch (_) {
-    return 0;
+  // FFScouter requires a key registered on their site. Try each
+  // available key in priority order; on 401/error move to the next.
+  //  1. caller's own Torn key (most active members have FFS registered)
+  //  2. faction-wide FFS key set in OC Settings → "FFScouter API Key"
+  //  3. server OWNER_API_KEY (dev fallback, may not be FFS-registered)
+  const keys = [preferredKey, factionKey, process.env.OWNER_API_KEY]
+    .filter((k) => typeof k === 'string' && k.length >= 10);
+  if (!keys.length) { console.log(`[flyer-takeoff] ${uid}: no key`); return 0; }
+  for (const key of keys) {
+    try {
+      const r = await fetch(`https://ffscouter.com/api/v1/player-flights?key=${encodeURIComponent(key)}&target=${encodeURIComponent(uid)}`);
+      if (!r.ok) { continue; } // 401 etc → try next key
+      const d = await r.json();
+      if (d?.error) { continue; }
+      if (!global._flyerTakeoffDiag) global._flyerTakeoffDiag = 0;
+      if (global._flyerTakeoffDiag < 10) {
+        global._flyerTakeoffDiag++;
+        console.log(`[flyer-takeoff] ${uid} via key****${key.slice(-4)}: current=${JSON.stringify(d?.current)?.slice(0,120)} recents=${(d?.recent_flights||[]).length}`);
+      }
+      // Prefer current flight's takeoff_time if still in transit.
+      // Otherwise member is abroad — use most recent outbound flight.
+      let t = Number(d?.current?.takeoff_time) || 0;
+      if (!t) {
+        const recents = Array.isArray(d?.recent_flights) ? d.recent_flights : [];
+        t = Number(recents[0]?.takeoff_time) || 0;
+      }
+      const takeoffTime = t > 0 ? t * 1000 : 0;
+      _flyerTakeoffCache.set(uid, { takeoffTime, ts: now });
+      return takeoffTime;
+    } catch (_) { /* try next key */ }
   }
+  console.log(`[flyer-takeoff] ${uid}: all ${keys.length} key(s) failed`);
+  _flyerTakeoffCache.set(uid, { takeoffTime: 0, ts: now });
+  return 0;
 }
 
 // ── GET /api/oc/delays ───────────────────────────────────────────────
@@ -4660,6 +4691,9 @@ router.get("/api/oc/settings", async (req, res) => {
     scope:               s.oc_scope                ?? null,
     high_weight_pct:     s.oc_high_weight_pct      ?? 25,
     high_weight_mincpr:  s.oc_high_weight_mincpr   ?? 75,
+    // v3.1.48: masked FFS-key presence flag. Full key never leaves server.
+    ffs_key_set:         !!s.oc_ffs_key,
+    ffs_key_last4:       s.oc_ffs_key ? String(s.oc_ffs_key).slice(-4) : '',
     // Engine toggles
     engine_slot_optimizer:   s.engine_slot_optimizer   ?? false,
     engine_cpr_forecaster:   s.engine_cpr_forecaster   ?? false,
@@ -4684,6 +4718,41 @@ router.get("/api/oc/version", (req, res) => {
 });
 
 // -- GET /api/oc/scope  (lightweight scope-only update — no other settings touched)
+// -- POST /api/oc/ffs-key  (faction-wide FFScouter key for delay attribution)
+// Admin-gated. Body: { key, ffsKey }. Never accepts the FFS key via URL
+// params — always POST body so it doesn't land in access logs.
+router.post("/api/oc/ffs-key", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const key = req.body?.key;
+  if (!key || key.length < 10) return res.status(400).json({ error: "Missing key" });
+  const suffix = key.slice(-8);
+  let info = _spawnKeyCache.get(suffix);
+  if (!info || (Date.now() - info.ts) > 5 * 60_000) {
+    try {
+      const tornInfo = await verifyTornApiKey(key);
+      info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition, hasFactionAccess: tornInfo.hasFactionAccess };
+      _spawnKeyCache.set(suffix, info);
+    } catch (err) { return res.status(401).json({ error: err.message }); }
+  }
+  // Admin gate: only admins can set a faction-wide credential.
+  const isDev = String(info.playerId) === "137558";
+  const adminRoles = store.getAdminRoles(info.factionId).map((r) => String(r).toLowerCase());
+  const pos = String(info.factionPosition || "").toLowerCase();
+  if (!isDev && !adminRoles.includes(pos)) {
+    return res.status(403).json({ error: "Admin role required" });
+  }
+  const ffsKey = String(req.body?.ffsKey ?? "").trim();
+  // Loose validation: Torn keys are 16 alphanumeric chars. Allow empty to clear.
+  if (ffsKey && !/^[A-Za-z0-9]{10,64}$/.test(ffsKey)) {
+    return res.status(400).json({ error: "Invalid FFS key format" });
+  }
+  store.updateFactionSettings(info.factionId, { oc_ffs_key: ffsKey });
+  // Clear takeoff cache so next lookup tries the new key immediately.
+  _flyerTakeoffCache.clear();
+  console.log(`[oc/ffs-key] ${info.playerName} (${info.playerId}) ${ffsKey ? 'set' : 'cleared'} FFS key for faction ${info.factionId}`);
+  return res.json({ ok: true });
+});
+
 router.get("/api/oc/scope", async (req, res) => {
   const key = req.query.key;
   if (!key) return res.status(400).json({ error: "Missing key" });

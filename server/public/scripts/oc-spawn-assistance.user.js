@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.47
+// @version      3.1.48
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -211,6 +211,7 @@
             CPR_LOOKBACK_DAYS:       Number(GM_getValue('cfg_lookback_days',      90)),
             HIGH_WEIGHT_THRESHOLD:   Number(GM_getValue('cfg_high_weight_pct',    25)),
             HIGH_WEIGHT_MIN_CPR:     Number(GM_getValue('cfg_high_weight_mincpr', 75)),
+            FFS_KEY:                 String(GM_getValue('cfg_ffs_key', '')),
             SCOPE:             GM_getValue('cfg_scope', null),  // null = not configured
             // Persisted: remember that scope came from auto-detection so a page
             // reload doesn't let the server's older saved value clobber it. The
@@ -242,7 +243,7 @@
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
-    const SCRIPT_VERSION = '3.1.47';
+    const SCRIPT_VERSION = '3.1.48';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -2137,6 +2138,17 @@
                 </div>
                 <input class="oc-setting-num" id="cfg-high-weight-mincpr" type="number" min="0" max="100"/>
             </div>
+            <!-- v3.1.48: optional faction-wide FFScouter key. Used server-side
+                 to fetch each flyer's real takeoff_time so OC delay
+                 attribution backdates correctly. Falls back to per-member
+                 keys when unset. -->
+            <div class="oc-setting-row" style="flex-direction:column;align-items:stretch;">
+                <div class="oc-setting-info" style="margin-bottom:4px;">
+                    <span class="oc-setting-label">FFScouter API Key</span>
+                    <div class="oc-setting-desc">Any Torn API key that's been registered at ffscouter.com. Used to look up OC flyers' takeoff times so delay attribution backdates correctly (Caboose flying 6h shows 6h, Rey flying 20min shows 20min). Leave blank to fall back to each member's own key.</div>
+                </div>
+                <input class="oc-setting-num" id="cfg-ffs-key" type="text" placeholder="(optional)" style="font-family:monospace;"/>
+            </div>
 
             <div style="text-align:right;margin-top:4px;">
                 <button id="oc-spawn-cfg-save" class="oc-setting-save-btn" disabled>Save for All Members</button>
@@ -2377,6 +2389,13 @@
         document.getElementById('cfg-lookback-days').value        = CONFIG.CPR_LOOKBACK_DAYS;
         document.getElementById('cfg-high-weight-pct').value      = CONFIG.HIGH_WEIGHT_THRESHOLD;
         document.getElementById('cfg-high-weight-mincpr').value   = CONFIG.HIGH_WEIGHT_MIN_CPR;
+        const ffsEl = document.getElementById('cfg-ffs-key');
+        if (ffsEl) {
+            ffsEl.value = '';
+            ffsEl.placeholder = CONFIG._FFS_KEY_SET
+                ? '••••••••' + (CONFIG._FFS_KEY_LAST4 || '') + '  (type to replace, blank to keep)'
+                : 'Paste a Torn API key registered at ffscouter.com';
+        }
         // Admin roles — fetched from server, populated async
         loadAdminRoles();
         // Engine toggles
@@ -2552,6 +2571,8 @@
         CONFIG.CPR_LOOKBACK_DAYS     = get('cfg-lookback-days');
         CONFIG.HIGH_WEIGHT_THRESHOLD = get('cfg-high-weight-pct');
         CONFIG.HIGH_WEIGHT_MIN_CPR   = get('cfg-high-weight-mincpr');
+        const ffsInput = document.getElementById('cfg-ffs-key');
+        CONFIG.FFS_KEY               = ffsInput ? String(ffsInput.value || '').trim() : (CONFIG.FFS_KEY || '');
 
         // Local persistence
         GM_setValue('cfg_active_days',    CONFIG.ACTIVE_DAYS);
@@ -2561,6 +2582,24 @@
         GM_setValue('cfg_lookback_days',       CONFIG.CPR_LOOKBACK_DAYS);
         GM_setValue('cfg_high_weight_pct',     CONFIG.HIGH_WEIGHT_THRESHOLD);
         GM_setValue('cfg_high_weight_mincpr',  CONFIG.HIGH_WEIGHT_MIN_CPR);
+        GM_setValue('cfg_ffs_key',             CONFIG.FFS_KEY);
+        // v3.1.48: push FFS key via POST (body-only, never query params)
+        // since it's a credential. Only send if the input has a non-empty
+        // value — leaving it blank preserves the existing server-side key.
+        // Uses GM_xmlhttpRequest directly (gmRequest is GET-only).
+        const _apiKeyForFfs = getApiKey();
+        if (CONFIG.FFS_KEY && _apiKeyForFfs && _apiKeyForFfs !== 'YOUR_API_KEY_HERE' && typeof GM_xmlhttpRequest === 'function') {
+            await new Promise((resolve) => {
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: `${SERVER}/api/oc/ffs-key`,
+                    headers: { 'Content-Type': 'application/json' },
+                    data: JSON.stringify({ key: _apiKeyForFfs, ffsKey: CONFIG.FFS_KEY }),
+                    onload:  () => resolve(),
+                    onerror: () => resolve(),
+                });
+            });
+        }
         GM_setValue('cfg_scope',               CONFIG.SCOPE);
         document.getElementById('oc-settings-panel').style.display = 'none';
         setStatus('Saving settings for all faction members…');
@@ -4735,6 +4774,9 @@
                 CONFIG.CPR_LOOKBACK_DAYS       = srvSettings.lookback_days;
                 CONFIG.HIGH_WEIGHT_THRESHOLD   = srvSettings.high_weight_pct      ?? CONFIG.HIGH_WEIGHT_THRESHOLD;
                 CONFIG.HIGH_WEIGHT_MIN_CPR     = srvSettings.high_weight_mincpr   ?? CONFIG.HIGH_WEIGHT_MIN_CPR;
+                // v3.1.48: presence flag + last4 only — full FFS key stays server-side.
+                CONFIG._FFS_KEY_SET   = !!srvSettings.ffs_key_set;
+                CONFIG._FFS_KEY_LAST4 = String(srvSettings.ffs_key_last4 || '');
                 // Only apply server-side scope if we don't have a fresher
                 // auto-detected value from the DOM reader. Otherwise every
                 // refresh would overwrite a fresh Recruiting-tab read (e.g.
