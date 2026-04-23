@@ -47,17 +47,50 @@ const BASIC_TTL_MS       = 30 * 1000;
 const availableCache     = new Map(); // factionId -> { ts, crimes }
 const basicCache         = new Map(); // factionId -> { ts, data }
 
-// Helper to fetch from Torn API directly if not in torn-api.js
+// Helper to fetch from Torn API directly if not in torn-api.js.
+// v3.1.45: paginates backwards using the `to` keyset so we fetch the
+// *entire* 90-day completed-crimes window instead of just the most
+// recent 100 crimes. Torn v2 caps each response at 100 entries; this
+// walks back using the oldest executed_at of each batch until empty
+// or past the lookback cutoff.
 async function fetchCompletedCrimes(factionId, apiKey) {
   const fromTs = Math.floor(Date.now() / 1000) - (CPR_LOOKBACK_DAYS * 86400);
-  const url = `https://api.torn.com/v2/faction/crimes?cat=completed&sort=DESC&from=${fromTs}&key=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Torn API HTTP ${res.status}`);
-  const data = await res.json();
-  if (data.error) throw new Error(data.error.error);
-  
-  if (Array.isArray(data.crimes)) return data.crimes;
-  return Object.values(data.crimes || {});
+  const seen = new Set();
+  const all = [];
+  let toTs = null;
+  const MAX_PAGES = 20;             // safety: 2000 crimes max
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const params = new URLSearchParams({
+      cat: 'completed',
+      sort: 'DESC',
+      from: String(fromTs),
+      key: apiKey,
+    });
+    if (toTs) params.set('to', String(toTs));
+    const url = `https://api.torn.com/v2/faction/crimes?${params}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Torn API HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.error);
+    const batch = Array.isArray(data.crimes) ? data.crimes : Object.values(data.crimes || {});
+    if (batch.length === 0) break;
+    let addedThisBatch = 0;
+    let oldest = Infinity;
+    for (const c of batch) {
+      const id = String(c.id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      all.push(c);
+      addedThisBatch++;
+      const ts = Number(c.executed_at || 0);
+      if (ts > 0 && ts < oldest) oldest = ts;
+    }
+    if (addedThisBatch === 0) break;  // nothing new (server ignoring our `to`)
+    if (!Number.isFinite(oldest) || oldest <= fromTs) break; // reached cutoff
+    // Walk backwards — use oldest-1 as the next upper bound.
+    toTs = oldest - 1;
+  }
+  return all;
 }
 
 async function fetchAvailableCrimes(factionId, apiKey) {

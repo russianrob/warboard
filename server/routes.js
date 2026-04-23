@@ -3228,8 +3228,9 @@ function collectOcHistory(factionId, data) {
     }
 
     if (added > 0) {
-      // Keep last 500 entries per faction
-      if (history.length > 500) history = history.slice(-500);
+      // v3.1.45: raised from 500 to 5000 so pagination backfill of the
+      // full 90-day window can land without truncating older entries.
+      if (history.length > 5000) history = history.slice(-5000);
       writeFileSync(histFile, JSON.stringify(history, null, 2));
       console.log(`[oc-history] Logged ${added} completed OC(s) for faction ${factionId}`);
     }
