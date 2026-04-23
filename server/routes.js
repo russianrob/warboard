@@ -4910,15 +4910,37 @@ router.post("/api/oc/vault-request", async (req, res) => {
   if (!isFinite(amount) || amount < 1) return res.status(400).json({ error: "Invalid amount" });
   if (target !== 'online' && target !== 'both') target = 'both';
 
-  // Cap at the requester's own vault balance using their own key. If the
-  // balance fetch fails we reject the submission rather than let it through
-  // uncapped — "Infinity max" would mean a member could request any amount.
+  // Cap at the requester's own vault balance. Try their own key first
+  // (fast path); if it fails with Torn's "Incorrect ID-entity relation"
+  // (happens when the member's key lacks faction permissions), fall
+  // back to any Full-access key from the faction's spawn-key pool so
+  // the request still goes through. Only reject if neither source
+  // works — "Infinity max" would let a member request any amount.
   let maxAmount = null;
+  let fetchErr = null;
   try {
     maxAmount = await vaultRequests.fetchVaultBalance(info.factionId, info.playerId, key);
   } catch (e) {
-    console.warn(`[vault-request] balance fetch failed for ${info.playerId}:`, e.message);
-    return res.status(503).json({ error: "Couldn't verify your vault balance — try again in a moment." });
+    fetchErr = e;
+  }
+  if (maxAmount === null || !Number.isFinite(maxAmount)) {
+    const poolKeys = getFactionKeys(info.factionId).filter(k => k !== key);
+    for (const pk of poolKeys) {
+      try {
+        const tryAmt = await vaultRequests.fetchVaultBalance(info.factionId, info.playerId, pk);
+        if (Number.isFinite(tryAmt)) {
+          maxAmount = tryAmt;
+          touchFactionKey(info.factionId, pk);
+          console.log(`[vault-request] balance for ${info.playerId} via pool key ****${pk.slice(-4)} (own key failed: ${fetchErr?.message || 'null'})`);
+          fetchErr = null;
+          break;
+        }
+      } catch (_) { /* try next */ }
+    }
+  }
+  if (fetchErr) {
+    console.warn(`[vault-request] balance fetch failed for ${info.playerId}:`, fetchErr.message);
+    return res.status(503).json({ error: "Couldn't verify your vault balance — your key may need faction permissions (preferences.php → API Keys)." });
   }
   if (!(maxAmount > 0)) {
     return res.status(400).json({ error: "No vault balance available to request." });
