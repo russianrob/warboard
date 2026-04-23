@@ -4695,15 +4695,21 @@ async function fetchFlightInfo(uid, preferredKey, factionKey) {
           method: cur.travel_method || '',
         };
       } else {
-        // Abroad — not in transit, so no landing countdown. Still
-        // surface outbound takeoff for delay attribution fallback.
-        const outbound = Number(recents[0]?.takeoff_time) || 0;
+        // Abroad — not in transit, so no landing countdown. Parse the
+        // destination from the outbound leg so the factionops pill can
+        // show 'UK' instead of 'Travel'.
+        const last = recents[0] || {};
+        const outbound = Number(last.takeoff_time) || 0;
+        const lastDesc = String(last.status_description || '');
+        let abroadDest = '';
+        const m = lastDesc.match(/Traveling to (.+)/i);
+        if (m) abroadDest = m[1].trim();
         info = {
           takeoffTime: outbound * 1000,
           landingAt: 0,
-          destination: '',
+          destination: abroadDest,
           returning: false,
-          method: '',
+          method: last.travel_method || '',
         };
       }
       _flyerTakeoffCache.set(uid, { data: info, ts: now });
@@ -4754,10 +4760,11 @@ router.post("/api/flights/batch", async (req, res) => {
   );
   const flights = {};
   for (const [uid, fi] of results) {
-    if (fi && (fi.landingAt > 0)) {
+    if (!fi) continue;
+    if (fi.landingAt > 0 || fi.destination) {
       flights[uid] = {
-        landingAt: fi.landingAt,
-        destination: fi.destination,
+        landingAt: fi.landingAt || 0,
+        destination: fi.destination || '',
         returning: !!fi.returning,
       };
     }

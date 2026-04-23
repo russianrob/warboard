@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.87
+// @version      4.9.88
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.87';
+    const SCRIPT_VERSION = '4.9.88';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1713,9 +1713,10 @@ body.wb-chain-active {
     font-size: 11px; font-weight: 500;
     padding: 3px 10px; border-radius: 20px;
     white-space: nowrap; line-height: 1;
-    /* v4.9.86: wider pill so hh:mm:ss and longer labels sit
-       comfortably in the narrow PDA columns without clipping. */
-    min-width: 84px;
+    /* v4.9.88: content-based sizing — padding absorbs short labels
+       ('OK', 'UK'), wider labels ('3h 45m', 'South Africa') grow the
+       pill naturally. No fixed min/max on desktop. */
+    width: fit-content;
 }
 .fo-status-pill .fo-s-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 
@@ -1874,10 +1875,11 @@ body.wb-chain-active {
     .fo-called-tag { padding: 2px 6px; font-size: 9px; }
     .fo-called-tag .fo-caller-name { max-width: 34px; }
     .fo-call-cell { overflow: hidden; max-width: 100%; }
-    /* v4.9.87: grow the narrow-viewport pill so hh:mm:ss / long travel
-       labels actually fit. The old 58px max clipped 'Xh YYm' labels and
-       forced a min-width of 0, overriding the desktop min-width:84px. */
-    .fo-status-pill { padding: 2px 6px; font-size: 9.5px; min-width: 78px; max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* v4.9.88: let the pill auto-size to its content on narrow
+       viewports too. Padding + inline-flex already keep it pill-shaped;
+       we just cap max-width so a comically long destination ('Dominican
+       Republic') can't blow out the column. */
+    .fo-status-pill { padding: 2px 8px; font-size: 9.5px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fo-player-name .fo-name { font-size: 11.5px; }
     .fo-player-name .fo-pid { font-size: 9px; }
     .fo-bsp-stat { font-size: 10px; }
@@ -3571,9 +3573,10 @@ body.wb-chain-active {
         }
         const uids = [];
         for (const [targetId, s] of Object.entries(state.statuses || {})) {
-            if (normalizeStatus(s.status) === 'traveling') uids.push(targetId);
+            const norm = normalizeStatus(s.status);
+            if (norm === 'traveling' || norm === 'abroad') uids.push(targetId);
         }
-        foFlightDiag('statuses=' + Object.keys(state.statuses || {}).length + ' traveling=' + uids.length);
+        foFlightDiag('statuses=' + Object.keys(state.statuses || {}).length + ' travel/abroad=' + uids.length);
         if (!uids.length) return;
         _flightsFetchInFlight = (async () => {
             try {
@@ -3595,11 +3598,13 @@ body.wb-chain-active {
                     // calls are still useful until we get a fresh value).
                     const touched = [];
                     for (const [uid, fi] of Object.entries(r.data.flights)) {
-                        if (fi && fi.landingAt > 0) {
+                        // v4.9.88: accept records with EITHER a landing
+                        // time (in-flight) or just a destination (abroad).
+                        if (fi && (fi.landingAt > 0 || fi.destination)) {
                             state.flights[uid] = fi;
                             if (state.statuses[uid]) {
-                                state.statuses[uid].landingAt = fi.landingAt;
-                                state.statuses[uid].flightDest = fi.destination;
+                                state.statuses[uid].landingAt = fi.landingAt || 0;
+                                state.statuses[uid].flightDest = fi.destination || '';
                                 state.statuses[uid].flightReturning = !!fi.returning;
                                 touched.push(uid);
                             }
@@ -8356,7 +8361,11 @@ body.wb-chain-active {
             label = 'Jail';
         } else if (status === 'traveling' || status === 'abroad') {
             pillClass = 'travel';
-            label = 'Travel';
+            // v4.9.88: default label is the destination country when we
+            // have it (from FFS flights), falling back to generic Travel.
+            // Abroad members ALWAYS show the country; in-flight shows the
+            // timer instead (handled below).
+            label = s.flightDest || 'Travel';
         }
 
         // v4.9.81: travel pill uses landing-time countdown when FFS data
