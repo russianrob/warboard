@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.82
+// @version      4.9.83
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.82';
+    const SCRIPT_VERSION = '4.9.83';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1709,10 +1709,13 @@ body.wb-chain-active {
 
 /* Status Pill */
 .fo-status-pill {
-    display: inline-flex; align-items: center; gap: 5px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
     font-size: 11px; font-weight: 500;
-    padding: 3px 8px; border-radius: 20px;
+    padding: 3px 10px; border-radius: 20px;
     white-space: nowrap; line-height: 1;
+    /* v4.9.83: widen the pill so a full hh:mm:ss countdown fits on PDA
+       without truncating and wrapping to the next row. */
+    min-width: 64px;
 }
 .fo-status-pill .fo-s-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 
@@ -3549,8 +3552,10 @@ body.wb-chain-active {
         if (!uids.length) return;
         _flightsFetchInFlight = (async () => {
             try {
+                // v4.9.83: use httpRequest helper so PDA routes through
+                // PDA_httpPost instead of failing on GM_xmlhttpRequest.
                 const r = await new Promise((resolve) => {
-                    GM_xmlhttpRequest({
+                    httpRequest({
                         method: 'POST',
                         url: `${CONFIG.SERVER_URL}/api/flights/batch`,
                         headers: { 'Content-Type': 'application/json' },
@@ -5280,7 +5285,7 @@ body.wb-chain-active {
                 if (apiKey && apiKey.length >= 10) {
                     const ffsInput = document.getElementById('wb-input-ffs-key');
                     const url = `${CONFIG.SERVER_URL}/api/oc/settings?key=${encodeURIComponent(apiKey)}`;
-                    GM_xmlhttpRequest({
+                    httpRequest({
                         method: 'GET',
                         url,
                         onload(r) {
@@ -5337,7 +5342,7 @@ body.wb-chain-active {
             }
             resultEl.textContent = 'Saving…';
             resultEl.style.color = '#9ca3af';
-            GM_xmlhttpRequest({
+            httpRequest({
                 method: 'POST',
                 url: `${CONFIG.SERVER_URL}/api/oc/ffs-key`,
                 headers: { 'Content-Type': 'application/json' },
