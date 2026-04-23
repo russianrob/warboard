@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.81
+// @version      4.9.82
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.81';
+    const SCRIPT_VERSION = '4.9.82';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -4960,6 +4960,25 @@ body.wb-chain-active {
                     <em>Note: Saving a list replaces the defaults. Clear and save to reset.</em>
                 </div>
             </div>
+
+            <!-- v4.9.82: faction-wide FFScouter key for flight tracker. Shared
+                 with OC Spawn Assistance (oc_ffs_key in faction settings),
+                 so setting it here also enables OC delay attribution and
+                 vice versa. -->
+            <div style="margin: 14px 0;">
+                <label for="wb-input-ffs-key">FFScouter API Key <span style="font-weight:400;opacity:0.6;font-size:11px;">(optional, admin-only)</span></label>
+                <div style="display:flex;gap:6px;">
+                    <input type="password" id="wb-input-ffs-key" placeholder="Paste a Torn key registered at ffscouter.com" style="margin-bottom:0;flex:1;font-family:monospace;">
+                    <button class="wb-btn wb-btn-sm" id="wb-btn-save-ffs-key">Save</button>
+                </div>
+                <div id="fo-ffs-key-result" style="font-size:11px;opacity:0.6;margin-top:4px;min-height:14px;">
+                    Powers travel-landing countdowns for enemies in war.
+                    Leave blank to keep the existing key, or enter any
+                    Torn key already registered at ffscouter.com. Shared
+                    with OC Spawn Assistance — setting it here also
+                    improves OC delay attribution.
+                </div>
+            </div>
             <div style="font-size:11px;opacity:0.6;margin-bottom:14px;">
                 Keeps your Torn activity fresh while the warboard is open, so enemies can't tell you're idle.
             </div>
@@ -5247,10 +5266,32 @@ body.wb-chain-active {
                     const label = document.getElementById('fo-enabled-roles-label');
                     const input = document.getElementById('wb-input-broadcast-roles');
                     if (label) label.innerHTML = 'Enabled roles: <span style="color:#00b894;">' + resp.roles.join(', ') + '</span><br>';
-                    
+
                     const defaults = ['leader', 'co-leader', 'war leader', 'banker'];
                     const isDefault = resp.roles.length === 4 && resp.roles.every(r => defaults.includes(r));
                     if (input && !isDefault) input.value = resp.roles.join(', ');
+                }
+            } catch (_) {}
+
+            // v4.9.82: check whether a faction-wide FFS key is already
+            // configured so we can show a masked placeholder.
+            try {
+                const apiKey = GM_getValue('factionops_api_key', '') || CONFIG.API_KEY;
+                if (apiKey && apiKey.length >= 10) {
+                    const ffsInput = document.getElementById('wb-input-ffs-key');
+                    const url = `${CONFIG.SERVER_URL}/api/oc/settings?key=${encodeURIComponent(apiKey)}`;
+                    GM_xmlhttpRequest({
+                        method: 'GET',
+                        url,
+                        onload(r) {
+                            const d = safeParse(r.responseText);
+                            if (r.status >= 200 && r.status < 300 && d && d.ffs_key_set && ffsInput) {
+                                const last4 = d.ffs_key_last4 || '';
+                                ffsInput.placeholder = `\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022${last4}  (type to replace)`;
+                            }
+                        },
+                        onerror() { /* leave default placeholder */ },
+                    });
                 }
             } catch (_) {}
         })();
@@ -5258,7 +5299,7 @@ body.wb-chain-active {
         document.getElementById('wb-btn-save-roles').addEventListener('click', async () => {
             const rolesInput = document.getElementById('wb-input-broadcast-roles').value.trim();
             const roles = rolesInput ? rolesInput.split(',').map(r => r.trim().toLowerCase()) : [];
-            
+
             try {
                 const resp = await postAction('/api/broadcast/roles', { roles });
                 if (resp && resp.success) {
@@ -5273,6 +5314,51 @@ body.wb-chain-active {
             } catch (e) {
                 showToast('Failed to connect to server.', 'error');
             }
+        });
+
+        // v4.9.82: save faction-wide FFS key via the existing
+        // /api/oc/ffs-key endpoint (body-only, admin-gated server-side).
+        // Pulls caller's own Torn API key from GM storage so factionops
+        // admins can set it without installing OC Spawn Assistance.
+        document.getElementById('wb-btn-save-ffs-key').addEventListener('click', () => {
+            const resultEl = document.getElementById('fo-ffs-key-result');
+            const input = document.getElementById('wb-input-ffs-key');
+            const ffsKey = input.value.trim();
+            if (!ffsKey) {
+                resultEl.textContent = 'Enter a key to save (leave blank to keep existing).';
+                resultEl.style.color = '#fbbf24';
+                return;
+            }
+            const apiKey = GM_getValue('factionops_api_key', '') || CONFIG.API_KEY;
+            if (!apiKey || apiKey.length < 10) {
+                resultEl.textContent = 'Verify your Torn API key first.';
+                resultEl.style.color = '#ef4444';
+                return;
+            }
+            resultEl.textContent = 'Saving…';
+            resultEl.style.color = '#9ca3af';
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `${CONFIG.SERVER_URL}/api/oc/ffs-key`,
+                headers: { 'Content-Type': 'application/json' },
+                data: JSON.stringify({ key: apiKey, ffsKey }),
+                onload(r) {
+                    const d = safeParse(r.responseText);
+                    if (r.status >= 200 && r.status < 300) {
+                        resultEl.textContent = `Saved — ••••${ffsKey.slice(-4)}`;
+                        resultEl.style.color = '#00b894';
+                        input.value = '';
+                        input.placeholder = `\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022${ffsKey.slice(-4)}  (type to replace)`;
+                    } else {
+                        resultEl.textContent = d?.error || `Save failed (HTTP ${r.status})`;
+                        resultEl.style.color = '#ef4444';
+                    }
+                },
+                onerror() {
+                    resultEl.textContent = 'Network error — could not reach server.';
+                    resultEl.style.color = '#ef4444';
+                },
+            });
         });
 
         document.getElementById('wb-btn-save-faction-key').addEventListener('click', async () => {
