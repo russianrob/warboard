@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.80
+// @version      4.9.81
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.80';
+    const SCRIPT_VERSION = '4.9.81';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2771,6 +2771,11 @@ body.wb-chain-active {
         enemyFactionName: null,
         onlinePlayers: [],
         ourFactionOnline: null, // { online, idle, total } from server
+        // v4.9.81: per-target flight info for travel countdown — populated
+        // from /api/flights/batch (server proxies FFScouter). Keyed by
+        // targetId → { landingAt, destination, returning }.
+        flights: {},
+        flightsLastFetchedAt: 0,
 
         // Map of targetId -> { calledBy: { id, name }, calledAt: timestamp }
         calls: {},
@@ -3526,6 +3531,57 @@ body.wb-chain-active {
      * On PDA uses fetch(); elsewhere uses GM_xmlhttpRequest.
      * Auto-retries once on network error after 1s delay.
      */
+    // v4.9.81: fetch tight landing timestamps for any targets currently
+    // showing status=traveling. Debounced so overlapping refresh
+    // triggers share one upstream call. Uses the stored API key (not
+    // JWT) since the flights endpoint does Torn-key verification.
+    let _flightsFetchInFlight = null;
+    async function refreshFlightsForTravelers() {
+        const FLIGHT_REFRESH_MIN_MS = 60_000;
+        if (_flightsFetchInFlight) return _flightsFetchInFlight;
+        if (Date.now() - state.flightsLastFetchedAt < FLIGHT_REFRESH_MIN_MS) return;
+        const apiKey = GM_getValue('factionops_api_key', '');
+        if (!apiKey || apiKey.length < 10) return;
+        const uids = [];
+        for (const [targetId, s] of Object.entries(state.statuses || {})) {
+            if (normalizeStatus(s.status) === 'traveling') uids.push(targetId);
+        }
+        if (!uids.length) return;
+        _flightsFetchInFlight = (async () => {
+            try {
+                const r = await new Promise((resolve) => {
+                    GM_xmlhttpRequest({
+                        method: 'POST',
+                        url: `${CONFIG.SERVER_URL}/api/flights/batch`,
+                        headers: { 'Content-Type': 'application/json' },
+                        data: JSON.stringify({ key: apiKey, uids }),
+                        onload: (resp) => resolve({ ok: resp.status >= 200 && resp.status < 300, data: safeParse(resp.responseText) }),
+                        onerror: () => resolve({ ok: false, data: null }),
+                    });
+                });
+                if (r.ok && r.data && r.data.flights) {
+                    // Merge (don't clobber — stale entries from previous
+                    // calls are still useful until we get a fresh value).
+                    for (const [uid, fi] of Object.entries(r.data.flights)) {
+                        if (fi && fi.landingAt > 0) {
+                            state.flights[uid] = fi;
+                            // Mirror into state.statuses so renderers can
+                            // read landingAt directly from the status shape.
+                            if (state.statuses[uid]) {
+                                state.statuses[uid].landingAt = fi.landingAt;
+                                state.statuses[uid].flightDest = fi.destination;
+                                state.statuses[uid].flightReturning = !!fi.returning;
+                            }
+                        }
+                    }
+                    state.flightsLastFetchedAt = Date.now();
+                }
+            } catch (_) { /* swallow; next tick retries */ }
+            finally { _flightsFetchInFlight = null; }
+        })();
+        return _flightsFetchInFlight;
+    }
+
     function postAction(endpoint, body, _retried) {
         return new Promise((resolve, reject) => {
             if (!state.jwtToken) return reject(new Error('Not authenticated'));
@@ -5921,6 +5977,10 @@ body.wb-chain-active {
         if (statusTimerRAF) return;
         statusTimerLast = performance.now();
         let nextUpAccum = 0; // throttle next-up DOM writes to ~1s
+        let flightsAccum = 0; // throttle flight-refresh to 60s intervals
+        // Fire one immediate refresh so countdown chips don't take 60s
+        // to appear on first render.
+        refreshFlightsForTravelers();
 
         function tick(now) {
             const dt = (now - statusTimerLast) / 1000;
@@ -5964,6 +6024,28 @@ body.wb-chain-active {
                 nextUpAccum = 0;
                 updateNextUp();
                 updateEnemyAttackingBadges();
+                // v4.9.81: tick live travel countdowns — landingAt is
+                // absolute, so each pass computes remaining exactly.
+                for (const targetId of Object.keys(state.statuses)) {
+                    const s = state.statuses[targetId];
+                    if (normalizeStatus(s.status) !== 'traveling') continue;
+                    const la = Number(s.landingAt) || 0;
+                    if (la <= 0) continue;
+                    const rem = Math.max(0, la - _nowSec());
+                    const fId = `fo-timer-${targetId}`;
+                    const wId = `wb-timer-${targetId}`;
+                    const fEl = document.getElementById(fId);
+                    const wEl = document.getElementById(wId);
+                    const label = rem > 0 ? formatTimer(rem) : 'Landing';
+                    if (fEl && fEl.textContent !== label) fEl.textContent = label;
+                    if (wEl && wEl.textContent !== label) wEl.textContent = label;
+                }
+            }
+            // Periodic flight-info refresh (60s cadence).
+            flightsAccum += dt;
+            if (flightsAccum >= 60) {
+                flightsAccum = 0;
+                refreshFlightsForTravelers();
             }
 
             statusTimerRAF = requestAnimationFrame(tick);
@@ -8152,15 +8234,22 @@ body.wb-chain-active {
             label = 'Travel';
         }
 
+        // v4.9.81: travel pill uses landing-time countdown when FFS data
+        // is available (populated by refreshFlightsForTravelers).
         const pill = document.createElement('span');
         pill.className = `fo-status-pill ${pillClass}`;
-        // For hospital, the label IS the timer — give it the timer ID for live ticking
         const curRemaining = statusRemainingSec(s);
-        const labelId = (status === 'hospital' && curRemaining > 0) ? `fo-timer-${targetId}` : '';
-        pill.innerHTML = `<span class="fo-s-dot"></span><span class="fo-s-label"${labelId ? ` id="${labelId}"` : ''}>${label}</span>`;
+        const travelRem = (status === 'traveling' && Number(s.landingAt) > 0)
+            ? Math.max(0, Number(s.landingAt) - _nowSec())
+            : 0;
+        const isHospTimer   = status === 'hospital' && curRemaining > 0;
+        const isTravelTimer = status === 'traveling' && travelRem > 0;
+        const labelId = (isHospTimer || isTravelTimer) ? `fo-timer-${targetId}` : '';
+        const shown = isTravelTimer ? formatTimer(travelRem) : label;
+        pill.innerHTML = `<span class="fo-s-dot"></span><span class="fo-s-label"${labelId ? ` id="${labelId}"` : ''}>${shown}</span>`;
 
-        // Timer (for non-hospital statuses that have timers)
-        if (status !== 'hospital' && curRemaining > 0) {
+        // Timer (for non-hospital / non-travel statuses that still have timers, e.g. jail)
+        if (!isHospTimer && !isTravelTimer && curRemaining > 0) {
             const timer = document.createElement('span');
             timer.id = `fo-timer-${targetId}`;
             timer.style.marginLeft = '4px';

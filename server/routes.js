@@ -4642,54 +4642,128 @@ router.post("/api/oc/flyer-delay", async (req, res) => {
 // FFScouter) as the server-side credential.
 const _flyerTakeoffCache = new Map(); // uid → { takeoffTime, ts }
 const FLYER_TAKEOFF_TTL_MS = 5 * 60_000;
-async function fetchFlyerTakeoffTime(uid, preferredKey, factionKey) {
+// Full flight-info fetch — returns takeoff + tightened landing estimate +
+// destination + direction. Caches the complete object so both the
+// takeoff-time path (OC delay attribution) and the new per-member
+// landing countdown in factionops share one upstream call.
+async function fetchFlightInfo(uid, preferredKey, factionKey) {
   const now = Date.now();
   const cached = _flyerTakeoffCache.get(uid);
-  if (cached && (now - cached.ts) < FLYER_TAKEOFF_TTL_MS) return cached.takeoffTime;
-  // FFScouter requires a key registered on their site. Try each
-  // available key in priority order; on 401/error move to the next.
-  //  1. caller's own Torn key (most active members have FFS registered)
-  //  2. faction-wide FFS key set in OC Settings → "FFScouter API Key"
-  //  3. server OWNER_API_KEY (dev fallback, may not be FFS-registered)
+  if (cached && (now - cached.ts) < FLYER_TAKEOFF_TTL_MS) return cached.data || null;
   const keys = [preferredKey, factionKey, process.env.OWNER_API_KEY]
     .filter((k) => typeof k === 'string' && k.length >= 10);
-  if (!keys.length) { console.log(`[flyer-takeoff] ${uid}: no key`); return 0; }
+  if (!keys.length) return null;
   for (const key of keys) {
     try {
       const r = await fetch(`https://ffscouter.com/api/v1/player-flights?key=${encodeURIComponent(key)}&target=${encodeURIComponent(uid)}`);
-      if (!r.ok) { continue; } // 401 etc → try next key
+      if (!r.ok) continue;
       const d = await r.json();
-      if (d?.error) { continue; }
-      if (!global._flyerTakeoffDiag) global._flyerTakeoffDiag = 0;
-      if (global._flyerTakeoffDiag < 10) {
-        global._flyerTakeoffDiag++;
-        console.log(`[flyer-takeoff] ${uid} via key****${key.slice(-4)}: current=${JSON.stringify(d?.current)?.slice(0,120)} recents=${(d?.recent_flights||[]).length}`);
-      }
-      // Pick the earliest takeoff that still represents "when they
-      // left Torn for this trip" — not the return-leg takeoff. Three
-      // cases, keyed off current.status_description:
-      //   • "Traveling to X"   → outbound: current.takeoff_time
-      //   • "Returning to Torn" → outbound was earlier → recent_flights[0].takeoff_time
-      //   • null (abroad)      → outbound was the most recent flight
+      if (d?.error) continue;
       const cur = d?.current;
       const recents = Array.isArray(d?.recent_flights) ? d.recent_flights : [];
-      const isReturning = cur && /Returning/i.test(String(cur.status_description || ''));
-      let t = 0;
-      if (cur && !isReturning) {
-        t = Number(cur.takeoff_time) || 0;
+      let info = null;
+      if (cur) {
+        const isReturning = /Returning/i.test(String(cur.status_description || ''));
+        const desc = String(cur.status_description || '');
+        let destination = '';
+        if (isReturning) {
+          const m = desc.match(/Returning to Torn from (.+)/i);
+          destination = m ? m[1].trim() : '';
+        } else {
+          const m = desc.match(/Traveling to (.+)/i);
+          destination = m ? m[1].trim() : '';
+        }
+        // Tighten landing: earliest when book is in use, latest when
+        // confirmed not, midpoint otherwise (wb49).
+        const earliest = Number(cur.earliest_arrival_time) || 0;
+        const latest   = Number(cur.latest_arrival_time)   || 0;
+        let landingAt = 0;
+        if (cur.book_likely_being_used === true && earliest > 0) landingAt = earliest;
+        else if (cur.book_likely_being_used === false && latest > 0) landingAt = latest;
+        else if (earliest > 0 && latest > 0) landingAt = Math.floor((earliest + latest) / 2);
+        else landingAt = latest || earliest;
+        // Outbound takeoff for OC delay attribution — return leg's own
+        // takeoff for travel countdowns is already baked into landingAt.
+        const outboundTakeoff = isReturning
+          ? (Number(recents[0]?.takeoff_time) || Number(cur.takeoff_time) || 0)
+          : (Number(cur.takeoff_time) || 0);
+        info = {
+          takeoffTime: outboundTakeoff * 1000,
+          landingAt,                 // unix seconds
+          destination,
+          returning: isReturning,
+          method: cur.travel_method || '',
+        };
       } else {
-        // Returning OR abroad — the outbound leg is recent_flights[0].
-        t = Number(recents[0]?.takeoff_time) || Number(cur?.takeoff_time) || 0;
+        // Abroad — not in transit, so no landing countdown. Still
+        // surface outbound takeoff for delay attribution fallback.
+        const outbound = Number(recents[0]?.takeoff_time) || 0;
+        info = {
+          takeoffTime: outbound * 1000,
+          landingAt: 0,
+          destination: '',
+          returning: false,
+          method: '',
+        };
       }
-      const takeoffTime = t > 0 ? t * 1000 : 0;
-      _flyerTakeoffCache.set(uid, { takeoffTime, ts: now });
-      return takeoffTime;
+      _flyerTakeoffCache.set(uid, { data: info, ts: now });
+      return info;
     } catch (_) { /* try next key */ }
   }
-  console.log(`[flyer-takeoff] ${uid}: all ${keys.length} key(s) failed`);
-  _flyerTakeoffCache.set(uid, { takeoffTime: 0, ts: now });
-  return 0;
+  _flyerTakeoffCache.set(uid, { data: null, ts: now });
+  return null;
 }
+
+async function fetchFlyerTakeoffTime(uid, preferredKey, factionKey) {
+  const info = await fetchFlightInfo(uid, preferredKey, factionKey);
+  return info?.takeoffTime || 0;
+}
+
+// v4.9.81: factionops flight-tracker batch endpoint. POST a list of
+// target uids (presumably the ones currently showing status=traveling
+// on the client) and get back tight landing timestamps for each, all
+// resolved via the same FFScouter key chain as the OC delay tracker.
+// Server-side cache (5 min per uid) means 100-member wars fan out to
+// ~100 upstream calls over ~5min then coast on cached data.
+router.post("/api/flights/batch", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const callerKey = req.body?.key || req.query.key;
+  if (!callerKey || callerKey.length < 10) return res.status(400).json({ error: "Missing key" });
+  const suffix = callerKey.slice(-8);
+  let info = _spawnKeyCache.get(suffix);
+  if (!info || (Date.now() - info.ts) > 5 * 60_000) {
+    try {
+      const tornInfo = await verifyTornApiKey(callerKey);
+      info = {
+        ts: Date.now(),
+        factionId: tornInfo.factionId,
+        playerName: tornInfo.playerName,
+        playerId: tornInfo.playerId,
+      };
+      _spawnKeyCache.set(suffix, info);
+    } catch (err) { return res.status(401).json({ error: err.message }); }
+  }
+  const uids = Array.isArray(req.body?.uids) ? req.body.uids.slice(0, 200) : [];
+  if (!uids.length) return res.json({ flights: {} });
+  const factionFfsKey = (store.getFactionSettings(info.factionId)?.oc_ffs_key) || '';
+  const results = await Promise.all(
+    uids.map(async (uid) => {
+      const fi = await fetchFlightInfo(String(uid), callerKey, factionFfsKey);
+      return [String(uid), fi];
+    })
+  );
+  const flights = {};
+  for (const [uid, fi] of results) {
+    if (fi && (fi.landingAt > 0)) {
+      flights[uid] = {
+        landingAt: fi.landingAt,
+        destination: fi.destination,
+        returning: !!fi.returning,
+      };
+    }
+  }
+  return res.json({ flights });
+});
 
 // ── GET /api/oc/delays ───────────────────────────────────────────────
 // Aggregates per-member delay stats over the faction's OC history.
