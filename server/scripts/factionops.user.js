@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.83
+// @version      4.9.84
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.83';
+    const SCRIPT_VERSION = '4.9.84';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3539,16 +3539,38 @@ body.wb-chain-active {
     // triggers share one upstream call. Uses the stored API key (not
     // JWT) since the flights endpoint does Torn-key verification.
     let _flightsFetchInFlight = null;
+    let _flightsDiagCount = 0;
+    function foFlightDiag(msg) {
+        if (_flightsDiagCount > 30) return;
+        _flightsDiagCount++;
+        console.log('[fo-flights] ' + msg);
+        try {
+            httpRequest({
+                method: 'POST',
+                url: `${CONFIG.SERVER_URL}/api/debug/client-log`,
+                headers: { 'Content-Type': 'application/json' },
+                data: JSON.stringify({ tag: 'fo-flights', data: { msg, ts: Date.now() } }),
+                onload() {}, onerror() {},
+            });
+        } catch (_) {}
+    }
     async function refreshFlightsForTravelers() {
         const FLIGHT_REFRESH_MIN_MS = 60_000;
         if (_flightsFetchInFlight) return _flightsFetchInFlight;
         if (Date.now() - state.flightsLastFetchedAt < FLIGHT_REFRESH_MIN_MS) return;
-        const apiKey = GM_getValue('factionops_api_key', '');
-        if (!apiKey || apiKey.length < 10) return;
+        // v4.9.84: fall back to CONFIG.API_KEY when GM storage is empty
+        // (PDA-managed key case — Torn PDA injects the key via
+        // PDA_API_KEY placeholder, not GM storage).
+        const apiKey = GM_getValue('factionops_api_key', '') || CONFIG.API_KEY;
+        if (!apiKey || apiKey.length < 10) {
+            foFlightDiag('skip: no api key (len=' + (apiKey?.length || 0) + ')');
+            return;
+        }
         const uids = [];
         for (const [targetId, s] of Object.entries(state.statuses || {})) {
             if (normalizeStatus(s.status) === 'traveling') uids.push(targetId);
         }
+        foFlightDiag('statuses=' + Object.keys(state.statuses || {}).length + ' traveling=' + uids.length);
         if (!uids.length) return;
         _flightsFetchInFlight = (async () => {
             try {
@@ -3564,6 +3586,7 @@ body.wb-chain-active {
                         onerror: () => resolve({ ok: false, data: null }),
                     });
                 });
+                foFlightDiag('fetch ok=' + r.ok + ' keys=' + (r.data && Object.keys(r.data.flights || {}).length));
                 if (r.ok && r.data && r.data.flights) {
                     // Merge (don't clobber — stale entries from previous
                     // calls are still useful until we get a fresh value).
