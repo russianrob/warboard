@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb41
+// @version      2.73.0-wb42
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2023,7 +2023,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb41",
+      scriptVersion: "2.73.0-wb42",
     };
     try {
       GM_xmlhttpRequest({
@@ -2350,7 +2350,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb41",
+        scriptVersion: "2.73.0-wb42",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2853,6 +2853,48 @@ if (!singleton) {
 
     // Data fetch loop: poll Torn API every 30s, extract all faction IDs
     // currently visible on the page.
+    // wb42: cache enemy faction IDs from the authoritative Torn wars API,
+    // since the war-list DOM on /factions.php?step=your&type=1 doesn't
+    // always expose enemy faction IDs via anchors our selectors can match.
+    // Refreshes every 60s.
+    let _ffsWarFactionIds = null;
+    let _ffsWarFactionFetchedAt = 0;
+    async function ffs_resolveWarFactionIds() {
+      if (_ffsWarFactionIds && (Date.now() - _ffsWarFactionFetchedAt) < 60_000) {
+        return _ffsWarFactionIds;
+      }
+      try {
+        const r = await fetch(`https://api.torn.com/v2/faction?selections=wars&key=${encodeURIComponent(key)}`);
+        const d = await r.json();
+        const ids = new Set();
+        const w = d?.wars || d;
+        const pools = [w?.ranked, w?.raids, w?.territory];
+        for (const pool of pools) {
+          if (!pool) continue;
+          const list = Array.isArray(pool) ? pool : [pool];
+          for (const entry of list) {
+            const facs = entry?.factions || entry?.defender || entry?.attacker;
+            if (!facs) continue;
+            if (Array.isArray(facs)) {
+              for (const f of facs) {
+                const id = f?.id ?? f?.ID;
+                if (id) ids.add(String(id));
+              }
+            } else if (facs.id) {
+              ids.add(String(facs.id));
+            }
+          }
+        }
+        _ffsWarFactionIds = Array.from(ids);
+        _ffsWarFactionFetchedAt = Date.now();
+        ffs_travelDiag({ source: "war-faction-resolve", ids: _ffsWarFactionIds, hasError: !!d?.error });
+      } catch (e) {
+        ffs_travelDiag({ source: "war-faction-resolve", err: String(e?.message || e) });
+        _ffsWarFactionIds = _ffsWarFactionIds || [];
+      }
+      return _ffsWarFactionIds;
+    }
+
     // wb18: ownFactionId — resolved once via Torn's own API when we're
     // on /factions.php?step=your (URL has no ID=). Cached for the session.
     let _ffsOwnFactionId = null;
@@ -2932,6 +2974,18 @@ if (!singleton) {
       // Torn doesn't render a clickable faction tile.
       const hashM = location.hash.match(/(?:war|id)[=\/]\s*(\d{2,})/i);
       if (hashM) factionIds.add(hashM[1]);
+
+      // wb42: on war-related URLs, also pull enemy faction IDs from the
+      // authoritative Torn wars API. Handles war-list + war-room pages
+      // where the DOM doesn't expose enemy faction anchors our selectors
+      // can reach.
+      const onWarPage = location.search.includes("step=your")
+        || /\/war\//.test(location.hash)
+        || location.search.includes("type=1");
+      if (onWarPage) {
+        const warIds = await ffs_resolveWarFactionIds();
+        for (const id of (warIds || [])) factionIds.add(id);
+      }
 
       // wb18: DOM probe to see what classes Torn is actually rendering,
       // so we can fix row selectors if they aren't matching.
