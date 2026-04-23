@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.93
+// @version      4.9.94
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.93';
+    const SCRIPT_VERSION = '4.9.94';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -6183,6 +6183,12 @@ body.wb-chain-active {
             if (flightsAccum >= 60) {
                 flightsAccum = 0;
                 refreshFlightsForTravelers();
+                // v4.9.94: also nudge the sort once a minute so new
+                // landing data / newly-boarded flights re-order
+                // without waiting for an unrelated trigger.
+                if (CONFIG.AUTO_SORT && typeof debouncedSort === 'function') {
+                    try { debouncedSort(); } catch (_) {}
+                }
             }
 
             statusTimerRAF = requestAnimationFrame(tick);
@@ -8730,16 +8736,22 @@ body.wb-chain-active {
     }
 
     /** Secondary sort: remaining timer (ascending).
-     *  - Hospital / jail: time until release (via statusRemainingSec)
-     *  - Traveling with known landingAt: time until landing
-     *  - Everything else: 0
+     *  - Hospital / jail:           time until release
+     *  - Traveling with landingAt:  time until landing (closest first)
+     *  - Traveling without landing: big number → bottom of travel group
+     *  - Abroad (no landing):       big number → bottom of travel group
+     *  - Everything else:           0
      */
     function sortTimerValue(targetId) {
         const s = state.statuses[targetId];
         if (!s) return 0;
         const status = normalizeStatus(s.status);
-        if (status === 'traveling' && Number(s.landingAt) > 0) {
-            return Math.max(0, Number(s.landingAt) - _nowSec());
+        if (status === 'traveling' || status === 'abroad') {
+            const la = Number(s.landingAt) || 0;
+            if (la > 0) return Math.max(0, la - _nowSec());
+            // No landing data yet — pile at the bottom of the travel
+            // group so actively-landing members take the top slots.
+            return 9e9;
         }
         return statusRemainingSec(s);
     }
