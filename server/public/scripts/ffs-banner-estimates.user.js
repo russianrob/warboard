@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb48
+// @version      2.73.0-wb49
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2051,7 +2051,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb48",
+      scriptVersion: "2.73.0-wb49",
     };
     try {
       GM_xmlhttpRequest({
@@ -2378,7 +2378,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb48",
+        scriptVersion: "2.73.0-wb49",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2582,7 +2582,25 @@ if (!singleton) {
               if (!data || data.error) throw new Error(data?.error || "error");
               if (!data.current) throw new Error("no current (not travelling per FFS)");
               const f = data.current;
-              landingTs = f.latest_arrival_time || f.earliest_arrival_time;
+              // wb49: tighten landing estimate. FFS returns a 10-20 min
+              // range (earliest ↔ latest) reflecting uncertainty over
+              // whether the flyer has the Book of Rapid Travel (0.75x
+              // duration). With FFS's book_likely_being_used flag we
+              // can pick the right endpoint:
+              //   book in use    → earliest  (shortened trip)
+              //   no book        → latest    (full trip)
+              //   flag missing   → midpoint  (best expected-value)
+              const earliest = Number(f.earliest_arrival_time) || 0;
+              const latest   = Number(f.latest_arrival_time)   || 0;
+              if (f.book_likely_being_used === true && earliest > 0) {
+                landingTs = earliest;
+              } else if (f.book_likely_being_used === false && latest > 0) {
+                landingTs = latest;
+              } else if (earliest > 0 && latest > 0) {
+                landingTs = Math.floor((earliest + latest) / 2);
+              } else {
+                landingTs = latest || earliest;
+              }
               if (landingTs) {
                 _ffsMemberCountdowns[uid] = landingTs;
               } else {
