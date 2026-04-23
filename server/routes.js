@@ -4513,27 +4513,31 @@ router.post("/api/oc/flyer-delay", async (req, res) => {
   const prev = m.get(key);
   const now = Date.now();
 
-  // v3.1.47: on FIRST observation, try to backdate firstObservedAt to
-  // the real moment this member started blocking — i.e., the later of
-  // (their takeoff_time) and (OC ready_at). That way a member who's
-  // been flying for 5h when we first see them gets credited with ~5h
-  // instead of 0. Falls back to `now` if we can't fetch takeoff info.
-  let firstObservedAt = Number(prev?.firstObservedAt) || 0;
-  if (!firstObservedAt) {
-    firstObservedAt = now; // safe default
-    try {
-      const takeoffTime = await fetchFlyerTakeoffTime(String(memberId));
+  // v3.1.47 / v3.1.48: backdate firstObservedAt to max(takeoffTime,
+  // ocReadyAt) — the real moment this member became a blocker. Runs
+  // on EVERY observation (not just the first), so entries created by
+  // v3.1.46 with firstObservedAt=now will get re-anchored the next
+  // tick once FFScouter returns real takeoff info. Caps at the current
+  // value so we never *extend* a delay upward retroactively — only
+  // move it earlier in time when we learn better data.
+  let firstObservedAt = Number(prev?.firstObservedAt) || now;
+  try {
+    const takeoffTime = await fetchFlyerTakeoffTime(String(memberId));
+    if (takeoffTime > 0) {
       const readyAtMs = Number(readyAt) > 0 ? Number(readyAt) * 1000 : 0;
       // The member only started *blocking* once both:
       //  (a) they were already in the air → takeoffTime, AND
       //  (b) the OC became ready → readyAtMs.
       // Whichever is LATER is when they actually became a blocker.
-      if (takeoffTime > 0) {
-        const candidate = Math.max(takeoffTime, readyAtMs || takeoffTime);
-        if (candidate > 0 && candidate < now) firstObservedAt = candidate;
+      const candidate = readyAtMs > 0 ? Math.max(takeoffTime, readyAtMs) : takeoffTime;
+      // Only move firstObservedAt earlier, never later. And never
+      // before readyAt (if known) — they can't have blocked the OC
+      // before it was ready.
+      if (candidate > 0 && candidate < firstObservedAt && candidate <= now) {
+        firstObservedAt = candidate;
       }
-    } catch (_) { /* stay with `now` */ }
-  }
+    }
+  } catch (_) { /* keep current firstObservedAt */ }
 
   const serverDelay = Math.max(0, Math.floor((now - firstObservedAt) / 1000));
   m.set(key, {
