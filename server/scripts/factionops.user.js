@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.92
+// @version      4.9.93
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.92';
+    const SCRIPT_VERSION = '4.9.93';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3617,6 +3617,13 @@ body.wb-chain-active {
                     // element — so the tick loop has nothing to update.
                     for (const uid of touched) {
                         try { updateTargetRow(uid); } catch (_) {}
+                    }
+                    // v4.9.93: re-sort so traveling members with tighter
+                    // landing times float to the top of the travel
+                    // group. Debounced 300ms so multiple batch landings
+                    // in quick succession collapse to one DOM reorder.
+                    if (touched.length && CONFIG.AUTO_SORT && typeof debouncedSort === 'function') {
+                        try { debouncedSort(); } catch (_) {}
                     }
                     state.flightsLastFetchedAt = Date.now();
                 }
@@ -8722,9 +8729,18 @@ body.wb-chain-active {
         }
     }
 
-    /** Secondary sort: remaining timer (ascending). */
+    /** Secondary sort: remaining timer (ascending).
+     *  - Hospital / jail: time until release (via statusRemainingSec)
+     *  - Traveling with known landingAt: time until landing
+     *  - Everything else: 0
+     */
     function sortTimerValue(targetId) {
         const s = state.statuses[targetId];
+        if (!s) return 0;
+        const status = normalizeStatus(s.status);
+        if (status === 'traveling' && Number(s.landingAt) > 0) {
+            return Math.max(0, Number(s.landingAt) - _nowSec());
+        }
         return statusRemainingSec(s);
     }
 
