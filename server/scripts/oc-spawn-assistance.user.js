@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.48
+// @version      3.1.49
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -243,7 +243,8 @@
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
-    const SCRIPT_VERSION = '3.1.48';
+    let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
+    const SCRIPT_VERSION = '3.1.49';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3933,7 +3934,7 @@
         </div>`;
     }
 
-    function buildTravelingAlert(availableCrimes, members) {
+    function buildTravelingAlert(availableCrimes, members, pendingDelays = {}) {
         const memberArr = Array.isArray(members) ? members : Object.values(members || {});
         const statusMap = {}; // uid -> { name, state }
         for (const m of memberArr) {
@@ -3988,6 +3989,15 @@
                 // landed-in-a-foreign-country ("Abroad"). Both block OC
                 // initiation, so flag either.
                 if (info.state === 'traveling' || info.state === 'abroad') {
+                    // v3.1.49: prefer server-supplied per-member delay
+                    // (backdated to real takeoff via FFScouter). Falls
+                    // back to OC-ready-age when no server data yet.
+                    const pdKey = `${crime.id}::${uid}`;
+                    const memberSec = Number(pendingDelays[pdKey]);
+                    const effSec = Number.isFinite(memberSec) && memberSec >= 0 ? memberSec : readyForSec;
+                    const memberUrgency = effSec > 0
+                        ? `delayed ${fmtReadyAge(effSec)}`
+                        : 'ready now';
                     alerts.push({
                         memberId: uid,
                         memberName: info.name,
@@ -3995,10 +4005,10 @@
                         crimeName: crime.name || 'Unknown',
                         position: slot.position || 'Unknown',
                         difficulty: crime.difficulty || 0,
-                        urgency,
+                        urgency: memberUrgency,
                         state: info.state,
                         readyAt: readyAt || 0,
-                        delayedSec: readyForSec,
+                        delayedSec: effSec,
                     });
                 }
             }
@@ -4090,7 +4100,7 @@
         }, 1000);
     }
 
-    function renderBody(recs, eligible, skipped, scopeProjection, viewer, availableCrimes, weights, engines, members, cprCache) {
+    function renderBody(recs, eligible, skipped, scopeProjection, viewer, availableCrimes, weights, engines, members, cprCache, pendingDelays) {
         const total = eligible.length + skipped.length;
         const eli   = eligible.length;
         const free  = eligible.filter(m => !m.inOC).length;
@@ -4115,7 +4125,7 @@
             '<p style="color:#6b7280;font-size:11px;">No personal OC data yet — refresh to load.</p>';
 
         // Admin tab — everything else
-        const travelAlert = buildTravelingAlert(availableCrimes, members);
+        const travelAlert = buildTravelingAlert(availableCrimes, members, pendingDelays || {});
         setupFlyerDelayTick();
         document.getElementById('oc-tab-admin').innerHTML = `
             ${travelAlert}
@@ -4837,6 +4847,8 @@
                     ({ members, availableCrimes, cprCache: rawCprCache, viewer, weights, engines } = serverResp);
                     // v3.1.38: stash hitRates so render functions can use them.
                     _lastHitRates = serverResp.hitRates || {};
+                    // v3.1.49: stash per-member pending delays for the admin banner.
+                    _lastPendingDelays = serverResp.pendingDelays || {};
                     engines = engines || {};
                     fetchSuccess = true;
                     break;
@@ -4926,7 +4938,7 @@
                 fetchVaultBalance(apiKey),
             ]);
 
-            renderBody(recs, eligible, skipped, scopeProjection, viewer, availableCrimes, weights, engines, members, cprCache);
+            renderBody(recs, eligible, skipped, scopeProjection, viewer, availableCrimes, weights, engines, members, cprCache, _lastPendingDelays);
             bindVaultRequestHandlers(apiKey, viewer);
 
             // Tab visibility: Admin/Manager/Metrics/Engines are gated together

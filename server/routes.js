@@ -4394,7 +4394,20 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     // OC payouts). Lets the client show predicted vs observed alongside.
     const hitRates = computeScenarioHitRates(playerInfo.factionId);
 
-    return res.json({ ...data, viewer: viewerObj, engines, hitRates });
+    // v3.1.49: snapshot of per-member pending flyer delays so the admin
+    // tab's traveling-alert banner can show each member's OWN delay
+    // duration (not the shared OC-ready-age). Shape: { [crimeId::memberId]: seconds }
+    const pendingDelays = {};
+    const fdMap = _flyerDelays.get(String(playerInfo.factionId));
+    if (fdMap) {
+      const nowMs = Date.now();
+      for (const [key, v] of fdMap.entries()) {
+        const first = Number(v?.firstObservedAt) || nowMs;
+        pendingDelays[key] = Math.max(0, Math.floor((nowMs - first) / 1000));
+      }
+    }
+
+    return res.json({ ...data, viewer: viewerObj, engines, hitRates, pendingDelays });
   } catch (err) {
     // If member's own key failed, try keys from the faction pool
     const fid = String(playerInfo.factionId);
@@ -4590,12 +4603,21 @@ async function fetchFlyerTakeoffTime(uid, preferredKey, factionKey) {
         global._flyerTakeoffDiag++;
         console.log(`[flyer-takeoff] ${uid} via key****${key.slice(-4)}: current=${JSON.stringify(d?.current)?.slice(0,120)} recents=${(d?.recent_flights||[]).length}`);
       }
-      // Prefer current flight's takeoff_time if still in transit.
-      // Otherwise member is abroad — use most recent outbound flight.
-      let t = Number(d?.current?.takeoff_time) || 0;
-      if (!t) {
-        const recents = Array.isArray(d?.recent_flights) ? d.recent_flights : [];
-        t = Number(recents[0]?.takeoff_time) || 0;
+      // Pick the earliest takeoff that still represents "when they
+      // left Torn for this trip" — not the return-leg takeoff. Three
+      // cases, keyed off current.status_description:
+      //   • "Traveling to X"   → outbound: current.takeoff_time
+      //   • "Returning to Torn" → outbound was earlier → recent_flights[0].takeoff_time
+      //   • null (abroad)      → outbound was the most recent flight
+      const cur = d?.current;
+      const recents = Array.isArray(d?.recent_flights) ? d.recent_flights : [];
+      const isReturning = cur && /Returning/i.test(String(cur.status_description || ''));
+      let t = 0;
+      if (cur && !isReturning) {
+        t = Number(cur.takeoff_time) || 0;
+      } else {
+        // Returning OR abroad — the outbound leg is recent_flights[0].
+        t = Number(recents[0]?.takeoff_time) || Number(cur?.takeoff_time) || 0;
       }
       const takeoffTime = t > 0 ? t * 1000 : 0;
       _flyerTakeoffCache.set(uid, { takeoffTime, ts: now });
