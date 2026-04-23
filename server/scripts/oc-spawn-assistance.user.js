@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.40
+// @version      3.1.41
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -242,7 +242,7 @@
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
-    const SCRIPT_VERSION = '3.1.40';
+    const SCRIPT_VERSION = '3.1.41';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4104,7 +4104,7 @@
         }
         // Click-to-toggle tooltips on column headers explain each metric.
         const ttPass = 'Probability the full slate clears every checkpoint and the OC succeeds. Derived by tornprobability.com from the per-slot CPR array.';
-        const ttTop  = 'Probability of hitting the top-tier payout — the highest-reward outcome. A successful OC still forks into multiple reward tiers; this is the chance of landing on the best one.';
+        const ttTop  = 'Probability of hitting the top-tier payout — the highest-reward outcome. A successful OC still forks into multiple reward tiers; this is the chance of landing on the best one. The $ value (when shown) is your faction\'s average top-tier payout for this scenario, computed from the top quartile of historical completions.';
         const ttQ    = 'Weighted quality score (roughly 0–1). Top-tier payout counts 1.0, 2nd-tier 0.7, 3rd-tier 0.4, every other successful tier 0.2. Single number for comparing expected reward across OCs.';
         const ttHit  = 'Historical top-tier hit rate for this scenario: % of the faction\'s successful completions whose money payout landed in the top quartile for this OC type. Used as a proxy for top-tier hits since Torn doesn\'t label outcome tiers directly. Needs at least 4 successful completions of this scenario to show; otherwise displays as —.';
         // v3.1.40: wrap the table in overflow-x:auto so a wide OC name
@@ -4241,7 +4241,27 @@
                 const top  = row.querySelector('.oc-outcome-top');
                 const q    = row.querySelector('.oc-outcome-q');
                 if (pass) { pass.style.color = colour(passPct); pass.textContent = passPct.toFixed(1) + '%'; pass.dataset.val = passPct; }
-                if (top)  { top.style.color  = colour(topPct * 2); top.textContent  = topPct.toFixed(1) + '%'; top.dataset.val = topPct; }
+                if (top) {
+                    top.style.color  = colour(topPct * 2);
+                    top.dataset.val = topPct;
+                    // v3.1.41: append $ avg top-tier payout (when we have
+                    // historical data for this scenario) so admins can
+                    // see the probability AND the actual dollar amount
+                    // on a top-tier hit.
+                    const hrForTop = _lastHitRates?.[c.name];
+                    const avgTop = hrForTop?.topAvgPayout;
+                    // Compact money: $1.2M / $950k / $500
+                    const fmtShort = (n) => {
+                        if (n >= 1e9) return '$' + (n / 1e9).toFixed(2).replace(/\.?0+$/, '') + 'B';
+                        if (n >= 1e6) return '$' + (n / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
+                        if (n >= 1e3) return '$' + (n / 1e3).toFixed(1).replace(/\.?0+$/, '') + 'k';
+                        return '$' + Math.round(n);
+                    };
+                    const dollarSuffix = (Number.isFinite(avgTop) && avgTop > 0)
+                        ? ` <span style="color:#9ca3af;font-size:9px;font-weight:400;">${fmtShort(avgTop)}</span>`
+                        : '';
+                    top.innerHTML = topPct.toFixed(1) + '%' + dollarSuffix;
+                }
                 if (q)    { q.style.color    = colour(qScore * 100); q.textContent  = qScore.toFixed(3); q.dataset.val = qScore; }
                 // Re-apply whichever sort is currently active on this
                 // specific table, so rankings update as data arrives.

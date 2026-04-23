@@ -3344,12 +3344,19 @@ function computeScenarioHitRates(factionId) {
     // are counted as top-tier hits.
     const qIdx = Math.floor(sorted.length * 0.75);
     const threshold = sorted[qIdx];
-    const topCount = payouts.filter(p => p >= threshold).length;
+    const topPayouts = payouts.filter(p => p >= threshold);
+    const topAvgPayout = topPayouts.length
+      ? topPayouts.reduce((a, b) => a + b, 0) / topPayouts.length
+      : null;
     out[name] = {
       count: payouts.length,
-      topCount,
-      rate: topCount / payouts.length,
+      topCount: topPayouts.length,
+      rate: topPayouts.length / payouts.length,
       threshold,
+      // v3.1.41: avg dollar payout across top-quartile completions.
+      // Shown next to the Top end % column so admins see what "top tier"
+      // actually pays for their faction on this scenario.
+      topAvgPayout,
     };
   }
   return out;
