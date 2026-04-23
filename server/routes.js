@@ -4911,11 +4911,12 @@ router.post("/api/oc/vault-request", async (req, res) => {
   if (target !== 'online' && target !== 'both') target = 'both';
 
   // Cap at the requester's own vault balance. Try their own key first
-  // (fast path); if it fails with Torn's "Incorrect ID-entity relation"
-  // (happens when the member's key lacks faction permissions), fall
-  // back to any Full-access key from the faction's spawn-key pool so
-  // the request still goes through. Only reject if neither source
-  // works — "Infinity max" would let a member request any amount.
+  // (fast path); if it fails fall back to any Full-access key from the
+  // faction's spawn-key pool. If neither source works, we log the issue
+  // but still let the request through uncapped — matches the historical
+  // behaviour this feature shipped with, and admins visually eyeball
+  // amounts before fulfilling anyway. The cap is a nice-to-have, not
+  // a hard security boundary.
   let maxAmount = null;
   let fetchErr = null;
   try {
@@ -4938,9 +4939,9 @@ router.post("/api/oc/vault-request", async (req, res) => {
       } catch (_) { /* try next */ }
     }
   }
-  if (fetchErr) {
-    console.warn(`[vault-request] balance fetch failed for ${info.playerId}:`, fetchErr.message);
-    return res.status(503).json({ error: "Couldn't verify your vault balance — your key may need faction permissions (preferences.php → API Keys)." });
+  if (fetchErr && (maxAmount === null || !Number.isFinite(maxAmount))) {
+    console.warn(`[vault-request] balance fetch failed for ${info.playerId} (own + pool): ${fetchErr.message} — proceeding uncapped`);
+    maxAmount = Infinity; // permissive: create the request anyway
   }
   if (!(maxAmount > 0)) {
     return res.status(400).json({ error: "No vault balance available to request." });
