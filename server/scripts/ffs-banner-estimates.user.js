@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb44
+// @version      2.73.0-wb45
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -1790,9 +1790,14 @@ if (!singleton) {
   const match = match1 ?? match2;
   if (match) {
     var target_id = parseInt(match.groups.target_id);
-    update_ff_cache([target_id], function (target_ids) {
-      display_fair_fight(target_ids[0], target_id);
-    });
+    // wb45: skip the stats chip / FF gauge on attack pages (match2) —
+    // user feedback that it looks cluttered next to Torn's own attack
+    // HUD. Profile pages (match1) still get it.
+    if (match1) {
+      update_ff_cache([target_id], function (target_ids) {
+        display_fair_fight(target_ids[0], target_id);
+      });
+    }
 
     // Inject Stats History button into Actions area
     // Use a MutationObserver in case the Actions area loads after page JS runs
@@ -2044,7 +2049,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb44",
+      scriptVersion: "2.73.0-wb45",
     };
     try {
       GM_xmlhttpRequest({
@@ -2371,7 +2376,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb44",
+        scriptVersion: "2.73.0-wb45",
       };
       GM_xmlhttpRequest({
         method: "POST",
