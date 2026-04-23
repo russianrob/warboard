@@ -4504,23 +4504,33 @@ async function resolveSpawnKeyInfo(req, res) {
 router.post("/api/oc/flyer-delay", async (req, res) => {
   const info = await resolveSpawnKeyInfo(req, res);
   if (!info) return;
-  const { crimeId, memberId, memberName, crimeName, delayedSec } = (req.body || {});
+  const { crimeId, memberId, memberName, crimeName } = (req.body || {});
   if (!crimeId || !memberId) return res.status(400).json({ error: "crimeId and memberId are required" });
-  const delay = Math.max(0, Math.floor(Number(delayedSec) || 0));
   const fid = String(info.factionId);
   if (!_flyerDelays.has(fid)) _flyerDelays.set(fid, new Map());
   const m = _flyerDelays.get(fid);
   const key = `${crimeId}::${memberId}`;
   const prev = m.get(key);
-  const nextDelay = Math.max(prev?.delayedSec || 0, delay);
+  // v3.1.46: compute delayedSec server-side from first-observation.
+  // Previously we trusted the client's delayedSec (= "OC has been ready
+  // for N seconds"), which over-credited members who started blocking
+  // LATE — if the OC sat ready for 5h and member joined the block 10min
+  // ago, they'd still get credited with a 5h delay. Now: delayedSec is
+  // simply now - firstObservedAt, so each member's tally reflects their
+  // own block duration. firstObservedAt persists across server restarts
+  // via the disk save.
+  const now = Date.now();
+  const firstObservedAt = Number(prev?.firstObservedAt) || now;
+  const serverDelay = Math.max(0, Math.floor((now - firstObservedAt) / 1000));
   m.set(key, {
-    delayedSec: nextDelay,
-    observedAt: Date.now(),
+    delayedSec: serverDelay,
+    firstObservedAt,
+    observedAt: now,
     memberName: String(memberName || prev?.memberName || memberId),
     crimeName:  String(crimeName  || prev?.crimeName  || crimeId),
   });
   scheduleFlyerDelaysSave();
-  return res.json({ ok: true, delayedSec: nextDelay });
+  return res.json({ ok: true, delayedSec: serverDelay });
 });
 
 // ── GET /api/oc/delays ───────────────────────────────────────────────
