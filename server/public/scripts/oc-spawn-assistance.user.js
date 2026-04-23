@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.41
+// @version      3.1.42
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -242,7 +242,7 @@
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
-    const SCRIPT_VERSION = '3.1.41';
+    const SCRIPT_VERSION = '3.1.42';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3846,7 +3846,7 @@
             <div style="flex:1;min-width:140px;position:relative;">
                 <button type="button" id="oc-vault-max" title="${balanceLabel ? 'Fill with your max vault balance: ' + balanceLabel : 'Vault balance unknown'}"
                     style="position:absolute;left:2px;top:1px;bottom:1px;width:26px;background:#1e3a5f;border:0;color:#facc15;font-weight:700;border-radius:3px;cursor:${balance ? 'pointer' : 'default'};font-size:12px;">$</button>
-                <input type="text" inputmode="decimal" autocomplete="off" placeholder="${balanceLabel ? 'Max ' + balanceLabel + ' — e.g. 500k, 2.5m' : 'Amount — e.g. 500k, 2.5m'}" id="oc-vault-amount"
+                <input type="text" autocomplete="off" placeholder="${balanceLabel ? 'Max ' + balanceLabel + ' — e.g. 500k, 2.5m' : 'Amount — e.g. 500k, 2.5m'}" id="oc-vault-amount"
                     style="width:100%;box-sizing:border-box;background:#0f1a2e;border:1px solid #1e3a5f;color:#dde;border-radius:4px;padding:4px 6px 4px 32px;font-size:11px;">
             </div>`;
 
