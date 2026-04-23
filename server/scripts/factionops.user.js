@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.84
+// @version      4.9.85
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.84';
+    const SCRIPT_VERSION = '4.9.85';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3590,17 +3590,25 @@ body.wb-chain-active {
                 if (r.ok && r.data && r.data.flights) {
                     // Merge (don't clobber — stale entries from previous
                     // calls are still useful until we get a fresh value).
+                    const touched = [];
                     for (const [uid, fi] of Object.entries(r.data.flights)) {
                         if (fi && fi.landingAt > 0) {
                             state.flights[uid] = fi;
-                            // Mirror into state.statuses so renderers can
-                            // read landingAt directly from the status shape.
                             if (state.statuses[uid]) {
                                 state.statuses[uid].landingAt = fi.landingAt;
                                 state.statuses[uid].flightDest = fi.destination;
                                 state.statuses[uid].flightReturning = !!fi.returning;
+                                touched.push(uid);
                             }
                         }
+                    }
+                    // v4.9.85: re-render affected rows so the pill picks
+                    // up the new landingAt. Without this the pill that
+                    // rendered BEFORE flight data arrived stays as
+                    // static 'Travel' text with no fo-timer-<uid>
+                    // element — so the tick loop has nothing to update.
+                    for (const uid of touched) {
+                        try { updateTargetRow(uid); } catch (_) {}
                     }
                     state.flightsLastFetchedAt = Date.now();
                 }
