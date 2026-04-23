@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.44
+// @version      3.1.47
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -242,7 +242,7 @@
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
-    const SCRIPT_VERSION = '3.1.44';
+    const SCRIPT_VERSION = '3.1.47';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3982,10 +3982,14 @@
                     if (rptMap[k] && (nowMs - rptMap[k]) < 60_000) continue;
                     rptMap[k] = nowMs;
                     const url = `${SERVER}/api/oc/flyer-delay?key=${encodeURIComponent(apiKey)}`;
+                    // v3.1.47: send readyAt (unix seconds) so the server
+                    // can backdate delay attribution to max(takeoffTime,
+                    // readyAt) instead of the moment of first observation.
                     const body = JSON.stringify({
                         crimeId: a.crimeId, memberId: a.memberId,
                         memberName: a.memberName, crimeName: a.crimeName,
                         delayedSec: a.delayedSec || 0,
+                        readyAt: Number(a.readyAt) || 0,
                     });
                     if (typeof GM_xmlhttpRequest === 'function') {
                         GM_xmlhttpRequest({ method: 'POST', url, data: body, headers: { 'Content-Type': 'application/json' }, onerror(){}, onload(){} });

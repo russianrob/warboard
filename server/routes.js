@@ -4504,23 +4504,37 @@ async function resolveSpawnKeyInfo(req, res) {
 router.post("/api/oc/flyer-delay", async (req, res) => {
   const info = await resolveSpawnKeyInfo(req, res);
   if (!info) return;
-  const { crimeId, memberId, memberName, crimeName } = (req.body || {});
+  const { crimeId, memberId, memberName, crimeName, readyAt } = (req.body || {});
   if (!crimeId || !memberId) return res.status(400).json({ error: "crimeId and memberId are required" });
   const fid = String(info.factionId);
   if (!_flyerDelays.has(fid)) _flyerDelays.set(fid, new Map());
   const m = _flyerDelays.get(fid);
   const key = `${crimeId}::${memberId}`;
   const prev = m.get(key);
-  // v3.1.46: compute delayedSec server-side from first-observation.
-  // Previously we trusted the client's delayedSec (= "OC has been ready
-  // for N seconds"), which over-credited members who started blocking
-  // LATE — if the OC sat ready for 5h and member joined the block 10min
-  // ago, they'd still get credited with a 5h delay. Now: delayedSec is
-  // simply now - firstObservedAt, so each member's tally reflects their
-  // own block duration. firstObservedAt persists across server restarts
-  // via the disk save.
   const now = Date.now();
-  const firstObservedAt = Number(prev?.firstObservedAt) || now;
+
+  // v3.1.47: on FIRST observation, try to backdate firstObservedAt to
+  // the real moment this member started blocking — i.e., the later of
+  // (their takeoff_time) and (OC ready_at). That way a member who's
+  // been flying for 5h when we first see them gets credited with ~5h
+  // instead of 0. Falls back to `now` if we can't fetch takeoff info.
+  let firstObservedAt = Number(prev?.firstObservedAt) || 0;
+  if (!firstObservedAt) {
+    firstObservedAt = now; // safe default
+    try {
+      const takeoffTime = await fetchFlyerTakeoffTime(String(memberId));
+      const readyAtMs = Number(readyAt) > 0 ? Number(readyAt) * 1000 : 0;
+      // The member only started *blocking* once both:
+      //  (a) they were already in the air → takeoffTime, AND
+      //  (b) the OC became ready → readyAtMs.
+      // Whichever is LATER is when they actually became a blocker.
+      if (takeoffTime > 0) {
+        const candidate = Math.max(takeoffTime, readyAtMs || takeoffTime);
+        if (candidate > 0 && candidate < now) firstObservedAt = candidate;
+      }
+    } catch (_) { /* stay with `now` */ }
+  }
+
   const serverDelay = Math.max(0, Math.floor((now - firstObservedAt) / 1000));
   m.set(key, {
     delayedSec: serverDelay,
@@ -4532,6 +4546,31 @@ router.post("/api/oc/flyer-delay", async (req, res) => {
   scheduleFlyerDelaysSave();
   return res.json({ ok: true, delayedSec: serverDelay });
 });
+
+// v3.1.47: FFScouter lookup for a single member's takeoff_time, cached
+// briefly so that sequential observations of the same traveller don't
+// each hit the upstream API. Uses OWNER_API_KEY (registered with
+// FFScouter) as the server-side credential.
+const _flyerTakeoffCache = new Map(); // uid → { takeoffTime, ts }
+const FLYER_TAKEOFF_TTL_MS = 5 * 60_000;
+async function fetchFlyerTakeoffTime(uid) {
+  const now = Date.now();
+  const cached = _flyerTakeoffCache.get(uid);
+  if (cached && (now - cached.ts) < FLYER_TAKEOFF_TTL_MS) return cached.takeoffTime;
+  const key = process.env.OWNER_API_KEY;
+  if (!key) return 0;
+  try {
+    const r = await fetch(`https://ffscouter.com/api/v1/player-flights?key=${encodeURIComponent(key)}&target=${encodeURIComponent(uid)}`);
+    if (!r.ok) return 0;
+    const d = await r.json();
+    const t = Number(d?.current?.takeoff_time) || 0;
+    const takeoffTime = t > 0 ? t * 1000 : 0;
+    _flyerTakeoffCache.set(uid, { takeoffTime, ts: now });
+    return takeoffTime;
+  } catch (_) {
+    return 0;
+  }
+}
 
 // ── GET /api/oc/delays ───────────────────────────────────────────────
 // Aggregates per-member delay stats over the faction's OC history.
