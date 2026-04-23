@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb49
+// @version      2.73.0-wb50
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2051,7 +2051,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb49",
+      scriptVersion: "2.73.0-wb50",
     };
     try {
       GM_xmlhttpRequest({
@@ -2242,13 +2242,8 @@ if (!singleton) {
           "https://www.torn.com/page.php?sid=attackLog",
         )
       ) {
-        const participants = Array.from(
-          node.querySelectorAll("ul.participants-list li"),
-        );
-        if (participants > 100) {
-          return;
-        }
-        await apply_ff_gauge(participants);
+        // wb50: user requested the FF gauge be hidden on attack-log
+        // pages — the chip clutters the participant list. No-op.
       } else if (
         window.location.href.startsWith("https://www.torn.com/forums.php")
       ) {
@@ -2378,7 +2373,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb49",
+        scriptVersion: "2.73.0-wb50",
       };
       GM_xmlhttpRequest({
         method: "POST",
