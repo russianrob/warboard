@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb42
+// @version      2.73.0-wb43
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2023,7 +2023,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb42",
+      scriptVersion: "2.73.0-wb43",
     };
     try {
       GM_xmlhttpRequest({
@@ -2350,7 +2350,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb42",
+        scriptVersion: "2.73.0-wb43",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2748,8 +2748,18 @@ if (!singleton) {
           }
           statusSpan.classList.toggle("returning", effectiveReturning);
         } else {
+          // wb43: only capture the original innerHTML if it has actual
+          // content. Otherwise we might snapshot a React mid-render
+          // (briefly empty) and then "restore" a permanent blank when
+          // the member stops travelling. Skip injection this tick if
+          // there's nothing to save — Torn will re-render and we'll
+          // catch it on the next cycle.
           if (!statusEl.dataset.ffsTravelInjected) {
-            statusEl.dataset.ffsTravelOriginal = statusEl.innerHTML;
+            const snapshot = statusEl.innerHTML;
+            if (!snapshot || !snapshot.trim()) {
+              return; // wait for Torn's React to render status before we overwrite
+            }
+            statusEl.dataset.ffsTravelOriginal = snapshot;
             statusEl.dataset.ffsTravelInjected = "1";
           }
           const escLabel = countryLabel.replace(/"/g, "&quot;");
@@ -2765,8 +2775,14 @@ if (!singleton) {
             + `</span>`;
         }
       } else if (statusEl.dataset.ffsTravelInjected) {
-        // Member is no longer travelling — restore original.
-        statusEl.innerHTML = statusEl.dataset.ffsTravelOriginal;
+        // Member is no longer travelling — restore original. wb43: if
+        // we cached an empty string (shouldn't happen anymore, but
+        // defensively), don't blank the cell — leave React's current
+        // content intact.
+        const orig = statusEl.dataset.ffsTravelOriginal;
+        if (orig && orig.trim()) {
+          statusEl.innerHTML = orig;
+        }
         delete statusEl.dataset.ffsTravelOriginal;
         delete statusEl.dataset.ffsTravelInjected;
       } else {
