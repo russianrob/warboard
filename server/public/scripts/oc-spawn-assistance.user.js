@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.51
+// @version      3.1.52
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -244,7 +244,8 @@
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
-    const SCRIPT_VERSION = '3.1.51';
+    let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
+    const SCRIPT_VERSION = '3.1.52';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3017,7 +3018,10 @@
             // instead. engines.slotOptimizer still arrives from the server
             // (member-to-slot assignment data) but we ignore it — the new
             // panel derives everything from availableCrimes + cprCache.
-            if (engines.slotOptimizer) html += renderOutcomeEvEngineShell(availableCrimes);
+            if (engines.slotOptimizer) {
+                html += renderOutcomeEvEngineShell(availableCrimes);
+                html += renderRecentCompletions(_lastRecentCompletions);
+            }
             if (engines.failureRisk) html += renderFailureRisk(engines.failureRisk);
             if (engines.cprForecaster) html += renderCprForecaster(engines.cprForecaster);
             if (engines.memberProjector) html += renderMemberProjector(engines.memberProjector);
@@ -4183,6 +4187,53 @@
     //   Q score   — weighted good-ending sum: gE1×1.0 + gE2×0.7 + gE3×0.4
     //               + all remaining good endings ×0.2. Single number for
     //               comparing expected reward quality across OCs.
+    // v3.1.52: last-10 completed crimes with ✓/✗ top-tier flag. Uses the
+    // same hitRates threshold the server uses for the Hit % column, so
+    // admins can cross-reference recent actual outcomes against the
+    // predicted Top end % + faction historical Hit % at a glance.
+    function renderRecentCompletions(completions) {
+        if (!Array.isArray(completions) || completions.length === 0) return '';
+        const fmtShort = (n) => {
+            if (n >= 1e9) return '$' + (n / 1e9).toFixed(2).replace(/\.?0+$/, '') + 'B';
+            if (n >= 1e6) return '$' + (n / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
+            if (n >= 1e3) return '$' + (n / 1e3).toFixed(1).replace(/\.?0+$/, '') + 'k';
+            return '$' + Math.round(n);
+        };
+        const fmtAgo = (ms) => {
+            if (!ms) return '—';
+            const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+            const m = Math.floor(s / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
+            if (d > 0) return `${d}d`;
+            if (h > 0) return `${h}h${m % 60}m`;
+            if (m > 0) return `${m}m`;
+            return `${s}s`;
+        };
+        let html = `<div style="margin:12px 0;border:1px solid #2d6a4f;border-radius:8px;padding:10px;background:#0a1f14;">`;
+        html += `<div style="font-size:12px;font-weight:700;color:#4ade80;margin-bottom:6px;">\u{1F4CA} Recent Completions <span style="font-size:10px;font-weight:400;color:#9ca3af;margin-left:4px;">last ${completions.length}</span></div>`;
+        html += `<div style="overflow-x:auto;max-width:100%;"><table class="oc-table" style="width:100%;"><thead><tr>`;
+        html += `<th>OC</th><th>Lvl</th><th>Payout</th><th>Top-tier</th><th>Done</th>`;
+        html += `</tr></thead><tbody>`;
+        for (const c of completions) {
+            const isFail = c.status && c.status !== 'Successful';
+            const top = c.topTier === true ? '<span style="color:#4ade80;font-weight:700;">\u2713</span>'
+                      : c.topTier === false ? '<span style="color:#ef4444;font-weight:700;">\u2717</span>'
+                      : isFail ? '<span style="color:#ef4444;" title="failed OC">\u2717</span>'
+                      : '<span style="color:#6b7280;" title="not enough samples for this scenario yet">\u2014</span>';
+            const payoutTxt = c.payout > 0 ? fmtShort(c.payout) : '—';
+            const payoutColor = c.payout > 0 ? '#f3f4f6' : '#6b7280';
+            const nameColor = isFail ? '#ef4444' : '#74c69d';
+            html += `<tr>`;
+            html += `<td><b style="color:${nameColor};">${c.crimeName || '?'}</b></td>`;
+            html += `<td>${c.difficulty || '?'}</td>`;
+            html += `<td style="color:${payoutColor};">${payoutTxt}</td>`;
+            html += `<td style="text-align:center;">${top}</td>`;
+            html += `<td style="color:#9ca3af;">${fmtAgo(c.completedAt)} ago</td>`;
+            html += `</tr>`;
+        }
+        html += `</tbody></table></div></div>`;
+        return html;
+    }
+
     function renderOutcomeEvEngineShell(availableCrimes, status = 'Planning', label = 'Planning OCs') {
         const matching = normArr(availableCrimes).filter(c => c.status === status);
         let html = `<div style="margin:12px 0;border:1px solid #2d6a4f;border-radius:8px;padding:10px;background:#0a1f14;">`;
@@ -4864,6 +4915,8 @@
                     _lastHitRates = serverResp.hitRates || {};
                     // v3.1.49: stash per-member pending delays for the admin banner.
                     _lastPendingDelays = serverResp.pendingDelays || {};
+                    _lastRecentCompletions = Array.isArray(serverResp.recentCompletions)
+                        ? serverResp.recentCompletions : [];
                     engines = engines || {};
                     fetchSuccess = true;
                     break;

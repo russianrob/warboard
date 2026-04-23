@@ -3373,6 +3373,46 @@ function computeScenarioHitRates(factionId) {
   return out;
 }
 
+// v3.1.52: last N most-recent completed crimes with effective payout
+// + whether they hit top-tier (per the same threshold used by hitRates).
+// Feeds the "Last 10 completions" list under the Outcome EV engine so
+// admins can see recent actual-vs-predicted performance at a glance.
+function computeRecentCompletions(factionId, limit = 10) {
+  const hist = loadOcHistory(factionId);
+  const hitRates = computeScenarioHitRates(factionId);
+  // hist is sorted oldest→newest by loadOcHistory; take the tail.
+  const recent = hist.slice(-Math.max(0, limit));
+  const out = [];
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const h = recent[i];
+    const money = Number(h.rewards?.money) || 0;
+    const items = Array.isArray(h.rewards?.items) ? h.rewards.items : [];
+    let itemsValue = 0;
+    for (const it of items) {
+      const qty = Number(it?.quantity) || 0;
+      if (qty <= 0) continue;
+      itemsValue += qty * getItemMarketValue(it.id);
+    }
+    const payout = money + itemsValue;
+    const name = (h.crimeName || '').trim();
+    const hr = name ? hitRates[name] : null;
+    let topTier = null;
+    if (payout > 0 && hr && hr.threshold > 0) {
+      topTier = payout >= hr.threshold;
+    }
+    out.push({
+      crimeId: h.crimeId,
+      crimeName: name,
+      difficulty: h.difficulty || 0,
+      status: h.status,
+      completedAt: h.completedAt || (h.executedAt ? h.executedAt * 1000 : 0),
+      payout,
+      topTier,
+    });
+  }
+  return out;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  FAILURE RISK ENGINE
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -4415,7 +4455,11 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       if (summary) console.log(`[oc/spawn-key] pendingDelays for ${playerInfo.factionId}: ${summary}`);
     }
 
-    return res.json({ ...data, viewer: viewerObj, engines, hitRates, pendingDelays });
+    // v3.1.52: last 10 completed crimes with top-tier flag for the
+    // Outcome EV engine's "Recent Completions" list.
+    const recentCompletions = computeRecentCompletions(playerInfo.factionId, 10);
+
+    return res.json({ ...data, viewer: viewerObj, engines, hitRates, pendingDelays, recentCompletions });
   } catch (err) {
     // If member's own key failed, try keys from the faction pool
     const fid = String(playerInfo.factionId);
