@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb46
+// @version      2.73.0-wb47
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -225,7 +225,9 @@ if (!singleton) {
       background: rgba(220, 38, 38, .22); color: #fca5a5;
       font-weight: 600; font-size: 11px;
       max-width: 100%;
+      cursor: pointer; text-decoration: none;
     }
+    .ffs-hosp-status:hover { filter: brightness(1.2); }
     .ffs-hosp-status.jail { background: rgba(100, 116, 139, .25); color: #cbd5e1; }
     .ffs-hosp-status.imminent {
       animation: ffs-hosp-pulse 1s ease-in-out infinite;
@@ -2049,7 +2051,7 @@ if (!singleton) {
       ffArrowCount: document.querySelectorAll(".ff-scouter-arrow").length,
       estInlineCount: document.querySelectorAll(".ff-scouter-est-inline").length,
       estOverlayCount: document.querySelectorAll(".ff-scouter-est-overlay").length,
-      scriptVersion: "2.73.0-wb46",
+      scriptVersion: "2.73.0-wb47",
     };
     try {
       GM_xmlhttpRequest({
@@ -2376,7 +2378,7 @@ if (!singleton) {
         userNameCount: document.querySelectorAll(".user.name").length,
         honorSample: honorClasses,
         nameSample: nameClasses,
-        scriptVersion: "2.73.0-wb46",
+        scriptVersion: "2.73.0-wb47",
       };
       GM_xmlhttpRequest({
         method: "POST",
@@ -2911,12 +2913,15 @@ if (!singleton) {
               statusEl.dataset.ffsHospInjected = "1";
             }
             const cls = 'ffs-hosp-status' + (jail ? ' jail' : '') + (imminent ? ' imminent' : '');
-            // wb46: drop the icon — timer alone reads cleaner.
+            // wb47: chip becomes a link to the attack page so a click
+            // lands you directly in attack flow (revive hunting UX).
             // Chip colour (red=hospital, grey=jail) still distinguishes state.
+            const attackHref = `https://www.torn.com/page.php?sid=attack&user2ID=${uid}`;
             statusEl.innerHTML =
-              `<span class="${cls}" title="${hospState} release">`
+              `<a class="${cls}" href="${attackHref}" target="_blank" rel="noopener"`
+              + ` title="${hospState} release \u2014 click to attack">`
               + `<span class="ffs-hosp-val">${timeStr}</span>`
-              + `</span>`;
+              + `</a>`;
           }
           painted++;
         } else if (statusEl.dataset.ffsHospInjected) {
