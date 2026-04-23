@@ -4539,19 +4539,29 @@ router.post("/api/oc/flyer-delay", async (req, res) => {
     const fS = store.getFactionSettings(info.factionId);
     const factionFfsKey = fS?.oc_ffs_key || '';
     const takeoffTime = await fetchFlyerTakeoffTime(String(memberId), callerKey, factionFfsKey);
-    if (takeoffTime > 0) {
-      const readyAtMs = Number(readyAt) > 0 ? Number(readyAt) * 1000 : 0;
-      // The member only started *blocking* once both:
-      //  (a) they were already in the air → takeoffTime, AND
-      //  (b) the OC became ready → readyAtMs.
-      // Whichever is LATER is when they actually became a blocker.
-      const candidate = readyAtMs > 0 ? Math.max(takeoffTime, readyAtMs) : takeoffTime;
-      // Only move firstObservedAt earlier, never later. And never
-      // before readyAt (if known) — they can't have blocked the OC
-      // before it was ready.
-      if (candidate > 0 && candidate < firstObservedAt && candidate <= now) {
-        firstObservedAt = candidate;
+    const readyAtMs = Number(readyAt) > 0 ? Number(readyAt) * 1000 : 0;
+    // v3.1.50: require readyAt to backdate — without it we can't rule
+    // out that this member became abroad LONG before the OC mattered
+    // (e.g. Caboose flew to UAE yesterday, OC spawned this morning →
+    // block should tally from OC-ready, not his departure yesterday).
+    // Planning crimes with null/0 ready_at don't get retroactive
+    // attribution; we fall back to "now" as the observation start.
+    if (takeoffTime > 0 && readyAtMs > 0) {
+      // The member started blocking the LATER of: (a) they were in the
+      // air (takeoffTime), and (b) the OC was ready (readyAtMs).
+      const candidate = Math.max(takeoffTime, readyAtMs);
+      if (candidate > 0 && candidate <= now && candidate !== firstObservedAt) {
+        // v3.1.50: allow moving firstObservedAt EITHER WAY — earlier
+        // (we learned better takeoff data) OR later (we had a pre-fix
+        // value older than readyAt). Clamp to readyAt floor.
+        if (candidate < firstObservedAt) firstObservedAt = candidate;
+        else if (firstObservedAt < readyAtMs) firstObservedAt = readyAtMs;
       }
+    } else if (readyAtMs > 0 && firstObservedAt < readyAtMs) {
+      // No takeoff info but we know OC-ready — if prior stamp is
+      // older than readyAt (pre-fix bug wrote takeoff before ready),
+      // clamp forward to readyAt.
+      firstObservedAt = readyAtMs;
     }
   } catch (_) { /* keep current firstObservedAt */ }
 
