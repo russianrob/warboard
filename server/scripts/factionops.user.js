@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.88
+// @version      4.9.89
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.88';
+    const SCRIPT_VERSION = '4.9.89';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1713,10 +1713,10 @@ body.wb-chain-active {
     font-size: 11px; font-weight: 500;
     padding: 3px 10px; border-radius: 20px;
     white-space: nowrap; line-height: 1;
-    /* v4.9.88: content-based sizing — padding absorbs short labels
-       ('OK', 'UK'), wider labels ('3h 45m', 'South Africa') grow the
-       pill naturally. No fixed min/max on desktop. */
-    width: fit-content;
+    /* v4.9.89: floor at 84px so short labels (OK, UK) don't collapse
+       to a tiny dot-and-2-chars chip, but no max-width so longer
+       labels (hh:mm:ss, South Africa) can grow naturally beyond it. */
+    min-width: 84px;
 }
 .fo-status-pill .fo-s-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 
@@ -1875,11 +1875,10 @@ body.wb-chain-active {
     .fo-called-tag { padding: 2px 6px; font-size: 9px; }
     .fo-called-tag .fo-caller-name { max-width: 34px; }
     .fo-call-cell { overflow: hidden; max-width: 100%; }
-    /* v4.9.88: let the pill auto-size to its content on narrow
-       viewports too. Padding + inline-flex already keep it pill-shaped;
-       we just cap max-width so a comically long destination ('Dominican
-       Republic') can't blow out the column. */
-    .fo-status-pill { padding: 2px 8px; font-size: 9.5px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* v4.9.89: narrow-viewport pill — floor at 78px for consistent
+       visual shape on 'OK' / short labels, cap at 140px so very long
+       country names ('Dominican Republic') don't blow out the column. */
+    .fo-status-pill { padding: 2px 8px; font-size: 9.5px; min-width: 78px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fo-player-name .fo-name { font-size: 11.5px; }
     .fo-player-name .fo-pid { font-size: 9px; }
     .fo-bsp-stat { font-size: 10px; }
