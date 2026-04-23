@@ -4902,12 +4902,25 @@ router.get("/api/public/flight/:playerId", async (req, res) => {
   const factionFfsKey = (store.getFactionSettings(ctx.info.factionId)?.oc_ffs_key) || "";
   const info = await fetchFlightInfo(playerId, ctx.key, factionFfsKey);
   if (!info) return res.status(502).json({ error: "FFScouter unreachable or no data" });
+  // v4.9.97: translate FFScouter's shorthand codes (PI, BCT, WLT, AS)
+  // into readable names. Keep the raw code on `methodCode` so machine
+  // consumers that learned the shorthand still work.
+  const METHOD_NAMES = {
+    'PI':       'Private Island',
+    'BCT':      'Business Class',
+    'BC':       'Business Class',
+    'WLT':      'Wind Lines',
+    'AS':       'Airstrip',
+    'Airline':  'Airline',
+  };
+  const readableMethod = METHOD_NAMES[info.method] || info.method || '';
   return res.json({
     playerId,
     landingAt: info.landingAt,          // unix seconds, 0 if not in flight
     destination: info.destination,      // country name or '' if home
     returning: info.returning,          // true = heading back to Torn
-    method: info.method,                // 'Airline' | 'PI' | ...
+    method: readableMethod,             // 'Private Island', 'Business Class', etc.
+    methodCode: info.method,            // raw FFS code for machine consumers
     takeoffAt: Math.floor((info.takeoffTime || 0) / 1000),
   });
 });
