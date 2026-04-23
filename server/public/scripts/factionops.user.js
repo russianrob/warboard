@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.85
+// @version      4.9.86
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.85';
+    const SCRIPT_VERSION = '4.9.86';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1713,9 +1713,9 @@ body.wb-chain-active {
     font-size: 11px; font-weight: 500;
     padding: 3px 10px; border-radius: 20px;
     white-space: nowrap; line-height: 1;
-    /* v4.9.83: widen the pill so a full hh:mm:ss countdown fits on PDA
-       without truncating and wrapping to the next row. */
-    min-width: 64px;
+    /* v4.9.86: wider pill so hh:mm:ss and longer labels sit
+       comfortably in the narrow PDA columns without clipping. */
+    min-width: 84px;
 }
 .fo-status-pill .fo-s-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 
