@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.43
+// @version      3.1.44
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -242,7 +242,7 @@
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
-    const SCRIPT_VERSION = '3.1.43';
+    const SCRIPT_VERSION = '3.1.44';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════

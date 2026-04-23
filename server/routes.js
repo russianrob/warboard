@@ -16,6 +16,7 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { getOcSpawnData, getCachedCompletedCrimes, calculateOutcome } from "./oc-spawn.js";
+import { getItemMarketValue } from "./item-values.js";
 import * as vaultRequests from "./vault-requests.js";
 import * as keyUsage from "./key-usage-log.js";
 import { hasXanaxSubscription, grantFactionAccess, getXanaxSubscription } from "./xanax-subscriptions.js";
@@ -3313,24 +3314,33 @@ function loadOcHistory(factionId) {
   return merged;
 }
 
-// v3.1.38: empirical "top-tier hit rate" per scenario, computed from
-// faction's historical completions. Since Torn doesn't label outcomes
-// by ending tier (goodEnding1 vs 2 vs 3 …), we bucket by payout:
-// completions whose money reward is in the top quartile for that
-// scenario are counted as "top-tier hits." It's a rough proxy for
-// goodEnding1 because top endings consistently yield the highest
-// cash payouts. Works once a scenario has at least a handful of
-// successful completions; returns null below the min-sample floor.
+// v3.1.38 / v3.1.44: empirical "top-tier hit rate" per scenario, computed
+// from faction's historical completions. Since Torn doesn't label
+// outcomes by ending tier (goodEnding1 vs 2 vs 3 …), we bucket by
+// *effective payout* = cash money + estimated market value of any
+// dropped items (via item-values cache refreshed from /v2/torn?
+// selections=items). Fixes the empty "Top end $" problem on scenarios
+// like Best of the Lot / Smoke and Wing Mirrors where the reward is an
+// item drop rather than cash. Completions whose effective payout is in
+// the top quartile for that scenario are counted as "top-tier hits."
 function computeScenarioHitRates(factionId) {
   const hist = loadOcHistory(factionId);
   const byName = {};
   for (const h of hist) {
-    const money = h.rewards?.money;
-    if (!Number.isFinite(money) || money <= 0) continue; // skip failures + no-reward
+    const money = Number(h.rewards?.money) || 0;
+    const items = Array.isArray(h.rewards?.items) ? h.rewards.items : [];
+    let itemsValue = 0;
+    for (const it of items) {
+      const qty = Number(it?.quantity) || 0;
+      if (qty <= 0) continue;
+      itemsValue += qty * getItemMarketValue(it.id);
+    }
+    const payout = money + itemsValue;
+    if (payout <= 0) continue; // skip failures + no-reward + all-unpriced items
     const name = (h.crimeName || '').trim();
     if (!name) continue;
     if (!byName[name]) byName[name] = [];
-    byName[name].push(money);
+    byName[name].push(payout);
   }
   const MIN_SAMPLES = 4;
   const out = {};
