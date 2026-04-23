@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.50
+// @version      3.1.51
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -244,7 +244,7 @@
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
-    const SCRIPT_VERSION = '3.1.50';
+    const SCRIPT_VERSION = '3.1.51';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4064,8 +4064,12 @@
             html += ` <span style="color:#9ca3af;">(${stateLabel})</span>`;
             html += ` <span style="color:#ef4444;">\u2192</span> `;
             html += `${a.crimeName} (${a.position}) <span style="color:#9ca3af;">Lvl ${a.difficulty}</span>`;
-            if (a.readyAt > 0) {
-                html += ` <span class="oc-flyer-delay" data-ready-at="${a.readyAt}" style="color:#fbbf24;font-weight:600;">${a.urgency}</span>`;
+            if (a.readyAt > 0 || a.delayedSec > 0) {
+                // v3.1.51: stash per-member base delay + render timestamp so
+                // the live-tick increments from THIS value instead of
+                // recalculating from OC-ready-age (which clobbered the
+                // per-member attribution with a shared crime-level value).
+                html += ` <span class="oc-flyer-delay" data-ready-at="${a.readyAt}" data-base-sec="${a.delayedSec || 0}" data-base-ts="${Date.now()}" style="color:#fbbf24;font-weight:600;">${a.urgency}</span>`;
             } else {
                 html += ` <span style="color:#fbbf24;font-weight:600;">${a.urgency}</span>`;
             }
@@ -4082,13 +4086,24 @@
     function setupFlyerDelayTick() {
         if (window.__ocFlyerDelayTick) return;
         window.__ocFlyerDelayTick = setInterval(() => {
-            const nodes = document.querySelectorAll('.oc-flyer-delay[data-ready-at]');
+            const nodes = document.querySelectorAll('.oc-flyer-delay');
             if (!nodes.length) return;
-            const now = Math.floor(Date.now() / 1000);
+            const nowMs = Date.now();
+            const nowSec = Math.floor(nowMs / 1000);
             for (const el of nodes) {
-                const ra = Number(el.dataset.readyAt) || 0;
-                if (!ra) continue;
-                const s = Math.max(0, now - ra);
+                // v3.1.51: prefer per-member (base-sec + elapsed-since-render).
+                // Fall back to crime-level (now - readyAt) only if base-sec
+                // isn't stamped (old renders / members without pending data).
+                const baseSec = Number(el.dataset.baseSec);
+                const baseTs  = Number(el.dataset.baseTs);
+                let s;
+                if (Number.isFinite(baseSec) && baseSec >= 0 && Number.isFinite(baseTs) && baseTs > 0) {
+                    s = Math.max(0, baseSec + Math.floor((nowMs - baseTs) / 1000));
+                } else {
+                    const ra = Number(el.dataset.readyAt) || 0;
+                    if (!ra) continue;
+                    s = Math.max(0, nowSec - ra);
+                }
                 const mins = Math.floor(s / 60), hrs = Math.floor(mins / 60);
                 let txt;
                 if (s <= 0) txt = 'ready now';
