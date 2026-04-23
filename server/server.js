@@ -79,7 +79,11 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json({ limit: '50kb' }));
+// 1MB is comfortable for scout-report / post-war-report payloads that
+// carry BSP + FFScouter estimates for every enemy + own faction member
+// in a ranked war (can hit a few hundred kb). 50kb was tripping 413s
+// for members with large BSP caches.
+app.use(express.json({ limit: '1mb' }));
 
 // ── Security headers ───────────────────────────────────────────────────────
 app.use(helmet({ contentSecurityPolicy: false }));
