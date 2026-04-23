@@ -4695,22 +4695,34 @@ async function fetchFlightInfo(uid, preferredKey, factionKey) {
           method: cur.travel_method || '',
         };
       } else {
-        // Abroad — not in transit, so no landing countdown. Parse the
-        // destination from the outbound leg so the factionops pill can
-        // show 'UK' instead of 'Travel'.
+        // current=null means 'not in transit'. Two sub-cases:
+        //   (a) Abroad — their most recent flight was outbound
+        //       ('Traveling to X'), they landed there, and haven't
+        //       started the return yet.
+        //   (b) Home — their most recent flight was a return
+        //       ('Returning to Torn from X'); they're back.
+        // Only emit destination+takeoff for (a). For (b) emit an empty
+        // info object so /api/public/flight reports 'not flying'.
         const last = recents[0] || {};
-        const outbound = Number(last.takeoff_time) || 0;
         const lastDesc = String(last.status_description || '');
-        let abroadDest = '';
-        const m = lastDesc.match(/Traveling to (.+)/i);
-        if (m) abroadDest = m[1].trim();
-        info = {
-          takeoffTime: outbound * 1000,
-          landingAt: 0,
-          destination: abroadDest,
-          returning: false,
-          method: last.travel_method || '',
-        };
+        const outboundMatch = lastDesc.match(/Traveling to (.+)/i);
+        if (outboundMatch) {
+          info = {
+            takeoffTime: (Number(last.takeoff_time) || 0) * 1000,
+            landingAt: 0,
+            destination: outboundMatch[1].trim(),
+            returning: false,
+            method: last.travel_method || '',
+          };
+        } else {
+          info = {
+            takeoffTime: 0,
+            landingAt: 0,
+            destination: '',
+            returning: false,
+            method: '',
+          };
+        }
       }
       _flyerTakeoffCache.set(uid, { data: info, ts: now });
       return info;
@@ -4914,8 +4926,15 @@ router.get("/api/public/flight/:playerId", async (req, res) => {
     'Airline':  'Airline',
   };
   const readableMethod = METHOD_NAMES[info.method] || info.method || '';
+  // inFlight=true when member is actively in transit (landingAt > 0).
+  // abroad=true when not in transit but currently at a foreign
+  // destination. Both false = member is home in Torn.
+  const inFlight = info.landingAt > 0;
+  const abroad = !inFlight && !!info.destination;
   return res.json({
     playerId,
+    inFlight,
+    abroad,
     landingAt: info.landingAt,          // unix seconds, 0 if not in flight
     destination: info.destination,      // country name or '' if home
     returning: info.returning,          // true = heading back to Torn
