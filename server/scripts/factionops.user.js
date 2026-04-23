@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.79
+// @version      4.9.80
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.79';
+    const SCRIPT_VERSION = '4.9.80';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2878,6 +2878,7 @@ body.wb-chain-active {
             const existing = state.statuses[targetId];
             if (!existing) {
                 state.statuses[targetId] = newData;
+                rebaseStatusUntil(state.statuses[targetId]);
                 maybeAutoUncallOnHospital(targetId, null, normalizeStatus(newData.status));
                 continue;
             }
@@ -2906,6 +2907,28 @@ body.wb-chain-active {
                 const existingUntil = typeof existing.until === 'number' ? existing.until : 0;
                 const newUntil      = typeof newData.until === 'number' ? newData.until : existingUntil;
                 state.statuses[targetId].until = Math.min(existingUntil, newUntil);
+            }
+            // v4.9.80: stamp releaseAt so render paths read from an
+            // absolute timestamp instead of decrementing a drifting
+            // duration each tick. Chose releaseAt = min(existing, new)
+            // to mirror the monotonic-down guard above — a later push
+            // from Torn's cache can't bump the release time later.
+            {
+                const curSec = _nowSec();
+                const existingReleaseAt = typeof existing.releaseAt === 'number' ? existing.releaseAt : 0;
+                const incomingUntil     = typeof newData.until  === 'number' ? newData.until : 0;
+                const incomingReleaseAt = incomingUntil > 0 ? curSec + incomingUntil : 0;
+                let merged = 0;
+                if (statusChanged) {
+                    // Fresh status → trust incoming absolutely.
+                    merged = incomingReleaseAt;
+                } else if (existingReleaseAt > 0 && incomingReleaseAt > 0) {
+                    merged = Math.min(existingReleaseAt, incomingReleaseAt);
+                } else {
+                    merged = incomingReleaseAt || existingReleaseAt;
+                }
+                if (merged > 0) state.statuses[targetId].releaseAt = merged;
+                else delete state.statuses[targetId].releaseAt;
             }
         }
     }
@@ -3063,6 +3086,31 @@ body.wb-chain-active {
         } catch (e) {
             warn(`[auto-uncall] failed for #${targetId}:`, e);
         }
+    }
+
+    // v4.9.80: helpers to ground hospital / jail timers on an absolute unix
+    // release timestamp instead of a locally-decremented duration. Prevents
+    // tick-drift (dt floating-point accumulation) + server-poll rebounds that
+    // required the wall of monotonic-guard patches (3.7.6, 3.8.3, 3.8.4, 3.8.5).
+    function _nowSec() { return Math.floor(Date.now() / 1000); }
+    function rebaseStatusUntil(s) {
+        // Call every time `until` is written from a fresh source (merge,
+        // init, DOM parse). Records the absolute release time so later
+        // reads don't drift.
+        if (!s) return;
+        const u = Number(s.until);
+        if (Number.isFinite(u) && u > 0) {
+            s.releaseAt = _nowSec() + u;
+        } else {
+            delete s.releaseAt;
+        }
+    }
+    function statusRemainingSec(s) {
+        if (!s) return 0;
+        if (typeof s.releaseAt === 'number' && s.releaseAt > 0) {
+            return Math.max(0, s.releaseAt - _nowSec());
+        }
+        return Math.max(0, Number(s.until) || 0);
     }
 
     /** Format seconds into compact timer: "Xd Yh", "Xh Ym", or "Xm Ys". */
@@ -5881,18 +5929,31 @@ body.wb-chain-active {
 
             for (const targetId of Object.keys(state.statuses)) {
                 const s = state.statuses[targetId];
-                if (s.until && s.until > 0) {
-                    s.until = Math.max(0, s.until - dt);
+                // v4.9.80: don't decrement s.until any more — read
+                // remaining from the absolute releaseAt we stamped on
+                // update. Decrement approach drifted over time and
+                // required monotonic-guard patches when server polls
+                // rebounded the timer. Absolute timestamp = no drift.
+                // Lazy-rebase for legacy state from disk or pre-upgrade
+                // payloads that only carry the duration.
+                if (typeof s.releaseAt !== 'number' && s.until > 0) {
+                    rebaseStatusUntil(s);
+                }
+                const remaining = statusRemainingSec(s);
+                if (remaining > 0) {
+                    // Keep the cached duration roughly in sync for any
+                    // legacy readers that still consult s.until directly.
+                    s.until = remaining;
                     anyActive = true;
                     // Update just the timer text in the DOM for efficiency
                     const timerEl = document.getElementById(`wb-timer-${targetId}`);
                     if (timerEl) {
-                        timerEl.textContent = formatTimer(s.until);
+                        timerEl.textContent = formatTimer(remaining);
                     }
                     // Also update overlay timer element
                     const foTimerEl = document.getElementById(`fo-timer-${targetId}`);
                     if (foTimerEl) {
-                        foTimerEl.textContent = formatTimer(s.until);
+                        foTimerEl.textContent = formatTimer(remaining);
                     }
                 }
             }
@@ -6186,8 +6247,9 @@ body.wb-chain-active {
         // Collect hospital targets that aren't called and still have a timer
         const hospitalTargets = [];
         for (const [targetId, s] of Object.entries(state.statuses)) {
-            if (normalizeStatus(s.status) === 'hospital' && s.until > 0 && !state.calls[targetId]) {
-                hospitalTargets.push({ targetId, until: s.until, name: s.name || `#${targetId}` });
+            const rem = statusRemainingSec(s);
+            if (normalizeStatus(s.status) === 'hospital' && rem > 0 && !state.calls[targetId]) {
+                hospitalTargets.push({ targetId, until: rem, name: s.name || `#${targetId}` });
             }
         }
 
@@ -6524,8 +6586,9 @@ body.wb-chain-active {
         else if (statusData.activity === 'idle') activityClass = 'wb-activity-idle';
 
         const dot = `<span class="wb-activity-dot ${activityClass}"></span>`;
-        const timerSpan = statusData.until && statusData.until > 0
-            ? `<span id="wb-timer-${targetId}">${formatTimer(statusData.until)}</span>`
+        const barRemaining = statusRemainingSec(statusData);
+        const timerSpan = barRemaining > 0
+            ? `<span id="wb-timer-${targetId}">${formatTimer(barRemaining)}</span>`
             : '';
 
         const normalizedSt = normalizeStatus(statusData.status);
@@ -8072,8 +8135,9 @@ body.wb-chain-active {
         if (status === 'hospital') {
             pillClass = 'hosp';
             // Show timer instead of "Hosp" text
-            if (s.until && s.until > 0) {
-                label = formatTimer(s.until);
+            const remaining = statusRemainingSec(s);
+            if (remaining > 0) {
+                label = formatTimer(remaining);
             } else {
                 label = 'Hosp';
             }
@@ -8091,15 +8155,16 @@ body.wb-chain-active {
         const pill = document.createElement('span');
         pill.className = `fo-status-pill ${pillClass}`;
         // For hospital, the label IS the timer — give it the timer ID for live ticking
-        const labelId = (status === 'hospital' && s.until && s.until > 0) ? `fo-timer-${targetId}` : '';
+        const curRemaining = statusRemainingSec(s);
+        const labelId = (status === 'hospital' && curRemaining > 0) ? `fo-timer-${targetId}` : '';
         pill.innerHTML = `<span class="fo-s-dot"></span><span class="fo-s-label"${labelId ? ` id="${labelId}"` : ''}>${label}</span>`;
 
         // Timer (for non-hospital statuses that have timers)
-        if (status !== 'hospital' && s.until && s.until > 0) {
+        if (status !== 'hospital' && curRemaining > 0) {
             const timer = document.createElement('span');
             timer.id = `fo-timer-${targetId}`;
             timer.style.marginLeft = '4px';
-            timer.textContent = formatTimer(s.until);
+            timer.textContent = formatTimer(curRemaining);
             pill.appendChild(timer);
         }
 
@@ -8437,7 +8502,7 @@ body.wb-chain-active {
     /** Secondary sort: remaining timer (ascending). */
     function sortTimerValue(targetId) {
         const s = state.statuses[targetId];
-        return s && s.until ? s.until : 0;
+        return statusRemainingSec(s);
     }
 
     /**
