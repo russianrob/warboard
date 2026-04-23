@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.91
+// @version      4.9.92
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.91';
+    const SCRIPT_VERSION = '4.9.92';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1855,8 +1855,11 @@ body.wb-chain-active {
     .fo-overlay { border-radius: 6px; margin: 4px 0; }
     .fo-header { gap: 4px 8px; padding: 6px 10px; }
     .fo-col-headers, .fo-row {
-        /* Prior | Target | (Lvl hidden) | (BSP hidden) | Status | On | Call | Action */
-        grid-template-columns: 30px 1fr 0px 0px 40px 18px 56px 52px;
+        /* Prior | Target | (Lvl hidden) | (BSP hidden) | Status | On | Call | Action
+           v4.9.92: status column bumped 40 to 108px so the travel /
+           hospital pill fits without being clipped by the cell
+           boundary. Name column absorbs the delta (still 1fr). */
+        grid-template-columns: 28px 1fr 0px 0px 108px 16px 52px 48px;
         padding: 7px 8px;
         column-gap: 6px;
         font-size: 11px;
