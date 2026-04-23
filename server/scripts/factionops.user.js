@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.86
+// @version      4.9.87
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -271,7 +271,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.86';
+    const SCRIPT_VERSION = '4.9.87';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1874,7 +1874,10 @@ body.wb-chain-active {
     .fo-called-tag { padding: 2px 6px; font-size: 9px; }
     .fo-called-tag .fo-caller-name { max-width: 34px; }
     .fo-call-cell { overflow: hidden; max-width: 100%; }
-    .fo-status-pill { padding: 2px 4px; font-size: 9px; min-width: 0; max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* v4.9.87: grow the narrow-viewport pill so hh:mm:ss / long travel
+       labels actually fit. The old 58px max clipped 'Xh YYm' labels and
+       forced a min-width of 0, overriding the desktop min-width:84px. */
+    .fo-status-pill { padding: 2px 6px; font-size: 9.5px; min-width: 78px; max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fo-player-name .fo-name { font-size: 11.5px; }
     .fo-player-name .fo-pid { font-size: 9px; }
     .fo-bsp-stat { font-size: 10px; }
