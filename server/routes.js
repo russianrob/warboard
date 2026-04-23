@@ -4406,6 +4406,14 @@ router.get("/api/oc/spawn-key", async (req, res) => {
         pendingDelays[key] = Math.max(0, Math.floor((nowMs - first) / 1000));
       }
     }
+    // v3.1.50 diag: log that we shipped pendingDelays so we can verify
+    // the banner path is wired end-to-end. Only logs first N spawn-keys
+    // per minute to keep the log readable.
+    if (!global._pendingDelaysDiag || (Date.now() - global._pendingDelaysDiag) > 60_000) {
+      global._pendingDelaysDiag = Date.now();
+      const summary = Object.entries(pendingDelays).map(([k, v]) => `${k.split('::')[1]}=${v}s`).join(',');
+      if (summary) console.log(`[oc/spawn-key] pendingDelays for ${playerInfo.factionId}: ${summary}`);
+    }
 
     return res.json({ ...data, viewer: viewerObj, engines, hitRates, pendingDelays });
   } catch (err) {
