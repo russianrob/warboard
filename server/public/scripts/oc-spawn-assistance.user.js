@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.63
+// @version      3.1.64
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.64 — Vault-request amount input commits shorthand on blur. Previously typing "1m" showed a live "= $1,000,000" preview beside the input but the input itself stayed "1m". Now when the field loses focus we run parseVaultAmount and overwrite the input value with the expanded number ("1m" → "1000000"). Live preview is still shown during typing (important — so "1.5m" doesn't get clipped to "1000000" after the m keystroke). Only commits if the value contains k/m/b and parses successfully; plain numbers are untouched.
 // v3.1.63 — Remove the dead vault-payout autofill path. The Send button's intent was to stash a {recipientId, amount} payload in sessionStorage and have a second listener on the Controls tab pre-fill Torn's give-to-user form via React input-setter hacks, but the selectors (input[name="money"], input[placeholder*="mount"]) haven't matched Torn's React DOM in a long time — autofill silently failed after a 10s poll, falling through to the clipboard-copy fallback that users actually see. Dead code removed (tryAutofillVaultPayout, setReactInputValue, maybeAutofill, hashchange listener). Send button now just copies the amount to clipboard and its <a> href handles the Controls-tab navigation. Status message updated from "Opening Controls tab — give X [id] $Y (autofill queued)" to "Amount copied. Paste into the Give form for X [id] — $Y" so it honestly describes what happens.
 // v3.1.62 — Min CPR % setting description rewritten to explain what the threshold actually does in caller-facing terms: "Minimum checkpoint pass rate a member needs before the script considers them eligible to join a crime at their historical level. Anyone below this gets pinned to Lvl 1 only." Previous wording ("Below this, member defaults to Lvl 1 eligibility") was correct but required prior knowledge of what "defaults to Lvl 1" meant.
 // v3.1.61 — Collapse the Notifications section of Settings into a single "Open Notifications Setup" button. Per-type toggles (Vault requests, OC ready to spawn) and the test button now live on the dedicated /notifications PWA page, which is the single source of truth for push preferences. Keeps the settings modal lean and works the same across desktop and PDA (PDA users get install-to-home-screen instructions on the page itself). Server whitelist (OC_PUSH_PREF_KEYS) and push-notifications.js NOTIFICATION_TYPES gain oc_ready_to_spawn (default: on) — the pref is stored now; the detection + broadcast side still needs to be wired, so toggling has no effect until that follow-up lands.
@@ -254,7 +255,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.63';
+    const SCRIPT_VERSION = '3.1.64';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1578,6 +1579,21 @@
                 }
             };
             amtField.addEventListener('input', updatePreview);
+            // v3.1.64: on blur, commit the parsed shorthand into the
+            // input itself — "1m" becomes "1000000" once focus leaves.
+            // Keeps the live preview during typing (so "1.5m" isn't
+            // clipped to "1000000" after the 'm' keystroke) but shows
+            // the expanded number in the input after the user is done.
+            amtField.addEventListener('blur', () => {
+                const raw = amtField.value.trim();
+                if (!raw) return;
+                if (!/[kmb]/i.test(raw)) return; // no shorthand — leave as-is
+                const n = parseVaultAmount(raw);
+                if (isFinite(n) && n > 0 && String(n) !== raw) {
+                    amtField.value = String(n);
+                    updatePreview();
+                }
+            });
             updatePreview();
         }
         // $ button: fill amount input with the requester's current max balance
