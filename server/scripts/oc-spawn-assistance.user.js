@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.65
+// @version      3.1.66
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.66 — Drop the "= $X" preview line under the vault-request amount input. Now that the input live-translates "1k" → "1000" directly, the separate preview strip (v3.1.43) duplicates the same information and just adds noise. Removed the DOM element and the updatePreview() function; kept the input listener that does the translation.
 // v3.1.65 — Vault-request amount input now live-translates shorthand. The moment the value ends in k/m/b and parses cleanly, the input text is overwritten with the expanded number — "1k" instantly becomes "1000", "10m" becomes "10000000". Works because people type the digits first and the suffix last, so by the time the k/m/b lands the digits are already fixed. The "1.5m" workflow still works: "1" → "1.5" stays as-is (no trailing suffix), and once the m arrives "1.5m" → "1500000" expands. v3.1.64's blur-only handler is replaced by this input-driven version.
 // v3.1.64 — Vault-request amount input commits shorthand on blur. Previously typing "1m" showed a live "= $1,000,000" preview beside the input but the input itself stayed "1m". Now when the field loses focus we run parseVaultAmount and overwrite the input value with the expanded number ("1m" → "1000000"). Live preview is still shown during typing (important — so "1.5m" doesn't get clipped to "1000000" after the m keystroke). Only commits if the value contains k/m/b and parses successfully; plain numbers are untouched.
 // v3.1.63 — Remove the dead vault-payout autofill path. The Send button's intent was to stash a {recipientId, amount} payload in sessionStorage and have a second listener on the Controls tab pre-fill Torn's give-to-user form via React input-setter hacks, but the selectors (input[name="money"], input[placeholder*="mount"]) haven't matched Torn's React DOM in a long time — autofill silently failed after a 10s poll, falling through to the clipboard-copy fallback that users actually see. Dead code removed (tryAutofillVaultPayout, setReactInputValue, maybeAutofill, hashchange listener). Send button now just copies the amount to clipboard and its <a> href handles the Controls-tab navigation. Status message updated from "Opening Controls tab — give X [id] $Y (autofill queued)" to "Amount copied. Paste into the Give form for X [id] — $Y" so it honestly describes what happens.
@@ -256,7 +257,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.65';
+    const SCRIPT_VERSION = '3.1.66';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1561,32 +1562,16 @@
 
     function bindVaultRequestHandlers(apiKey, viewer) {
         ensureVaultPolling(apiKey, viewer);
-        // v3.1.43: live-preview the parsed amount under the input so users
-        // see '1m' → '$1,000,000' as they type and know the suffix
-        // actually converted (instead of suspecting it was taken literally).
+        // v3.1.65: live-translate shorthand to the expanded number as
+        // the user types. The moment the value ends in k/m/b and
+        // parses cleanly, overwrite the input ("1k" → "1000",
+        // "10m" → "10000000"). Works mid-stream because people type
+        // the number first and the suffix last — by the time k/m/b
+        // lands, the digits are already fixed. v3.1.66 dropped the
+        // separate "= $X" preview element since the expanded number
+        // now appears in the input itself.
         const amtField = document.getElementById('oc-vault-amount');
-        const preview  = document.getElementById('oc-vault-amount-preview');
-        if (amtField && preview) {
-            const updatePreview = () => {
-                const raw = amtField.value.trim();
-                if (!raw) { preview.textContent = ''; return; }
-                const n = parseVaultAmount(raw);
-                if (!isFinite(n) || n <= 0) {
-                    preview.textContent = 'Invalid — try 500k, 2.5m, 1b';
-                    preview.style.color = '#ef4444';
-                } else {
-                    preview.textContent = `= $${n.toLocaleString('en-US')}`;
-                    preview.style.color = '#74c69d';
-                }
-            };
-            // v3.1.65: live-translate shorthand to the expanded number as
-            // the user types. The moment the value ends in k/m/b and
-            // parses cleanly, overwrite the input ("1k" → "1000",
-            // "10m" → "10000000"). Works mid-stream because people
-            // type the number first and the suffix last — by the time
-            // k/m/b lands, the digits are already fixed. "1.5m" still
-            // works: "1.5" doesn't end in a suffix so stays; once the
-            // m is typed we expand the whole thing.
+        if (amtField) {
             amtField.addEventListener('input', () => {
                 const raw = amtField.value.trim();
                 if (/[kmb]$/i.test(raw)) {
@@ -1595,9 +1580,7 @@
                         amtField.value = String(n);
                     }
                 }
-                updatePreview();
             });
-            updatePreview();
         }
         // $ button: fill amount input with the requester's current max balance
         const maxBtn = document.getElementById('oc-vault-max');
@@ -3922,10 +3905,7 @@
                     style="position:absolute;left:2px;top:1px;bottom:1px;width:26px;background:#1e3a5f;border:0;color:#facc15;font-weight:700;border-radius:3px;cursor:${balance ? 'pointer' : 'default'};font-size:12px;">$</button>
                 <input type="text" autocomplete="off" placeholder="${balanceLabel ? 'Max ' + balanceLabel + ' — e.g. 500k, 2.5m' : 'Amount — e.g. 500k, 2.5m'}" id="oc-vault-amount"
                     style="width:100%;box-sizing:border-box;background:#0f1a2e;border:1px solid #1e3a5f;color:#dde;border-radius:4px;padding:4px 6px 4px 32px;font-size:11px;">
-            </div>
-            <!-- v3.1.43: live parse preview so '1m' → '$1,000,000' shows as
-                 you type, confirming the suffix got picked up. -->
-            <div id="oc-vault-amount-preview" style="font-size:10px;color:#6b7280;margin-top:2px;min-height:13px;"></div>`;
+            </div>`;
 
         const headerLabel = isAdmin ? '💰 Vault requests' : '💰 Request from vault';
         const listHtml = isAdmin
