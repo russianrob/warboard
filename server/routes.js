@@ -4329,10 +4329,13 @@ router.post("/admin/login", express.json({ limit: '4kb' }), async (req, res) => 
       return res.status(403).json({ error: "Not authorised" });
     }
     const token = issueToken({ playerId: t.playerId, scope: 'admin' });
-    // httpOnly so JS can't read it; Secure so it only travels over HTTPS.
-    // SameSite=Lax lets us navigate back to /admin/partners via a link.
+    // v4.9.98: Path=/ so the cookie rides on both /admin/* (HTML) AND
+    // /api/admin/* (API) endpoints. Previous Path=/admin blocked the
+    // cookie from the API call path, triggering the login-loop bug.
     const twelveHours = 12 * 60 * 60;
-    res.set('Set-Cookie', `admin_token=${encodeURIComponent(token)}; Path=/admin; HttpOnly; Secure; SameSite=Lax; Max-Age=${twelveHours}`);
+    const cookieVal = `admin_token=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${twelveHours}`;
+    res.set('Set-Cookie', cookieVal);
+    console.log(`[admin] login OK for ${t.playerName} (${t.playerId}); cookie set len=${token.length}`);
     return res.json({ ok: true });
   } catch (err) {
     return res.status(401).json({ error: err.message });
@@ -4341,7 +4344,7 @@ router.post("/admin/login", express.json({ limit: '4kb' }), async (req, res) => 
 
 // POST /admin/logout — clears the cookie.
 router.post("/admin/logout", (_req, res) => {
-  res.set('Set-Cookie', 'admin_token=; Path=/admin; HttpOnly; Secure; SameSite=Lax; Max-Age=0');
+  res.set('Set-Cookie', 'admin_token=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0');
   return res.json({ ok: true });
 });
 
@@ -4357,7 +4360,11 @@ router.get("/admin/login", (_req, res) => {
 // a valid session.
 router.get("/admin/partners", async (req, res) => {
   const session = _verifyAdminCookie(req);
-  if (!session) return res.redirect(302, '/admin/login');
+  if (!session) {
+    console.log(`[admin] /admin/partners redirect to login. cookieHeader=${req.headers.cookie ? 'present(len=' + req.headers.cookie.length + ')' : 'MISSING'}`);
+    return res.redirect(302, '/admin/login');
+  }
+  console.log(`[admin] /admin/partners allowed for playerId=${session.playerId}`);
   // Inline HTML — the owner is already authenticated via cookie, so
   // API calls don't need to pass a key; they'll include the cookie
   // automatically via same-origin fetch.
