@@ -54,12 +54,17 @@ function _resolveAdmins(factionId, members) {
 }
 
 // ── Ready-to-spawn detection ───────────────────────────────────────────
-async function _checkReadyToSpawn(factionId, availableCrimes, members) {
+async function _checkReadyToSpawn(factionId, availableCrimes, members, cprCache) {
   if (!Array.isArray(availableCrimes) || availableCrimes.length === 0) return;
   const fid = String(factionId);
   const map = _facMap(fid);
   const { adminIds, adminRoles } = _resolveAdmins(fid, members);
   const nowTs = Math.floor(Date.now() / 1000);
+  // Faction's min-CPR threshold — defines "recommended" quality.
+  // If any placed slot's member has CPR below this, the slate isn't
+  // considered worth spawning and we suppress the notification so
+  // admins only get pinged for quality-passing slates.
+  const minCprThreshold = Number(store.getFactionSettings(fid)?.oc_mincpr ?? 60);
 
   const transitions = [];
   for (const crime of availableCrimes) {
@@ -71,26 +76,44 @@ async function _checkReadyToSpawn(factionId, availableCrimes, members) {
     // "Spawnable" = Planning + fully filled + ready_at has passed.
     // Torn v2 sometimes leaves ready_at null/0 for Planning crimes, so
     // treat that as ready-now (matches the userscript's isReadyNow check
-    // at render time: a Planning crime with null/0 ready_at is
-    // considered ready). A Planning crime whose ready_at is still in
-    // the future is NOT spawnable yet — the admin can see the
-    // countdown but can't click Initiate.
+    // at render time).
     const readyAt = Number(crime.ready_at || 0);
     const prev = map.get(cid);
-    const isSpawnable = status === 'Planning' && maxSlots > 0 && filled >= maxSlots
+    const mechanicallySpawnable = status === 'Planning' && maxSlots > 0 && filled >= maxSlots
       && (readyAt === 0 || readyAt <= nowTs);
-    const hadPrev = prev !== undefined;
-    const wasSpawnable = hadPrev && prev.spawnable === true;
 
-    if (isSpawnable && hadPrev && !wasSpawnable) {
+    // Quality gate: compute the minimum CPR across placed slots using
+    // each member's historical CPR from cprCache. If any slot's member
+    // has CPR below the faction's oc_mincpr setting, this slate isn't a
+    // recommended spawn — admin probably wants to wait or replace.
+    let minSlotCpr = Infinity;
+    let haveAllCprs = true;
+    if (mechanicallySpawnable && Array.isArray(crime.slots)) {
+      for (const slot of crime.slots) {
+        const uid = String(slot?.user_id ?? slot?.user?.id ?? '');
+        if (!uid) { haveAllCprs = false; break; }
+        const rec = cprCache?.[uid];
+        const cpr = Number(rec?.cpr);
+        if (!Number.isFinite(cpr) || cpr <= 0) { haveAllCprs = false; break; }
+        if (cpr < minSlotCpr) minSlotCpr = cpr;
+      }
+    }
+    const qualityOk = haveAllCprs && minSlotCpr >= minCprThreshold;
+    const isRecommended = mechanicallySpawnable && qualityOk;
+
+    const hadPrev = prev !== undefined;
+    const wasRecommended = hadPrev && prev.recommended === true;
+
+    if (isRecommended && hadPrev && !wasRecommended) {
       transitions.push({
         crimeId: cid,
         name: String(crime.name || 'OC'),
         difficulty: Number(crime.difficulty || 0),
         slots: maxSlots,
+        minCpr: Math.round(minSlotCpr * 10) / 10,
       });
     }
-    map.set(cid, { status, filledCount: filled, maxSlots, spawnable: isSpawnable });
+    map.set(cid, { status, filledCount: filled, maxSlots, recommended: isRecommended });
   }
 
   // GC crimes that dropped out of availableCrimes (completed / deleted).
@@ -104,9 +127,10 @@ async function _checkReadyToSpawn(factionId, availableCrimes, members) {
   }
 
   for (const t of transitions) {
+    const cprBit = Number.isFinite(t.minCpr) ? ` · min CPR ${t.minCpr}%` : '';
     const payload = {
       title: `OC ready: ${t.name}`,
-      body: `Difficulty ${t.difficulty} · all ${t.slots} slots filled — tap to spawn.`,
+      body: `Difficulty ${t.difficulty}${cprBit} · all ${t.slots} slots filled — tap to spawn.`,
       tag: `oc-ready-${t.crimeId}`,
       data: {
         type: 'oc_ready_to_spawn',
@@ -193,14 +217,14 @@ async function _checkCompletions(factionId, completedCrimes, members) {
 }
 
 // ── Public API ─────────────────────────────────────────────────────────
-export async function checkAndNotify(factionId, availableCrimes, members, completedCrimes) {
-  await _checkReadyToSpawn(factionId, availableCrimes, members);
+export async function checkAndNotify(factionId, availableCrimes, members, completedCrimes, cprCache) {
+  await _checkReadyToSpawn(factionId, availableCrimes, members, cprCache);
   if (completedCrimes) await _checkCompletions(factionId, completedCrimes, members);
 }
 
-export function checkAndNotifyAsync(factionId, availableCrimes, members, completedCrimes) {
+export function checkAndNotifyAsync(factionId, availableCrimes, members, completedCrimes, cprCache) {
   Promise.resolve()
-    .then(() => checkAndNotify(factionId, availableCrimes, members, completedCrimes))
+    .then(() => checkAndNotify(factionId, availableCrimes, members, completedCrimes, cprCache))
     .catch(e => console.warn('[oc-notif] async error:', e.message));
 }
 
@@ -240,7 +264,7 @@ async function runPoll() {
     if (!key) continue;
     try {
       const data = await _fetchOcData(fid, key);
-      await checkAndNotify(fid, data.availableCrimes, data.members, data.completedCrimes);
+      await checkAndNotify(fid, data.availableCrimes, data.members, data.completedCrimes, data.cprCache);
     } catch (e) {
       console.warn(`[oc-notif][poller] faction ${fid}:`, e.message);
     }
