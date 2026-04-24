@@ -59,6 +59,7 @@ async function _checkReadyToSpawn(factionId, availableCrimes, members) {
   const fid = String(factionId);
   const map = _facMap(fid);
   const { adminIds, adminRoles } = _resolveAdmins(fid, members);
+  const nowTs = Math.floor(Date.now() / 1000);
 
   const transitions = [];
   for (const crime of availableCrimes) {
@@ -67,12 +68,21 @@ async function _checkReadyToSpawn(factionId, availableCrimes, members) {
     const status = String(crime.status || '');
     const filled = _filledCount(crime.slots);
     const maxSlots = Number(crime.maximum_members || (Array.isArray(crime.slots) ? crime.slots.length : 0));
+    // "Spawnable" = Planning + fully filled + ready_at has passed.
+    // Torn v2 sometimes leaves ready_at null/0 for Planning crimes, so
+    // treat that as ready-now (matches the userscript's isReadyNow check
+    // at render time: a Planning crime with null/0 ready_at is
+    // considered ready). A Planning crime whose ready_at is still in
+    // the future is NOT spawnable yet — the admin can see the
+    // countdown but can't click Initiate.
+    const readyAt = Number(crime.ready_at || 0);
     const prev = map.get(cid);
-    const isReady = status === 'Planning' && maxSlots > 0 && filled >= maxSlots;
+    const isSpawnable = status === 'Planning' && maxSlots > 0 && filled >= maxSlots
+      && (readyAt === 0 || readyAt <= nowTs);
     const hadPrev = prev !== undefined;
-    const wasReady = hadPrev && prev.status === 'Planning' && prev.filledCount >= prev.maxSlots;
+    const wasSpawnable = hadPrev && prev.spawnable === true;
 
-    if (isReady && hadPrev && !wasReady) {
+    if (isSpawnable && hadPrev && !wasSpawnable) {
       transitions.push({
         crimeId: cid,
         name: String(crime.name || 'OC'),
@@ -80,7 +90,7 @@ async function _checkReadyToSpawn(factionId, availableCrimes, members) {
         slots: maxSlots,
       });
     }
-    map.set(cid, { status, filledCount: filled, maxSlots });
+    map.set(cid, { status, filledCount: filled, maxSlots, spawnable: isSpawnable });
   }
 
   // GC crimes that dropped out of availableCrimes (completed / deleted).
