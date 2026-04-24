@@ -1600,7 +1600,7 @@ router.get("/terms", (_req, res) => {
   res.set('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Terms of Service · tornwar.com</title><style>${LEGAL_STYLE}</style></head><body>
 <h1>Terms of Service</h1>
-<div class="eff">Effective 2026-04-24 · Operator: RussianRob (Torn XID 137558)</div>
+<div class="eff">Effective 2026-04-24</div>
 
 <div class="card"><h2>1. What this is</h2><p><strong>tornwar.com</strong> ("the Service") hosts OC Spawn Assistance, FactionOps, the <code>/notifications</code> PWA, and related tooling for the Torn community. All services run from a single private dedicated server in Helsinki, Finland.</p></div>
 
@@ -1618,8 +1618,6 @@ router.get("/terms", (_req, res) => {
 
 <div class="card"><h2>8. Changes to these terms</h2><p>The operator may update these terms. Material changes will be posted at <code>tornwar.com/terms</code> with an updated effective date. Continued use after changes constitutes acceptance.</p></div>
 
-<div class="card"><h2>9. Contact</h2><p>Questions, data deletion requests, abuse reports: Torn XID <code>137558</code> (RussianRob) in-game, or <code>robert.n.hay@gmail.com</code>.</p></div>
-
 <div class="nav"><a href="/privacy">Privacy Policy</a> · <a href="/notifications">Notifications</a></div>
 </body></html>`);
 });
@@ -1628,7 +1626,7 @@ router.get("/privacy", (_req, res) => {
   res.set('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Privacy Policy · tornwar.com</title><style>${LEGAL_STYLE}</style></head><body>
 <h1>Privacy Policy</h1>
-<div class="eff">Effective 2026-04-24 · Operator: RussianRob (Torn XID 137558)</div>
+<div class="eff">Effective 2026-04-24</div>
 
 <div class="card"><h2>What we collect</h2><ul><li><strong>Your Torn API key</strong> — stored to perform read-only calls to Torn on your behalf.</li><li><strong>Faction data returned by Torn</strong> — completed OCs, active crimes, member roster, CPR history, vault news, etc. Collected only for factions on the partner allowlist or with active access.</li><li><strong>Per-player notification preferences</strong> — which notification types you've enabled, and the Web Push subscription endpoint(s) for your device.</li><li><strong>Minimal request metadata</strong> — timestamp, request path, status code (in nginx access logs). API keys are scrubbed from logs at ingest.</li></ul></div>
 
@@ -1641,12 +1639,6 @@ router.get("/privacy", (_req, res) => {
 <div class="card"><h2>Retention</h2><ul><li>Active while your faction is an allowlisted partner or has active access.</li><li>Deleted on request (contact the operator) within 7 days. Deletion removes your faction's entries from all data files and reclaims disk space on the next filesystem operation.</li><li>Revoking your API key at Torn's preferences page does not auto-delete historical data; it only stops new calls from being made with that key. Request deletion for full removal.</li><li>Nginx access logs are rotated every ~10 days with API keys already scrubbed at ingest.</li></ul></div>
 
 <div class="card"><h2>Your rights</h2><ul><li>Revoke your API key at <code>torn.com/preferences.php#tab=api</code> at any time.</li><li>Request full deletion of your faction's stored data.</li><li>Request a copy of what the Service has stored for your faction.</li><li>Uninstall the userscript at any time; no continued connection is required.</li></ul></div>
-
-<div class="card"><h2>Security incidents</h2><p>If the operator becomes aware of any unauthorized access to stored data, all affected partner factions will be notified within 72 hours via in-game Torn message to a nominated admin and/or via email to the address on file (if any). Affected API keys will be proactively evicted from caches and users will be asked to revoke and re-issue.</p></div>
-
-<div class="card"><h2>Source code</h2><p>The server and userscripts are open-source at <code>github.com/russianrob/factionops</code>. You can audit exactly what happens to your data.</p></div>
-
-<div class="card"><h2>Contact</h2><p>Questions, deletion requests, incident reports: Torn XID <code>137558</code> (RussianRob) in-game, or <code>robert.n.hay@gmail.com</code>.</p></div>
 
 <div class="nav"><a href="/terms">Terms of Service</a> · <a href="/notifications">Notifications</a></div>
 </body></html>`);
