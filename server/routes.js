@@ -16,6 +16,7 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { getOcSpawnData, getCachedCompletedCrimes, calculateOutcome } from "./oc-spawn.js";
+import { checkAndNotifyAsync as ocReadyCheck } from "./oc-ready-notifier.js";
 import { getItemMarketValue, maybeRefreshItemValues } from "./item-values.js";
 import * as vaultRequests from "./vault-requests.js";
 import * as keyUsage from "./key-usage-log.js";
@@ -421,6 +422,7 @@ router.get("/api/oc/spawn", requireAuth, async (req, res) => {
 
   try {
     const data = await getOcSpawnData(factionId, apiKey);
+    ocReadyCheck(factionId, data.availableCrimes, data.members);
     return res.json(data);
   } catch (err) {
     console.error(`[api] /api/oc/spawn failed:`, err.message);
@@ -4668,6 +4670,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     if (playerInfo.hasFactionAccess) addFactionKey(fid, key);
     keyUsage.logCall(key, 'faction/spawn (primary)', `oc-spawn:${playerInfo.playerName}`);
     const data = await getOcSpawnData(playerInfo.factionId, key);
+    ocReadyCheck(playerInfo.factionId, data.availableCrimes, data.members);
 
     // Apply faction's MINCPR/CPR_BOOST to recalculate joinable (server cache uses hardcoded defaults)
     const fSettings = store.getFactionSettings(playerInfo.factionId);
@@ -4775,6 +4778,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
           keyUsage.logCall(poolKey, 'faction/spawn (fallback)', `oc-spawn-fallback:for:${playerInfo.playerName}`);
           touchFactionKey(fid, poolKey);
           const data = await getOcSpawnData(playerInfo.factionId, poolKey);
+          ocReadyCheck(playerInfo.factionId, data.availableCrimes, data.members);
           // Apply faction settings to retry path too
           const fS2 = store.getFactionSettings(playerInfo.factionId);
           const fM2 = fS2.oc_mincpr ?? 60, fB2 = fS2.oc_cpr_boost ?? 15;
@@ -5318,6 +5322,7 @@ router.get("/api/public/oc/spawn", async (req, res) => {
   }
   try {
     const data = await getOcSpawnData(ctx.info.factionId, ctx.key);
+    ocReadyCheck(ctx.info.factionId, data.availableCrimes, data.members);
     // Strip the raw cprCache byPosition blobs — keep the summary stats
     // only (cpr, joinable, highestLevel) to keep response size down.
     const leanCpr = {};
