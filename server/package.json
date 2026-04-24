@@ -17,6 +17,7 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "node-cron": "^4.2.1",
+    "otpauth": "^9.5.0",
     "socket.io": "^4.8.1",
     "uuid": "^11.1.0",
     "web-push": "^3.6.7"

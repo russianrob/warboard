@@ -8,6 +8,38 @@ import { join as pathJoin, dirname as pathDirname } from "node:path";
 import { fileURLToPath } from 'node:url';
 import axios from "axios";
 import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.js";
+import { TOTP as _OTPAuthTOTP, Secret as _OTPAuthSecret } from "otpauth";
+import { readFileSync as _totpReadFile } from "node:fs";
+
+// Load the TOTP secret for admin-login 2FA from the same
+// ~/.google_authenticator file the SSH PAM module reads, so the owner
+// only has to enroll once (already done for SSH). First line of that
+// file is the base32 secret.
+let _ADMIN_TOTP = null;
+try {
+  const secretB32 = _totpReadFile('/root/.google_authenticator', 'utf8').split('\n')[0].trim();
+  if (secretB32) {
+    _ADMIN_TOTP = new _OTPAuthTOTP({
+      issuer: 'tornwar-admin',
+      label: 'root@tornwar',
+      algorithm: 'SHA1',
+      digits: 6,
+      period: 30,
+      secret: _OTPAuthSecret.fromBase32(secretB32),
+    });
+    console.log('[admin] TOTP 2FA enabled for /admin/login (secret loaded)');
+  }
+} catch (e) {
+  console.warn('[admin] TOTP 2FA disabled — could not read /root/.google_authenticator:', e.message);
+}
+function _verifyAdminTotp(code) {
+  if (!_ADMIN_TOTP) return true; // fail-open when secret isn't readable (same as SSH)
+  if (!code) return false;
+  const clean = String(code).replace(/\s/g, '');
+  // `window: 1` tolerates ±30s clock drift, matching PAM's -w 3 (-1..+1 slots)
+  const delta = _ADMIN_TOTP.validate({ token: clean, window: 1 });
+  return delta !== null;
+}
 import * as store from "./store.js";
 import { getAllowedBroadcastRoles, updateFactionSettings } from "./store.js";
 import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBasic, fetchRankedWarReport, fetchFactionAttacks } from "./torn-api.js";
@@ -4417,7 +4449,9 @@ function _verifyAdminCookie(req) {
 // signed cookie so subsequent admin pages load without key-in-URL.
 router.post("/admin/login", express.json({ limit: '4kb' }), async (req, res) => {
   const key = req.body?.key;
+  const totp = req.body?.totp;
   if (!key || String(key).length < 10) return res.status(400).json({ error: "Missing key" });
+  if (!_verifyAdminTotp(totp)) return res.status(401).json({ error: "Invalid or missing TOTP code" });
   try {
     const t = await verifyTornApiKey(key);
     if (String(t.playerId) !== String(OWNER_PLAYER_ID)) {
@@ -4446,7 +4480,7 @@ router.post("/admin/logout", (_req, res) => {
 // GET /admin/login — dead-simple login form, no auth required.
 router.get("/admin/login", (_req, res) => {
   res.set('Content-Type', 'text/html; charset=utf-8');
-  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin login</title><style>:root{color-scheme:dark}body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:40px;display:flex;justify-content:center}.card{background:#0f1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:20px;max-width:360px;width:100%}h1{font-size:18px;margin:0 0 14px}label{display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px}input{width:100%;box-sizing:border-box;background:#060b12;border:1px solid #1e3a5f;color:#e5e7eb;border-radius:4px;padding:9px 10px;font-family:monospace;font-size:13px;margin-bottom:12px}button{background:#2d6a4f;color:white;border:0;border-radius:4px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;width:100%}.status{font-size:11px;margin-top:10px;min-height:16px;color:#ef4444}</style></head><body><div class="card"><h1>Admin</h1><form id="f"><label for="k">Torn API Key</label><input id="k" type="password" autocomplete="off" placeholder="..." required><button type="submit">Unlock</button><div class="status" id="s"></div></form><script>document.getElementById('f').addEventListener('submit',async e=>{e.preventDefault();const k=document.getElementById('k').value.trim();const s=document.getElementById('s');s.textContent='Verifying…';s.style.color='#9ca3af';try{const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});const d=await r.json();if(!r.ok)throw new Error(d.error||'HTTP '+r.status);location.href='/admin/partners'}catch(x){s.textContent=x.message;s.style.color='#ef4444'}});</script></div></body></html>`);
+  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin login</title><style>:root{color-scheme:dark}body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:40px;display:flex;justify-content:center}.card{background:#0f1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:20px;max-width:360px;width:100%}h1{font-size:18px;margin:0 0 14px}label{display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px}input{width:100%;box-sizing:border-box;background:#060b12;border:1px solid #1e3a5f;color:#e5e7eb;border-radius:4px;padding:9px 10px;font-family:monospace;font-size:13px;margin-bottom:12px}button{background:#2d6a4f;color:white;border:0;border-radius:4px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;width:100%}.status{font-size:11px;margin-top:10px;min-height:16px;color:#ef4444}</style></head><body><div class="card"><h1>Admin</h1><form id="f"><label for="k">Torn API Key</label><input id="k" type="password" autocomplete="off" placeholder="..." required><label for="t">6-digit TOTP code</label><input id="t" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" placeholder="123456" required><button type="submit">Unlock</button><div class="status" id="s"></div></form><script>document.getElementById('f').addEventListener('submit',async e=>{e.preventDefault();const k=document.getElementById('k').value.trim();const totp=document.getElementById('t').value.trim();const s=document.getElementById('s');s.textContent='Verifying…';s.style.color='#9ca3af';try{const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,totp})});const d=await r.json();if(!r.ok)throw new Error(d.error||'HTTP '+r.status);location.href='/admin/partners'}catch(x){s.textContent=x.message;s.style.color='#ef4444'}});</script></div></body></html>`);
 });
 
 // Owner-gated admin page. Access requires the admin_token cookie set
