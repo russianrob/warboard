@@ -43,8 +43,12 @@ export const NOTIFICATION_TYPES = {
   call_stolen:     { label: "Call Contested",        description: "When someone else views a target you called",       default: true  },
   war_target:      { label: "War Target Reached",    description: "When faction hits the custom war target",           default: true  },
   enemy_attacking: { label: "Enemy Attacking",        description: "When an enemy is caught mid-attack by the poller",  default: false },
-  vault_request:   { label: "Vault Requests",         description: "When a faction member requests money from the vault", default: true },
-  oc_ready_to_spawn: { label: "OC Ready to Spawn",    description: "When an organized crime is fully filled and ready to spawn",  default: true },
+  // oc: true marks a type as OC-Spawn-only. The FactionOps settings UI
+  // filters these out via /api/push/types so war-overlay users don't see
+  // OC-specific toggles; they're managed instead from the /notifications
+  // PWA, which hard-codes its own toggle list.
+  vault_request:     { label: "Vault Requests",      description: "When a faction member requests money from the vault",          default: true, oc: true },
+  oc_ready_to_spawn: { label: "OC Ready to Spawn",   description: "When an organized crime is fully filled and ready to spawn",   default: true, oc: true },
 };
 
 // ── Subscription Storage ────────────────────────────────────────────────

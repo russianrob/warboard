@@ -1460,7 +1460,16 @@ router.get("/api/push/status", requireAuth, (req, res) => {
 // Unauthenticated — needed for the settings UI before login.
 
 router.get("/api/push/types", (_req, res) => {
-  return res.json({ types: push.NOTIFICATION_TYPES });
+  // Hide OC-only types (oc: true) from FactionOps' settings UI — those
+  // live on the /notifications PWA, which hard-codes its own toggles.
+  // Also strip the internal `oc` flag from the response.
+  const filtered = {};
+  for (const [key, val] of Object.entries(push.NOTIFICATION_TYPES)) {
+    if (val && val.oc === true) continue;
+    const { oc: _ignored, ...rest } = val || {};
+    filtered[key] = rest;
+  }
+  return res.json({ types: filtered });
 });
 
 // Key-auth'd push subscription endpoints. Mirror the JWT-gated
