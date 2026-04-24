@@ -1503,6 +1503,41 @@ router.get("/api/oc/push/status", async (req, res) => {
   });
 });
 
+// Pending-events poll for Torn PDA (Flutter InAppWebView), which has
+// no Web Push support and needs a client-side polling fallback to fire
+// local notifications via scheduleNotification. Returns vault_request
+// events (currently the only OC-originated notification type) with
+// createdAt > since, filtered to the caller's faction and excluding
+// self-posted requests. Caller tracks the bookmark client-side.
+router.get("/api/oc/push/pending", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const since = Math.max(0, parseInt(req.query.since, 10) || 0);
+  const prefs = push.getPreferences(ctx.info.playerId);
+  const now = Date.now();
+  const out = [];
+  if (prefs.vault_request !== false) {
+    const pending = vaultRequests.listRequests(ctx.info.factionId);
+    for (const r of pending) {
+      if (!r || typeof r.createdAt !== 'number') continue;
+      if (r.createdAt <= since) continue;
+      if (String(r.requesterId) === String(ctx.info.playerId)) continue;
+      const amount = Number(r.amount || 0).toLocaleString('en-US');
+      const pref = r.target === 'online' ? 'only when online' : 'OK even if offline';
+      out.push({
+        type: 'vault_request',
+        id: r.id,
+        createdAt: r.createdAt,
+        title: `${r.requesterName} requested $${amount}`,
+        body: `${pref}. Tap to open the faction vault.`,
+        url: 'https://www.torn.com/factions.php?step=your&type=1#/tab=controls',
+      });
+    }
+  }
+  return res.json({ now, events: out });
+});
+
 // Standalone device-enable page for partner factions. Same origin as
 // the service worker, so pushManager.subscribe() works without any
 // cross-origin shenanigans. Partners land here with ?key=<API>.

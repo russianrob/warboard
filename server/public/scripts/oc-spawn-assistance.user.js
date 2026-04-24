@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.58
+// @version      3.1.59
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.59 — PDA vault-request notifications via scheduleNotification. On Torn PDA (Flutter InAppWebView), the "Enable on This Device" button now toggles a client-side polling loop (30s interval) that hits the new GET /api/oc/push/pending endpoint for vault-request events created since the last bookmark, then fires each one as a local notification via window.flutter_inappwebview.callHandler('scheduleNotification', ...). Bookmark persists in GM storage so a page reload doesn't re-fire a backlog, and first-ever enable silently bookmarks "now" so enabling during a pending request doesn't spam the backlog either. Test button on PDA fires a local scheduleNotification directly (no server round-trip) so the user can verify the bridge works. ID range 700–799 rotated to avoid colliding with FactionOps' ranges. Desktop / mobile-web flow unchanged — they still hit /push/setup for the Web Push subscription.
 // v3.1.58 — Enable-on-this-device fix for PDA: previous version opened tornwar.com/push/setup via GM_openInTab / window.open, which on Torn PDA's Flutter InAppWebView spawns a blank tab because Web Push isn't supported there at all (no Service Worker, no pushManager). Now detect PDA via window.flutter_inappwebview and show a yellow hint line directing the user to open the setup page in a desktop browser instead. Desktop / real mobile browsers still get the open-in-new-tab behavior unchanged. Push remains a per-device feature; PDA parity would need a PDA-native notifications path (scheduleNotification callHandler) which is out of scope for this change.
 // v3.1.57 — Scope audit tag fix: _lastScopeDetectSource was initialized to the literal string 'auto', which short-circuited the `_lastScopeDetectSource || source || 'auto'` fallback chain inside pushScopeOnly. Result: every scope push logged on the server with source=auto, masking which strategy actually read the value (DOM state / class / text / AJAX XHR / AJAX Fetch). Initialize to null instead so the chain falls through to the caller's source arg (used by the AJAX interceptors) when no DOM read has landed a fresh value. Going forward the server audit log in pm2 will show specific tags like 'state', 'class:warScope', 'text:Scope … 1', or 'AJAX (XHR)' — makes the "where did that scope value come from?" question actually answerable.
 // v3.1.56 — Vault-request notifications now work for partner factions that aren't running FactionOps. Added an "Enable on This Device" button next to "Send Test Notification" in Settings → Notifications. It opens tornwar.com/push/setup with the saved API key, which handles service-worker registration, VAPID fetch, and pushManager.subscribe on the tornwar.com origin, then POSTs to the new /api/oc/push/subscribe endpoint (auth'd by the same Torn API key used everywhere else). After enabling, the existing vault_request preference toggle + Send Test Notification flow work exactly as they did for FactionOps factions. Test-button error text updated to reference the Enable button instead of FactionOps.
@@ -249,8 +250,92 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.58';
+    const SCRIPT_VERSION = '3.1.59';
     const SERVER = 'https://tornwar.com';
+
+    // Torn PDA (Flutter InAppWebView) doesn't support Web Push, so on PDA
+    // we fall back to a polling loop that fires scheduleNotification via
+    // the flutter bridge for each new vault-request event.
+    const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
+    const PDA_NOTIF_POLL_MS = 30_000;
+    const PDA_NOTIF_ID_RANGE = [700, 799];
+    let _pdaNotifTimer = null;
+    let _pdaNotifIdCursor = PDA_NOTIF_ID_RANGE[0];
+
+    function firePdaLocalNotification(title, body, url) {
+        if (!IS_PDA || !window.flutter_inappwebview?.callHandler) return false;
+        const id = _pdaNotifIdCursor;
+        _pdaNotifIdCursor = id >= PDA_NOTIF_ID_RANGE[1] ? PDA_NOTIF_ID_RANGE[0] : id + 1;
+        try {
+            window.flutter_inappwebview.callHandler('scheduleNotification', {
+                title: String(title || 'Vault Request'),
+                subtitle: String(body || ''),
+                id,
+                timestamp: Date.now() + 1000,
+                overwriteID: true,
+                launchNativeToast: false,
+                urlCallback: String(url || ''),
+            });
+            return true;
+        } catch (e) {
+            console.warn('[OC Spawn][pda-notif] scheduleNotification failed:', e.message);
+            return false;
+        }
+    }
+
+    async function pollPdaNotifications() {
+        if (!IS_PDA) return;
+        const apiKey = getApiKey();
+        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
+        let since = Number(GM_getValue('cfg_pda_notif_since', 0)) || 0;
+        // First poll: bookmark "now" from server so we don't fire a
+        // backlog of notifications for requests that were pending when
+        // the user enabled PDA notifications.
+        const bookmarkOnly = since === 0;
+        try {
+            const url = `${SERVER}/api/oc/push/pending?key=${encodeURIComponent(apiKey)}&since=${since}`;
+            const resp = await gmRequest(url);
+            const data = JSON.parse(resp.responseText || '{}');
+            if (!data || typeof data.now !== 'number') return;
+            if (bookmarkOnly) {
+                GM_setValue('cfg_pda_notif_since', data.now);
+                return;
+            }
+            const events = Array.isArray(data.events) ? data.events : [];
+            let maxTs = since;
+            for (const ev of events) {
+                if (!ev || typeof ev.createdAt !== 'number') continue;
+                if (ev.createdAt > maxTs) maxTs = ev.createdAt;
+                firePdaLocalNotification(ev.title, ev.body, ev.url);
+            }
+            GM_setValue('cfg_pda_notif_since', Math.max(data.now, maxTs));
+        } catch (e) {
+            console.debug('[OC Spawn][pda-notif] poll failed:', e.message);
+        }
+    }
+
+    function startPdaNotifLoop() {
+        if (!IS_PDA) return;
+        if (_pdaNotifTimer) return;
+        // Bookmark-only first call so we don't spam backfill.
+        pollPdaNotifications();
+        _pdaNotifTimer = setInterval(pollPdaNotifications, PDA_NOTIF_POLL_MS);
+    }
+
+    function stopPdaNotifLoop() {
+        if (_pdaNotifTimer) { clearInterval(_pdaNotifTimer); _pdaNotifTimer = null; }
+    }
+
+    function isPdaNotifEnabled() { return GM_getValue('cfg_pda_notif_enabled', false) === true; }
+    function setPdaNotifEnabled(on) {
+        GM_setValue('cfg_pda_notif_enabled', !!on);
+        if (on) {
+            GM_setValue('cfg_pda_notif_since', 0);
+            startPdaNotifLoop();
+        } else {
+            stopPdaNotifLoop();
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     //  OC METRICS  — constants, state, and core logic (ported from Canixe's script)
@@ -2563,6 +2648,28 @@
             if (msgEl) msgEl.textContent = 'Save your API key first.';
             return;
         }
+        // On PDA, fire a local scheduleNotification so the user can
+        // confirm the flutter bridge works without waiting for a real
+        // vault request to land. Desktop uses the server-side Web Push
+        // test path as before.
+        if (IS_PDA) {
+            if (!isPdaNotifEnabled()) {
+                if (msgEl) { msgEl.style.color = '#fbbf24'; msgEl.textContent = 'Click "Enable on This Device" first.'; }
+                return;
+            }
+            const fired = firePdaLocalNotification(
+                'Vault Request — test',
+                'If you see this, PDA notifications are working.',
+                'https://www.torn.com/factions.php?step=your&type=1#/tab=controls',
+            );
+            if (msgEl) {
+                msgEl.style.color = fired ? '#74c69d' : '#ef4444';
+                msgEl.textContent = fired
+                    ? '✓ Test scheduled — should ring in ~1s.'
+                    : 'Failed — flutter_inappwebview bridge unavailable.';
+            }
+            return;
+        }
         if (msgEl) msgEl.textContent = 'Sending test…';
         vaultNotifTestBtn.disabled = true;
         GM_xmlhttpRequest({
@@ -2583,38 +2690,44 @@
         });
     });
 
-    // "Enable on This Device" opens the standalone /push/setup page where
-    // the service worker + VAPID + pushManager.subscribe flow runs on the
-    // tornwar.com origin (required for service-worker scope). On Torn PDA
-    // (Flutter InAppWebView) Web Push isn't available at all — no SW, no
-    // push subscription — so instead of opening a blank new tab we show
-    // guidance to enable from a desktop browser (the subscription is
-    // per-device, so PDA ringing would need PDA-native notifications,
-    // which is a separate feature).
+    // "Enable on This Device":
+    //   - Desktop / mobile web → opens /push/setup for the Web Push flow
+    //     (service worker + VAPID + pushManager.subscribe on tornwar.com).
+    //   - Torn PDA → toggles a PDA-native polling loop that fires
+    //     scheduleNotification via the flutter_inappwebview bridge. Web
+    //     Push can't work inside PDA's Flutter InAppWebView, so we poll
+    //     /api/oc/push/pending every 30s and fire local notifications.
     const vaultNotifEnableBtn = document.getElementById('cfg-vault-notif-enable');
-    if (vaultNotifEnableBtn) bindTap(vaultNotifEnableBtn, () => {
-        const apiKey = getApiKey();
-        const msgEl = document.getElementById('cfg-vault-notif-msg');
-        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
-            if (msgEl) msgEl.textContent = 'Save your API key first.';
-            return;
-        }
-        const isPDA = typeof window.flutter_inappwebview !== 'undefined';
-        const url = `${SERVER}/push/setup?key=${encodeURIComponent(apiKey)}`;
-        if (isPDA) {
-            if (msgEl) {
-                msgEl.innerHTML = 'Torn PDA doesn\'t support Web Push. Open <b>tornwar.com/push/setup</b> in a desktop browser (Chrome / Safari / Firefox) while signed into Torn; enter your API key there to register that device.';
-                msgEl.style.color = '#fbbf24';
-                msgEl.style.lineHeight = '1.4';
+    if (vaultNotifEnableBtn) {
+        // Reflect initial PDA enabled state in the button label.
+        if (IS_PDA && isPdaNotifEnabled()) vaultNotifEnableBtn.textContent = 'Disable on This Device';
+        bindTap(vaultNotifEnableBtn, () => {
+            const apiKey = getApiKey();
+            const msgEl = document.getElementById('cfg-vault-notif-msg');
+            if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
+                if (msgEl) msgEl.textContent = 'Save your API key first.';
+                return;
             }
-            return;
-        }
-        try {
-            if (typeof GM_openInTab === 'function') GM_openInTab(url, { active: true });
-            else window.open(url, '_blank', 'noopener');
-        } catch (_) { window.open(url, '_blank', 'noopener'); }
-        if (msgEl) msgEl.textContent = 'Opened setup page in a new tab.';
-    });
+            if (IS_PDA) {
+                const turningOn = !isPdaNotifEnabled();
+                setPdaNotifEnabled(turningOn);
+                vaultNotifEnableBtn.textContent = turningOn ? 'Disable on This Device' : 'Enable on This Device';
+                if (msgEl) {
+                    msgEl.style.color = turningOn ? '#74c69d' : '#9ca3af';
+                    msgEl.textContent = turningOn
+                        ? '✓ Enabled on PDA — polls every 30s and rings locally via scheduleNotification.'
+                        : 'Disabled on this device.';
+                }
+                return;
+            }
+            const url = `${SERVER}/push/setup?key=${encodeURIComponent(apiKey)}`;
+            try {
+                if (typeof GM_openInTab === 'function') GM_openInTab(url, { active: true });
+                else window.open(url, '_blank', 'noopener');
+            } catch (_) { window.open(url, '_blank', 'noopener'); }
+            if (msgEl) msgEl.textContent = 'Opened setup page in a new tab.';
+        });
+    }
 
     document.getElementById('oc-spawn-key-save').addEventListener('click', () => {
         const val = document.getElementById('oc-spawn-key-input').value.trim();
@@ -5205,6 +5318,10 @@
 
     // Start DOM scope reader (runs whenever recruiting tab is visible)
     setupScopeDomReader();
+
+    // Start PDA notification polling loop if the user previously enabled
+    // it. On non-PDA this is a no-op.
+    if (IS_PDA && isPdaNotifEnabled()) startPdaNotifLoop();
 
     // ── Vault-payout autofill on Controls tab ────────────────────────────
     // When an admin taps the Send button on a vault-request row, we stash
