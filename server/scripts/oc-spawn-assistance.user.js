@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.67
+// @version      3.1.68
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.68 — Scope stability window: Torn's React re-renders the scope badge during OC state transitions and the DOM class-match strategy sometimes catches intermediate values. Observed 04-24 05:00:24-05:00:41 EDT: 16 → 2 → 5 → 2 pushed in 20s, all class:container___THb7U scope_, when real scope was 16. Delay the commit + push by 2.5s; if a different value arrives inside the window, reset the timer and drop the transient. Legitimate scope changes settle well inside 2.5s so real edits feel ~live. Also moves CONFIG.SCOPE and GM_setValue inside the timer (previously they committed immediately; only the push was debounced).
 // v3.1.67 — Fix Request button on vault-request form rendering as black text on a black background. The button was using class="w3b-btn" but that class never existed in the panel stylesheet — browsers fell back to UA default (which ends up ~invisible on the dark panel). Replaced with explicit inline styles matching the rest of the OC Spawn UI: green #2d6a4f background, white text, 1px green border, same padding/font-weight as Refresh.
 // v3.1.66 — Drop the "= $X" preview line under the vault-request amount input. Now that the input live-translates "1k" → "1000" directly, the separate preview strip (v3.1.43) duplicates the same information and just adds noise. Removed the DOM element and the updatePreview() function; kept the input listener that does the translation.
 // v3.1.65 — Vault-request amount input now live-translates shorthand. The moment the value ends in k/m/b and parses cleanly, the input text is overwritten with the expanded number — "1k" instantly becomes "1000", "10m" becomes "10000000". Works because people type the digits first and the suffix last, so by the time the k/m/b lands the digits are already fixed. The "1.5m" workflow still works: "1" → "1.5" stays as-is (no trailing suffix), and once the m arrives "1.5m" → "1500000" expands. v3.1.64's blur-only handler is replaced by this input-driven version.
@@ -258,7 +259,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.67';
+    const SCRIPT_VERSION = '3.1.68';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -961,37 +962,38 @@
         if (scope === null) return;
         if (scope === CONFIG.SCOPE) return;
 
-        console.log(`[OC Spawn] Detected scope change: ${CONFIG.SCOPE} → ${scope} (source: ${source})`);
-        CONFIG.SCOPE = scope;
-        CONFIG._scopeAutoDetected = true;
-        // Persist so a full page reload survives the detection — without this,
-        // on reload CONFIG.SCOPE = GM_getValue('cfg_scope', null) loads the
-        // old stored value and _scopeAutoDetected resets to false, which lets
-        // fetchFactionSettings overwrite with the stale server-saved scope.
-        GM_setValue('cfg_scope', scope);
-        GM_setValue('cfg_scope_auto_ts', Date.now());
-
-        // Auto-push to server, debounced 1.5s — if the MutationObserver fires
-        // the same value a few times in rapid succession we only send one
-        // request. Everyone else in the faction picks up the new scope on
-        // their next refresh without needing the detector to fire on their
-        // own client.
+        // v3.1.68: stability check. Torn's React re-renders the scope
+        // badge during OC state transitions and we sometimes catch
+        // intermediate values (e.g. 16 → 2 → 5 → 2 over 20s, all class-
+        // matched). Delay the commit + push; if a new detection with a
+        // different value lands inside the stability window we reset
+        // the timer and the transient value gets dropped. Legitimate
+        // scope changes (OC fill, OC fire) settle in < 2.5s so this
+        // window is ~invisible for real edits.
         clearTimeout(scopePushTimer);
+        const pendingValue = scope;
+        const pendingSource = source;
+        const pendingDetectSource = _lastScopeDetectSource;
         scopePushTimer = setTimeout(() => {
+            // Guard in case another handleDetectedScope already committed
+            // the same value before this timer fired.
+            if (pendingValue === CONFIG.SCOPE) return;
+
+            console.log(`[OC Spawn] Detected scope change: ${CONFIG.SCOPE} → ${pendingValue} (source: ${pendingSource})`);
+            CONFIG.SCOPE = pendingValue;
+            CONFIG._scopeAutoDetected = true;
+            // Persist so a full page reload survives the detection.
+            GM_setValue('cfg_scope', pendingValue);
+            GM_setValue('cfg_scope_auto_ts', Date.now());
+            // Update settings panel input
+            const scopeEl = document.getElementById('cfg-scope');
+            if (scopeEl) scopeEl.value = pendingValue;
+            // Push to server with the strategy tag captured at detect time.
             const apiKey = getApiKey();
             if (apiKey && apiKey !== 'YOUR_API_KEY_HERE') {
-                // v3.1.53: include the detection strategy tag so the
-                // server audit log traces every push back to the exact
-                // source ('state' vs 'class:warScope...' vs 'text:...').
-                pushScopeOnly(apiKey, scope, _lastScopeDetectSource || source || 'auto');
+                pushScopeOnly(apiKey, pendingValue, pendingDetectSource || pendingSource || 'auto');
             }
-        }, 1500);
-
-        // Update settings panel input
-        const scopeEl = document.getElementById('cfg-scope');
-        if (scopeEl) scopeEl.value = scope;
-
-        // Scope auto-push removed — scope is saved manually via Settings
+        }, 2500);
     }
 
     // Force a fresh scope read via Torn's public v2 faction API. Prior
