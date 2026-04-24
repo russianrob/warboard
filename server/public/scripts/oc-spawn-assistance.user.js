@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.53
+// @version      3.1.54
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -245,7 +245,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.53';
+    const SCRIPT_VERSION = '3.1.54';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -2164,7 +2164,15 @@
             <div class="oc-setting-row" style="flex-direction:column;align-items:stretch;">
                 <div class="oc-setting-info" style="margin-bottom:4px;">
                     <span class="oc-setting-label">FFScouter API Key</span>
-                    <div class="oc-setting-desc">Any Torn API key that's been registered at ffscouter.com. Used to look up OC flyers' takeoff times so delay attribution backdates correctly (Caboose flying 6h shows 6h, Rey flying 20min shows 20min). Leave blank to fall back to each member's own key.</div>
+                    <div class="oc-setting-desc">
+                        Any Torn API key that's been <a href="https://ffscouter.com" target="_blank" style="color:#60a5fa;">registered at ffscouter.com</a>. Used server-side (never leaves the server) for:
+                        <ul style="margin:4px 0 4px 18px;padding:0;font-size:11px;color:#9ca3af;">
+                          <li><b>OC delay attribution</b> — looks up each blocker's real takeoff time so a member flying 6h shows 6h, one flying 20 min shows 20 min (instead of both showing the OC-ready age).</li>
+                          <li><b>FactionOps flight tracker</b> — powers the live landing-countdown pill for traveling enemies on the war page.</li>
+                          <li><b>OC outcome analyzer</b> — same lookup path used when no flight data is available via the caller's own key.</li>
+                        </ul>
+                        Shared with FactionOps — setting it here or there configures both. Leave blank to fall back to each member's own key (works for members registered at ffscouter.com themselves).
+                    </div>
                 </div>
                 <input class="oc-setting-num" id="cfg-ffs-key" type="text" placeholder="(optional)" style="font-family:monospace;"/>
             </div>

@@ -2,7 +2,7 @@
  * REST API route definitions.
  */
 
-import { Router } from "express";
+import express, { Router } from "express";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join as pathJoin, dirname as pathDirname } from "node:path";
 import { fileURLToPath } from 'node:url';
@@ -4249,8 +4249,92 @@ function removeFactionKey(fid, key) {
     _schedulePersistFactionKeys();
   }
 }
-const PARTNER_FACTIONS = ["51430"]; // Factions with permanent free access
+// v4.9.99: partner factions are persisted in data/partner-factions.json
+// and managed via the admin UI. The legacy constant stays defined (but
+// empty) so git diffs elsewhere are minimal; all gates go through
+// isPartnerFaction() which reads the persisted state.
+import { isPartnerFaction, listPartnerFactions, addPartnerFaction, removePartnerFaction } from "./partner-factions.js";
+const PARTNER_FACTIONS = []; // deprecated — use isPartnerFaction()
 const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Factions with permanent free access
+
+// ── Admin: partner-faction management ─────────────────────────────────
+// Owner-only endpoints the admin UI calls to add / remove / list
+// partner factions without touching code.
+async function _resolveAdminKey(req, res) {
+  res.set("Access-Control-Allow-Origin", "*");
+  const key = req.query.key || (req.body && req.body.key) || req.get('x-torn-key');
+  if (!key || String(key).length < 10) {
+    res.status(400).json({ error: "Missing key" });
+    return null;
+  }
+  const suffix = String(key).slice(-8);
+  let info = _spawnKeyCache.get(suffix);
+  if (!info || (Date.now() - info.ts) > 5 * 60_000) {
+    try {
+      const t = await verifyTornApiKey(key);
+      info = { ts: Date.now(), factionId: t.factionId, playerName: t.playerName, playerId: t.playerId };
+      _spawnKeyCache.set(suffix, info);
+    } catch (err) {
+      res.status(401).json({ error: err.message });
+      return null;
+    }
+  }
+  if (String(info.playerId) !== String(OWNER_PLAYER_ID)) {
+    res.status(403).json({ error: "Owner only" });
+    return null;
+  }
+  return info;
+}
+
+// Owner-gated admin page. Access requires ?key=<owner Torn key> in the
+// URL — anyone else (no key, wrong key, wrong player) gets a generic
+// 404 so the path doesn't leak as a known admin surface.
+router.get("/admin/partners", async (req, res) => {
+  const key = req.query.key;
+  if (!key || String(key).length < 10) return res.status(404).end();
+  try {
+    const suffix = String(key).slice(-8);
+    let info = _spawnKeyCache.get(suffix);
+    if (!info || (Date.now() - info.ts) > 5 * 60_000) {
+      const t = await verifyTornApiKey(key);
+      info = { ts: Date.now(), factionId: t.factionId, playerName: t.playerName, playerId: t.playerId };
+      _spawnKeyCache.set(suffix, info);
+    }
+    if (String(info.playerId) !== String(OWNER_PLAYER_ID)) return res.status(404).end();
+  } catch (_) { return res.status(404).end(); }
+  // Inline HTML — small enough + lets us embed the verified key so the
+  // UI's subsequent API calls don't require a second paste.
+  const safeKey = String(key).replace(/[^A-Za-z0-9]/g, '');
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Partner Factions · Admin</title><style>:root{color-scheme:dark}body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:24px}h1{font-size:18px;font-weight:700;color:#f3f4f6;margin:0 0 4px}.sub{color:#9ca3af;font-size:12px;margin-bottom:20px}.card{background:#0f1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:16px;margin-bottom:16px;max-width:620px}label{display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px}input[type=text]{width:100%;box-sizing:border-box;background:#060b12;border:1px solid #1e3a5f;color:#e5e7eb;border-radius:4px;padding:7px 10px;font-family:inherit;font-size:13px;margin-bottom:12px}input:focus{outline:none;border-color:#4ade80}button{background:#2d6a4f;color:white;border:0;border-radius:4px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer}button:hover{background:#3d8a6f}button.danger{background:#7f1d1d}button.danger:hover{background:#991d1d}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #1a2e20}th{color:#9ca3af;font-weight:600;font-size:10px;text-transform:uppercase}.muted{color:#6b7280;font-size:11px}.status{font-size:11px;padding:8px;border-radius:4px;margin-bottom:12px;min-height:16px}.status.ok{background:rgba(74,222,128,.1);color:#4ade80}.status.err{background:rgba(239,68,68,.1);color:#ef4444}.row{display:flex;gap:8px}.row>div{flex:1}</style></head><body><h1>Partner Factions</h1><div class="sub">Factions with permanent free access to OC Spawn Assistance + FactionOps. Owner-only.</div><div class="card" id="list-card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-weight:600">Current partners</div><div class="muted" id="count"></div></div><table><thead><tr><th>Faction ID</th><th>Name</th><th>Note</th><th>Added</th><th></th></tr></thead><tbody id="tbody"></tbody></table></div><div class="card" id="add-card"><div style="font-weight:600;margin-bottom:10px">Add / update partner</div><div class="row"><div><label for="new-id">Faction ID</label><input id="new-id" type="text" inputmode="numeric" placeholder="e.g. 42055"></div><div><label for="new-name">Name (optional)</label><input id="new-name" type="text" placeholder="Dead Fragment"></div></div><label for="new-note">Note (optional)</label><input id="new-note" type="text" placeholder="why they got free access"><button id="add">Add / Update</button><div id="add-status" class="status"></div></div><script>const K=${JSON.stringify(safeKey)};const $=(i)=>document.getElementById(i);async function loadPartners(){const r=await fetch('/api/admin/partners?key='+encodeURIComponent(K));const d=await r.json();if(!r.ok){alert(d.error||'HTTP '+r.status);return}renderList(d.partners||[])}function renderList(p){$('count').textContent=p.length+' faction(s)';const t=$('tbody');t.innerHTML='';if(p.length===0){t.innerHTML='<tr><td colspan="5" class="muted">No partners yet.</td></tr>';return}for(const x of p){const tr=document.createElement('tr');const a=new Date(x.addedAt||0).toLocaleDateString();tr.innerHTML='<td><b>'+esc(x.factionId)+'</b></td><td>'+esc(x.factionName||'')+'</td><td class="muted">'+esc(x.note||'')+'</td><td class="muted">'+a+'</td><td style="text-align:right"><button class="danger" data-remove="'+esc(x.factionId)+'">Remove</button></td>';t.appendChild(tr)}t.querySelectorAll('button[data-remove]').forEach(b=>{b.addEventListener('click',async()=>{const f=b.dataset.remove;if(!confirm('Remove faction '+f+'?'))return;const r=await fetch('/api/admin/partners/'+encodeURIComponent(f)+'?key='+encodeURIComponent(K),{method:'DELETE'});const d=await r.json();if(!r.ok){alert(d.error||'Failed');return}loadPartners()})})}async function addPartner(){const factionId=$('new-id').value.trim();const factionName=$('new-name').value.trim();const note=$('new-note').value.trim();if(!factionId){setS('err','Enter a faction ID');return}setS('','Saving…');try{const r=await fetch('/api/admin/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:K,factionId,factionName,note})});const d=await r.json();if(!r.ok)throw new Error(d.error||'HTTP '+r.status);setS('ok','Saved '+factionId);$('new-id').value='';$('new-name').value='';$('new-note').value='';loadPartners()}catch(e){setS('err',e.message)}}function setS(c,t){const e=$('add-status');e.className='status '+(c||'');e.textContent=t}function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}$('add').addEventListener('click',addPartner);loadPartners()</script></body></html>`);
+});
+
+router.get("/api/admin/partners", async (req, res) => {
+  const info = await _resolveAdminKey(req, res);
+  if (!info) return;
+  return res.json({ partners: listPartnerFactions() });
+});
+
+router.post("/api/admin/partners", express.json({ limit: '4kb' }), async (req, res) => {
+  const info = await _resolveAdminKey(req, res);
+  if (!info) return;
+  const { factionId, factionName, note } = req.body || {};
+  try {
+    const added = addPartnerFaction(factionId, factionName, note);
+    console.log(`[partners] ${info.playerName} added/updated ${added.factionId} (${added.factionName || 'no name'})`);
+    return res.json({ ok: true, partner: added });
+  } catch (e) { return res.status(400).json({ error: e.message }); }
+});
+
+router.delete("/api/admin/partners/:factionId", async (req, res) => {
+  const info = await _resolveAdminKey(req, res);
+  if (!info) return;
+  const fid = String(req.params.factionId || '').replace(/[^0-9]/g, '');
+  const removed = removePartnerFaction(fid);
+  if (!removed) return res.status(404).json({ error: "Not a partner" });
+  console.log(`[partners] ${info.playerName} removed ${fid}`);
+  return res.json({ ok: true });
+});
 
 
 const OC_MIN_VERSION = '3.1.4';
@@ -4312,7 +4396,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     const fid = String(playerInfo.factionId);
     const ownerFid = String(process.env.OWNER_FACTION_ID || '42055');
     let subscriptionExpiresAt = null;
-    if (fid === ownerFid || PARTNER_FACTIONS.includes(fid)) {
+    if (fid === ownerFid || isPartnerFaction(fid)) {
       subscriptionExpiresAt = 'permanent';
     } else {
       const xSub = getXanaxSubscription(fid);
@@ -4357,7 +4441,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
   if (!playerInfo || (Date.now() - playerInfo.ts) > 5 * 60_000 || !playerInfo.playerId) {
     try {
       const info = await verifyTornApiKey(key);
-      if (!isFactionAllowed(info.factionId) && !PARTNER_FACTIONS.includes(String(info.factionId)) && !hasXanaxSubscription(info.factionId)) {
+      if (!isFactionAllowed(info.factionId) && !isPartnerFaction(info.factionId) && !hasXanaxSubscription(info.factionId)) {
         // Check if they just sent Xanax (instant grant)
         const granted = await checkInstantXanax(key, { factionId: info.factionId, playerName: info.playerName });
         if (!granted) {
@@ -4554,7 +4638,7 @@ async function resolveSpawnKeyInfo(req, res) {
   if (!info || (Date.now() - info.ts) > 5 * 60_000) {
     try {
       const tornInfo = await verifyTornApiKey(key);
-      if (!isFactionAllowed(tornInfo.factionId) && !PARTNER_FACTIONS.includes(String(tornInfo.factionId)) && !hasXanaxSubscription(tornInfo.factionId)) {
+      if (!isFactionAllowed(tornInfo.factionId) && !isPartnerFaction(tornInfo.factionId) && !hasXanaxSubscription(tornInfo.factionId)) {
         res.status(403).json({ error: "Access restricted" });
         return null;
       }
@@ -5074,7 +5158,7 @@ router.get("/api/oc/settings", async (req, res) => {
   if (!info || (Date.now() - info.ts) > 5 * 60_000) {
     try {
       const tornInfo = await verifyTornApiKey(key);
-      if (!isFactionAllowed(tornInfo.factionId) && !PARTNER_FACTIONS.includes(String(tornInfo.factionId)) && !hasXanaxSubscription(tornInfo.factionId)) {
+      if (!isFactionAllowed(tornInfo.factionId) && !isPartnerFaction(tornInfo.factionId) && !hasXanaxSubscription(tornInfo.factionId)) {
         return res.status(403).json({ error: "Access restricted" });
       }
       info = { ts: Date.now(), factionId: tornInfo.factionId, playerName: tornInfo.playerName, playerId: tornInfo.playerId, factionPosition: tornInfo.factionPosition, hasFactionAccess: tornInfo.hasFactionAccess };
@@ -5394,7 +5478,7 @@ async function resolveVaultCaller(req, res) {
   if (!info || (Date.now() - info.ts) > 5 * 60_000 || !info.playerId) {
     try {
       const tornInfo = await verifyTornApiKey(key);
-      if (!isFactionAllowed(tornInfo.factionId) && !PARTNER_FACTIONS.includes(String(tornInfo.factionId)) && !hasXanaxSubscription(tornInfo.factionId)) {
+      if (!isFactionAllowed(tornInfo.factionId) && !isPartnerFaction(tornInfo.factionId) && !hasXanaxSubscription(tornInfo.factionId)) {
         res.status(403).json({ error: "Access restricted" });
         return null;
       }
