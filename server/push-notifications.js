@@ -49,6 +49,7 @@ export const NOTIFICATION_TYPES = {
   // PWA, which hard-codes its own toggle list.
   vault_request:     { label: "Vault Requests",      description: "When a faction member requests money from the vault",          default: true, oc: true },
   oc_ready_to_spawn: { label: "OC Ready to Spawn",   description: "When an organized crime is fully filled and ready to spawn",   default: true, oc: true },
+  oc_completed:      { label: "OC Completed",        description: "When an organized crime finishes (success or failure)",        default: true, oc: true },
 };
 
 // ── Subscription Storage ────────────────────────────────────────────────
