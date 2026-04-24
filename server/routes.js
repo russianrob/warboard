@@ -33,13 +33,45 @@ try {
   console.warn('[admin] TOTP 2FA disabled — could not read /root/.google_authenticator:', e.message);
 }
 function _verifyAdminTotp(code) {
-  if (!_ADMIN_TOTP) return true; // fail-open when secret isn't readable (same as SSH)
+  // Fail-closed: if the secret file is unreadable we require the env
+  // override ALLOW_ADMIN_NO_TOTP=1 to reach the pre-TOTP behaviour.
+  // Prevents silent degradation on permission drift or file mishap.
+  if (!_ADMIN_TOTP) {
+    if (process.env.ALLOW_ADMIN_NO_TOTP === '1') return true;
+    return false;
+  }
   if (!code) return false;
   const clean = String(code).replace(/\s/g, '');
   // `window: 1` tolerates ±30s clock drift, matching PAM's -w 3 (-1..+1 slots)
   const delta = _ADMIN_TOTP.validate({ token: clean, window: 1 });
   return delta !== null;
 }
+
+// Per-IP rate limiter for /admin/login. Bounded to 5 failed attempts
+// per 15 minutes to make TOTP brute-force impractical (6-digit space
+// would take ~3M attempts; 5/15min = 480/day). Successful login
+// clears the counter for that IP.
+const _adminLoginAttempts = new Map(); // ip -> { count, firstAt }
+const ADMIN_LOGIN_WINDOW_MS = 15 * 60_000;
+const ADMIN_LOGIN_MAX_FAILS = 5;
+function _adminLoginAllowed(ip) {
+  const rec = _adminLoginAttempts.get(ip);
+  if (!rec) return true;
+  if (Date.now() - rec.firstAt > ADMIN_LOGIN_WINDOW_MS) {
+    _adminLoginAttempts.delete(ip);
+    return true;
+  }
+  return rec.count < ADMIN_LOGIN_MAX_FAILS;
+}
+function _adminLoginFail(ip) {
+  const rec = _adminLoginAttempts.get(ip);
+  if (!rec || (Date.now() - rec.firstAt > ADMIN_LOGIN_WINDOW_MS)) {
+    _adminLoginAttempts.set(ip, { count: 1, firstAt: Date.now() });
+  } else {
+    rec.count += 1;
+  }
+}
+function _adminLoginClear(ip) { _adminLoginAttempts.delete(ip); }
 import * as store from "./store.js";
 import { getAllowedBroadcastRoles, updateFactionSettings } from "./store.js";
 import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBasic, fetchRankedWarReport, fetchFactionAttacks } from "./torn-api.js";
@@ -1120,6 +1152,11 @@ router.post("/api/war-timer-report", requireAuth, (req, res) => {
   if (!warId || !etaTimestamp) return res.json({ ok: false });
   const war = store.getWar(warId);
   if (!war) return res.json({ ok: false });
+  // Only faction members of the war's own faction can submit timer
+  // reports. Previously any authenticated user could write to any war.
+  if (String(war.factionId) !== String(req.user.factionId)) {
+    return res.status(403).json({ ok: false, error: "Not a member of this war's faction" });
+  }
   // Only accept reports that are in the future
   if (etaTimestamp <= Date.now()) return res.json({ ok: false });
   war.clientTimerReport = { etaTimestamp, calculatedAt, receivedAt: Date.now() };
@@ -1398,8 +1435,20 @@ router.post("/api/viewing", requireAuth, (req, res) => {
 // Returns the activity heatmap data for the authenticated player's faction.
 
 router.get("/api/heatmap", requireAuth, (req, res) => {
-  const factionId = req.query.factionId || req.user.factionId;
-  return res.json({ heatmap: getHeatmap(factionId) });
+  const callerFactionId = req.user.factionId;
+  const targetFactionId = req.query.factionId || callerFactionId;
+  // Cross-faction read must be your current enemy. Same gate as the
+  // reset path below — previously GET trusted the query param blindly,
+  // letting any authenticated user read any faction's heatmap.
+  if (String(targetFactionId) !== String(callerFactionId)) {
+    const activeWars = Array.from(store.getAllWars().values())
+      .filter(w => String(w.factionId) === String(callerFactionId));
+    const isEnemy = activeWars.some(w => String(w.enemyFactionId) === String(targetFactionId));
+    if (!isEnemy) {
+      return res.status(403).json({ error: "You can only read your own faction's heatmap or your current enemy's." });
+    }
+  }
+  return res.json({ heatmap: getHeatmap(targetFactionId) });
 });
 
 // ── DELETE /api/heatmap ──────────────────────────────────────────────────
@@ -4502,15 +4551,21 @@ function _verifyAdminCookie(req) {
 // POST /admin/login — verifies a Torn key is the owner's, issues a
 // signed cookie so subsequent admin pages load without key-in-URL.
 router.post("/admin/login", express.json({ limit: '4kb' }), async (req, res) => {
+  const ip = String(req.ip || req.connection?.remoteAddress || 'unknown');
+  if (!_adminLoginAllowed(ip)) {
+    return res.status(429).json({ error: "Too many failed attempts. Wait 15 minutes and retry." });
+  }
   const key = req.body?.key;
   const totp = req.body?.totp;
-  if (!key || String(key).length < 10) return res.status(400).json({ error: "Missing key" });
-  if (!_verifyAdminTotp(totp)) return res.status(401).json({ error: "Invalid or missing TOTP code" });
+  if (!key || String(key).length < 10) { _adminLoginFail(ip); return res.status(400).json({ error: "Missing key" }); }
+  if (!_verifyAdminTotp(totp)) { _adminLoginFail(ip); return res.status(401).json({ error: "Invalid or missing TOTP code" }); }
   try {
     const t = await verifyTornApiKey(key);
     if (String(t.playerId) !== String(OWNER_PLAYER_ID)) {
+      _adminLoginFail(ip);
       return res.status(403).json({ error: "Not authorised" });
     }
+    _adminLoginClear(ip);
     const token = issueToken({ playerId: t.playerId, scope: 'admin' });
     // v4.9.98: Path=/ so the cookie rides on both /admin/* (HTML) AND
     // /api/admin/* (API) endpoints. Previous Path=/admin blocked the
@@ -4521,6 +4576,7 @@ router.post("/admin/login", express.json({ limit: '4kb' }), async (req, res) => 
     console.log(`[admin] login OK for ${t.playerName} (${t.playerId}); cookie set len=${token.length}`);
     return res.json({ ok: true });
   } catch (err) {
+    _adminLoginFail(ip);
     return res.status(401).json({ error: err.message });
   }
 });
