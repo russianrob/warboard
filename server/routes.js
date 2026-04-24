@@ -16,7 +16,7 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { getOcSpawnData, getCachedCompletedCrimes, calculateOutcome } from "./oc-spawn.js";
-import { getItemMarketValue } from "./item-values.js";
+import { getItemMarketValue, maybeRefreshItemValues } from "./item-values.js";
 import * as vaultRequests from "./vault-requests.js";
 import * as keyUsage from "./key-usage-log.js";
 import { hasXanaxSubscription, grantFactionAccess, getXanaxSubscription } from "./xanax-subscriptions.js";
@@ -4410,6 +4410,13 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       collectOcHistory(playerInfo.factionId, { crimes: completedForHistory, members: data.members });
     }
 
+    // v4.9.98: refresh the item market-value cache opportunistically
+    // using the caller's key. Ensures item-based OC payouts stay
+    // priced without the owner's key subsidizing third-party factions.
+    // In-flight guard + 6h min-interval inside ensure one refresh max
+    // per 6h regardless of how many factions are live.
+    maybeRefreshItemValues(key);
+
     // Run engines if enabled — cached per faction for 1 hour (same TTL as CPR cache)
     if (!_engineCache.has(fid) || (Date.now() - _engineCache.get(fid).ts) > 3600_000 || _engineCache.get(fid).settingsHash !== engineSettingsHash(fSettings)) {
       const engines = {};
@@ -4650,7 +4657,12 @@ async function fetchFlightInfo(uid, preferredKey, factionKey) {
   const now = Date.now();
   const cached = _flyerTakeoffCache.get(uid);
   if (cached && (now - cached.ts) < FLYER_TAKEOFF_TTL_MS) return cached.data || null;
-  const keys = [preferredKey, factionKey, process.env.OWNER_API_KEY]
+  // v4.9.98: each faction supplies its own FFScouter credentials.
+  //   1. caller's own Torn key (most active members have FFS registered)
+  //   2. faction-wide FFS key in OC Settings → "FFScouter API Key"
+  // OWNER_API_KEY is no longer a fallback — the owner doesn't subsidize
+  // third-party factions' FFScouter usage.
+  const keys = [preferredKey, factionKey]
     .filter((k) => typeof k === 'string' && k.length >= 10);
   if (!keys.length) return null;
   for (const key of keys) {
