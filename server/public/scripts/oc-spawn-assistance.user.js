@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.56
+// @version      3.1.57
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.57 — Scope audit tag fix: _lastScopeDetectSource was initialized to the literal string 'auto', which short-circuited the `_lastScopeDetectSource || source || 'auto'` fallback chain inside pushScopeOnly. Result: every scope push logged on the server with source=auto, masking which strategy actually read the value (DOM state / class / text / AJAX XHR / AJAX Fetch). Initialize to null instead so the chain falls through to the caller's source arg (used by the AJAX interceptors) when no DOM read has landed a fresh value. Going forward the server audit log in pm2 will show specific tags like 'state', 'class:warScope', 'text:Scope … 1', or 'AJAX (XHR)' — makes the "where did that scope value come from?" question actually answerable.
 // v3.1.56 — Vault-request notifications now work for partner factions that aren't running FactionOps. Added an "Enable on This Device" button next to "Send Test Notification" in Settings → Notifications. It opens tornwar.com/push/setup with the saved API key, which handles service-worker registration, VAPID fetch, and pushManager.subscribe on the tornwar.com origin, then POSTs to the new /api/oc/push/subscribe endpoint (auth'd by the same Torn API key used everywhere else). After enabling, the existing vault_request preference toggle + Send Test Notification flow work exactly as they did for FactionOps factions. Test-button error text updated to reference the Enable button instead of FactionOps.
 // v3.1.38 — Outcome EV tables now include a Hit % column: empirical top-tier hit rate per scenario, computed from the faction's historical OC completions. We bucket by money payout since Torn doesn't label ending tiers directly — successful completions whose reward lands in the top quartile for that scenario count as top-tier hits. Lets admins compare predicted Top end % (tornprobability model) vs observed Hit % (faction's own history). Needs ≥4 successful completions to show a rate; otherwise displays '—' with the current sample count. Sortable like the other numeric columns.
 // v3.1.37 — Empty-slot placeholder in Recruiting Outcome EV now uses the faction's avg CPR at each OC's difficulty level instead of the flat CPR-50. Average is computed client-side from cprCache across every member whose joinable/highestLevel reaches the OC's level, so the Recruiting numbers reflect "what-if-filled-by-an-average-one-of-us" instead of an artificially low floor. Planning panel unchanged (no empty slots to fill).
@@ -247,7 +248,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.56';
+    const SCRIPT_VERSION = '3.1.57';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1048,7 +1049,11 @@
     // ═══════════════════════════════════════════════════════════════════════
     // v3.1.53: module-level tag so the last detected strategy propagates
     // to the push path without threading a return tuple through callers.
-    let _lastScopeDetectSource = 'auto';
+    // v3.1.57: null sentinel (not 'auto') so the `||` chain in pushScopeOnly
+    // actually falls through to the caller-supplied `source` arg for AJAX-
+    // path detections. Previously a truthy default masked every non-DOM
+    // source and the audit log always showed 'auto'.
+    let _lastScopeDetectSource = null;
     function readScopeFromDom() {
         // Strategy 0: Torn's internal state (authoritative when populated).
         const win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
