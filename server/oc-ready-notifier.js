@@ -111,3 +111,52 @@ export function checkAndNotifyAsync(factionId, availableCrimes, members) {
     .then(() => checkAndNotify(factionId, availableCrimes, members))
     .catch(e => console.warn('[oc-ready] async error:', e.message));
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Background poller — independent of admin Refresh clicks.
+//
+// Runs every POLL_INTERVAL_MS for every faction that has at least one
+// Torn API key cached in the pool (populated by admin OC Spawn
+// refreshes). Uses the freshest key for each faction. Cost: ≤1 Torn
+// API call per faction per minute (well under the 100/min per-key
+// limit). Factions with an empty key pool are skipped — the refresh-
+// piggyback path still catches transitions when an admin refreshes.
+// ─────────────────────────────────────────────────────────────────────
+
+const POLL_INTERVAL_MS = 60_000;
+let _pollTimer = null;
+let _listFactions = null;
+let _getFreshKey = null;
+let _fetchOcData = null;
+
+export function startPoller({ listFactions, getFreshKey, fetchOcData }) {
+  if (_pollTimer) return;
+  _listFactions = listFactions;
+  _getFreshKey = getFreshKey;
+  _fetchOcData = fetchOcData;
+  _pollTimer = setInterval(runPoll, POLL_INTERVAL_MS);
+  console.log(`[oc-ready][poller] started — ${POLL_INTERVAL_MS / 1000}s interval`);
+  // Fire once at startup so a cold boot doesn't wait a full interval
+  // before establishing the first snapshot.
+  runPoll();
+}
+
+export function stopPoller() {
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+}
+
+async function runPoll() {
+  if (!_listFactions || !_getFreshKey || !_fetchOcData) return;
+  let factionIds = [];
+  try { factionIds = _listFactions() || []; } catch (_) { return; }
+  for (const fid of factionIds) {
+    const key = _getFreshKey(fid);
+    if (!key) continue;
+    try {
+      const data = await _fetchOcData(fid, key);
+      await checkAndNotify(fid, data.availableCrimes, data.members);
+    } catch (e) {
+      console.warn(`[oc-ready][poller] faction ${fid}:`, e.message);
+    }
+  }
+}

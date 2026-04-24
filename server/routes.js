@@ -16,7 +16,7 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
 import { getOcSpawnData, getCachedCompletedCrimes, calculateOutcome } from "./oc-spawn.js";
-import { checkAndNotifyAsync as ocReadyCheck } from "./oc-ready-notifier.js";
+import { checkAndNotifyAsync as ocReadyCheck, startPoller as startOcReadyPoller } from "./oc-ready-notifier.js";
 import { getItemMarketValue, maybeRefreshItemValues } from "./item-values.js";
 import * as vaultRequests from "./vault-requests.js";
 import * as keyUsage from "./key-usage-log.js";
@@ -5919,6 +5919,17 @@ router.post("/api/debug/key-usage/clear", async (req, res) => {
   } catch (e) {
     return res.status(401).json({ error: e.message });
   }
+});
+
+// Start the OC ready-to-spawn background poller. Uses the faction-key
+// pool populated by admin OC-Spawn refreshes; factions without a
+// cached key are skipped (refresh-piggyback path still covers them).
+// Defined at module bottom so all closures (_factionKeyCache,
+// getFactionKeys, getOcSpawnData) are already in scope.
+startOcReadyPoller({
+  listFactions: () => Array.from(_factionKeyCache.keys()),
+  getFreshKey: (fid) => getFactionKeys(fid)[0] || null,
+  fetchOcData: getOcSpawnData,
 });
 
 export default router;
