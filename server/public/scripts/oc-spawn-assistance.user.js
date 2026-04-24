@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.57
+// @version      3.1.58
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.58 — Enable-on-this-device fix for PDA: previous version opened tornwar.com/push/setup via GM_openInTab / window.open, which on Torn PDA's Flutter InAppWebView spawns a blank tab because Web Push isn't supported there at all (no Service Worker, no pushManager). Now detect PDA via window.flutter_inappwebview and show a yellow hint line directing the user to open the setup page in a desktop browser instead. Desktop / real mobile browsers still get the open-in-new-tab behavior unchanged. Push remains a per-device feature; PDA parity would need a PDA-native notifications path (scheduleNotification callHandler) which is out of scope for this change.
 // v3.1.57 — Scope audit tag fix: _lastScopeDetectSource was initialized to the literal string 'auto', which short-circuited the `_lastScopeDetectSource || source || 'auto'` fallback chain inside pushScopeOnly. Result: every scope push logged on the server with source=auto, masking which strategy actually read the value (DOM state / class / text / AJAX XHR / AJAX Fetch). Initialize to null instead so the chain falls through to the caller's source arg (used by the AJAX interceptors) when no DOM read has landed a fresh value. Going forward the server audit log in pm2 will show specific tags like 'state', 'class:warScope', 'text:Scope … 1', or 'AJAX (XHR)' — makes the "where did that scope value come from?" question actually answerable.
 // v3.1.56 — Vault-request notifications now work for partner factions that aren't running FactionOps. Added an "Enable on This Device" button next to "Send Test Notification" in Settings → Notifications. It opens tornwar.com/push/setup with the saved API key, which handles service-worker registration, VAPID fetch, and pushManager.subscribe on the tornwar.com origin, then POSTs to the new /api/oc/push/subscribe endpoint (auth'd by the same Torn API key used everywhere else). After enabling, the existing vault_request preference toggle + Send Test Notification flow work exactly as they did for FactionOps factions. Test-button error text updated to reference the Enable button instead of FactionOps.
 // v3.1.38 — Outcome EV tables now include a Hit % column: empirical top-tier hit rate per scenario, computed from the faction's historical OC completions. We bucket by money payout since Torn doesn't label ending tiers directly — successful completions whose reward lands in the top quartile for that scenario count as top-tier hits. Lets admins compare predicted Top end % (tornprobability model) vs observed Hit % (faction's own history). Needs ≥4 successful completions to show a rate; otherwise displays '—' with the current sample count. Sortable like the other numeric columns.
@@ -248,7 +249,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.57';
+    const SCRIPT_VERSION = '3.1.58';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -2584,7 +2585,12 @@
 
     // "Enable on This Device" opens the standalone /push/setup page where
     // the service worker + VAPID + pushManager.subscribe flow runs on the
-    // tornwar.com origin (required for service-worker scope).
+    // tornwar.com origin (required for service-worker scope). On Torn PDA
+    // (Flutter InAppWebView) Web Push isn't available at all — no SW, no
+    // push subscription — so instead of opening a blank new tab we show
+    // guidance to enable from a desktop browser (the subscription is
+    // per-device, so PDA ringing would need PDA-native notifications,
+    // which is a separate feature).
     const vaultNotifEnableBtn = document.getElementById('cfg-vault-notif-enable');
     if (vaultNotifEnableBtn) bindTap(vaultNotifEnableBtn, () => {
         const apiKey = getApiKey();
@@ -2593,7 +2599,16 @@
             if (msgEl) msgEl.textContent = 'Save your API key first.';
             return;
         }
+        const isPDA = typeof window.flutter_inappwebview !== 'undefined';
         const url = `${SERVER}/push/setup?key=${encodeURIComponent(apiKey)}`;
+        if (isPDA) {
+            if (msgEl) {
+                msgEl.innerHTML = 'Torn PDA doesn\'t support Web Push. Open <b>tornwar.com/push/setup</b> in a desktop browser (Chrome / Safari / Firefox) while signed into Torn; enter your API key there to register that device.';
+                msgEl.style.color = '#fbbf24';
+                msgEl.style.lineHeight = '1.4';
+            }
+            return;
+        }
         try {
             if (typeof GM_openInTab === 'function') GM_openInTab(url, { active: true });
             else window.open(url, '_blank', 'noopener');
