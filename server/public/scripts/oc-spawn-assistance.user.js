@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.68
+// @version      3.1.69
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.69 — Scope DOM reader now rejects elements nested inside a completed-crime reward block. Torn's Completed tab shows per-OC "+N scope" chips (e.g. Pet Project +2 scope) whose wrapper class also contains the word "scope", so strategies 1 and 2 were scraping those per-OC rewards and pushing them as if they were the faction's current scope balance. That's the source of the 16 → 2 → 5 oscillation in v3.1.68's stability window logs. New insideCompletedContext() walks up ancestors and bails on any node whose className matches completed|executed|ended|reward|payout|result|history. Both strategy 1 (class-match) and strategy 2 (text-match) honor the guard.
 // v3.1.68 — Scope stability window: Torn's React re-renders the scope badge during OC state transitions and the DOM class-match strategy sometimes catches intermediate values. Observed 04-24 05:00:24-05:00:41 EDT: 16 → 2 → 5 → 2 pushed in 20s, all class:container___THb7U scope_, when real scope was 16. Delay the commit + push by 2.5s; if a different value arrives inside the window, reset the timer and drop the transient. Legitimate scope changes settle well inside 2.5s so real edits feel ~live. Also moves CONFIG.SCOPE and GM_setValue inside the timer (previously they committed immediately; only the push was debounced).
 // v3.1.67 — Fix Request button on vault-request form rendering as black text on a black background. The button was using class="w3b-btn" but that class never existed in the panel stylesheet — browsers fell back to UA default (which ends up ~invisible on the dark panel). Replaced with explicit inline styles matching the rest of the OC Spawn UI: green #2d6a4f background, white text, 1px green border, same padding/font-weight as Refresh.
 // v3.1.66 — Drop the "= $X" preview line under the vault-request amount input. Now that the input live-translates "1k" → "1000" directly, the separate preview strip (v3.1.43) duplicates the same information and just adds noise. Removed the DOM element and the updatePreview() function; kept the input listener that does the translation.
@@ -259,7 +260,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.68';
+    const SCRIPT_VERSION = '3.1.69';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1095,10 +1096,27 @@
             return rect.width > 0 && rect.height > 0;
         }
 
+        // v3.1.69: reject scope elements inside a completed-crime reward
+        // block. Torn's Completed tab shows "+N scope" chips per OC
+        // (e.g. Pet Project +2 scope) whose wrapper class also contains
+        // the word "scope", so strategy 1 was scraping per-OC rewards
+        // and pushing them as if they were the faction's current scope
+        // balance. Walk up the ancestors and bail if we're nested inside
+        // anything tagged completed / executed / ending / reward / payout.
+        function insideCompletedContext(el) {
+            for (let p = el; p; p = p.parentElement) {
+                const cls = String(p.className || '').toLowerCase();
+                if (!cls) continue;
+                if (/completed|executed|ended|reward|payout|result|history/.test(cls)) return true;
+            }
+            return false;
+        }
+
         // Strategy 1: element whose class contains 'scope' (visible only).
         const byClass = document.querySelectorAll('[class*="scope" i]:not(#oc-spawn-panel *)');
         for (const el of byClass) {
             if (!visible(el)) continue;
+            if (insideCompletedContext(el)) continue;
             const num = parseInt(el.textContent.trim());
             if (!isNaN(num) && num >= 0 && num <= SCOPE_MAX) {
                 console.debug('[OC Spawn][scope] strategy 1 (class):', num, '·', el.className);
@@ -1122,6 +1140,7 @@
             if (el.closest('#oc-spawn-panel')) continue;
             if (el.children.length > 2) continue;
             if (!visible(el)) continue;
+            if (insideCompletedContext(el)) continue;
             const text = el.textContent.trim();
             const m = text.match(/scope[\s\w:]*?(\d+)/i);
             if (m) {
