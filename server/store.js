@@ -314,6 +314,14 @@ export function getFactionSettings(factionId) {
   return factionSettings.get(String(factionId)) || {};
 }
 
+// Shallow snapshot of every faction's settings, keyed by factionId.
+// Used by enumeration paths (e.g. the OC ready-to-spawn poller needs
+// to find factions whose admin configured an oc_ffs_key even if no
+// admin has refreshed yet — those factions aren't in the key pool).
+export function getAllFactionSettings() {
+  return Object.fromEntries(factionSettings);
+}
+
 export function updateFactionSettings(factionId, newSettings) {
   const current = getFactionSettings(factionId);
   factionSettings.set(String(factionId), { ...current, ...newSettings });

@@ -5922,13 +5922,32 @@ router.post("/api/debug/key-usage/clear", async (req, res) => {
 });
 
 // Start the OC ready-to-spawn background poller. Uses the faction-key
-// pool populated by admin OC-Spawn refreshes; factions without a
-// cached key are skipped (refresh-piggyback path still covers them).
-// Defined at module bottom so all closures (_factionKeyCache,
-// getFactionKeys, getOcSpawnData) are already in scope.
+// pool populated by admin OC-Spawn refreshes; falls back to the
+// faction's configured oc_ffs_key (which is a Torn API key passed to
+// FFScouter, so it works directly against Torn too) when the pool is
+// empty — covers brand-new partner factions whose admins haven't
+// refreshed since server start. listFactions unions both sources so
+// factions configured via FFS key but with no refresh history still
+// get polled.
 startOcReadyPoller({
-  listFactions: () => Array.from(_factionKeyCache.keys()),
-  getFreshKey: (fid) => getFactionKeys(fid)[0] || null,
+  listFactions: () => {
+    const ids = new Set(Array.from(_factionKeyCache.keys()).map(String));
+    try {
+      const allSettings = store.getAllFactionSettings ? store.getAllFactionSettings() : null;
+      if (allSettings) {
+        for (const [fid, s] of Object.entries(allSettings)) {
+          if (s && s.oc_ffs_key) ids.add(String(fid));
+        }
+      }
+    } catch (_) { /* settings enumeration optional */ }
+    return Array.from(ids);
+  },
+  getFreshKey: (fid) => {
+    const poolKey = getFactionKeys(fid)[0];
+    if (poolKey) return poolKey;
+    const ffsKey = store.getFactionSettings(fid)?.oc_ffs_key;
+    return ffsKey || null;
+  },
   fetchOcData: getOcSpawnData,
 });
 
