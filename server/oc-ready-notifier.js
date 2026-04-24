@@ -1,9 +1,12 @@
 // OC event detection + push broadcast.
 //
 // Two event types today:
-//   - oc_ready_to_spawn — crime transitions to Planning with all slots
-//     filled (fresh snapshot ≠ previous snapshot). Detected from the
-//     availableCrimes list.
+//   - oc_ready_to_spawn — mirrors the OC Spawn Assistance Admin tab's
+//     "spawn these level-N OCs" recommendation. Computes per-level
+//     availability (members free now + members completing an OC inside
+//     the forecast window) and compares against open Recruiting slots.
+//     Fires when a level transitions from "0 OCs recommended" to
+//     "≥1 OC should be spawned."
 //   - oc_completed — crime finishes (Successful/Failure). Detected by
 //     watching the completedCrimes list for new crimeIds we've never
 //     seen before (per faction).
@@ -18,7 +21,9 @@
 import * as push from './push-notifications.js';
 import * as store from './store.js';
 
-// factionId → Map<crimeId, { status, filledCount, maxSlots }>
+// factionId → Map<level, numOcsRecommended>
+// Also carries a __seeded sentinel on the Map so the first observation
+// only populates the baseline without firing a backlog of alerts.
 const _snapshot = new Map();
 // factionId → Set<crimeId> already-notified completions
 const _completedSeen = new Map();
@@ -53,97 +58,142 @@ function _resolveAdmins(factionId, members) {
   return { adminIds: ids, adminRoles };
 }
 
-// ── Ready-to-spawn detection ───────────────────────────────────────────
-async function _checkReadyToSpawn(factionId, availableCrimes, members, cprCache) {
-  if (!Array.isArray(availableCrimes) || availableCrimes.length === 0) return;
-  const fid = String(factionId);
-  const map = _facMap(fid);
-  const { adminIds, adminRoles } = _resolveAdmins(fid, members);
-  const nowTs = Math.floor(Date.now() / 1000);
-  // Faction's min-CPR threshold — defines "recommended" quality.
-  // If any placed slot's member has CPR below this, the slate isn't
-  // considered worth spawning and we suppress the notification so
-  // admins only get pinged for quality-passing slates.
-  const minCprThreshold = Number(store.getFactionSettings(fid)?.oc_mincpr ?? 60);
+// ── Spawn-recommendation detection ─────────────────────────────────────
+// Mirrors the OC Spawn Assistance Admin tab's "Recommended OCs to
+// spawn" computation. For each difficulty level we count eligible
+// members (free now + completing an OC within forecast_hours) and
+// compare against open Recruiting slots. When a level has at least
+// one full OC's worth of deficit, it's a "spawn recommendation."
+const DEFAULT_SLOTS_PER_OC = 4;
 
-  const transitions = [];
-  for (const crime of availableCrimes) {
-    if (!crime || crime.id == null) continue;
-    const cid = String(crime.id);
-    const status = String(crime.status || '');
-    const filled = _filledCount(crime.slots);
-    const maxSlots = Number(crime.maximum_members || (Array.isArray(crime.slots) ? crime.slots.length : 0));
-    // "Spawnable" = Planning + fully filled + ready_at has passed.
-    // Torn v2 sometimes leaves ready_at null/0 for Planning crimes, so
-    // treat that as ready-now (matches the userscript's isReadyNow check
-    // at render time).
-    const readyAt = Number(crime.ready_at || 0);
-    const prev = map.get(cid);
-    const mechanicallySpawnable = status === 'Planning' && maxSlots > 0 && filled >= maxSlots
-      && (readyAt === 0 || readyAt <= nowTs);
+function _buildSpawnRecommendations(factionId, availableCrimes, members, cprCache) {
+  if (!Array.isArray(availableCrimes) || !Array.isArray(members)) return [];
+  const settings = store.getFactionSettings(factionId) || {};
+  const forecastHours = Number(settings.oc_forecast_hours ?? 6);
+  const activeDays = Number(settings.oc_active_days ?? 7);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const forecastCutoff = nowSec + forecastHours * 3600;
+  const activeCutoff = nowSec - activeDays * 86400;
 
-    // Quality gate: compute the minimum CPR across placed slots using
-    // each member's historical CPR from cprCache. If any slot's member
-    // has CPR below the faction's oc_mincpr setting, this slate isn't a
-    // recommended spawn — admin probably wants to wait or replace.
-    let minSlotCpr = Infinity;
-    let haveAllCprs = true;
-    if (mechanicallySpawnable && Array.isArray(crime.slots)) {
-      for (const slot of crime.slots) {
-        const uid = String(slot?.user_id ?? slot?.user?.id ?? '');
-        if (!uid) { haveAllCprs = false; break; }
-        const rec = cprCache?.[uid];
-        const cpr = Number(rec?.cpr);
-        if (!Number.isFinite(cpr) || cpr <= 0) { haveAllCprs = false; break; }
-        if (cpr < minSlotCpr) minSlotCpr = cpr;
-      }
+  // Map each placed member → their current OC's ready_at timestamp.
+  const memberOcMap = new Map();
+  for (const c of availableCrimes) {
+    if (!c || c.status === 'Expired' || !Array.isArray(c.slots)) continue;
+    for (const s of c.slots) {
+      const uid = s?.user_id ?? s?.user?.id;
+      if (uid != null) memberOcMap.set(String(uid), Number(c.ready_at || 0));
     }
-    const qualityOk = haveAllCprs && minSlotCpr >= minCprThreshold;
-    const isRecommended = mechanicallySpawnable && qualityOk;
-
-    const hadPrev = prev !== undefined;
-    const wasRecommended = hadPrev && prev.recommended === true;
-
-    if (isRecommended && hadPrev && !wasRecommended) {
-      transitions.push({
-        crimeId: cid,
-        name: String(crime.name || 'OC'),
-        difficulty: Number(crime.difficulty || 0),
-        slots: maxSlots,
-        minCpr: Math.round(minSlotCpr * 10) / 10,
-      });
-    }
-    map.set(cid, { status, filledCount: filled, maxSlots, recommended: isRecommended });
   }
 
-  // GC crimes that dropped out of availableCrimes (completed / deleted).
-  const presentIds = new Set(availableCrimes.map(c => String(c?.id)));
-  for (const cid of Array.from(map.keys())) if (!presentIds.has(cid)) map.delete(cid);
+  // Filter members: active, tenure, and forecast-window OC gating.
+  const eligible = [];
+  for (const m of members) {
+    const uid = String(m?.id ?? '');
+    if (!uid) continue;
+    const lastAction = Number(m?.last_action?.timestamp ?? 0);
+    if (lastAction < activeCutoff) continue;
+    const daysInFaction = Number(m?.days_in_faction ?? 999);
+    if (daysInFaction < 3) continue;
+    const rec = cprCache?.[uid];
+    const joinable = Number(rec?.joinable ?? 0);
+    if (joinable <= 0) continue;
+    const readyAt = memberOcMap.get(uid);
+    const inOC = readyAt !== undefined;
+    // Skip members in an OC that finishes beyond the forecast window —
+    // they're not available to join anything we'd spawn now.
+    if (inOC && readyAt > 0 && readyAt > forecastCutoff) continue;
+    eligible.push({ uid, joinable, inOC });
+  }
+
+  // Count current Recruiting capacity per level.
+  const slotMap = {};
+  for (const c of availableCrimes) {
+    if (!c || c.status !== 'Recruiting') continue;
+    const d = Number(c.difficulty || 0);
+    if (!slotMap[d]) slotMap[d] = { totalSlots: 0, openSlots: 0, crimes: 0 };
+    const slots = Array.isArray(c.slots) ? c.slots : [];
+    let open = 0;
+    for (const s of slots) if (!s?.user_id && !s?.user?.id) open++;
+    slotMap[d].totalSlots += slots.length;
+    slotMap[d].openSlots  += open;
+    slotMap[d].crimes     += 1;
+  }
+
+  const recs = [];
+  for (let lvl = 10; lvl >= 1; lvl--) {
+    const forLvl = eligible.filter(e => e.joinable === lvl);
+    if (forLvl.length === 0) continue;
+    const freeNow  = forLvl.filter(e => !e.inOC).length;
+    const soonFree = forLvl.length - freeNow;
+    const info = slotMap[lvl] || { totalSlots: 0, openSlots: 0, crimes: 0 };
+    const slotsPerOc = info.crimes > 0 ? info.totalSlots / info.crimes : DEFAULT_SLOTS_PER_OC;
+    let numOcsToSpawn = 0;
+    if (info.totalSlots === 0) {
+      numOcsToSpawn = 1; // no OCs at this level but members waiting — open one
+    } else {
+      const deficit = forLvl.length - info.openSlots;
+      if (deficit > 0) numOcsToSpawn = Math.floor(deficit / slotsPerOc);
+    }
+    if (numOcsToSpawn > 0) recs.push({ level: lvl, numOcsToSpawn, freeNow, soonFree });
+  }
+  return recs;
+}
+
+async function _checkReadyToSpawn(factionId, availableCrimes, members, cprCache) {
+  if (!Array.isArray(availableCrimes) || !Array.isArray(members)) return;
+  const fid = String(factionId);
+  const map = _facMap(fid);
+  const recs = _buildSpawnRecommendations(fid, availableCrimes, members, cprCache);
+
+  // First-ever observation for this faction: seed the snapshot without
+  // firing so cold boots don't spam the admin with the current backlog.
+  if (!map.__seeded) {
+    map.__seeded = true;
+    for (const r of recs) map.set(r.level, r.numOcsToSpawn);
+    return;
+  }
+
+  const { adminIds, adminRoles } = _resolveAdmins(fid, members);
+  const transitions = [];
+  const presentLevels = new Set(recs.map(r => r.level));
+  for (const r of recs) {
+    const prevCount = map.get(r.level) || 0;
+    if (prevCount === 0 && r.numOcsToSpawn > 0) transitions.push(r);
+    map.set(r.level, r.numOcsToSpawn);
+  }
+  // Reset dropped levels to 0 so the next fresh spike can fire again.
+  for (const lvl of Array.from(map.keys())) {
+    if (typeof lvl !== 'number') continue;
+    if (!presentLevels.has(lvl) && map.get(lvl) !== 0) map.set(lvl, 0);
+  }
 
   if (transitions.length === 0) return;
   if (adminIds.length === 0) {
-    console.log(`[oc-ready] faction ${fid}: ${transitions.length} transition(s) but no admins in roles [${adminRoles.join(',')}] — skipping push`);
+    console.log(`[oc-ready] faction ${fid}: ${transitions.length} recommendation(s) but no admins in roles [${adminRoles.join(',')}] — skipping push`);
     return;
   }
 
   for (const t of transitions) {
-    const cprBit = Number.isFinite(t.minCpr) ? ` · min CPR ${t.minCpr}%` : '';
+    const total = t.freeNow + t.soonFree;
+    const s = t.numOcsToSpawn === 1 ? '' : 's';
+    const soonBit = t.soonFree > 0 ? ` (${t.freeNow} free now, ${t.soonFree} completing within forecast)` : ` (${t.freeNow} free now)`;
     const payload = {
-      title: `OC ready: ${t.name}`,
-      body: `Difficulty ${t.difficulty}${cprBit} · all ${t.slots} slots filled — tap to spawn.`,
-      tag: `oc-ready-${t.crimeId}`,
+      title: `Spawn ${t.numOcsToSpawn} level-${t.level} OC${s}`,
+      body: `${total} member${total === 1 ? '' : 's'} ready to join${soonBit}`,
+      tag: `oc-ready-lvl-${t.level}`,
       data: {
         type: 'oc_ready_to_spawn',
-        crimeId: t.crimeId,
         factionId: fid,
-        url: `https://www.torn.com/factions.php?step=your#/tab=crimes`,
+        level: t.level,
+        count: t.numOcsToSpawn,
+        url: 'https://www.torn.com/factions.php?step=your#/tab=crimes',
       },
     };
     try {
       await push.sendToPlayers(adminIds, payload, 'oc_ready_to_spawn');
-      console.log(`[oc-ready] faction ${fid}: fired "${payload.title}" (crime ${t.crimeId}) to ${adminIds.length} admin(s)`);
+      console.log(`[oc-ready] faction ${fid}: recommend ${t.numOcsToSpawn}×lvl-${t.level} OC(s) (${t.freeNow} free, ${t.soonFree} soon) → ${adminIds.length} admin(s)`);
     } catch (e) {
-      console.warn(`[oc-ready] faction ${fid} push failed for crime ${t.crimeId}:`, e.message);
+      console.warn(`[oc-ready] faction ${fid} push failed for lvl ${t.level}:`, e.message);
     }
   }
 }
