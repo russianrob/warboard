@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.62
+// @version      3.1.63
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.63 — Remove the dead vault-payout autofill path. The Send button's intent was to stash a {recipientId, amount} payload in sessionStorage and have a second listener on the Controls tab pre-fill Torn's give-to-user form via React input-setter hacks, but the selectors (input[name="money"], input[placeholder*="mount"]) haven't matched Torn's React DOM in a long time — autofill silently failed after a 10s poll, falling through to the clipboard-copy fallback that users actually see. Dead code removed (tryAutofillVaultPayout, setReactInputValue, maybeAutofill, hashchange listener). Send button now just copies the amount to clipboard and its <a> href handles the Controls-tab navigation. Status message updated from "Opening Controls tab — give X [id] $Y (autofill queued)" to "Amount copied. Paste into the Give form for X [id] — $Y" so it honestly describes what happens.
 // v3.1.62 — Min CPR % setting description rewritten to explain what the threshold actually does in caller-facing terms: "Minimum checkpoint pass rate a member needs before the script considers them eligible to join a crime at their historical level. Anyone below this gets pinned to Lvl 1 only." Previous wording ("Below this, member defaults to Lvl 1 eligibility") was correct but required prior knowledge of what "defaults to Lvl 1" meant.
 // v3.1.61 — Collapse the Notifications section of Settings into a single "Open Notifications Setup" button. Per-type toggles (Vault requests, OC ready to spawn) and the test button now live on the dedicated /notifications PWA page, which is the single source of truth for push preferences. Keeps the settings modal lean and works the same across desktop and PDA (PDA users get install-to-home-screen instructions on the page itself). Server whitelist (OC_PUSH_PREF_KEYS) and push-notifications.js NOTIFICATION_TYPES gain oc_ready_to_spawn (default: on) — the pref is stored now; the detection + broadcast side still needs to be wired, so toggling has no effect until that follow-up lands.
 // v3.1.60 — Drop the PDA scheduleNotification polling loop; replace with a dedicated /notifications PWA page that partner factions install to their home screen. PDA's Flutter InAppWebView can't receive Web Push, but iOS 16.4+ Safari and Android Chrome can deliver Web Push to home-screen-installed PWAs — so the right answer is to give partners a proper PWA instead of trying to bridge PDA's native notification API. Server serves /notifications (with install-to-home-screen instructions, API-key login, Enable/Disable, vault-request pref toggle, Send test button) and /notifications/manifest.json (start_url: /notifications, short_name "OC Notif") so the installed icon launches straight into the flow. Previous /api/oc/push/pending endpoint + userscript polling infrastructure removed. Desktop Enable button now opens /notifications instead of /push/setup (which redirects for back-compat).
@@ -253,7 +254,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.62';
+    const SCRIPT_VERSION = '3.1.63';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1623,27 +1624,24 @@
                 }
             }, { once: true });
         }
-        // Send-button clicks: stash the payout intent in sessionStorage so
-        // the auto-fill handler on the Controls tab can pick it up, plus
-        // copy the raw amount to clipboard as a fallback if auto-fill fails.
+        // Send-button clicks: copy the raw amount to clipboard so the
+        // admin can paste it into Torn's Give-to-member form on the
+        // Controls tab (the row's <a> handles the navigation via its
+        // href). The script does NOT auto-fill Torn's form — v3.1.63
+        // removed the dead autofill path whose selectors hadn't matched
+        // Torn's React DOM in a long time.
         document.querySelectorAll('.oc-vault-send').forEach(a => {
             a.addEventListener('click', (e) => {
                 const amt = a.dataset.amount;
                 const recipient = a.dataset.recipient;
                 const xid = a.dataset.recipientId;
                 try {
-                    sessionStorage.setItem('ocVaultPayout', JSON.stringify({
-                        recipientId: xid, recipientName: recipient,
-                        amount: Number(amt), ts: Date.now(),
-                    }));
-                } catch (_) {}
-                try {
                     if (navigator.clipboard && navigator.clipboard.writeText) {
                         navigator.clipboard.writeText(String(amt));
                     }
                 } catch (_) {}
                 const msg = document.getElementById('oc-vault-msg');
-                if (msg) msg.textContent = `Opening Controls tab — give ${recipient} [${xid}] $${Number(amt).toLocaleString('en-US')} (autofill queued)`;
+                if (msg) msg.textContent = `Amount copied. Paste into the Give form for ${recipient} [${xid}] — $${Number(amt).toLocaleString('en-US')}`;
             }, { once: false });
         });
         document.querySelectorAll('.oc-vault-del').forEach(btn => {
@@ -5133,77 +5131,6 @@
     // Start DOM scope reader (runs whenever recruiting tab is visible)
     setupScopeDomReader();
 
-
-    // ── Vault-payout autofill on Controls tab ────────────────────────────
-    // When an admin taps the Send button on a vault-request row, we stash
-    // {recipientId, recipientName, amount} in sessionStorage. Torn's give-
-    // to-user form lives at factions.php#/tab=controls. We watch for that
-    // page + form and pre-populate the fields so the admin just taps Submit.
-    //
-    // Fragile: Torn's React DOM selectors can change. The selectors below
-    // are best-effort; if Torn ships a redesign, autofill breaks silently
-    // and the amount-in-clipboard + name-in-toast fallback still works.
-    function setReactInputValue(el, value) {
-        const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
-        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-        if (setter) setter.call(el, String(value));
-        else el.value = String(value);
-        el.dispatchEvent(new Event('input',  { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-
-    async function tryAutofillVaultPayout() {
-        let intent;
-        try {
-            const raw = sessionStorage.getItem('ocVaultPayout');
-            if (!raw) return;
-            intent = JSON.parse(raw);
-            // Only honor intents from the last 5 minutes.
-            if (!intent || (Date.now() - (intent.ts || 0)) > 5 * 60_000) {
-                sessionStorage.removeItem('ocVaultPayout');
-                return;
-            }
-        } catch (_) { return; }
-
-        // Poll for the form elements — React may take a moment to mount.
-        const start = Date.now();
-        const maxWaitMs = 10_000;
-        while (Date.now() - start < maxWaitMs) {
-            // Best-effort selectors. Torn's Controls tab has a "Give to
-            // faction member" form with a user picker + amount input.
-            const moneyInput = document.querySelector(
-                'input[name="money"], input[placeholder*="mount" i], input[type="text"][data-testid*="money" i]'
-            );
-            const userInput = document.querySelector(
-                'input[name="user"], input[placeholder*="user" i], input[placeholder*="member" i]'
-            );
-
-            if (moneyInput) {
-                setReactInputValue(moneyInput, intent.amount);
-                // Also fill user input if we found one — Torn usually uses
-                // a dropdown that filters as you type.
-                if (userInput) {
-                    setReactInputValue(userInput, intent.recipientName);
-                }
-                // Clear the intent so it doesn't re-fire on reload
-                sessionStorage.removeItem('ocVaultPayout');
-                console.log(`[OC Spawn] autofilled vault payout: ${intent.recipientName} [${intent.recipientId}] $${intent.amount}`);
-                return;
-            }
-            await new Promise(r => setTimeout(r, 300));
-        }
-        console.log('[OC Spawn] vault-payout form not found; fallback = paste amount from clipboard');
-    }
-
-    // Run autofill whenever the hash changes to #/tab=controls AND on
-    // initial load if we're already there.
-    function maybeAutofill() {
-        if ((window.location.hash || '').toLowerCase().includes('tab=controls')) {
-            tryAutofillVaultPayout();
-        }
-    }
-    window.addEventListener('hashchange', maybeAutofill);
-    maybeAutofill();
 
 })();
 
