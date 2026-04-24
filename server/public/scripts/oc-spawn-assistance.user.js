@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.52
+// @version      3.1.53
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -245,7 +245,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.52';
+    const SCRIPT_VERSION = '3.1.53';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -961,7 +961,10 @@
         scopePushTimer = setTimeout(() => {
             const apiKey = getApiKey();
             if (apiKey && apiKey !== 'YOUR_API_KEY_HERE') {
-                pushScopeOnly(apiKey, scope);
+                // v3.1.53: include the detection strategy tag so the
+                // server audit log traces every push back to the exact
+                // source ('state' vs 'class:warScope...' vs 'text:...').
+                pushScopeOnly(apiKey, scope, _lastScopeDetectSource || source || 'auto');
             }
         }, 1500);
 
@@ -1041,6 +1044,9 @@
     // ═══════════════════════════════════════════════════════════════════════
     //  DOM SCOPE READER  — fallback / secondary detection
     // ═══════════════════════════════════════════════════════════════════════
+    // v3.1.53: module-level tag so the last detected strategy propagates
+    // to the push path without threading a return tuple through callers.
+    let _lastScopeDetectSource = 'auto';
     function readScopeFromDom() {
         // Strategy 0: Torn's internal state (authoritative when populated).
         const win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
@@ -1048,6 +1054,7 @@
              const s = win.torn.faction.scope_balance ?? win.torn.faction.scope;
              if (typeof s === 'number' && s >= 0 && s <= SCOPE_MAX) {
                  console.debug('[OC Spawn][scope] strategy 0 (state):', s);
+                 _lastScopeDetectSource = 'state';
                  return s;
              }
         }
@@ -1070,6 +1077,7 @@
             const num = parseInt(el.textContent.trim());
             if (!isNaN(num) && num >= 0 && num <= SCOPE_MAX) {
                 console.debug('[OC Spawn][scope] strategy 1 (class):', num, '·', el.className);
+                _lastScopeDetectSource = 'class:' + String(el.className || '').slice(0, 24);
                 return num;
             }
             const numChild = el.querySelector('span, b, strong');
@@ -1077,6 +1085,7 @@
                 const n2 = parseInt(numChild.textContent.trim());
                 if (!isNaN(n2) && n2 >= 0 && n2 <= SCOPE_MAX) {
                     console.debug('[OC Spawn][scope] strategy 1 (class-child):', n2, '·', el.className);
+                    _lastScopeDetectSource = 'class-child:' + String(el.className || '').slice(0, 20);
                     return n2;
                 }
             }
@@ -1094,6 +1103,7 @@
                 const val = parseInt(m[1]);
                 if (val >= 0 && val <= SCOPE_MAX) {
                     console.debug('[OC Spawn][scope] strategy 2 (text):', val, '·', text.slice(0, 60));
+                    _lastScopeDetectSource = 'text:' + text.slice(0, 24);
                     return val;
                 }
             }
@@ -1700,7 +1710,7 @@
     // the Recruiting DOM propagates to the faction-wide server value
     // immediately — everyone else on Planning / Admin / etc sees the new
     // scope without that user having to tap Save Settings manually.
-    async function pushScopeOnly(apiKey, scope) {
+    async function pushScopeOnly(apiKey, scope, source) {
         if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
         if (scope === null || scope === undefined) return;
         try {
@@ -1709,9 +1719,16 @@
             // which on the old server handler silently reset every other
             // OC setting (mincpr → 60, cpr_boost → 15, etc.) because the
             // handler applied hard-coded defaults for missing query params.
-            const p = new URLSearchParams({ key: apiKey, scope: String(scope) });
+            // v3.1.53: pass the detection source tag so the server audit
+            // log says 'state' / 'class' / 'text' and we can trace where
+            // a spurious value came from next time.
+            const p = new URLSearchParams({
+                key: apiKey,
+                scope: String(scope),
+                source: String(source || 'auto').slice(0, 32),
+            });
             await gmRequest(`${SERVER}/api/oc/scope?${p}`);
-            console.log(`[OC Spawn][scope] pushed ${scope} to server`);
+            console.log(`[OC Spawn][scope] pushed ${scope} to server (source=${source || 'auto'})`);
         } catch (e) {
             console.warn('[OC Spawn][scope] push failed:', e.message);
         }
