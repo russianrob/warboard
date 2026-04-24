@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.66
+// @version      3.1.67
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.67 — Fix Request button on vault-request form rendering as black text on a black background. The button was using class="w3b-btn" but that class never existed in the panel stylesheet — browsers fell back to UA default (which ends up ~invisible on the dark panel). Replaced with explicit inline styles matching the rest of the OC Spawn UI: green #2d6a4f background, white text, 1px green border, same padding/font-weight as Refresh.
 // v3.1.66 — Drop the "= $X" preview line under the vault-request amount input. Now that the input live-translates "1k" → "1000" directly, the separate preview strip (v3.1.43) duplicates the same information and just adds noise. Removed the DOM element and the updatePreview() function; kept the input listener that does the translation.
 // v3.1.65 — Vault-request amount input now live-translates shorthand. The moment the value ends in k/m/b and parses cleanly, the input text is overwritten with the expanded number — "1k" instantly becomes "1000", "10m" becomes "10000000". Works because people type the digits first and the suffix last, so by the time the k/m/b lands the digits are already fixed. The "1.5m" workflow still works: "1" → "1.5" stays as-is (no trailing suffix), and once the m arrives "1.5m" → "1500000" expands. v3.1.64's blur-only handler is replaced by this input-driven version.
 // v3.1.64 — Vault-request amount input commits shorthand on blur. Previously typing "1m" showed a live "= $1,000,000" preview beside the input but the input itself stayed "1m". Now when the field loses focus we run parseVaultAmount and overwrite the input value with the expanded number ("1m" → "1000000"). Live preview is still shown during typing (important — so "1.5m" doesn't get clipped to "1000000" after the m keystroke). Only commits if the value contains k/m/b and parses successfully; plain numbers are untouched.
@@ -257,7 +258,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.66';
+    const SCRIPT_VERSION = '3.1.67';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -3921,7 +3922,7 @@
                     <option value="both">Send anytime</option>
                     <option value="online">Only when I'm online</option>
                 </select>
-                <button type="submit" class="w3b-btn" style="padding:4px 10px;font-size:11px;">Request</button>
+                <button type="submit" style="background:#2d6a4f;color:#fff;border:1px solid #3d8a6f;border-radius:4px;padding:5px 14px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">Request</button>
             </form>
             <div id="oc-vault-msg" style="font-size:10px;color:#6b7280;margin-top:4px;min-height:12px;"></div>
         </div>`;
