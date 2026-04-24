@@ -1463,6 +1463,54 @@ router.get("/api/push/types", (_req, res) => {
   return res.json({ types: push.NOTIFICATION_TYPES });
 });
 
+// Key-auth'd push subscription endpoints. Mirror the JWT-gated
+// /api/push/* trio above but authenticate via a Torn API key instead
+// of a FactionOps session. Lets partner factions (OC-Spawn-only) enable
+// device notifications via /push/setup without needing warboard access.
+router.post("/api/oc/push/subscribe", express.json({ limit: '8kb' }), async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { subscription } = req.body || {};
+  if (!subscription || !subscription.endpoint) {
+    return res.status(400).json({ error: "Push subscription object is required" });
+  }
+  push.subscribe(ctx.info.playerId, subscription);
+  console.log(`[push/oc] ${ctx.info.playerName} (${ctx.info.playerId}) subscribed endpoint ****${String(subscription.endpoint).slice(-12)}`);
+  return res.json({ ok: true });
+});
+
+router.post("/api/oc/push/unsubscribe", express.json({ limit: '4kb' }), async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { endpoint } = req.body || {};
+  if (!endpoint) return res.status(400).json({ error: "endpoint is required" });
+  if (endpoint === "all") push.unsubscribeAll(ctx.info.playerId);
+  else push.unsubscribe(ctx.info.playerId, endpoint);
+  console.log(`[push/oc] ${ctx.info.playerName} (${ctx.info.playerId}) unsubscribed ${endpoint === 'all' ? 'all endpoints' : '****' + String(endpoint).slice(-12)}`);
+  return res.json({ ok: true });
+});
+
+router.get("/api/oc/push/status", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  return res.json({
+    subscribed: push.isSubscribed(ctx.info.playerId),
+    playerName: ctx.info.playerName,
+    playerId: ctx.info.playerId,
+  });
+});
+
+// Standalone device-enable page for partner factions. Same origin as
+// the service worker, so pushManager.subscribe() works without any
+// cross-origin shenanigans. Partners land here with ?key=<API>.
+router.get("/push/setup", (_req, res) => {
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Enable Notifications · tornwar.com</title><link rel="manifest" href="/manifest.json"><style>:root{color-scheme:dark}body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:20px;max-width:560px;margin-left:auto;margin-right:auto}h1{font-size:20px;font-weight:700;color:#f3f4f6;margin:0 0 4px}.sub{color:#9ca3af;font-size:13px;margin-bottom:18px;line-height:1.5}.card{background:#0f1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:18px;margin-bottom:14px}label{display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px}input[type=text]{width:100%;box-sizing:border-box;background:#060b12;border:1px solid #1e3a5f;color:#e5e7eb;border-radius:4px;padding:9px 10px;font-family:monospace;font-size:13px;margin-bottom:10px}input:focus{outline:none;border-color:#4ade80}button{background:#2d6a4f;color:white;border:0;border-radius:4px;padding:10px 16px;font-size:13px;font-weight:600;cursor:pointer;width:100%;margin-top:6px}button:hover{background:#3d8a6f}button:disabled{background:#374151;cursor:not-allowed}button.danger{background:#7f1d1d}button.danger:hover{background:#991d1d}.status{font-size:13px;padding:10px;border-radius:4px;margin-top:10px;min-height:18px;line-height:1.4}.status.ok{background:rgba(74,222,128,.12);color:#4ade80}.status.err{background:rgba(239,68,68,.12);color:#ef4444}.status.info{background:rgba(96,165,250,.12);color:#93c5fd}.muted{color:#6b7280;font-size:12px;line-height:1.5}.who{font-size:12px;color:#9ca3af;margin-bottom:6px}.who b{color:#e5e7eb}</style></head><body><h1>Enable Notifications</h1><div class="sub">One-time setup per device. After enabling, push preferences (vault requests, etc.) are controlled from the OC Spawn Assistance userscript's Settings panel.</div><div class="card"><label for="k">Torn API key</label><input id="k" type="text" placeholder="paste your Limited or Full key" autocomplete="off"><div class="who" id="who"></div><button id="enable">Enable on this device</button><button id="disable" class="danger" style="display:none">Disable on this device</button><div id="status" class="status"></div></div><div class="muted">Your key is used once to verify your player ID with Torn, then discarded by this page. The subscription is stored server-side keyed to your player ID — not your key.</div><script>const $=(i)=>document.getElementById(i);const params=new URLSearchParams(location.search);if(params.get('key'))$('k').value=params.get('key');function setS(c,t){const e=$('status');e.className='status '+(c||'');e.textContent=t}function urlB64ToU8(s){const pad='='.repeat((4-s.length%4)%4);const b=(s+pad).replace(/-/g,'+').replace(/_/g,'/');const raw=atob(b);const out=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out}async function refreshStatus(){const k=$('k').value.trim();if(k.length<10){$('who').textContent='';$('disable').style.display='none';return}try{const r=await fetch('/api/oc/push/status?key='+encodeURIComponent(k));if(!r.ok){const d=await r.json().catch(()=>({}));$('who').textContent='';setS('err',d.error||'Status check failed ('+r.status+')');return}const d=await r.json();$('who').innerHTML='Signed in as <b>'+d.playerName+' ['+d.playerId+']</b>';setS('info',d.subscribed?'Subscribed on at least one device.':'Not subscribed yet.');$('disable').style.display=d.subscribed?'block':'none'}catch(e){setS('err',e.message)}}$('k').addEventListener('change',refreshStatus);$('k').addEventListener('blur',refreshStatus);if($('k').value)refreshStatus();async function enable(){const k=$('k').value.trim();if(k.length<10){setS('err','Enter your Torn API key first.');return}if(!('serviceWorker' in navigator)||!('PushManager' in window)){setS('err','This browser does not support push notifications.');return}$('enable').disabled=true;setS('info','Requesting permission\u2026');try{const perm=await Notification.requestPermission();if(perm!=='granted'){setS('err','Notification permission denied. Enable it in browser settings and try again.');$('enable').disabled=false;return}setS('info','Registering service worker\u2026');const reg=await navigator.serviceWorker.register('/sw.js');await navigator.serviceWorker.ready;setS('info','Fetching VAPID key\u2026');const vr=await fetch('/api/push/vapid-key');const v=await vr.json();if(!v.publicKey)throw new Error('Push not configured on server');setS('info','Subscribing\u2026');let sub=await reg.pushManager.getSubscription();if(!sub){sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlB64ToU8(v.publicKey)})}setS('info','Registering with server\u2026');const sr=await fetch('/api/oc/push/subscribe?key='+encodeURIComponent(k),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:sub.toJSON()})});const sd=await sr.json();if(!sr.ok)throw new Error(sd.error||'Server error ('+sr.status+')');setS('ok','\u2714 Enabled. Vault-request and other OC push notifications will now ring this device.');$('disable').style.display='block';refreshStatus()}catch(e){setS('err',e.message)}finally{$('enable').disabled=false}}async function disable(){const k=$('k').value.trim();if(k.length<10){setS('err','Enter your Torn API key first.');return}$('disable').disabled=true;setS('info','Unsubscribing\u2026');try{const reg=await navigator.serviceWorker.getRegistration('/sw.js');let endpoint=null;if(reg){const s=await reg.pushManager.getSubscription();if(s){endpoint=s.endpoint;await s.unsubscribe()}}const body=endpoint?{endpoint}:{endpoint:'all'};const r=await fetch('/api/oc/push/unsubscribe?key='+encodeURIComponent(k),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.error||'Server error ('+r.status+')');setS('ok','Unsubscribed this device.');refreshStatus()}catch(e){setS('err',e.message)}finally{$('disable').disabled=false}}$('enable').addEventListener('click',enable);$('disable').addEventListener('click',disable)</script></body></html>`);
+});
+
 // ── GET /api/push/preferences ────────────────────────────────────────
 // Returns the authenticated player's notification preferences.
 

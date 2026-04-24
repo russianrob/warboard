@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.55
+// @version      3.1.56
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -9,6 +9,7 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_xmlhttpRequest
+// @grant        GM_openInTab
 // @connect      tornwar.com
 // @connect      api.torn.com
 // @downloadURL  https://tornwar.com/scripts/oc-spawn-assistance.user.js
@@ -18,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.56 — Vault-request notifications now work for partner factions that aren't running FactionOps. Added an "Enable on This Device" button next to "Send Test Notification" in Settings → Notifications. It opens tornwar.com/push/setup with the saved API key, which handles service-worker registration, VAPID fetch, and pushManager.subscribe on the tornwar.com origin, then POSTs to the new /api/oc/push/subscribe endpoint (auth'd by the same Torn API key used everywhere else). After enabling, the existing vault_request preference toggle + Send Test Notification flow work exactly as they did for FactionOps factions. Test-button error text updated to reference the Enable button instead of FactionOps.
 // v3.1.38 — Outcome EV tables now include a Hit % column: empirical top-tier hit rate per scenario, computed from the faction's historical OC completions. We bucket by money payout since Torn doesn't label ending tiers directly — successful completions whose reward lands in the top quartile for that scenario count as top-tier hits. Lets admins compare predicted Top end % (tornprobability model) vs observed Hit % (faction's own history). Needs ≥4 successful completions to show a rate; otherwise displays '—' with the current sample count. Sortable like the other numeric columns.
 // v3.1.37 — Empty-slot placeholder in Recruiting Outcome EV now uses the faction's avg CPR at each OC's difficulty level instead of the flat CPR-50. Average is computed client-side from cprCache across every member whose joinable/highestLevel reaches the OC's level, so the Recruiting numbers reflect "what-if-filled-by-an-average-one-of-us" instead of an artificially low floor. Planning panel unchanged (no empty slots to fill).
 // v3.1.36 — Outcome EV table rows now link to the specific OC: the crime name is an anchor to /factions.php?step=your#/tab=crimes&crimeId=<id>, so "row with best Top end %" → one click → the exact OC in Torn's crimes list. Fill chip (e.g. 3/4) added next to each name so multiple same-named OCs at the same difficulty are distinguishable before clicking.
@@ -245,7 +247,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.55';
+    const SCRIPT_VERSION = '3.1.56';
     const SERVER = 'https://tornwar.com';
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -2200,9 +2202,13 @@
                     <input type="checkbox" id="cfg-vault-notif" checked style="width:16px;height:16px;cursor:pointer;accent-color:#74c69d;">
                 </label>
             </div>
-            <div style="display:flex;gap:6px;align-items:center;margin-top:4px;">
+            <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap;">
+                <button id="cfg-vault-notif-enable" class="oc-setting-save-btn" style="background:#2d6a4f;">Enable on This Device</button>
                 <button id="cfg-vault-notif-test" class="oc-setting-save-btn" style="background:#1e3a5f;">Send Test Notification</button>
                 <span id="cfg-vault-notif-msg" style="font-size:10px;color:#6b7280;flex:1;min-height:12px;"></span>
+            </div>
+            <div style="font-size:10px;color:#6b7280;margin-top:4px;line-height:1.4;">
+                First-time setup: click <b>Enable on This Device</b> to grant notification permission and register this browser. Done once per device.
             </div>
 
             </div><!-- /oc-cfg-section -->
@@ -2561,14 +2567,33 @@
             onload: (resp) => {
                 vaultNotifTestBtn.disabled = false;
                 if (msgEl) msgEl.textContent = resp.status >= 200 && resp.status < 300
-                    ? '✓ Test sent — if you don\'t see it, check that push is enabled in FactionOps.'
-                    : `Failed (${resp.status}). Make sure you're subscribed via FactionOps.`;
+                    ? '✓ Test sent — if you don\'t see a pop-up, click "Enable on This Device" first.'
+                    : `Failed (${resp.status}). Click "Enable on This Device" first.`;
             },
             onerror: () => {
                 vaultNotifTestBtn.disabled = false;
                 if (msgEl) msgEl.textContent = 'Network error';
             },
         });
+    });
+
+    // "Enable on This Device" opens the standalone /push/setup page where
+    // the service worker + VAPID + pushManager.subscribe flow runs on the
+    // tornwar.com origin (required for service-worker scope).
+    const vaultNotifEnableBtn = document.getElementById('cfg-vault-notif-enable');
+    if (vaultNotifEnableBtn) bindTap(vaultNotifEnableBtn, () => {
+        const apiKey = getApiKey();
+        const msgEl = document.getElementById('cfg-vault-notif-msg');
+        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
+            if (msgEl) msgEl.textContent = 'Save your API key first.';
+            return;
+        }
+        const url = `${SERVER}/push/setup?key=${encodeURIComponent(apiKey)}`;
+        try {
+            if (typeof GM_openInTab === 'function') GM_openInTab(url, { active: true });
+            else window.open(url, '_blank', 'noopener');
+        } catch (_) { window.open(url, '_blank', 'noopener'); }
+        if (msgEl) msgEl.textContent = 'Opened setup page in a new tab.';
     });
 
     document.getElementById('oc-spawn-key-save').addEventListener('click', () => {
