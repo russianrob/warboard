@@ -4015,8 +4015,15 @@ function runMemberProjector(factionId, data) {
     if (!cpr) continue;
 
     const history = memberHistory[uid];
-    const currentLevel = cpr.effectiveTop || cpr.highestLevel || 0;
-    const joinable = cpr.joinable || currentLevel;
+    // "OC Lvl" in the Member Projector = the highest level the member
+    // has actually completed. Previously used effectiveTop, which
+    // downgrades the number when the member's avg CPR at that level
+    // is below the faction's MINCPR — e.g. a member who did Lvl 8 at
+    // 66% avg while MINCPR is 67 showed as Lvl 7. That's the wrong
+    // concept for "how far have they gotten"; effectiveTop belongs to
+    // "what level should they join now" (still exposed via `joinable`).
+    const currentLevel = cpr.highestLevel || cpr.effectiveTop || 0;
+    const joinable = cpr.joinable || cpr.effectiveTop || currentLevel;
     const isEstimated = !!cpr.estimated; // no real OC data, using level-based estimate
 
     // Current level CPR
