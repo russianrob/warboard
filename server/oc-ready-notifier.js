@@ -66,14 +66,48 @@ function _resolveAdmins(factionId, members) {
 // one full OC's worth of deficit, it's a "spawn recommendation."
 const DEFAULT_SLOTS_PER_OC = 4;
 
+// Recompute each member's `joinable` using the faction's MINCPR and
+// CPR_BOOST settings. getOcSpawnData's cprCache is built with a server-
+// wide default MINCPR=60/BOOST=15; /api/oc/spawn-key's response re-runs
+// this same loop with the faction's oc_mincpr / oc_cpr_boost before the
+// userscript sees it, so the Admin tab's joinable differs from the raw
+// cache for factions whose mincpr isn't 60. Mirror that recalc here
+// so the notifier agrees with the Admin tab.
+function _applyFactionCprThreshold(cprCache, mincpr, boost) {
+  if (!cprCache) return {};
+  const out = {};
+  for (const [uid, d] of Object.entries(cprCache)) {
+    const lc = {};
+    for (const e of (d?.entries || [])) {
+      if (!lc[e.diff]) lc[e.diff] = { sum: 0, count: 0 };
+      lc[e.diff].sum += e.rate;
+      lc[e.diff].count += 1;
+    }
+    let effTop = d?.highestLevel || 0;
+    for (let lvl = effTop; lvl >= 1; lvl--) {
+      const lv = lc[lvl];
+      if (!lv) continue;
+      if ((lv.sum / lv.count) >= mincpr) { effTop = lvl; break; }
+    }
+    const cpr = Number(d?.cpr || 0);
+    const joinable = cpr >= mincpr + boost ? Math.min(effTop + 1, 10) : effTop;
+    out[uid] = { ...d, effectiveTop: effTop, joinable };
+  }
+  return out;
+}
+
 function _buildSpawnRecommendations(factionId, availableCrimes, members, cprCache) {
   if (!Array.isArray(availableCrimes) || !Array.isArray(members)) return [];
   const settings = store.getFactionSettings(factionId) || {};
   const forecastHours = Number(settings.oc_forecast_hours ?? 6);
   const activeDays = Number(settings.oc_active_days ?? 7);
+  const mincpr = Number(settings.oc_mincpr ?? 60);
+  const boost = Number(settings.oc_cpr_boost ?? 15);
   const nowSec = Math.floor(Date.now() / 1000);
   const forecastCutoff = nowSec + forecastHours * 3600;
   const activeCutoff = nowSec - activeDays * 86400;
+  // Recompute joinable per-member using faction thresholds.
+  const tunedCpr = _applyFactionCprThreshold(cprCache, mincpr, boost);
 
   // Map each placed member → their current OC's ready_at timestamp.
   const memberOcMap = new Map();
@@ -94,7 +128,7 @@ function _buildSpawnRecommendations(factionId, availableCrimes, members, cprCach
     if (lastAction < activeCutoff) continue;
     const daysInFaction = Number(m?.days_in_faction ?? 999);
     if (daysInFaction < 3) continue;
-    const rec = cprCache?.[uid];
+    const rec = tunedCpr?.[uid];
     const joinable = Number(rec?.joinable ?? 0);
     if (joinable <= 0) continue;
     const readyAt = memberOcMap.get(uid);
