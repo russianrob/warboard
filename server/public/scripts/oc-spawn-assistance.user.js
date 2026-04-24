@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.60
+// @version      3.1.61
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.61 — Collapse the Notifications section of Settings into a single "Open Notifications Setup" button. Per-type toggles (Vault requests, OC ready to spawn) and the test button now live on the dedicated /notifications PWA page, which is the single source of truth for push preferences. Keeps the settings modal lean and works the same across desktop and PDA (PDA users get install-to-home-screen instructions on the page itself). Server whitelist (OC_PUSH_PREF_KEYS) and push-notifications.js NOTIFICATION_TYPES gain oc_ready_to_spawn (default: on) — the pref is stored now; the detection + broadcast side still needs to be wired, so toggling has no effect until that follow-up lands.
 // v3.1.60 — Drop the PDA scheduleNotification polling loop; replace with a dedicated /notifications PWA page that partner factions install to their home screen. PDA's Flutter InAppWebView can't receive Web Push, but iOS 16.4+ Safari and Android Chrome can deliver Web Push to home-screen-installed PWAs — so the right answer is to give partners a proper PWA instead of trying to bridge PDA's native notification API. Server serves /notifications (with install-to-home-screen instructions, API-key login, Enable/Disable, vault-request pref toggle, Send test button) and /notifications/manifest.json (start_url: /notifications, short_name "OC Notif") so the installed icon launches straight into the flow. Previous /api/oc/push/pending endpoint + userscript polling infrastructure removed. Desktop Enable button now opens /notifications instead of /push/setup (which redirects for back-compat).
 // v3.1.59 — PDA vault-request notifications via scheduleNotification. On Torn PDA (Flutter InAppWebView), the "Enable on This Device" button now toggles a client-side polling loop (30s interval) that hits the new GET /api/oc/push/pending endpoint for vault-request events created since the last bookmark, then fires each one as a local notification via window.flutter_inappwebview.callHandler('scheduleNotification', ...). Bookmark persists in GM storage so a page reload doesn't re-fire a backlog, and first-ever enable silently bookmarks "now" so enabling during a pending request doesn't spam the backlog either. Test button on PDA fires a local scheduleNotification directly (no server round-trip) so the user can verify the bridge works. ID range 700–799 rotated to avoid colliding with FactionOps' ranges. Desktop / mobile-web flow unchanged — they still hit /push/setup for the Web Push subscription.
 // v3.1.58 — Enable-on-this-device fix for PDA: previous version opened tornwar.com/push/setup via GM_openInTab / window.open, which on Torn PDA's Flutter InAppWebView spawns a blank tab because Web Push isn't supported there at all (no Service Worker, no pushManager). Now detect PDA via window.flutter_inappwebview and show a yellow hint line directing the user to open the setup page in a desktop browser instead. Desktop / real mobile browsers still get the open-in-new-tab behavior unchanged. Push remains a per-device feature; PDA parity would need a PDA-native notifications path (scheduleNotification callHandler) which is out of scope for this change.
@@ -251,7 +252,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.60';
+    const SCRIPT_VERSION = '3.1.61';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -2207,22 +2208,15 @@
             </div>
 
             <hr class="oc-setting-divider"/>
-            <div class="oc-setting-row">
-                <div class="oc-setting-info">
-                    <span class="oc-setting-label">Vault-Request Notifications</span>
-                    <div class="oc-setting-desc">Push notifications when a faction member posts a new "$X from vault" request. Server-side opt-out — turn off if you don't handle payouts.</div>
+            <div class="oc-setting-row" style="flex-direction:column;align-items:stretch;">
+                <div class="oc-setting-info" style="margin-bottom:6px;">
+                    <span class="oc-setting-label">Notifications</span>
+                    <div class="oc-setting-desc">Enable push notifications for vault requests, OC spawn-ready alerts, and more. Setup and all per-type toggles live on a dedicated page — install it to your home screen from Safari/Chrome to get PDA-capable notifications.</div>
                 </div>
-                <label class="oc-toggle" style="display:inline-flex;align-items:center;cursor:pointer;">
-                    <input type="checkbox" id="cfg-vault-notif" checked style="width:16px;height:16px;cursor:pointer;accent-color:#74c69d;">
-                </label>
-            </div>
-            <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap;">
-                <button id="cfg-vault-notif-enable" class="oc-setting-save-btn" style="background:#2d6a4f;">Enable on This Device</button>
-                <button id="cfg-vault-notif-test" class="oc-setting-save-btn" style="background:#1e3a5f;">Send Test Notification</button>
-                <span id="cfg-vault-notif-msg" style="font-size:10px;color:#6b7280;flex:1;min-height:12px;"></span>
-            </div>
-            <div style="font-size:10px;color:#6b7280;margin-top:4px;line-height:1.4;">
-                First-time setup: click <b>Enable on This Device</b> to grant notification permission and register this browser. Done once per device.
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                    <button id="cfg-notif-open" class="oc-setting-save-btn" style="background:#2d6a4f;">Open Notifications Setup</button>
+                    <span id="cfg-notif-msg" style="font-size:10px;color:#6b7280;flex:1;min-height:12px;line-height:1.4;"></span>
+                </div>
             </div>
 
             </div><!-- /oc-cfg-section -->
@@ -2520,118 +2514,32 @@
         }
     });
 
-    // Vault-request notification toggle + test. Auth'd via Torn API key.
-    // Server stores the pref in push-preferences.json keyed by playerId;
-    // the vault-request sender consults it before dispatching to each
-    // recipient, so turning this off reliably suppresses the push.
-    async function hydrateVaultNotifToggle() {
-        const cb = document.getElementById('cfg-vault-notif');
-        if (!cb) return;
+    // Single entry point: the Settings "Open Notifications Setup" button
+    // opens tornwar.com/notifications — a dedicated PWA where the user
+    // enables push, picks per-type toggles (vault requests, OC spawn-
+    // ready, …) and fires a test. Works on desktop directly; on PDA,
+    // Web Push can't fire from the Flutter WebView so the page itself
+    // prompts the user to open in Safari/Chrome and Add to Home Screen.
+    const notifOpenBtn = document.getElementById('cfg-notif-open');
+    if (notifOpenBtn) bindTap(notifOpenBtn, () => {
         const apiKey = getApiKey();
-        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
-        try {
-            const r = await gmRequest(`${SERVER}/api/oc/notification-prefs?key=${encodeURIComponent(apiKey)}`);
-            if (r.ok) {
-                const prefs = r.data?.preferences || {};
-                // server default is on — only mark unchecked if explicitly false
-                cb.checked = prefs.vault_request !== false;
-            }
-        } catch (_) { /* keep default-checked */ }
-    }
-    hydrateVaultNotifToggle();
-
-    const vaultNotifCb = document.getElementById('cfg-vault-notif');
-    if (vaultNotifCb) vaultNotifCb.addEventListener('change', (e) => {
-        const apiKey = getApiKey();
-        const msgEl = document.getElementById('cfg-vault-notif-msg');
-        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
-            if (msgEl) msgEl.textContent = 'Save your API key first.';
-            return;
-        }
-        const enabled = e.target.checked;
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: `${SERVER}/api/oc/notification-prefs`,
-            headers: { 'Content-Type': 'application/json' },
-            data: JSON.stringify({ key: apiKey, preferences: { vault_request: enabled } }),
-            onload: (resp) => {
-                if (msgEl) msgEl.textContent = resp.status >= 200 && resp.status < 300
-                    ? (enabled ? '✓ Notifications on' : '✓ Notifications off')
-                    : 'Save failed — try again';
-            },
-            onerror: () => { if (msgEl) msgEl.textContent = 'Network error'; },
-        });
-    });
-
-    const vaultNotifTestBtn = document.getElementById('cfg-vault-notif-test');
-    if (vaultNotifTestBtn) bindTap(vaultNotifTestBtn, () => {
-        const apiKey = getApiKey();
-        const msgEl = document.getElementById('cfg-vault-notif-msg');
-        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
-            if (msgEl) msgEl.textContent = 'Save your API key first.';
-            return;
-        }
-        // PDA can't receive Web Push — point the user at the install
-        // instructions instead of hitting the server test endpoint (which
-        // would succeed but never ring the phone).
+        const msgEl = document.getElementById('cfg-notif-msg');
+        const url = `${SERVER}/notifications${apiKey && apiKey !== 'YOUR_API_KEY_HERE' ? `?key=${encodeURIComponent(apiKey)}` : ''}`;
         if (IS_PDA) {
             if (msgEl) {
                 msgEl.style.color = '#fbbf24';
-                msgEl.textContent = 'Install the notifications PWA first — see Enable on This Device.';
+                msgEl.innerHTML = 'PDA can\'t receive Web Push. Open <b>tornwar.com/notifications</b> in Safari / Chrome → Share → Add to Home Screen → open from home screen to enable.';
             }
             return;
         }
-        if (msgEl) msgEl.textContent = 'Sending test…';
-        vaultNotifTestBtn.disabled = true;
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: `${SERVER}/api/oc/notification-test?key=${encodeURIComponent(apiKey)}`,
-            headers: { 'Content-Type': 'application/json' },
-            data: '{}',
-            onload: (resp) => {
-                vaultNotifTestBtn.disabled = false;
-                if (msgEl) msgEl.textContent = resp.status >= 200 && resp.status < 300
-                    ? '✓ Test sent — if you don\'t see a pop-up, click "Enable on This Device" first.'
-                    : `Failed (${resp.status}). Click "Enable on This Device" first.`;
-            },
-            onerror: () => {
-                vaultNotifTestBtn.disabled = false;
-                if (msgEl) msgEl.textContent = 'Network error';
-            },
-        });
-    });
-
-    // "Enable on This Device":
-    //   - Desktop / mobile web → opens /push/setup in a new tab for the
-    //     Web Push flow (SW + VAPID + pushManager.subscribe on tornwar.com).
-    //   - Torn PDA → Web Push can't work inside PDA's Flutter InAppWebView,
-    //     so we show instructions to open /push/setup in Safari (iOS) or
-    //     Chrome (Android) and install it to the home screen as a PWA.
-    //     iOS 16.4+ and all Androids deliver Web Push to installed PWAs,
-    //     so the subscription created there rings the phone natively even
-    //     when the PWA isn't open.
-    const vaultNotifEnableBtn = document.getElementById('cfg-vault-notif-enable');
-    if (vaultNotifEnableBtn) bindTap(vaultNotifEnableBtn, () => {
-        const apiKey = getApiKey();
-        const msgEl = document.getElementById('cfg-vault-notif-msg');
-        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
-            if (msgEl) msgEl.textContent = 'Save your API key first.';
-            return;
-        }
-        if (IS_PDA) {
-            if (msgEl) {
-                msgEl.innerHTML = 'Torn PDA can\'t receive Web Push directly. Open <b>tornwar.com/notifications</b> in <b>Safari</b> (iOS) or <b>Chrome</b> (Android) → tap <b>Share → Add to Home Screen</b> → open from home screen → tap <b>Enable</b>. Notifications then ring the phone natively even when the PWA isn\'t open.';
-                msgEl.style.color = '#fbbf24';
-                msgEl.style.lineHeight = '1.5';
-            }
-            return;
-        }
-        const url = `${SERVER}/notifications?key=${encodeURIComponent(apiKey)}`;
         try {
             if (typeof GM_openInTab === 'function') GM_openInTab(url, { active: true });
             else window.open(url, '_blank', 'noopener');
         } catch (_) { window.open(url, '_blank', 'noopener'); }
-        if (msgEl) msgEl.textContent = 'Opened setup page in a new tab.';
+        if (msgEl) {
+            msgEl.style.color = '#74c69d';
+            msgEl.textContent = 'Opened in a new tab.';
+        }
     });
 
     document.getElementById('oc-spawn-key-save').addEventListener('click', () => {

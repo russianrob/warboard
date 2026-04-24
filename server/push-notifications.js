@@ -44,6 +44,7 @@ export const NOTIFICATION_TYPES = {
   war_target:      { label: "War Target Reached",    description: "When faction hits the custom war target",           default: true  },
   enemy_attacking: { label: "Enemy Attacking",        description: "When an enemy is caught mid-attack by the poller",  default: false },
   vault_request:   { label: "Vault Requests",         description: "When a faction member requests money from the vault", default: true },
+  oc_ready_to_spawn: { label: "OC Ready to Spawn",    description: "When an organized crime is fully filled and ready to spawn",  default: true },
 };
 
 // ── Subscription Storage ────────────────────────────────────────────────
