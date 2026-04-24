@@ -46,18 +46,34 @@ export function listPartnerFactions() {
 }
 
 export function isPartnerFaction(factionId) {
-  return !!_state[String(factionId)];
+  const p = _state[String(factionId)];
+  if (!p) return false;
+  if (p.expiresAt && Date.now() > p.expiresAt) return false;
+  return true;
 }
 
-export function addPartnerFaction(factionId, factionName = '', note = '') {
+export function addPartnerFaction(factionId, factionName = '', note = '', opts = {}) {
   const fid = String(factionId);
   if (!/^\d+$/.test(fid)) throw new Error('Invalid faction ID');
+  const existing = _state[fid];
+  // Preserve existing expiry unless caller explicitly passes durationWeeks.
+  // durationWeeks === 0 or '' or null => permanent (clears expiry).
+  let expiresAt = existing?.expiresAt ?? null;
+  if (Object.prototype.hasOwnProperty.call(opts, 'durationWeeks')) {
+    const w = Number(opts.durationWeeks);
+    if (Number.isFinite(w) && w > 0) {
+      expiresAt = Date.now() + Math.round(w * 7 * 24 * 60 * 60 * 1000);
+    } else {
+      expiresAt = null;
+    }
+  }
   _state[fid] = {
     factionId: fid,
     factionName: String(factionName || '').slice(0, 64),
     note: String(note || '').slice(0, 200),
-    addedAt: _state[fid]?.addedAt || Date.now(),
+    addedAt: existing?.addedAt || Date.now(),
     updatedAt: Date.now(),
+    expiresAt,
   };
   _save();
   return _state[fid];
