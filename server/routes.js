@@ -11,13 +11,16 @@ import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.j
 import { TOTP as _OTPAuthTOTP, Secret as _OTPAuthSecret } from "otpauth";
 import { readFileSync as _totpReadFile } from "node:fs";
 
-// Load the TOTP secret for admin-login 2FA from the same
-// ~/.google_authenticator file the SSH PAM module reads, so the owner
-// only has to enroll once (already done for SSH). First line of that
-// file is the base32 secret.
+// Load the TOTP secret for admin-login 2FA. Try /etc/warboard/totp-secret
+// first (readable by the warboard service user when Node runs unprivileged),
+// fall back to /root/.google_authenticator (when running as root, legacy).
+// First line of either file is the base32 secret.
 let _ADMIN_TOTP = null;
 try {
-  const secretB32 = _totpReadFile('/root/.google_authenticator', 'utf8').split('\n')[0].trim();
+  let secretB32 = '';
+  for (const p of ['/etc/warboard/totp-secret', '/root/.google_authenticator']) {
+    try { secretB32 = _totpReadFile(p, 'utf8').split('\n')[0].trim(); if (secretB32) break; } catch (_) {}
+  }
   if (secretB32) {
     _ADMIN_TOTP = new _OTPAuthTOTP({
       issuer: 'tornwar-admin',
@@ -30,7 +33,7 @@ try {
     console.log('[admin] TOTP 2FA enabled for /admin/login (secret loaded)');
   }
 } catch (e) {
-  console.warn('[admin] TOTP 2FA disabled — could not read /root/.google_authenticator:', e.message);
+  console.warn('[admin] TOTP 2FA disabled — could not read TOTP secret:', e.message);
 }
 function _verifyAdminTotp(code) {
   // Fail-closed: if the secret file is unreadable we require the env
