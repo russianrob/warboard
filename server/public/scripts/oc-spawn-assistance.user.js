@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.61
+// @version      3.1.62
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.62 — Min CPR % setting description rewritten to explain what the threshold actually does in caller-facing terms: "Minimum checkpoint pass rate a member needs before the script considers them eligible to join a crime at their historical level. Anyone below this gets pinned to Lvl 1 only." Previous wording ("Below this, member defaults to Lvl 1 eligibility") was correct but required prior knowledge of what "defaults to Lvl 1" meant.
 // v3.1.61 — Collapse the Notifications section of Settings into a single "Open Notifications Setup" button. Per-type toggles (Vault requests, OC ready to spawn) and the test button now live on the dedicated /notifications PWA page, which is the single source of truth for push preferences. Keeps the settings modal lean and works the same across desktop and PDA (PDA users get install-to-home-screen instructions on the page itself). Server whitelist (OC_PUSH_PREF_KEYS) and push-notifications.js NOTIFICATION_TYPES gain oc_ready_to_spawn (default: on) — the pref is stored now; the detection + broadcast side still needs to be wired, so toggling has no effect until that follow-up lands.
 // v3.1.60 — Drop the PDA scheduleNotification polling loop; replace with a dedicated /notifications PWA page that partner factions install to their home screen. PDA's Flutter InAppWebView can't receive Web Push, but iOS 16.4+ Safari and Android Chrome can deliver Web Push to home-screen-installed PWAs — so the right answer is to give partners a proper PWA instead of trying to bridge PDA's native notification API. Server serves /notifications (with install-to-home-screen instructions, API-key login, Enable/Disable, vault-request pref toggle, Send test button) and /notifications/manifest.json (start_url: /notifications, short_name "OC Notif") so the installed icon launches straight into the flow. Previous /api/oc/push/pending endpoint + userscript polling infrastructure removed. Desktop Enable button now opens /notifications instead of /push/setup (which redirects for back-compat).
 // v3.1.59 — PDA vault-request notifications via scheduleNotification. On Torn PDA (Flutter InAppWebView), the "Enable on This Device" button now toggles a client-side polling loop (30s interval) that hits the new GET /api/oc/push/pending endpoint for vault-request events created since the last bookmark, then fires each one as a local notification via window.flutter_inappwebview.callHandler('scheduleNotification', ...). Bookmark persists in GM storage so a page reload doesn't re-fire a backlog, and first-ever enable silently bookmarks "now" so enabling during a pending request doesn't spam the backlog either. Test button on PDA fires a local scheduleNotification directly (no server round-trip) so the user can verify the bridge works. ID range 700–799 rotated to avoid colliding with FactionOps' ranges. Desktop / mobile-web flow unchanged — they still hit /push/setup for the Web Push subscription.
@@ -252,7 +253,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.61';
+    const SCRIPT_VERSION = '3.1.62';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -2142,7 +2143,7 @@
             <div class="oc-setting-row">
                 <div class="oc-setting-info">
                     <span class="oc-setting-label">Min CPR %</span>
-                    <div class="oc-setting-desc">Below this, member defaults to Lvl 1 eligibility.</div>
+                    <div class="oc-setting-desc">Minimum checkpoint pass rate a member needs before the script considers them eligible to join a crime at their historical level. Anyone below this gets pinned to Lvl 1 only.</div>
                 </div>
                 <input class="oc-setting-num" id="cfg-mincpr" type="number" min="0" max="100"/>
             </div>
