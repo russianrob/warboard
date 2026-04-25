@@ -243,6 +243,9 @@ export function startChainMonitor(io, warId) {
 
       scheduleNext(nextChain(war));
     } catch (err) {
+      if (/Incorrect ID-entity relation/i.test(err.message)) {
+        store.quarantinePoolKey(apiKey, war.factionId, 'chain code 7');
+      }
       // Exponential backoff on failure
       const current = backoffs.get(warId) || POLL_INTERVAL_MS;
       const next = Math.min(current * 2, MAX_BACKOFF_MS);

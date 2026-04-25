@@ -508,6 +508,30 @@ export function getPooledKeysForFaction(factionId) {
   return out;
 }
 
+/**
+ * Auto-quarantine: when a poll using a pool key returns Torn API error
+ * code 7 ("Incorrect ID-entity relation"), the key's owner is no longer
+ * in the faction OR their access level dropped below what the call needs.
+ * Either way, every future pick of that key for this faction will fail
+ * with the same error. Flip enabled=false on their pool opt so the
+ * rotation skips it. They can re-enable in settings if they fix it.
+ */
+export function quarantinePoolKey(apiKey, factionId, reason) {
+  if (!apiKey) return false;
+  let foundPid = null;
+  for (const [pid, k] of apiKeys) {
+    if (k === apiKey) { foundPid = pid; break; }
+  }
+  if (!foundPid) return false;
+  const opt = keyPoolingOpt.get(foundPid);
+  if (!opt || !opt.enabled) return false;     // already disabled — no-op
+  if (String(opt.factionId) !== String(factionId)) return false;
+  keyPoolingOpt.set(foundPid, { ...opt, enabled: false, quarantinedAt: Date.now(), quarantineReason: reason || 'unknown' });
+  saveKeyPoolingOpt();
+  console.log(`[store] Quarantined pool key for player ${foundPid} (faction ${factionId}): ${reason || 'unknown'}`);
+  return true;
+}
+
 /** Tiny deterministic string hash for rotating keys by purpose. */
 function stringHash(s) {
   let h = 0;

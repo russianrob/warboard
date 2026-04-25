@@ -211,6 +211,9 @@ export function startWarStatusMonitor(io, warId) {
       store.saveState();
       scheduleNext(nextWarStatus(war));
     } catch (err) {
+      if (/Incorrect ID-entity relation/i.test(err.message)) {
+        store.quarantinePoolKey(apiKey, war.factionId, 'war-status code 7');
+      }
       // Exponential backoff on failure
       const current = backoffs.get(warId) || POLL_INTERVAL_MS;
       const next = Math.min(current * 2, MAX_BACKOFF_MS);
@@ -305,6 +308,9 @@ function startEnemyAttacksMonitor(io, warId) {
       }
       scheduleNext(nextEnemyAttacks(war));
     } catch (err) {
+      if (/Incorrect ID-entity relation/i.test(err.message)) {
+        store.quarantinePoolKey(apiKey, war.factionId, 'enemy-attacks code 7');
+      }
       const current = enemyAttacksBackoffs.get(warId) || 30_000;
       const next = Math.min(current * 2, MAX_BACKOFF_MS);
       enemyAttacksBackoffs.set(warId, next);
@@ -416,6 +422,13 @@ function startAttacksFeedMonitor(io, warId) {
 
       scheduleNext(nextAttacksFeed(war));
     } catch (err) {
+      // Auto-quarantine code-7 keys: the owning player either left the
+      // faction or their key dropped below the access level this call
+      // needs. Either way, every future rotation onto this key will keep
+      // failing — pull it out of the pool until the owner re-enables it.
+      if (/Incorrect ID-entity relation/i.test(err.message)) {
+        store.quarantinePoolKey(apiKey, war.factionId, 'attacks-feed code 7');
+      }
       const current = attacksFeedBackoffs.get(warId) || ATTACKS_FEED_INTERVAL_MS;
       const next = Math.min(current * 2, MAX_BACKOFF_MS);
       attacksFeedBackoffs.set(warId, next);
