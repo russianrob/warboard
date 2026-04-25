@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.0
+// @version      5.0.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -53,7 +53,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.0';
+    const SCRIPT_VERSION = '5.0.1';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -6196,6 +6196,20 @@ body.wb-chain-active {
                 if (!Object.keys(state.memberBars || {}).length) return;
                 renderFactionBars();
             }, 60000);
+        }
+
+        // Tick the Next Up hospital timers every second. Previously the
+        // queue text only repainted on new status_update events, so the
+        // visible countdown could lag up to a full poll cycle (15s)
+        // behind reality and then jump. statusRemainingSec already reads
+        // from a wall-clock anchor (s.releaseAt = nowSec + s.until at
+        // arrival time), so a 1s tick gives an exact, smooth count.
+        // Cheap: when target IDs haven't changed it's just N timer-text
+        // updates (top 5), no DOM rebuild.
+        if (!window.__foNextUpTickInterval) {
+            window.__foNextUpTickInterval = setInterval(() => {
+                if (typeof updateNextUp === 'function') updateNextUp();
+            }, 1000);
         }
     }
 
