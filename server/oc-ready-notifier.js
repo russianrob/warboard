@@ -14,12 +14,30 @@
 // Audience for both: faction admins (members whose factionPosition is in
 // store.getAdminRoles(factionId)).
 //
-// Storage is in-memory only — a restart means we miss transitions that
-// happen during the restart window. First-ever observation per faction
-// is observe-only (no fires) to avoid cold-start spam.
+// _completedSeen is persisted to data/oc-completed-seen-<factionId>.json
+// so reboots don't re-fire the entire Torn 90-day completed-crimes window.
+// The ready-to-spawn snapshot is in-memory only (it's transition-based and
+// re-baselines naturally within one poll cycle).
 
 import * as push from './push-notifications.js';
 import * as store from './store.js';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname, join as pathJoin } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = dirname(__filename);
+const DATA_DIR   = process.env.DATA_DIR || pathJoin(__dirname, 'data');
+
+// Cap is large enough to comfortably exceed Torn's completed-crimes API
+// page (~last 90 days, sub-1k entries even for high-volume factions).
+// Previous 300-cap was the spam source: a 500-entry response cycled
+// 200 entries through the dropped → re-fire → dropped loop forever.
+const COMPLETED_SEEN_CAP = 5000;
+// Crimes whose executed_at is older than this are never fired, even if
+// they're not in the seen set yet. Backstop for cold-start, restored
+// snapshots, or Torn returning crimes from outside the recent window.
+const FIRE_MAX_AGE_MS = 6 * 60 * 60 * 1000;   // 6 hours
 
 // factionId → Map<level, numOcsRecommended>
 // Also carries a __seeded sentinel on the Map so the first observation
@@ -34,10 +52,41 @@ function _facMap(factionId) {
   return _snapshot.get(k);
 }
 
+function _completedSeenFile(factionId) {
+  try { mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+  return pathJoin(DATA_DIR, `oc-completed-seen-${factionId}.json`);
+}
+
 function _facSeen(factionId) {
   const k = String(factionId);
-  if (!_completedSeen.has(k)) _completedSeen.set(k, new Set());
-  return _completedSeen.get(k);
+  if (_completedSeen.has(k)) return _completedSeen.get(k);
+  // Cold load from disk — ensures reboots don't reseed and re-fire.
+  let s = new Set();
+  try {
+    const f = _completedSeenFile(k);
+    if (existsSync(f)) {
+      const raw = JSON.parse(readFileSync(f, 'utf-8'));
+      if (Array.isArray(raw.ids)) s = new Set(raw.ids.map(String));
+    }
+  } catch (e) {
+    console.warn(`[oc-completed] load seen set for ${k}: ${e.message}`);
+  }
+  _completedSeen.set(k, s);
+  return s;
+}
+
+function _persistSeen(factionId) {
+  const k = String(factionId);
+  const s = _completedSeen.get(k);
+  if (!s) return;
+  try {
+    writeFileSync(_completedSeenFile(k), JSON.stringify({
+      ids: Array.from(s),
+      savedAt: Date.now(),
+    }));
+  } catch (e) {
+    console.warn(`[oc-completed] persist seen set for ${k}: ${e.message}`);
+  }
 }
 
 function _filledCount(slots) {
@@ -237,27 +286,49 @@ async function _checkCompletions(factionId, completedCrimes, members) {
   if (!Array.isArray(completedCrimes) || completedCrimes.length === 0) return;
   const fid = String(factionId);
   const seen = _facSeen(fid);
+  const wasEmpty = seen.size === 0;
 
-  // First-ever observation: seed the set without firing. Prevents a
-  // restart from spamming the last 90 days of completions.
-  if (seen.size === 0) {
+  // First-ever observation (no on-disk seed either): record every current
+  // crime ID without firing. Prevents a brand-new install from spamming
+  // the entire 90-day Torn history.
+  if (wasEmpty) {
     for (const c of completedCrimes) if (c?.id != null) seen.add(String(c.id));
+    _persistSeen(fid);
     return;
   }
 
+  // Age guard backstop. Even if the seen set somehow lost an ID, only
+  // crimes whose executed_at is within FIRE_MAX_AGE_MS get pushed —
+  // historical entries from Torn's 90-day window can never spam again.
+  const ageCutoff = Math.floor((Date.now() - FIRE_MAX_AGE_MS) / 1000);
+
   const { adminIds, adminRoles } = _resolveAdmins(fid, members);
   const fresh = [];
+  let dirty = false;
   for (const c of completedCrimes) {
     if (!c || c.id == null) continue;
     const cid = String(c.id);
     if (seen.has(cid)) continue;
+    // Mark as seen regardless of whether we'll fire — that prevents the
+    // SAME old crime ID showing up twice across consecutive polls and
+    // still being considered fresh. Persist after the loop.
     seen.add(cid);
+    dirty = true;
+    const executedAt = Number(c.executed_at || 0);
+    if (executedAt && executedAt < ageCutoff) {
+      // Too old to push but still record as seen so the dedup is honest.
+      continue;
+    }
     fresh.push(c);
   }
 
-  if (fresh.length === 0) return;
+  if (fresh.length === 0) {
+    if (dirty) _persistSeen(fid);
+    return;
+  }
   if (adminIds.length === 0) {
     console.log(`[oc-completed] faction ${fid}: ${fresh.length} new completion(s) but no admins in roles [${adminRoles.join(',')}] — skipping push`);
+    if (dirty) _persistSeen(fid);
     return;
   }
 
@@ -292,12 +363,14 @@ async function _checkCompletions(factionId, completedCrimes, members) {
     }
   }
 
-  // Cap memory — 300 seen IDs per faction is plenty given a 90-day
-  // lookback window with sparse completions.
-  if (seen.size > 300) {
+  // Cap memory. 5000 comfortably exceeds Torn's completed-crimes page
+  // size (~last 90 days), so the previous "drop 200 → re-fire 200 next
+  // poll" loop can't happen even on the busiest factions.
+  if (seen.size > COMPLETED_SEEN_CAP) {
     const arr = Array.from(seen);
-    _completedSeen.set(fid, new Set(arr.slice(-300)));
+    _completedSeen.set(fid, new Set(arr.slice(-COMPLETED_SEEN_CAP)));
   }
+  _persistSeen(fid);
 }
 
 // ── Public API ─────────────────────────────────────────────────────────
