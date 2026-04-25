@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Faction Offline Highlighter
 // @namespace    torn.faction.offline.highlight
-// @version      1.9.2
+// @version      1.9.3
 // @description  Highlights faction members red who have been offline for over 24 hours on the faction member list. Shows OC inactivity badges in chat globally. Configurable threshold. PDA compatible.
 // @author       RussianRob
 // @match        https://www.torn.com/*
@@ -17,6 +17,7 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v1.9.3  - Fix: members whose last OC was older than the most-recent ~100 crimes were getting "[OC: Never]" / "Last OC: Never" badges. Torn v2 caps /faction/crimes?cat=completed at 100 entries per response and the script was only reading page 1 — anyone (e.g. Ciel) whose last OC was further back than the freshest page got dropped from lastOCMap and treated as a never-participant. fetchCompletedCrimes now paginates backwards via the `to=<unix-ts>` keyset over a 90-day window (max 20 pages = 2000 crimes), matching the same pagination loop already in use server-side at oc-spawn.js:62.
 // v1.9.2  - Update URLs to tornwar.com hosting
 // v1.9.1  - Fix: highlighting bleeding onto armory/controls pages
 // v1.9.0  - Fix: new members (<72h) incorrectly getting [OC: Never] badges
@@ -132,8 +133,48 @@
         return apiFetch(`${API_BASE}/v2/faction/?selections=members&key=${apiKey}`);
     }
 
-    function fetchCompletedCrimes(apiKey) {
-        return apiFetch(`${API_BASE}/v2/faction/crimes?cat=completed&sort=DESC&key=${apiKey}`);
+    // Paginated fetch — Torn v2 caps `?cat=completed` at 100 entries per
+    // response. Without walking back via the `to=<unix-ts>` keyset we only
+    // see the most-recent ~100 crimes, which makes anyone whose last OC
+    // happened earlier than that window look like they "Never" joined an OC.
+    // Walks 90 days max; safety cap of 20 pages = 2000 crimes.
+    async function fetchCompletedCrimes(apiKey) {
+        const LOOKBACK_DAYS = 90;
+        const MAX_PAGES = 20;
+        const fromTs = Math.floor(Date.now() / 1000) - (LOOKBACK_DAYS * 86400);
+        const seen = new Set();
+        const all = [];
+        let toTs = null;
+        for (let page = 0; page < MAX_PAGES; page++) {
+            const params = new URLSearchParams({
+                cat: 'completed',
+                sort: 'DESC',
+                from: String(fromTs),
+                key: apiKey,
+            });
+            if (toTs) params.set('to', String(toTs));
+            const data = await apiFetch(`${API_BASE}/v2/faction/crimes?${params}`);
+            if (data && data.error) return data; // surface the error to caller
+            const batch = Array.isArray(data?.crimes)
+                ? data.crimes
+                : Object.values(data?.crimes || {});
+            if (batch.length === 0) break;
+            let added = 0;
+            let oldest = Infinity;
+            for (const c of batch) {
+                const id = String(c.id);
+                if (seen.has(id)) continue;
+                seen.add(id);
+                all.push(c);
+                added++;
+                const ts = Number(c.executed_at || 0);
+                if (ts > 0 && ts < oldest) oldest = ts;
+            }
+            if (added === 0) break;
+            if (!Number.isFinite(oldest) || oldest <= fromTs) break;
+            toTs = oldest - 1;
+        }
+        return { crimes: all };
     }
 
     function fetchAvailableCrimes(apiKey) {
