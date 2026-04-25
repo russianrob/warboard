@@ -70,15 +70,23 @@ export async function verifyTornApiKey(apiKey) {
   // rather than a fatal auth error — the user-endpoint call already proved
   // the key is at least Public.
   let accessLevel = 0;
+  let accessType = "";
+  let factionSelections = [];
   if (keyRes.ok) {
     try {
       const keyData = await keyRes.json();
-      if (!keyData.error) accessLevel = Number(keyData.access_level ?? 0);
+      if (!keyData.error) {
+        accessLevel = Number(keyData.access_level ?? 0);
+        accessType = String(keyData.access_type || "");
+        const sel = keyData.selections?.faction;
+        if (Array.isArray(sel)) factionSelections = sel.map(String);
+      }
     } catch (_) { /* ignore */ }
   }
 
   // Torn access levels: 1=Public, 2=Minimal, 3=Limited, 4=Full.
   // Faction endpoints (used by the OC spawn-key route) require Limited+.
+  // Pool eligibility is stricter — see isPoolEligible() below.
   const result = {
     playerId: String(data.player_id),
     playerName: data.name,
@@ -86,9 +94,49 @@ export async function verifyTornApiKey(apiKey) {
     factionName: data.faction?.faction_name ?? "",
     factionPosition: data.faction?.position ?? "",
     hasFactionAccess: accessLevel >= 3,
+    accessLevel,
+    accessType,
+    factionSelections,
   };
   setAuthCache(apiKey, { result, expiresAt: Date.now() + AUTH_CACHE_SUCCESS_TTL_MS });
   return result;
+}
+
+// ── Pool eligibility ────────────────────────────────────────────────────
+
+// Selections every pool poller depends on. attacks-feed needs `attacks`,
+// war-status needs `members`, chain-monitor needs `chain`. A key missing
+// any of these will produce code-7 errors when the rotation lands on it
+// — auto-quarantine catches them after the first failure, but it's
+// nicer to reject up front so we never add a doomed key in the first
+// place.
+const REQUIRED_POOL_SELECTIONS = ["attacks", "members", "chain"];
+
+/**
+ * Decide if an authenticated key is suitable for the rotating pool.
+ * Returns { eligible: bool, reason: string|null, missing: string[] }.
+ *
+ * Full Access (level 4) keys always qualify because every faction
+ * selection is implicitly granted. Limited Access (level 3) keys
+ * qualify only if their explicit selections list contains every entry
+ * in REQUIRED_POOL_SELECTIONS. Public/Minimal keys never qualify.
+ */
+export function isPoolEligible(authInfo) {
+  if (!authInfo || authInfo.accessLevel < 3) {
+    return { eligible: false, reason: 'Pool requires a Limited+ Access key', missing: [] };
+  }
+  if (authInfo.accessLevel >= 4) {
+    return { eligible: true, reason: null, missing: [] };
+  }
+  // Limited Access: must have every required faction selection.
+  const have = new Set(authInfo.factionSelections || []);
+  const missing = REQUIRED_POOL_SELECTIONS.filter(s => !have.has(s));
+  if (missing.length === 0) return { eligible: true, reason: null, missing: [] };
+  return {
+    eligible: false,
+    reason: `Limited Access key missing required faction selection(s): ${missing.join(', ')}. Re-issue your key with Full Access (or include those selections) to join the pool.`,
+    missing,
+  };
 }
 
 // ── JWT helpers ─────────────────────────────────────────────────────────

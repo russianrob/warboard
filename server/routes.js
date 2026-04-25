@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join as pathJoin, dirname as pathDirname } from "node:path";
 import { fileURLToPath } from 'node:url';
 import axios from "axios";
-import { verifyTornApiKey, issueToken, verifyToken, requireAuth } from "./auth.js";
+import { verifyTornApiKey, issueToken, verifyToken, requireAuth, isPoolEligible } from "./auth.js";
 import { TOTP as _OTPAuthTOTP, Secret as _OTPAuthSecret } from "otpauth";
 import { readFileSync as _totpReadFile } from "node:fs";
 
@@ -451,7 +451,19 @@ router.post("/api/auth", async (req, res) => {
     // key to the rotating pool. Preserves explicit opt-outs. Clients are
     // told on first login (via the disclosure flag in the /api/auth
     // response) so they can show a one-time notice.
-    const createdDefault = store.ensureDefaultPoolOpt(info.playerId, info.factionId);
+    //
+    // BUT only if the key is actually pool-eligible (Full Access, or
+    // Limited with attacks/members/chain selections). Otherwise we'd add
+    // a key that's guaranteed to fail every rotation — auto-quarantine
+    // would catch it on the first cycle, but not adding it in the first
+    // place is cleaner and avoids a noisy log line.
+    const eligibility = isPoolEligible(info);
+    const createdDefault = eligibility.eligible
+      ? store.ensureDefaultPoolOpt(info.playerId, info.factionId)
+      : false;
+    if (!eligibility.eligible) {
+      console.log(`[auth] Pool opt-in skipped for ${info.playerName} (${info.playerId}): ${eligibility.reason}`);
+    }
 
     const token = issueToken({
       playerId: info.playerId,
@@ -470,6 +482,13 @@ router.post("/api/auth", async (req, res) => {
       // faction's polling pool" notice. Server only returns true on the
       // first auth for this player.
       poolingDefaultApplied: createdDefault,
+      // Eligibility hints. If false, the client can show why the user
+      // wasn't added to the pool (e.g. "your key is Limited Access and
+      // missing the `attacks` selection"). Doesn't block auth — Limited
+      // keys can still use the rest of FactionOps, they just don't
+      // contribute to the polling pool.
+      poolEligible: eligibility.eligible,
+      poolEligibilityReason: eligibility.reason,
     });
   } catch (err) {
     console.error("[auth] Authentication failed:", err.message);
@@ -918,8 +937,30 @@ router.get("/api/pool-opt", requireAuth, (req, res) => {
   });
 });
 
-router.post("/api/pool-opt", requireAuth, (req, res) => {
+router.post("/api/pool-opt", requireAuth, async (req, res) => {
   const { enabled } = (req.body || {});
+  // Opt-OUT is always allowed. Opt-IN must re-verify the key has the
+  // selections every pool poller depends on — otherwise the rotation
+  // would land on a doomed key and auto-quarantine it on the next
+  // failure. Cleaner to refuse up front with an actionable message.
+  if (enabled) {
+    const apiKey = store.getApiKeyForPlayer(req.user.playerId);
+    if (!apiKey) {
+      return res.status(400).json({ error: "No API key on file. Re-authenticate first." });
+    }
+    try {
+      const info = await verifyTornApiKey(apiKey);
+      const eligibility = isPoolEligible(info);
+      if (!eligibility.eligible) {
+        return res.status(400).json({
+          error: eligibility.reason,
+          missing: eligibility.missing,
+        });
+      }
+    } catch (err) {
+      return res.status(400).json({ error: `Could not verify key: ${err.message}` });
+    }
+  }
   store.setKeyPoolingOpt(req.user.playerId, !!enabled, req.user.factionId);
   console.log(
     `[pool-opt] ${req.user.playerName} (${req.user.playerId}) ${enabled ? "opted IN to" : "opted OUT of"} faction ${req.user.factionId} key pool`
