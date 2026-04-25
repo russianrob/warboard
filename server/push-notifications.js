@@ -244,32 +244,57 @@ export async function sendToPlayer(playerId, payload, notifType, pushOptions) {
 
   const message = JSON.stringify(payload);
 
-  // Send to the most recent subscription only to avoid duplicate notifications
-  const sub = subs[subs.length - 1];
-  try {
-    await webPush.sendNotification(sub, message, pushOptions);
-  } catch (err) {
-    if (err.statusCode === 410 || err.statusCode === 404) {
-      // Subscription expired (APNs/FCM returned 410 Gone or 404). Spec
-      // says remove it. Log so we can tell the difference between
-      // server-side removal and client-side permission revocation next
-      // time a user reports "my notifications stopped."
-      const shortEndpoint = (sub.endpoint || "").slice(-24);
-      console.log(
-        `[push] Removing expired subscription for player ${playerId} ` +
-        `(endpoint …${shortEndpoint}, statusCode ${err.statusCode})`
-      );
-      subscriptions[playerId] = subs.filter((s) => s.endpoint !== sub.endpoint);
-      if (subscriptions[playerId].length === 0) delete subscriptions[playerId];
-      saveSubscriptions();
-      // Retry with remaining subs
-      if (subscriptions[playerId]?.length > 0) {
-        return sendToPlayer(playerId, payload, notifType, pushOptions);
+  // Send to ALL subscriptions, not just the most recent. A player can be
+  // registered through multiple PWAs (e.g. FactionOps + OC Spawn) on the
+  // same device, or have separate phone+tablet registrations — each one
+  // is its own independent Service Worker subscription. Stale endpoints
+  // fall away via the 410/404 reap below, so over time the list converges
+  // to the user's actually-active set without manual intervention.
+  const expiredEndpoints = [];
+  let sent = 0;
+  let failed = 0;
+  for (const sub of subs) {
+    try {
+      await webPush.sendNotification(sub, message, pushOptions);
+      sent++;
+    } catch (err) {
+      if (err.statusCode === 410 || err.statusCode === 404) {
+        // Subscription expired (APNs/FCM returned 410 Gone or 404). Spec
+        // says remove it. Log so we can tell the difference between
+        // server-side removal and client-side permission revocation next
+        // time a user reports "my notifications stopped."
+        const shortEndpoint = (sub.endpoint || "").slice(-24);
+        console.log(
+          `[push] Removing expired subscription for player ${playerId} ` +
+          `(endpoint …${shortEndpoint}, statusCode ${err.statusCode})`
+        );
+        expiredEndpoints.push(sub.endpoint);
+      } else {
+        failed++;
+        console.error(`[push] Failed to send to ${playerId} (endpoint …${(sub.endpoint || "").slice(-24)}):`, err.message);
       }
-    } else {
-      console.error(`[push] Failed to send to ${playerId}:`, err.message);
     }
   }
+
+  // Reap expired endpoints after the loop so we don't mutate the array
+  // while iterating. Persist once.
+  if (expiredEndpoints.length > 0) {
+    subscriptions[playerId] = subs.filter((s) => !expiredEndpoints.includes(s.endpoint));
+    if (subscriptions[playerId].length === 0) delete subscriptions[playerId];
+    saveSubscriptions();
+  }
+
+  // Per-call success log. Answers "did the server actually fire that
+  // notif?" the next time a missed alert gets reported. Absence of this
+  // line means the pref/type/no-subs gate fired upstream — the function
+  // returned without ever attempting a send.
+  console.log(
+    `[push] sent ${notifType || 'no-type'} to ${playerId} ` +
+    `(${sent}/${subs.length} device(s)` +
+    (failed ? `, ${failed} failed` : '') +
+    (expiredEndpoints.length ? `, ${expiredEndpoints.length} expired` : '') +
+    `)`
+  );
 }
 
 /**
