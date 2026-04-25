@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.97
+// @version      4.9.98
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.98  - Tweak: Next Up queue now shows top 5 hospitalised targets instead of top 3. Stat chip + timer + Call button per row, same layout as 4.9.97.
 // v4.9.97  - Feature: stat chip on Next Up queue items. Each of the top-3 hospitalised targets in the queue strip now shows a BSP/FFS stat chip between the name and the timer, using the same renderInlineBsp() helper + tier colors as the inline overlay badges. Lets you eyeball "is this one worth calling now?" without drilling into the row. Sticky once loaded; if cache is empty it pops in mid-timer when BSP/FFS data finally lands. No new API calls — reads localStorage (BSP) and ffscouter-cache IndexedDB (FFS) just like the existing badges.
 // v4.9.79  - Revert 4.9.78: vault-request toggle moved to OC Spawn Assistance settings gear where the feature actually lives. FactionOps is war coordination; vault-request notifs belong with their originating feature.
 // v4.9.78  - Feature: "Vault Requests" toggle in Settings → Notifications (moved to OC Spawn Assistance in 4.9.79).
@@ -272,7 +273,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.97';
+    const SCRIPT_VERSION = '4.9.98';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -6483,22 +6484,22 @@ body.wb-chain-active {
             }
         }
 
-        // Sort by shortest timer first, take top 3
+        // Sort by shortest timer first, take top 5
         hospitalTargets.sort((a, b) => a.until - b.until);
-        const top3 = hospitalTargets.slice(0, 3);
+        const topN = hospitalTargets.slice(0, 5);
 
-        if (top3.length === 0) {
+        if (topN.length === 0) {
             container.innerHTML = '';
             return;
         }
 
         // Check if the same targets are already rendered — only update timers
         const currentIds = Array.from(container.querySelectorAll('[data-nu-id]')).map(el => el.dataset.nuId);
-        const newIds = top3.map(t => t.targetId);
+        const newIds = topN.map(t => t.targetId);
         const sameSet = currentIds.length === newIds.length && currentIds.every((id, i) => id === newIds[i]);
 
         if (sameSet) {
-            for (const t of top3) {
+            for (const t of topN) {
                 const item = container.querySelector(`[data-nu-id="${t.targetId}"]`);
                 if (!item) continue;
                 const timerSpan = item.querySelector(`.${prefix}-next-timer, .fo-next-up-timer, .wb-next-timer`);
@@ -6526,7 +6527,7 @@ body.wb-chain-active {
         label.textContent = 'Next Up:';
         container.appendChild(label);
 
-        for (const t of top3) {
+        for (const t of topN) {
             // Try to get the name from the overlay row or status data
             const foRow = document.querySelector(`[data-fo-id="${t.targetId}"]`);
             const wbRow = document.querySelector(`[data-wb-target-id="${t.targetId}"]`);
