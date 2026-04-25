@@ -5989,6 +5989,27 @@ router.delete("/api/oc/vault-request/:id", async (req, res) => {
   return res.json({ ok: true, removed });
 });
 
+// Banker claims a request — they're about to send the money. Hides the
+// request from every client immediately; a background fundsnews poll
+// confirms the actual transfer. If no matching news event arrives within
+// the claim TTL, the claim expires and the request reappears on every
+// client's next list fetch.
+router.post("/api/oc/vault-request/:id/claim", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info } = ctx;
+  const isAdmin = info.hasFactionAccess === true || String(info.playerId) === '137558';
+  if (!isAdmin) return res.status(403).json({ error: "Only faction-API-access roles can claim a request" });
+  const result = vaultRequests.claimRequest(info.factionId, req.params.id, info.playerId, info.playerName);
+  if (!result) return res.status(404).json({ error: "Request not found" });
+  if (result.conflict) return res.status(409).json({ error: `Already claimed by ${result.claimedByName}` });
+  // Kick a piggy-back fundsnews sweep so the verification window starts
+  // counting from now and a transfer that lands quickly clears fast.
+  vaultRequests.pollFactionWithKey(info.factionId, ctx.key).catch(() => {});
+  return res.json({ ok: true, request: result });
+});
+
 // Per-user push-notification preferences, auth'd by Torn API key so the
 // OC Spawn Assistance settings panel can read/write them without needing
 // a FactionOps JWT. Currently exposes vault_request only; extend the

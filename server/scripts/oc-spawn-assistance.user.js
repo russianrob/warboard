@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.69
+// @version      3.1.70
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.70 — Banker-claim optimistic clear on vault-request Send. Hitting Send now POSTs to /api/oc/vault-request/:id/claim before opening the Controls tab. Server marks the request as claimed-by-this-banker and hides it from listRequests() for every viewer immediately, so all admins see it disappear without waiting for the 20s fundsnews poll → 15s client poll cycle (previously took ~3 manual refreshes to clear). If the matching fundsnews event arrives within the 90s claim TTL, the request is fully deleted as before. If the banker bails (closes Torn tab, never sends the money), the claim expires and the request reappears on every client's next list fetch — no orphaned requests. Two bankers clicking the same Send near-simultaneously: the second gets a 409 Conflict with "Already claimed by X" and their UI shows that message instead of removing the row.
 // v3.1.69 — Scope DOM reader now rejects elements nested inside a completed-crime reward block. Torn's Completed tab shows per-OC "+N scope" chips (e.g. Pet Project +2 scope) whose wrapper class also contains the word "scope", so strategies 1 and 2 were scraping those per-OC rewards and pushing them as if they were the faction's current scope balance. That's the source of the 16 → 2 → 5 oscillation in v3.1.68's stability window logs. New insideCompletedContext() walks up ancestors and bails on any node whose className matches completed|executed|ended|reward|payout|result|history. Both strategy 1 (class-match) and strategy 2 (text-match) honor the guard.
 // v3.1.68 — Scope stability window: Torn's React re-renders the scope badge during OC state transitions and the DOM class-match strategy sometimes catches intermediate values. Observed 04-24 05:00:24-05:00:41 EDT: 16 → 2 → 5 → 2 pushed in 20s, all class:container___THb7U scope_, when real scope was 16. Delay the commit + push by 2.5s; if a different value arrives inside the window, reset the timer and drop the transient. Legitimate scope changes settle well inside 2.5s so real edits feel ~live. Also moves CONFIG.SCOPE and GM_setValue inside the timer (previously they committed immediately; only the push was debounced).
 // v3.1.67 — Fix Request button on vault-request form rendering as black text on a black background. The button was using class="w3b-btn" but that class never existed in the panel stylesheet — browsers fell back to UA default (which ends up ~invisible on the dark panel). Replaced with explicit inline styles matching the rest of the OC Spawn UI: green #2d6a4f background, white text, 1px green border, same padding/font-weight as Refresh.
@@ -260,7 +261,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.69';
+    const SCRIPT_VERSION = '3.1.70';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1656,6 +1657,7 @@
         // Torn's React DOM in a long time.
         document.querySelectorAll('.oc-vault-send').forEach(a => {
             a.addEventListener('click', (e) => {
+                const reqId = a.dataset.reqId;
                 const amt = a.dataset.amount;
                 const recipient = a.dataset.recipient;
                 const xid = a.dataset.recipientId;
@@ -1666,6 +1668,22 @@
                 } catch (_) {}
                 const msg = document.getElementById('oc-vault-msg');
                 if (msg) msg.textContent = `Amount copied. Paste into the Give form for ${recipient} [${xid}] — $${Number(amt).toLocaleString('en-US')}`;
+                // Optimistic faction-wide hide: server marks the request as
+                // banker-claimed so every other admin's next list fetch
+                // drops it too. If the matching fundsnews event doesn't
+                // arrive within the claim TTL (90s), the server expires the
+                // claim and the request reappears for everyone.
+                if (reqId) {
+                    claimVaultRequest(apiKey, reqId).then(r => {
+                        if (r.ok) {
+                            S.vaultRequests = (S.vaultRequests || []).filter(x => x.id !== reqId);
+                            const row = a.closest('div');
+                            if (row) row.remove();
+                        } else if (r.conflict && msg) {
+                            msg.textContent = `Already being fulfilled${r.by ? ' by ' + r.by : ''}.`;
+                        }
+                    }).catch(() => {});
+                }
             }, { once: false });
         });
         document.querySelectorAll('.oc-vault-del').forEach(btn => {
@@ -1721,6 +1739,27 @@
                 method: 'DELETE',
                 url: `${SERVER}/api/oc/vault-request/${encodeURIComponent(id)}?key=${encodeURIComponent(apiKey)}`,
                 onload: (resp) => resolve({ ok: resp.status >= 200 && resp.status < 300 }),
+                onerror: () => resolve({ ok: false }),
+            });
+        });
+        return r;
+    }
+    async function claimVaultRequest(apiKey, id) {
+        const body = JSON.stringify({ key: apiKey });
+        const r = await new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `${SERVER}/api/oc/vault-request/${encodeURIComponent(id)}/claim`,
+                headers: { 'Content-Type': 'application/json' },
+                data: body,
+                onload: (resp) => {
+                    let data = {};
+                    try { data = JSON.parse(resp.responseText); } catch {}
+                    if (resp.status === 409) {
+                        return resolve({ ok: false, conflict: true, by: data.error?.replace(/^Already claimed by\s+/, '') });
+                    }
+                    resolve({ ok: resp.status >= 200 && resp.status < 300, data });
+                },
                 onerror: () => resolve({ ok: false }),
             });
         });
@@ -3904,6 +3943,7 @@
             const payUrl = 'https://www.torn.com/factions.php?step=your&type=1#/tab=controls';
             const sendBtn = `<a href="${payUrl}" target="_blank" rel="noopener"
                 class="oc-vault-send"
+                data-req-id="${met_escapeHtml(r.id)}"
                 data-amount="${met_escapeHtml(r.amount)}"
                 data-recipient="${met_escapeHtml(r.requesterName)}"
                 data-recipient-id="${met_escapeHtml(r.requesterId)}"

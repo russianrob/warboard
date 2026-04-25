@@ -25,6 +25,10 @@ const DATA_DIR = process.env.DATA_DIR || pathJoin(__dirname, 'data');
 // 20s — fast enough that auto-removal feels live; well within Torn's
 // rate limits (3 calls/min, plenty of owner-key headroom).
 const FULFILL_POLL_MS = 20_000;
+// Banker-claim TTL: when a banker hits Send the request is hidden from
+// every client immediately, but if the matching news event hasn't shown
+// up within this window the claim expires and the request reappears.
+const CLAIM_TTL_MS = 90_000;
 // How many news events to look at per poll (Torn returns last ~100).
 // Per-faction state ─────────────────────────────────────────────────────────
 // factionId -> { requests: [], newsSeen: Set<newsId>, lastPoll: ts }
@@ -70,13 +74,36 @@ function uuid() {
     return randomBytes(8).toString('hex');
 }
 
+// Drop expired claims so the next listRequests() shows them again. Mutates
+// in place; returns true if any claim was reaped (caller can persist).
+function unclaimExpired(f) {
+    const now = Date.now();
+    let changed = false;
+    for (const r of f.requests) {
+        if (r.claimedBy && r.claimExpiresAt && r.claimExpiresAt < now) {
+            console.log(`[vault-requests] claim by ${r.claimedByName || r.claimedBy} on req ${r.id} expired — request restored`);
+            delete r.claimedBy;
+            delete r.claimedByName;
+            delete r.claimedAt;
+            delete r.claimExpiresAt;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /** Returns an array of pending requests for the faction (newest first).
  *  Triggers a non-blocking fundsnews sweep if we haven't polled recently,
- *  so stale fulfilled requests get cleaned up before being shown. */
+ *  so stale fulfilled requests get cleaned up before being shown.
+ *  Hides any request currently claimed by a banker whose claim hasn't
+ *  expired yet — that's the optimistic-clear UX so all clients see it
+ *  disappear the moment one banker hits Send. */
 export function listRequests(factionId) {
-    const f = load(String(factionId));
+    const fid = String(factionId);
+    const f = load(fid);
+    if (unclaimExpired(f)) persist(fid);
     // If anyone's looking at the list, kick a poll if we haven't checked
     // in the last 5s — gives near-real-time auto-removal whenever an admin
     // is actively viewing.
@@ -85,7 +112,11 @@ export function listRequests(factionId) {
             Promise.resolve().then(() => runPoll()).catch(() => {});
         }
     }
-    return f.requests.slice().sort((a, b) => b.createdAt - a.createdAt);
+    const now = Date.now();
+    return f.requests
+        .filter(r => !r.claimedBy || !r.claimExpiresAt || r.claimExpiresAt < now)
+        .slice()
+        .sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /**
@@ -114,6 +145,36 @@ export function createRequest(factionId, {
     f.requests.push(req);
     persist(factionId);
     return req;
+}
+
+/**
+ * Banker claims a request — they're about to fulfill it. Hides the request
+ * from listRequests() for every viewer until either:
+ *   (a) the next fundsnews poll matches it (real fulfillment), or
+ *   (b) CLAIM_TTL_MS elapses without a match → claim expires, request reappears.
+ * Re-claims by the same banker reset the TTL (covers a "I'm still working on
+ * it" refresh). A different banker claiming an already-claimed request is
+ * rejected so two bankers can't both think they own the same one.
+ * Returns the request or null (not found / claim conflict).
+ */
+export function claimRequest(factionId, requestId, claimerId, claimerName) {
+    const fid = String(factionId);
+    const f = load(fid);
+    unclaimExpired(f);
+    const r = f.requests.find(x => x.id === requestId);
+    if (!r) return null;
+    const now = Date.now();
+    if (r.claimedBy && String(r.claimedBy) !== String(claimerId)
+        && r.claimExpiresAt && r.claimExpiresAt > now) {
+        return { conflict: true, claimedByName: r.claimedByName };
+    }
+    r.claimedBy       = String(claimerId);
+    r.claimedByName   = String(claimerName || claimerId);
+    r.claimedAt       = now;
+    r.claimExpiresAt  = now + CLAIM_TTL_MS;
+    persist(fid);
+    console.log(`[vault-requests] req ${r.id} claimed by ${r.claimedByName} for $${r.amount} — TTL ${CLAIM_TTL_MS / 1000}s`);
+    return r;
 }
 
 /**
@@ -208,6 +269,9 @@ async function pollOneFaction(factionId, apiKey) {
     if (data.error) throw new Error(data.error.error || 'API error');
 
     const f = load(String(factionId));
+    // Reap expired banker claims first so a request the news poll can't
+    // confirm becomes visible again on the next list fetch.
+    unclaimExpired(f);
     const news = data.fundsnews || {};
     let fulfilledAny = false;
 
