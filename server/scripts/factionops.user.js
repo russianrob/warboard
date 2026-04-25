@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.96
+// @version      4.9.97
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.97  - Feature: stat chip on Next Up queue items. Each of the top-3 hospitalised targets in the queue strip now shows a BSP/FFS stat chip between the name and the timer, using the same renderInlineBsp() helper + tier colors as the inline overlay badges. Lets you eyeball "is this one worth calling now?" without drilling into the row. Sticky once loaded; if cache is empty it pops in mid-timer when BSP/FFS data finally lands. No new API calls — reads localStorage (BSP) and ffscouter-cache IndexedDB (FFS) just like the existing badges.
 // v4.9.79  - Revert 4.9.78: vault-request toggle moved to OC Spawn Assistance settings gear where the feature actually lives. FactionOps is war coordination; vault-request notifs belong with their originating feature.
 // v4.9.78  - Feature: "Vault Requests" toggle in Settings → Notifications (moved to OC Spawn Assistance in 4.9.79).
 // v4.9.77  - Feature: Energy bars in the Cooldowns panel now project forward from the last report timestamp using Torn's own regen metadata (ticktime/interval/increment/fulltime). Donator vs non-donator regen rate is baked into interval, so no per-member flag is needed. Sort order also uses projected energy so freshly topped-up members bubble up correctly.
@@ -271,7 +272,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.96';
+    const SCRIPT_VERSION = '4.9.97';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -6502,6 +6503,11 @@ body.wb-chain-active {
                 if (!item) continue;
                 const timerSpan = item.querySelector(`.${prefix}-next-timer, .fo-next-up-timer, .wb-next-timer`);
                 if (timerSpan) timerSpan.textContent = formatTimer(t.until);
+                // Refresh the stat chip — cheap no-op once cache is filled,
+                // but lets a chip that started empty pop in when BSP/FFS
+                // data finally lands mid-timer.
+                const statChip = item.querySelector('.fo-bsp-inline');
+                if (statChip) renderInlineBsp(statChip, t.targetId);
                 const imminent = t.until <= 120;
                 if (prefix === 'fo') {
                     item.classList.toggle('imminent', imminent);
@@ -6545,6 +6551,15 @@ body.wb-chain-active {
             nameLink.title = name;
             nameLink.style.cssText = 'text-decoration:none;color:inherit;';
             item.appendChild(nameLink);
+
+            // Stat chip (BSP cache → FFS fallback). Same renderer the
+            // overlay row's inline badge uses, so colors / tier rules
+            // match. Sits between name and timer at a glance.
+            const statChip = document.createElement('span');
+            statChip.className = 'fo-bsp-inline';
+            statChip.style.marginLeft = '4px';
+            renderInlineBsp(statChip, t.targetId);
+            item.appendChild(statChip);
 
             const timerSpan = document.createElement('span');
             timerSpan.className = prefix === 'fo' ? 'fo-next-up-timer' : 'wb-next-timer';
