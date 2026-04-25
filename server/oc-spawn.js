@@ -34,9 +34,15 @@ function loadAndNormalizeDiskHistory(factionId) {
 }
 
 const CPR_LOOKBACK_DAYS = 90;
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours — backstop only
 
 const factionOcsCache    = new Map(); // factionId -> { timestamp, cprCache, completedCrimes }
+// Per-faction snapshot of the previous poll's availableCrimes IDs. When a
+// slot ID disappears between consecutive calls to getOcSpawnData() we
+// know an OC just completed and force-invalidate completedCrimes so the
+// notifier sees it within one 60s poll cycle (instead of waiting up to
+// CACHE_TTL_MS = 6h for the natural expiry).
+const lastAvailableIds   = new Map(); // factionId -> Set<crimeId>
 // Short-TTL caches for high-frequency endpoints. These were being called on
 // every spawn-key request (one per user refresh), burning through Torn's
 // 100-req/min rate limit. 30s TTL is short enough that recruitment / member
@@ -334,6 +340,31 @@ export async function getOcSpawnData(factionId, apiKey) {
   // but placements are re-derived every call — they change minute to minute.
   const availableCrimes = await fetchAvailableCrimes(factionId, apiKey);
   const currentPlacements = extractCurrentPlacements(availableCrimes);
+
+  // Detect just-completed OCs: any slot ID that was in the previous poll's
+  // availableCrimes but isn't anymore must have transitioned to completed.
+  // When that happens, force the completedCrimes cache to refetch so the
+  // notifier (which runs right after this returns) sees the new entry on
+  // its very next dedup pass — sub-60s latency instead of up to CACHE_TTL_MS.
+  // First poll after restart: lastAvailableIds is empty, so no IDs are
+  // "missing" and we don't trigger a spurious refetch.
+  const fid = String(factionId);
+  const currentAvailIds = new Set();
+  for (const c of (availableCrimes || [])) {
+    if (c?.id != null) currentAvailIds.add(String(c.id));
+  }
+  const prevAvailIds = lastAvailableIds.get(fid);
+  let availDelta = false;
+  if (prevAvailIds && prevAvailIds.size > 0) {
+    for (const id of prevAvailIds) {
+      if (!currentAvailIds.has(id)) { availDelta = true; break; }
+    }
+  }
+  lastAvailableIds.set(fid, currentAvailIds);
+  if (availDelta) {
+    factionOcsCache.delete(factionId);   // force refetch below
+    console.log(`[oc-spawn] faction ${fid}: availableCrimes shrunk → invalidating completedCrimes cache`);
+  }
 
   // Load disk history every call (fast, small file, may have been updated
   // by routes.js's persist path in the last few minutes). API crimes are
