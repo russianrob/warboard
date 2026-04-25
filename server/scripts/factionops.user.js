@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.98
+// @version      4.9.99
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -45,6 +45,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// v4.9.99  - Tweak: removed the first-auth "your API key is now part of the faction polling pool" toast. Pool opt-in is silent now; the settings panel toggle "Share my API key with faction pool" is still there for anyone who wants to opt out. Server keeps returning body.poolingDefaultApplied for back-compat — it's just no longer surfaced.
 // v4.9.98  - Tweak: Next Up queue now shows top 5 hospitalised targets instead of top 3. Stat chip + timer + Call button per row, same layout as 4.9.97.
 // v4.9.97  - Feature: stat chip on Next Up queue items. Each of the top-3 hospitalised targets in the queue strip now shows a BSP/FFS stat chip between the name and the timer, using the same renderInlineBsp() helper + tier colors as the inline overlay badges. Lets you eyeball "is this one worth calling now?" without drilling into the row. Sticky once loaded; if cache is empty it pops in mid-timer when BSP/FFS data finally lands. No new API calls — reads localStorage (BSP) and ffscouter-cache IndexedDB (FFS) just like the existing badges.
 // v4.9.79  - Revert 4.9.78: vault-request toggle moved to OC Spawn Assistance settings gear where the feature actually lives. FactionOps is war coordination; vault-request notifs belong with their originating feature.
@@ -273,7 +274,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '4.9.98';
+    const SCRIPT_VERSION = '4.9.99';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -4452,19 +4453,12 @@ body.wb-chain-active {
                             }
                         }).catch(() => {});
 
-                        // First-auth disclosure: if server says this login
-                        // just created a default pool opt-in, show the
-                        // user a one-time notice so pooling isn't covert.
-                        if (body.poolingDefaultApplied && !GM_getValue('factionops_pool_notice_shown', false)) {
-                            GM_setValue('factionops_pool_notice_shown', true);
-                            setTimeout(() => {
-                                showToast(
-                                    'Your Torn API key is now part of the faction polling pool (chain, war status, attacks feed). ' +
-                                    'Open settings → "Share my API key with faction pool" to opt out.',
-                                    'info',
-                                );
-                            }, 2000);
-                        }
+                        // Pool opt-in is now silent. The settings panel
+                        // still has the "Share my API key with faction
+                        // pool" toggle for anyone who wants to opt out.
+                        // Server still returns body.poolingDefaultApplied
+                        // for back-compat — just no longer surfaced as
+                        // a toast.
 
                         resolve(body);
                     } else {
