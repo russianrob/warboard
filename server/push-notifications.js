@@ -244,16 +244,28 @@ export async function sendToPlayer(playerId, payload, notifType, pushOptions) {
 
   const message = JSON.stringify(payload);
 
-  // Send to ALL subscriptions, not just the most recent. A player can be
-  // registered through multiple PWAs (e.g. FactionOps + OC Spawn) on the
-  // same device, or have separate phone+tablet registrations — each one
-  // is its own independent Service Worker subscription. Stale endpoints
-  // fall away via the 410/404 reap below, so over time the list converges
-  // to the user's actually-active set without manual intervention.
+  // Collapse same-device duplicates. A player can be registered through
+  // multiple PWAs (FactionOps + OC Spawn) on the same physical iPhone —
+  // each PWA owns its own Service Worker and gets its own endpoint, but
+  // both endpoints share the same push-provider hostname (e.g.
+  // web.push.apple.com). Sending to both = two banners on one device,
+  // which is almost never what the user wants. Group by hostname, keep
+  // only the most-recently-added endpoint in each group. Genuinely
+  // different devices (Apple iPhone + Mozilla Firefox + Google FCM
+  // Android) live on different hostnames so each still gets its own
+  // banner.
+  const byHost = new Map();
+  for (const sub of subs) {
+    let host = '';
+    try { host = new URL(sub.endpoint).host; } catch { host = sub.endpoint || ''; }
+    byHost.set(host, sub);   // later entries overwrite earlier — most-recent wins
+  }
+  const sendList = Array.from(byHost.values());
+
   const expiredEndpoints = [];
   let sent = 0;
   let failed = 0;
-  for (const sub of subs) {
+  for (const sub of sendList) {
     try {
       await webPush.sendNotification(sub, message, pushOptions);
       sent++;
@@ -287,10 +299,14 @@ export async function sendToPlayer(playerId, payload, notifType, pushOptions) {
   // Per-call success log. Answers "did the server actually fire that
   // notif?" the next time a missed alert gets reported. Absence of this
   // line means the pref/type/no-subs gate fired upstream — the function
-  // returned without ever attempting a send.
+  // returned without ever attempting a send. The "subs" count reflects
+  // the post-collapse send list (1 per physical device), not raw
+  // subscriptions[playerId].length.
+  const collapsed = subs.length - sendList.length;
   console.log(
     `[push] sent ${notifType || 'no-type'} to ${playerId} ` +
-    `(${sent}/${subs.length} device(s)` +
+    `(${sent}/${sendList.length} device(s)` +
+    (collapsed > 0 ? `, ${collapsed} collapsed` : '') +
     (failed ? `, ${failed} failed` : '') +
     (expiredEndpoints.length ? `, ${expiredEndpoints.length} expired` : '') +
     `)`
