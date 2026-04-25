@@ -456,13 +456,28 @@ function saveKeyPoolingOpt() {
 /**
  * Record a player's opt-in/out decision for the key pool.
  * Stores the factionId at opt-in time so if they later switch factions
- * their key isn't used for their old faction's pool.
+ * their key isn't used for their old faction's pool. Optional auth
+ * metadata (accessLevel, factionSelections) lets the per-purpose router
+ * pick a key whose access actually supports the call being made.
  */
-export function setKeyPoolingOpt(playerId, enabled, factionId) {
-  keyPoolingOpt.set(String(playerId), {
+export function setKeyPoolingOpt(playerId, enabled, factionId, meta = {}) {
+  const existing = keyPoolingOpt.get(String(playerId)) || {};
+  const next = {
+    ...existing,
     enabled: !!enabled,
     factionId: String(factionId || ""),
-  });
+  };
+  // Auth metadata is captured opportunistically — when present it lets
+  // the per-purpose router pick a key whose access actually supports
+  // the call being made. Absent fields are preserved from the previous
+  // record (so a re-opt without re-auth doesn't wipe known capabilities).
+  if (meta.accessLevel != null)        next.accessLevel = Number(meta.accessLevel);
+  if (Array.isArray(meta.factionSelections)) next.factionSelections = meta.factionSelections.map(String);
+  if (enabled) {
+    delete next.quarantinedAt;
+    delete next.quarantineReason;
+  }
+  keyPoolingOpt.set(String(playerId), next);
   saveKeyPoolingOpt();
 }
 
@@ -478,31 +493,90 @@ export function getKeyPoolingOpt(playerId) {
 /**
  * Create a default pool opt-in for a player if they don't already have
  * an explicit record. Called from /api/auth. Existing records (including
- * explicit opt-outs) are preserved.
+ * explicit opt-outs) are preserved. If meta (accessLevel, factionSelections)
+ * is provided AND the existing record predates per-purpose routing,
+ * backfill the capabilities so the router can dispatch correctly.
  */
-export function ensureDefaultPoolOpt(playerId, factionId) {
+export function ensureDefaultPoolOpt(playerId, factionId, meta = {}) {
   const pid = String(playerId);
-  if (keyPoolingOpt.has(pid)) return false; // already has an explicit record
+  const existing = keyPoolingOpt.get(pid);
+  if (existing) {
+    // Backfill auth metadata onto pre-routing entries so the per-purpose
+    // router can start dispatching them correctly without forcing the
+    // user to re-toggle in settings.
+    let changed = false;
+    const patched = { ...existing };
+    if (meta.accessLevel != null && existing.accessLevel == null) {
+      patched.accessLevel = Number(meta.accessLevel); changed = true;
+    }
+    if (Array.isArray(meta.factionSelections) && !Array.isArray(existing.factionSelections)) {
+      patched.factionSelections = meta.factionSelections.map(String); changed = true;
+    }
+    if (changed) {
+      keyPoolingOpt.set(pid, patched);
+      saveKeyPoolingOpt();
+    }
+    return false; // not a fresh opt-in
+  }
   keyPoolingOpt.set(pid, {
     enabled: true,
     factionId: String(factionId || ""),
+    ...(meta.accessLevel != null ? { accessLevel: Number(meta.accessLevel) } : {}),
+    ...(Array.isArray(meta.factionSelections) ? { factionSelections: meta.factionSelections.map(String) } : {}),
   });
   saveKeyPoolingOpt();
   return true;
 }
 
+// ── Per-purpose key routing ────────────────────────────────────────────
+// Every server-side poller has a single faction selection it depends on.
+// Mapping the poller's purpose tag to that selection lets the router
+// pick from the SUBSET of pool keys that actually support the call.
+// Keys with limited selections still contribute to capacity for the
+// purposes they cover; they just don't get rotated onto purposes they'd
+// fail at. Unknown purposes get the unfiltered pool (legacy behavior).
+const PURPOSE_REQUIRED_SELECTION = {
+  "attacks-feed":  "attacks",
+  "enemy-attacks": "attacks",
+  "war-status":    "members",
+  "chain":         "chain",
+};
+
+/** Look up the faction selection a poller's purpose requires, if any. */
+export function selectionForPurpose(purpose) {
+  return PURPOSE_REQUIRED_SELECTION[purpose] || null;
+}
+
 /**
- * Return all keys opted into the faction's pool, stable-sorted by
+ * Return all keys opted into the faction's pool, optionally filtered to
+ * those that support a specific faction selection. Stable-sorted by
  * playerId so purpose-hash rotation is deterministic across restarts.
+ *
+ * Filter rules when requiredSelection is non-null:
+ *   - Full Access (level 4) keys always pass (every selection implicit).
+ *   - Limited (level 3) keys pass iff their factionSelections list
+ *     contains requiredSelection.
+ *   - Keys with no recorded accessLevel/selections (pre-routing entries
+ *     that haven't re-authed yet) are included. The auto-quarantine
+ *     handles the case where they turn out to fail in practice.
  */
-export function getPooledKeysForFaction(factionId) {
+export function getPooledKeysForFaction(factionId, requiredSelection = null) {
   const fid = String(factionId);
   const out = [];
   for (const [playerId, opt] of keyPoolingOpt) {
     if (!opt.enabled) continue;
     if (String(opt.factionId) !== fid) continue;
     const key = apiKeys.get(playerId);
-    if (key) out.push({ playerId, key });
+    if (!key) continue;
+    if (requiredSelection) {
+      // Full Access always qualifies; otherwise need an explicit grant.
+      const hasFull = Number(opt.accessLevel) >= 4;
+      const hasSelection = Array.isArray(opt.factionSelections)
+        && opt.factionSelections.includes(requiredSelection);
+      const unknown = opt.accessLevel == null && !Array.isArray(opt.factionSelections);
+      if (!hasFull && !hasSelection && !unknown) continue;
+    }
+    out.push({ playerId, key });
   }
   out.sort((a, b) => a.playerId.localeCompare(b.playerId));
   return out;
@@ -734,7 +808,15 @@ export function loadMemberBars() {
 }
 
 export function getPollingKey(factionId, purpose, index) {
-  const pool = getPooledKeysForFaction(factionId);
+  const required = selectionForPurpose(purpose);
+  let pool = getPooledKeysForFaction(factionId, required);
+  // Safety net: if the per-purpose filter narrowed the pool to zero
+  // (e.g. every key is Limited and none have the required selection),
+  // fall back to the unfiltered pool. Auto-quarantine will catch any
+  // resulting failures and the next call will see one fewer doomed key.
+  if (pool.length === 0 && required) {
+    pool = getPooledKeysForFaction(factionId, null);
+  }
   let picked = null;
   let pickedPid = null;
   if (pool.length > 0) {

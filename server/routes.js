@@ -452,14 +452,19 @@ router.post("/api/auth", async (req, res) => {
     // told on first login (via the disclosure flag in the /api/auth
     // response) so they can show a one-time notice.
     //
-    // BUT only if the key is actually pool-eligible (Full Access, or
-    // Limited with attacks/members/chain selections). Otherwise we'd add
-    // a key that's guaranteed to fail every rotation — auto-quarantine
-    // would catch it on the first cycle, but not adding it in the first
-    // place is cleaner and avoids a noisy log line.
+    // We pass accessLevel + factionSelections so the per-purpose router
+    // can dispatch correctly: a Limited key only needs ONE relevant
+    // faction selection (e.g. `chain`) to be useful — it'll be picked
+    // for chain-monitor calls but skipped for attacks-feed. Public /
+    // Minimal keys (level < 3) still aren't useful for any pool poller,
+    // so we skip the opt-in entirely for them.
+    const meta = {
+      accessLevel: info.accessLevel,
+      factionSelections: info.factionSelections,
+    };
     const eligibility = isPoolEligible(info);
     const createdDefault = eligibility.eligible
-      ? store.ensureDefaultPoolOpt(info.playerId, info.factionId)
+      ? store.ensureDefaultPoolOpt(info.playerId, info.factionId, meta)
       : false;
     if (!eligibility.eligible) {
       console.log(`[auth] Pool opt-in skipped for ${info.playerName} (${info.playerId}): ${eligibility.reason}`);
@@ -939,10 +944,12 @@ router.get("/api/pool-opt", requireAuth, (req, res) => {
 
 router.post("/api/pool-opt", requireAuth, async (req, res) => {
   const { enabled } = (req.body || {});
-  // Opt-OUT is always allowed. Opt-IN must re-verify the key has the
-  // selections every pool poller depends on — otherwise the rotation
-  // would land on a doomed key and auto-quarantine it on the next
-  // failure. Cleaner to refuse up front with an actionable message.
+  // Opt-OUT is always allowed. Opt-IN must re-verify the key has at
+  // least one pool-routable faction selection — Public/Minimal keys
+  // (or Limited keys with no useful selections) can't help any poller
+  // so we refuse up front with an actionable message.
+  let meta = {};
+  let useful = [];
   if (enabled) {
     const apiKey = store.getApiKeyForPlayer(req.user.playerId);
     if (!apiKey) {
@@ -954,18 +961,21 @@ router.post("/api/pool-opt", requireAuth, async (req, res) => {
       if (!eligibility.eligible) {
         return res.status(400).json({
           error: eligibility.reason,
-          missing: eligibility.missing,
+          useful: eligibility.useful,
         });
       }
+      meta = { accessLevel: info.accessLevel, factionSelections: info.factionSelections };
+      useful = eligibility.useful;
     } catch (err) {
       return res.status(400).json({ error: `Could not verify key: ${err.message}` });
     }
   }
-  store.setKeyPoolingOpt(req.user.playerId, !!enabled, req.user.factionId);
+  store.setKeyPoolingOpt(req.user.playerId, !!enabled, req.user.factionId, meta);
   console.log(
-    `[pool-opt] ${req.user.playerName} (${req.user.playerId}) ${enabled ? "opted IN to" : "opted OUT of"} faction ${req.user.factionId} key pool`
+    `[pool-opt] ${req.user.playerName} (${req.user.playerId}) ${enabled ? "opted IN to" : "opted OUT of"} faction ${req.user.factionId} key pool` +
+    (enabled && useful.length ? ` — useful for: ${useful.join(', ')}` : '')
   );
-  return res.json({ ok: true, enabled: !!enabled });
+  return res.json({ ok: true, enabled: !!enabled, useful });
 });
 
 // ── POST /api/call ───────────────────────────────────────────────────────

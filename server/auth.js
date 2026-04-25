@@ -104,38 +104,42 @@ export async function verifyTornApiKey(apiKey) {
 
 // ── Pool eligibility ────────────────────────────────────────────────────
 
-// Selections every pool poller depends on. attacks-feed needs `attacks`,
-// war-status needs `members`, chain-monitor needs `chain`. A key missing
-// any of these will produce code-7 errors when the rotation lands on it
-// — auto-quarantine catches them after the first failure, but it's
-// nicer to reject up front so we never add a doomed key in the first
-// place.
-const REQUIRED_POOL_SELECTIONS = ["attacks", "members", "chain"];
+// Faction selections any pool poller might use. With per-purpose
+// routing in store.js the key only needs ONE of these to be useful —
+// it'll be picked for the matching purpose's calls and skipped for
+// the others. A key with NONE of these can't help any pool poller,
+// so it shouldn't be added.
+const ROUTABLE_POOL_SELECTIONS = ["attacks", "members", "chain"];
 
 /**
  * Decide if an authenticated key is suitable for the rotating pool.
- * Returns { eligible: bool, reason: string|null, missing: string[] }.
+ * Returns { eligible: bool, reason: string|null, useful: string[] }.
  *
- * Full Access (level 4) keys always qualify because every faction
- * selection is implicitly granted. Limited Access (level 3) keys
- * qualify only if their explicit selections list contains every entry
- * in REQUIRED_POOL_SELECTIONS. Public/Minimal keys never qualify.
+ * Full Access (level 4) keys always qualify (every faction selection
+ * is implicitly granted). Limited Access (level 3) keys qualify if
+ * their selections include AT LEAST ONE of the routable selections —
+ * the per-purpose router in store.js dispatches each call to a key
+ * that supports it, so a Limited key contributes to capacity for the
+ * purposes it covers and is skipped for the rest. Public / Minimal
+ * (level < 3) keys never qualify.
  */
 export function isPoolEligible(authInfo) {
   if (!authInfo || authInfo.accessLevel < 3) {
-    return { eligible: false, reason: 'Pool requires a Limited+ Access key', missing: [] };
+    return { eligible: false, reason: 'Pool requires a Limited+ Access key', useful: [] };
   }
   if (authInfo.accessLevel >= 4) {
-    return { eligible: true, reason: null, missing: [] };
+    return { eligible: true, reason: null, useful: ROUTABLE_POOL_SELECTIONS.slice() };
   }
-  // Limited Access: must have every required faction selection.
+  // Limited Access: useful if at least one routable selection is granted.
   const have = new Set(authInfo.factionSelections || []);
-  const missing = REQUIRED_POOL_SELECTIONS.filter(s => !have.has(s));
-  if (missing.length === 0) return { eligible: true, reason: null, missing: [] };
+  const useful = ROUTABLE_POOL_SELECTIONS.filter(s => have.has(s));
+  if (useful.length > 0) {
+    return { eligible: true, reason: null, useful };
+  }
   return {
     eligible: false,
-    reason: `Limited Access key missing required faction selection(s): ${missing.join(', ')}. Re-issue your key with Full Access (or include those selections) to join the pool.`,
-    missing,
+    reason: `Limited Access key has none of the pool-routable faction selections (${ROUTABLE_POOL_SELECTIONS.join(', ')}). Enable at least one when generating your key.`,
+    useful: [],
   };
 }
 
