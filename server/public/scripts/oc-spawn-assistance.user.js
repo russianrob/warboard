@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.70
+// @version      3.1.75
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.75 — Loan + retrieve: accept both `entry.user.userID` and `entry.user.id` shapes. Torn's late-Apr 2026 auth refactor (changelog "Optimized authentication and last action updates by improving session log logic") flipped some loaned-item entries to expose the borrower as `user.id` instead of `user.userID`. The retrieve match condition (`String(entry.user.userID) === String(userID)`) silently failed against the new shape — every retrieve from the Unused tab raised "Could not find armory item" with no context (the catch block only set "Error" on the button). Fix: cascade `entry.user.userID ?? entry.user.id` everywhere we read the borrower id, both in retrieve's match check AND in `mgr_fetchArmoryIDsForCategory`'s isUnused check (which was mis-classifying loaned-to-others items as available, risking double-loans). Also widened retrieve's category sweep from [hint, alternate-spelling-of-armor] to every loanable bucket (utilities/weapons/armor/armour/medical/boosters/drugs/clothing) since Torn's `/v2/faction` selection name doesn't always match the page-AJAX `type` field. Replaced the silent "Error" button text with the actual reason (truncated to 28 chars, full text in tooltip + console.warn), so the next time something breaks the fix is one screenshot away.
 // v3.1.70 — Banker-claim optimistic clear on vault-request Send. Hitting Send now POSTs to /api/oc/vault-request/:id/claim before opening the Controls tab. Server marks the request as claimed-by-this-banker and hides it from listRequests() for every viewer immediately, so all admins see it disappear without waiting for the 20s fundsnews poll → 15s client poll cycle (previously took ~3 manual refreshes to clear). If the matching fundsnews event arrives within the 90s claim TTL, the request is fully deleted as before. If the banker bails (closes Torn tab, never sends the money), the claim expires and the request reappears on every client's next list fetch — no orphaned requests. Two bankers clicking the same Send near-simultaneously: the second gets a 409 Conflict with "Already claimed by X" and their UI shows that message instead of removing the row.
 // v3.1.69 — Scope DOM reader now rejects elements nested inside a completed-crime reward block. Torn's Completed tab shows per-OC "+N scope" chips (e.g. Pet Project +2 scope) whose wrapper class also contains the word "scope", so strategies 1 and 2 were scraping those per-OC rewards and pushing them as if they were the faction's current scope balance. That's the source of the 16 → 2 → 5 oscillation in v3.1.68's stability window logs. New insideCompletedContext() walks up ancestors and bails on any node whose className matches completed|executed|ended|reward|payout|result|history. Both strategy 1 (class-match) and strategy 2 (text-match) honor the guard.
 // v3.1.68 — Scope stability window: Torn's React re-renders the scope badge during OC state transitions and the DOM class-match strategy sometimes catches intermediate values. Observed 04-24 05:00:24-05:00:41 EDT: 16 → 2 → 5 → 2 pushed in 20s, all class:container___THb7U scope_, when real scope was 16. Delay the commit + push by 2.5s; if a different value arrives inside the window, reset the timer and drop the transient. Legitimate scope changes settle well inside 2.5s so real edits feel ~live. Also moves CONFIG.SCOPE and GM_setValue inside the timer (previously they committed immediately; only the push was debounced).
@@ -261,7 +262,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.70';
+    const SCRIPT_VERSION = '3.1.75';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -276,7 +277,7 @@
     const MET_CRIMES_API  = "https://api.torn.com/v2/faction/crimes";
     const MET_NEWS_API    = "https://api.torn.com/v2/faction/news";
     const MET_ITEMS_API   = "https://api.torn.com/v2/torn/items";
-    const MET_API_COMMENT = "OC-Spawn-Metrics";
+    const MET_API_COMMENT = "ocs-mtrcs";  // 9 chars — Torn truncates `comment=` to 10
     const MET_API_PAGE_CAP = 100;
     const MET_FIG = "\u2007";
     const MET_ITEM_CACHE_KEY = "oc-spawn-metrics:items_cache_v1.1";
@@ -1263,7 +1264,7 @@
         if (mgr_membersLoaded) return;
         const key = getApiKey();
         if (!key || key === 'YOUR_API_KEY_HERE') throw new Error('API key required');
-        const res = await fetch(`https://api.torn.com/v2/faction/members?key=${key}`);
+        const res = await fetch(`https://api.torn.com/v2/faction/members?key=${key}&comment=oc-spawn`);
         if (!res.ok) throw new Error('Failed to load members');
         const data = await res.json();
         const members = Array.isArray(data?.members) ? data.members : Object.values(data?.members || {});
@@ -1284,7 +1285,7 @@
         if (!key || key === 'YOUR_API_KEY_HERE') throw new Error('API key required');
         _mgr_crimesInFlight = (async () => {
             try {
-                const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}`);
+                const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}&comment=oc-spawn`);
                 if (!res.ok) throw new Error('Failed to load OC data');
                 const data = await res.json();
                 _mgr_crimesCache = { data, ts: Date.now() };
@@ -1335,7 +1336,7 @@
         if (!key || key === 'YOUR_API_KEY_HERE') throw new Error('API key required');
         const now = Math.floor(Date.now() / 1000);
         const thirtyDaysAgo = now - (30 * 24 * 60 * 60);
-        const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=successful&filter=executed_at&from=${thirtyDaysAgo}&to=${now}&sort=DESC&limit=100&key=${key}`);
+        const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=successful&filter=executed_at&from=${thirtyDaysAgo}&to=${now}&sort=DESC&limit=100&key=${key}&comment=oc-spawn`);
         if (!res.ok) throw new Error('Failed to load completed crimes');
         const data = await res.json();
         if (data?.error) throw new Error(`API error: ${data.error.error || JSON.stringify(data.error)}`);
@@ -1360,7 +1361,7 @@
         try {
             const key = getApiKey();
             if (!key || key === 'YOUR_API_KEY_HERE') return;
-            const res = await fetch(`https://api.torn.com/v2/torn/items?ids=${unique.join(',')}&key=${key}`);
+            const res = await fetch(`https://api.torn.com/v2/torn/items?ids=${unique.join(',')}&key=${key}&comment=oc-spawn`);
             const data = await res.json();
             const items = Array.isArray(data?.items) ? data.items : Object.values(data?.items || {});
             items.forEach(item => { if (item.id && item.name) mgr_setItemName(item.id, item.name); });
@@ -1372,7 +1373,7 @@
         const key = getApiKey();
         if (!key || key === 'YOUR_API_KEY_HERE') throw new Error('API key required');
         const selections = ARMORY_API_SELECTIONS.join(',');
-        const r = await gmRequest(`https://api.torn.com/v2/faction/?selections=${selections}&key=${encodeURIComponent(key)}`);
+        const r = await gmRequest(`https://api.torn.com/v2/faction/?selections=${selections}&key=${encodeURIComponent(key)}&comment=oc-spawn`);
         if (!r.ok) throw new Error('Failed to load armory data');
         const data = r.data;
         const allItems = [];
@@ -1413,7 +1414,14 @@
                 if (itemsArr.length === 0) break;
                 let added = 0;
                 for (const entry of itemsArr) {
-                    const isUnused = entry.user === false || entry.user === '' || entry.user === 0 || (entry.user && !entry.user.userID);
+                    // Accept either user.userID OR user.id when checking
+                    // "is this item loaned to someone?" — Torn ships
+                    // both shapes after the late-Apr 2026 auth refactor.
+                    // Without the e.user.id fallback, items loaned to
+                    // other members were being mis-classified as unused
+                    // and could be re-loaned over the existing loan.
+                    const occupant = entry.user && (entry.user.userID ?? entry.user.id);
+                    const isUnused = entry.user === false || entry.user === '' || entry.user === 0 || (entry.user && !occupant);
                     if (isUnused && entry.armoryID) {
                         ids.push({ armoryID: entry.armoryID, itemID: Number(entry.itemID) });
                         added++;
@@ -1826,6 +1834,13 @@
         if (r.status === 429) {
             const err = new Error(r.data?.error || 'Too many requests — please wait a moment.');
             err.status = 429; throw err;
+        }
+        // 503 = Torn-side transient (gateway timeout / backend slow). Surface
+        // as a tagged transient error so the retry loop can show a friendly
+        // "Torn slow" message instead of the bare "Server error 503".
+        if (r.status === 503) {
+            const err = new Error(r.data?.error || 'Torn API is slow right now — retrying…');
+            err.status = 503; err.transient = true; throw err;
         }
         if (!r.ok) throw new Error(r.data?.error || `Server error (${r.status})`);
         return r.data;
@@ -3165,10 +3180,13 @@
                     html += `<div style="font-size:10px;color:#ef4444;padding:2px 0;">\u{1f6a8} <b>${d.name}</b> — ${d.position} (${d.cpr.toFixed(0)}% CPR, ${d.weight.toFixed(0)}% weight)</div>`;
                 }
             }
-            // Weakest link (if no danger slots, show weakest)
+            // Weakest link (if no danger slots, show weakest). New members
+            // (no CPR data yet) get a "new member" tag instead of the
+            // misleading "0% CPR" — they're an unknown, not a known weak link.
             if ((!c.dangerSlots || c.dangerSlots.length === 0) && c.weakestLink) {
                 const w = c.weakestLink;
-                html += `<div style="font-size:10px;color:#e5b567;padding:2px 0;">Weakest: <b>${w.name}</b> — ${w.position} (${w.cpr.toFixed(0)}% CPR, ${w.weight.toFixed(0)}% weight)</div>`;
+                const cprLabel = w.isNewMember ? 'new member' : `${w.cpr.toFixed(0)}% CPR`;
+                html += `<div style="font-size:10px;color:#e5b567;padding:2px 0;">Weakest: <b>${w.name}</b> — ${w.position} (${cprLabel}, ${w.weight.toFixed(0)}% weight)</div>`;
             }
             html += `</div>`;
         }
@@ -4792,41 +4810,76 @@
                     // Step 2: on armory tab, perform retrieve
                     btn.dataset.retrieving = 'true'; btn.disabled = true; btn.textContent = 'Finding item…';
                     try {
-                        const cat = btn.dataset.category || 'utilities';
+                        const hintCat = btn.dataset.category || 'utilities';
                         const itemID = parseInt(btn.dataset.itemid, 10);
                         const userID = parseInt(btn.dataset.userid, 10);
-                        // Fetch armoryIDs from page AJAX to find the specific loaned item
-                        const categoriesToTry = [cat];
-                        if (cat === 'armor') categoriesToTry.push('armour');
+                        // Sweep order: try the cached hint first (fast),
+                        // then every other loanable bucket. Torn's
+                        // /v2/faction selection name (utilities / armor /
+                        // …) doesn't always match the page-AJAX `type`,
+                        // and after Torn's auth refactor (changelog
+                        // 21–28 Apr) loaned-entry user keys flip between
+                        // user.userID and user.id, so a tight single-cat
+                        // search now misses items it used to find.
+                        const sweep = ['utilities','weapons','armor','armour','medical','boosters','drugs','clothing'];
+                        const categoriesToTry = Array.from(new Set([hintCat, ...(hintCat === 'armor' ? ['armour'] : []), ...sweep]));
                         let armoryID = null;
+                        let resolvedCat = hintCat;
+                        const reasons = [];
                         for (const c of categoriesToTry) {
                             const rfcv = mgr_getRfcvToken();
-                            if (!rfcv) throw new Error('Missing RFCV token');
+                            if (!rfcv) throw new Error('Missing RFCV cookie — refresh the page and try again.');
                             let start = 0;
+                            let pages = 0;
+                            let httpFail = '';
                             while (start < 1000 && !armoryID) {
                                 const body = new URLSearchParams({ step: 'armouryTabContent', type: c, start: String(start), ajax: 'true' });
                                 const res = await fetch(`https://www.torn.com/factions.php?rfcv=${rfcv}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' }, body, credentials: 'same-origin' });
-                                if (!res.ok) break;
-                                const data = await res.json();
-                                if (!data?.items) break;
+                                if (!res.ok) { httpFail = `http-${res.status}`; break; }
+                                let data;
+                                try { data = await res.json(); }
+                                catch { httpFail = 'parse-fail'; break; }
+                                if (!data?.items) { httpFail = 'no-items-key'; break; }
                                 const itemsArr = Array.isArray(data.items) ? data.items : Object.values(data.items);
                                 if (itemsArr.length === 0) break;
+                                pages += 1;
                                 for (const entry of itemsArr) {
-                                    if (Number(entry.itemID) === itemID && entry.user && String(entry.user.userID) === String(userID) && entry.armoryID) {
-                                        armoryID = entry.armoryID; break;
+                                    if (Number(entry.itemID) !== itemID) continue;
+                                    // Accept either user.userID OR user.id —
+                                    // Torn ships both shapes after this
+                                    // week's auth refactor.
+                                    const uid = entry.user && (entry.user.userID ?? entry.user.id);
+                                    if (uid !== undefined && String(uid) === String(userID) && entry.armoryID) {
+                                        armoryID = entry.armoryID;
+                                        resolvedCat = c;
+                                        break;
                                     }
                                 }
                                 if (itemsArr.length < 50) break;
                                 start += 50;
                             }
                             if (armoryID) break;
+                            reasons.push(`${c}:${httpFail || (pages === 0 ? 'empty-bucket' : `no-match-on-${pages}pg`)}`);
                         }
-                        if (!armoryID) throw new Error('Could not find armory item');
+                        if (!armoryID) {
+                            console.warn('[OC Mgr] Retrieve miss for itemID', itemID, 'user', userID, 'hint', hintCat, '— bucket reasons:', reasons.join(', '));
+                            throw new Error(`Not in armoury [${reasons.slice(0, 3).join(', ')}]`);
+                        }
                         btn.textContent = 'Retrieving…';
-                        const postType = ARMORY_TAB_TO_POST_TYPE[cat] || 'Tool';
+                        const postType = ARMORY_TAB_TO_POST_TYPE[resolvedCat] || 'Tool';
                         await mgr_retrieveItem({ armoryID, itemID, userID, userName: btn.dataset.username, postType });
                         btn.textContent = '✓ Retrieved'; btn.classList.add('mgr-btn-success');
-                    } catch (e) { btn.textContent = 'Error'; btn.classList.add('mgr-btn-warning'); btn.disabled = false; btn.dataset.retrieving = 'false'; }
+                    } catch (e) {
+                        // Surface the actual reason instead of just "Error"
+                        // — the silent catch was the reason every retrieve
+                        // failure read identically. Tooltip exposes the
+                        // full message; console.warn keeps the stack.
+                        console.warn('[OC Mgr] Retrieve failed:', e);
+                        btn.textContent = (e?.message || 'Error').slice(0, 28);
+                        btn.title = e?.message || String(e);
+                        btn.classList.add('mgr-btn-warning');
+                        btn.disabled = false; btn.dataset.retrieving = 'false';
+                    }
                 };
             });
         } catch (e) { content.innerHTML = `<div class="mgr-error">Error: ${e.message}</div>`; }
@@ -4980,13 +5033,20 @@
                         return;
                     }
                     if (err.status === 429 || attempt >= MAX_RETRIES) throw err;
-                    // Transient error — wait and retry
+                    // Transient error — wait and retry. 503 is Torn-side
+                    // (gateway timeout, backend slow); show a friendlier
+                    // hint than the generic "Retrying" so the user knows
+                    // it's not their key / their faction.
                     const delay = RETRY_DELAYS[attempt] || 20000;
+                    if (err.status === 503 || err.transient) {
+                        setStatus(`⏳ Torn API is slow — retrying… (${attempt + 1}/${MAX_RETRIES})`);
+                        _injectDispatcherStatus('⏳', 'Torn slow', '#f59e0b');
+                    }
                     console.warn(`[OC Spawn] Fetch attempt ${attempt + 1} failed: ${err.message}. Retrying in ${delay/1000}s…`);
                     await new Promise(r => setTimeout(r, delay));
                 }
             }
-            if (!fetchSuccess) throw new Error('Failed to fetch OC data after retries');
+            if (!fetchSuccess) throw new Error('Torn API is having issues right now — please refresh in a minute.');
 
             // No faction key cached yet — show actionable message based on Torn's error reason
             if (serverResp.pendingFactionData) {

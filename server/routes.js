@@ -76,6 +76,7 @@ function _adminLoginFail(ip) {
 }
 function _adminLoginClear(ip) { _adminLoginAttempts.delete(ip); }
 import * as store from "./store.js";
+import * as chat from "./chat.js";
 import { getAllowedBroadcastRoles, updateFactionSettings } from "./store.js";
 import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBasic, fetchRankedWarReport, fetchFactionAttacks } from "./torn-api.js";
 
@@ -531,13 +532,53 @@ router.get("/api/faction/:factionId/war", requireAuth, (req, res) => {
     return res.status(403).json({ error: "You are not a member of this faction" });
   }
 
-  // Find all wars for this faction
+  // Find all wars for this faction. Some legacy ranked-war records
+  // are missing warOrigTarget because warboard joined the war mid-flight
+  // before fetchRankedWar populated the original-target value. The
+  // synthetic `war_<factionId>` record always has it; coalesce that
+  // value into any sibling record missing the field so the timer
+  // computation works the same regardless of which warId surfaces here.
+  const allWars = [...store.getAllWars()].map(([, w]) => w);
+  const synthetic = allWars.find(w =>
+    w.factionId === factionId && w.warId === `war_${factionId}` && w.warOrigTarget,
+  );
   const result = [];
-  for (const [, war] of store.getAllWars()) {
+  for (const war of allWars) {
     if (war.factionId === factionId) {
+      // v3.1.74 (reverted): we tried aging `until` by our cache
+      // staleness, but Torn API itself caches the field — that double-
+      // compensation made the timer race ~10 s ahead of the FFS banner
+      // script's reading. The script never adjusts; it just displays
+      // whatever Torn most recently reported. Match that.
       result.push({
         warId: war.warId,
         enemyFactionId: war.enemyFactionId,
+        // v3.1.72: surface the enemy faction name on the wars endpoint
+        // so clients (warboard-native) can render the war header without
+        // a second /api/poll round trip. Mirrors what the userscript
+        // pulls from /api/poll → enemyFactionName.
+        enemyFactionName: war.enemyFactionName || null,
+        // Surface warEnded so clients can suppress ended wars without
+        // a second /api/poll round trip. Server keeps ended wars in
+        // its store so the userscript can still pull post-war reports
+        // for them; clients that want a clean "no active war" UX
+        // should filter the list locally where warEnded === true.
+        warEnded: war.warEnded || false,
+        warResult: war.warResult || null,
+        warScores: war.warScores || null,
+        // v3.1.73: warStart (epoch seconds) + warOrigTarget (initial
+        // target) let the warboard-native client run the same drop-per-
+        // hour formula as torn-ranked-war-timer.user.js without a poll
+        // round-trip. Both are populated by fetchRankedWar; warOrigTarget
+        // may be missing for legacy wars the server never re-fetched.
+        warStart: war.warStart || synthetic?.warStart || null,
+        warOrigTarget: war.warOrigTarget || synthetic?.warOrigTarget || null,
+        // currentTarget mirrors Torn API's `target` field — already
+        // dropped from the original. The native client uses this to
+        // back-calculate originalTarget the same way torn-ranked-war-
+        // timer does from the page DOM. Falls through synthetic when
+        // missing on the primary war record.
+        currentTarget: (war.warEta?.currentTarget) || (synthetic?.warEta?.currentTarget) || null,
         calls: war.calls,
         priorities: war.priorities,
         enemyStatuses: war.enemyStatuses,
@@ -1095,9 +1136,16 @@ router.post("/api/broadcast", requireAuth, (req, res) => {
     return res.status(403).json({ error: "Only leaders and bankers can broadcast to the faction." });
   }
 
-  const payload = { 
-    message: message, 
-    type: type || "info" 
+  const payload = {
+    message: message,
+    type: type || "info",
+    // Attribution — lets clients show "X sent: <message>" in their toast.
+    // Includes the sender so they ALSO see their own broadcast confirmed
+    // in-app (Socket.IO/SSE fan out to every client in the war room
+    // including the originator).
+    senderName: playerName,
+    senderId: String(playerId),
+    ts: Date.now(),
   };
 
   // 1. Broadcast to Socket.IO clients in this war room
@@ -1127,6 +1175,81 @@ router.post("/api/broadcast", requireAuth, (req, res) => {
   console.log(`[📣] Faction Broadcast sent to war ${warId} by ${playerName}: ${message}`);
 
   return res.json({ success: true });
+});
+
+// ── War chat ────────────────────────────────────────────────────────────
+// Per-war chat — anyone in the faction can post, admins (broadcast roles
+// + owner) can delete. Buffer is persisted to data/war-chat.json and
+// accumulates across war boundaries (history never auto-expires).
+
+const CHAT_RATE_WINDOW_MS = 5_000;
+const CHAT_RATE_MAX_MSGS  = 5;     // 5 messages per 5s per player → ~1/s burst
+const _chatRateBuckets = new Map(); // playerId → Array<ts>
+
+function chatRateLimited(playerId) {
+  const now = Date.now();
+  const bucket = (_chatRateBuckets.get(playerId) || []).filter(t => t > now - CHAT_RATE_WINDOW_MS);
+  bucket.push(now);
+  _chatRateBuckets.set(playerId, bucket);
+  return bucket.length > CHAT_RATE_MAX_MSGS;
+}
+
+router.get("/api/chat/:warId", requireAuth, (req, res) => {
+  const { warId } = req.params;
+  // Faction-gate — caller must be a member of the war's faction.
+  const war = store.getWar(warId);
+  if (!war) return res.status(404).json({ error: "War not found" });
+  if (String(war.factionId) !== String(req.user.factionId)) {
+    return res.status(403).json({ error: "Not a member of this war's faction" });
+  }
+  // No limit — return the full persisted history. Clients can window
+  // locally if they want a tail-only view.
+  return res.json({ messages: chat.getHistory(warId) });
+});
+
+router.post("/api/chat/:warId", requireAuth, (req, res) => {
+  const { warId } = req.params;
+  const { text } = (req.body || {});
+  const { playerId, playerName, factionPosition, factionId } = req.user;
+  if (!text || typeof text !== "string" || !text.trim()) {
+    return res.status(400).json({ error: "text is required" });
+  }
+  const war = store.getWar(warId);
+  if (!war) return res.status(404).json({ error: "War not found" });
+  if (String(war.factionId) !== String(factionId)) {
+    return res.status(403).json({ error: "Not a member of this war's faction" });
+  }
+  if (chatRateLimited(playerId)) {
+    return res.status(429).json({ error: "Slow down — try again in a few seconds." });
+  }
+  const msg = chat.addMessage(warId, { playerId, playerName, factionPosition, text });
+  if (!msg) return res.status(400).json({ error: "Empty message" });
+  // Fan out — Socket.IO + SSE to every client in this war's room.
+  if (io) io.to(`war_${warId}`).emit("chat_message", msg);
+  broadcastSSE(warId, { type: "chat_message", ...msg });
+  return res.json({ message: msg });
+});
+
+router.delete("/api/chat/:warId/:msgId", requireAuth, (req, res) => {
+  const { warId, msgId } = req.params;
+  const { playerId, factionPosition, factionId } = req.user;
+  const war = store.getWar(warId);
+  if (!war) return res.status(404).json({ error: "War not found" });
+  if (String(war.factionId) !== String(factionId)) {
+    return res.status(403).json({ error: "Not a member of this war's faction" });
+  }
+  // Admin gate — broadcast roles + global owner can delete.
+  const allowed = getAllowedBroadcastRoles(factionId);
+  const isLeader = allowed.includes((factionPosition || "").toLowerCase());
+  const isOwner  = String(playerId) === "137558";
+  if (!isLeader && !isOwner) {
+    return res.status(403).json({ error: "Only admins can delete chat messages" });
+  }
+  const ok = chat.deleteMessage(warId, msgId);
+  if (!ok) return res.status(404).json({ error: "Message not found" });
+  if (io) io.to(`war_${warId}`).emit("chat_deleted", { warId, msgId });
+  broadcastSSE(warId, { type: "chat_deleted", warId, msgId });
+  return res.json({ ok: true });
 });
 
 // ── POST /api/priority ──────────────────────────────────────────────────
@@ -1313,7 +1436,7 @@ router.post("/api/faction-key", requireAuth, async (req, res) => {
 
   // Validate the key by making a test call to Torn API
   try {
-    const url = `https://api.torn.com/user/?selections=basic&key=${encodeURIComponent(apiKey)}`;
+    const url = `https://api.torn.com/user/?selections=basic&key=${encodeURIComponent(apiKey)}&comment=wb-routes`;
     const tornRes = await fetch(url);
     if (!tornRes.ok) {
       return res.status(502).json({ error: `Torn API returned HTTP ${tornRes.status}` });
@@ -1344,6 +1467,20 @@ function handleRemoveFactionKey(req, res) {
 router.delete("/api/faction-key", requireAuth, handleRemoveFactionKey);
 // POST alias for PDA compatibility (PDA's WebView only supports GET/POST)
 router.post("/api/faction-key/remove", requireAuth, handleRemoveFactionKey);
+
+// ── GET /api/faction-key/status ───────────────────────────────────────────
+// Tells the native settings UIs whether a faction-wide key is on file
+// without leaking the key itself. Used by the iOS / Android Admin
+// sections so they can show "stored / not stored" + a Remove button.
+
+router.get("/api/faction-key/status", requireAuth, (req, res) => {
+  const { factionId } = req.user;
+  const key = store.getFactionApiKey(factionId);
+  return res.json({
+    stored: !!key,
+    last4: key ? String(key).slice(-4) : null,
+  });
+});
 
 // ── POST /api/status ─────────────────────────────────────────────────────
 // Bulk update enemy statuses or report chain data.
@@ -1614,7 +1751,6 @@ router.get("/api/push/types", (_req, res) => {
 // of a FactionOps session. Lets partner factions (OC-Spawn-only) enable
 // device notifications via /push/setup without needing warboard access.
 router.post("/api/oc/push/subscribe", express.json({ limit: '8kb' }), async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
   const { subscription } = req.body || {};
@@ -1627,7 +1763,6 @@ router.post("/api/oc/push/subscribe", express.json({ limit: '8kb' }), async (req
 });
 
 router.post("/api/oc/push/unsubscribe", express.json({ limit: '4kb' }), async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
   const { endpoint } = req.body || {};
@@ -1639,7 +1774,6 @@ router.post("/api/oc/push/unsubscribe", express.json({ limit: '4kb' }), async (r
 });
 
 router.get("/api/oc/push/status", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
   return res.json({
@@ -1831,8 +1965,11 @@ router.get("/api/admin/pm2-logs", requireAuth, (req, res) => {
     return res.status(403).json({ error: "Unauthorized access. This endpoint is restricted." });
   }
 
-  const outLogPath = "/root/.pm2/logs/warboard-out.log";
-  const errLogPath = "/root/.pm2/logs/warboard-error.log";
+  // ecosystem.config.cjs redirects PM2 logs here so the unprivileged
+  // warboard user can read them (the default /root/.pm2/logs/ path is
+  // mode 700 → only root can stat the files).
+  const outLogPath = "/var/log/warboard/warboard-out.log";
+  const errLogPath = "/var/log/warboard/warboard-error.log";
 
   // Mask any API keys that appear in logs (16-char alphanumeric Torn API keys)
   const scrubKeys = (text) => text.replace(/\b([A-Za-z0-9]{12,20})\b/g, (match) => {
@@ -2368,7 +2505,10 @@ async function handleWarReport(req, res) {
     return res.status(503).json({ error: "No API key available — set a faction API key in settings" });
   }
 
-  // Accept estimates from POST body
+  // Client may pre-fill estimates (e.g. userscript with BSP cache). We
+  // merge server-side FFS results into the gaps so the native client
+  // doesn't need its own FFScouter integration. BSP > FFS in accuracy
+  // per tdup convention, so client-supplied values always win.
   const estimates = (req.body && req.body.estimates) || {};
 
   try {
@@ -2377,9 +2517,53 @@ async function handleWarReport(req, res) {
       fetchFactionBasic(war.factionId, apiKey),
       fetchFactionBasic(war.enemyFactionId, apiKey),
     ]);
+
+    // Collect member IDs needing an estimate. fetchFactionBasic returns
+    // a `members` map keyed by playerId.
+    const allIds = new Set([
+      ...Object.keys(ourData?.members || {}),
+      ...Object.keys(enemyData?.members || {}),
+    ]);
+    const missing = [...allIds].filter((id) => !estimates[id]);
+    if (missing.length > 0) {
+      const factionFfsKey = (store.getFactionSettings(factionId)?.oc_ffs_key) || '';
+      // Try FFS-purposed faction key first; fall back to the faction's
+      // active API key (most members have FFS registered against it).
+      const ffsKeys = [factionFfsKey, apiKey].filter((k) => typeof k === 'string' && k.length >= 10);
+      for (const ffsKey of ffsKeys) {
+        if (missing.length === 0) break;
+        try {
+          // FFScouter caps batches at ~50 IDs per request.
+          const remaining = [...missing];
+          while (remaining.length > 0) {
+            const batch = remaining.splice(0, 50);
+            const url = `https://ffscouter.com/api/v1/get-stats?key=${encodeURIComponent(ffsKey)}&targets=${batch.join(',')}`;
+            const r = await fetch(url);
+            if (!r.ok) break;
+            const arr = await r.json();
+            if (!Array.isArray(arr)) break;
+            for (const e of arr) {
+              if (!e || !e.player_id) continue;
+              const pid = String(e.player_id);
+              const total = Number(e.bs_estimate);
+              if (!Number.isFinite(total) || total <= 0) continue;
+              estimates[pid] = { total, source: 'ffs' };
+            }
+          }
+          // Drop IDs we just filled in so the next key (if any) only
+          // tries the still-missing ones.
+          for (let i = missing.length - 1; i >= 0; i--) {
+            if (estimates[missing[i]]) missing.splice(i, 1);
+          }
+        } catch (err) {
+          console.warn(`[scout] FFS lookup with key ****${ffsKey.slice(-4)} failed: ${err.message}`);
+        }
+      }
+    }
+
     const warScores = war.warScores || null;
     const report = analyzeWarReport(ourData, enemyData, estimates, warScores);
-    console.log(`[scout] Generated war report for war ${warId} (us: ${war.factionId}, enemy: ${war.enemyFactionId})`);
+    console.log(`[scout] Generated war report for war ${warId} (us: ${war.factionId}, enemy: ${war.enemyFactionId}); estimates filled: ${Object.keys(estimates).length}`);
     return res.json({ report });
   } catch (err) {
     console.error("[scout] War report failed:", err.message);
@@ -2389,6 +2573,121 @@ async function handleWarReport(req, res) {
 
 router.get("/api/war/:warId/scout-report", requireAuth, handleWarReport);
 router.post("/api/war/:warId/scout-report", requireAuth, handleWarReport);
+
+// ── GET /api/war/:warId/travel-info ─────────────────────────────────
+// FFScouter player-flights wrapper for the warboard-native targets list.
+// For every enemy currently traveling (or just landed abroad) we ask
+// FFScouter for `landingAt` + destination + travel method, so the
+// native client can render a live HH:MM:SS countdown to landing — same
+// info the FFS banner script paints inline on the war page. Per-war
+// 60-second cache to keep upstream calls bounded.
+const _warTravelCache = new Map(); // warId → { ts, travels }
+const WAR_TRAVEL_TTL_MS = 60_000;
+
+router.get("/api/war/:warId/travel-info", requireAuth, async (req, res) => {
+  const { warId } = req.params;
+  const { factionId } = req.user;
+  const war = requireWarMember(req, res, warId);
+  if (!war) return;
+
+  const cached = _warTravelCache.get(warId);
+  if (cached && (Date.now() - cached.ts) < WAR_TRAVEL_TTL_MS) {
+    return res.json({ travels: cached.travels, cached: true });
+  }
+
+  // Only enemies whose Torn status flags them as in-transit need a
+  // FFScouter lookup. "abroad" members are stationary; we still want
+  // their destination but no countdown matters.
+  const travelers = Object.entries(war.enemyStatuses || {})
+    .filter(([, s]) => s && (s.status === "traveling" || s.status === "abroad"))
+    .map(([id]) => id);
+  if (travelers.length === 0) {
+    _warTravelCache.set(warId, { ts: Date.now(), travels: {} });
+    return res.json({ travels: {} });
+  }
+
+  const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
+  const factionFfsKey = (store.getFactionSettings(factionId)?.oc_ffs_key) || '';
+
+  // fetchFlightInfo is single-target by FFScouter design; fan out
+  // sequentially to keep the call cap predictable. The 5-min in-process
+  // cache inside fetchFlightInfo covers the per-uid hot path.
+  const travels = {};
+  for (const uid of travelers) {
+    const info = await fetchFlightInfo(uid, factionFfsKey, apiKey);
+    if (info && (info.landingAt > 0 || info.destination)) {
+      travels[uid] = {
+        landingAt: info.landingAt || 0,
+        destination: info.destination || '',
+        returning: !!info.returning,
+        method: info.method || '',
+      };
+    }
+  }
+
+  _warTravelCache.set(warId, { ts: Date.now(), travels });
+  console.log(`[war/travel-info] War ${warId}: ${Object.keys(travels).length}/${travelers.length} flight estimates`);
+  return res.json({ travels });
+});
+
+// ── GET /api/war/:warId/enemy-stats ─────────────────────────────────
+// Returns FFScouter battle-stat estimates for every member of this
+// war's enemy faction. Cached per-war for 30 min so the warboard-native
+// targets list can light up stat chips without hammering FFScouter on
+// every poll. Same key chain as the scout report (faction's
+// `oc_ffs_key` first, faction's active API key as fallback).
+const _enemyStatsCache = new Map(); // warId → { ts, estimates }
+const ENEMY_STATS_TTL_MS = 30 * 60_000;
+
+router.get("/api/war/:warId/enemy-stats", requireAuth, async (req, res) => {
+  const { warId } = req.params;
+  const { factionId } = req.user;
+  const war = requireWarMember(req, res, warId);
+  if (!war) return;
+  if (!war.enemyFactionId) return res.json({ estimates: {} });
+
+  const cached = _enemyStatsCache.get(warId);
+  if (cached && (Date.now() - cached.ts) < ENEMY_STATS_TTL_MS) {
+    return res.json({ estimates: cached.estimates, cached: true });
+  }
+
+  const enemyIds = Object.keys(war.enemyStatuses || {});
+  if (enemyIds.length === 0) return res.json({ estimates: {} });
+
+  const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
+  const factionFfsKey = (store.getFactionSettings(factionId)?.oc_ffs_key) || '';
+  const ffsKeys = [factionFfsKey, apiKey].filter((k) => typeof k === 'string' && k.length >= 10);
+  if (ffsKeys.length === 0) return res.status(503).json({ error: "No FFScouter key available" });
+
+  const estimates = {};
+  const remaining = [...enemyIds];
+  for (const ffsKey of ffsKeys) {
+    if (remaining.length === 0) break;
+    try {
+      while (remaining.length > 0) {
+        const batch = remaining.splice(0, 50);
+        const url = `https://ffscouter.com/api/v1/get-stats?key=${encodeURIComponent(ffsKey)}&targets=${batch.join(',')}`;
+        const r = await fetch(url);
+        if (!r.ok) break;
+        const arr = await r.json();
+        if (!Array.isArray(arr)) break;
+        for (const e of arr) {
+          if (!e || !e.player_id) continue;
+          const pid = String(e.player_id);
+          const total = Number(e.bs_estimate);
+          if (!Number.isFinite(total) || total <= 0) continue;
+          estimates[pid] = total;
+        }
+      }
+    } catch (err) {
+      console.warn(`[enemy-stats] FFS lookup failed for war ${warId}: ${err.message}`);
+    }
+  }
+
+  _enemyStatsCache.set(warId, { ts: Date.now(), estimates });
+  console.log(`[enemy-stats] War ${warId}: ${Object.keys(estimates).length}/${enemyIds.length} enemies have FFS estimates`);
+  return res.json({ estimates });
+});
 
 // ── GET/POST /api/war/:warId/post-war-report ─────────────────────────
 // Generate a post-war performance analysis report.
@@ -2930,6 +3229,11 @@ router.get("/api/oc-verify", async (req, res) => {
 
 const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
 const _engineCache    = new Map(); // factionId  → { ts, engines, settingsHash }
+// Always-on engine cache for /api/oc/engines — runs ALL six engines
+// regardless of faction settings, so the warboard-native client gets a
+// complete payload without depending on the admin having toggled them
+// on. Faction-keyed, 1h TTL like _engineCache.
+const _allEnginesCache = new Map(); // factionId → { ts, engines }
 
 // In-memory flyer-delay observations. Clients POST per-render to
 // /api/oc/flyer-delay; we keep the max delayedSec seen per
@@ -3749,7 +4053,15 @@ function runFailureRisk(factionId, data) {
       if (!uid) { hasEmpty = true; continue; }
       const cpr = cprCache[uid];
       const posKey = `${crime.name}::${s.position}`;
-      const posCpr = cpr?.byPosition?.[posKey]?.cpr || cpr?.cpr || 0;
+      // Distinguish "no CPR data at all" (new members) from "real CPR
+      // that happens to be low." A new member with no history shouldn't
+      // be treated as 0% success — it's actually unknown. Use 50% neutral
+      // and flag the slot as estimated so admins can see why a low-data
+      // slot isn't dragging the OC down to "certain failure."
+      const rawPosCpr = cpr?.byPosition?.[posKey]?.cpr;
+      const rawOverall = cpr?.cpr;
+      const hasCprData = (rawPosCpr ?? 0) > 0 || (rawOverall ?? 0) > 0;
+      const posCpr = rawPosCpr || rawOverall || 0;
       // Look up weight from weights object using position label
       const posLabel = s.position_info?.label || s.position || '';
       const posBase = posLabel.replace(/\s*#\d+$/, ''); // strip "#1" etc
@@ -3771,18 +4083,33 @@ function runFailureRisk(factionId, data) {
           ? pHist.succeeded / (pHist.succeeded + pHist.failed)
           : null;
 
-      // Members at or above 60% CPR are near-certain success; only below 60% is real risk
-      // Blend with historical rate when available (70% CPR-based, 30% historical)
-      let effectiveSuccessProb = posCpr >= 60 ? 0.98 : posCpr / 100;
-      if (histSuccessRate !== null) {
-        effectiveSuccessProb = effectiveSuccessProb * 0.7 + histSuccessRate * 0.3;
+      // No CPR data → neutral 50% (uses position-wide history if we have
+      // it, else the bare 50%). Members at or above 60% CPR are
+      // near-certain success; only below 60% is real risk.
+      let effectiveSuccessProb;
+      if (!hasCprData) {
+        effectiveSuccessProb = histSuccessRate !== null ? histSuccessRate : 0.5;
+      } else {
+        effectiveSuccessProb = posCpr >= 60 ? 0.98 : posCpr / 100;
+        if (histSuccessRate !== null) {
+          effectiveSuccessProb = effectiveSuccessProb * 0.7 + histSuccessRate * 0.3;
+        }
       }
-      const riskScore = weight > 0 && posCpr < 60 ? Math.round((1 - effectiveSuccessProb) * weight) : 0;
+      // Risk score only makes sense when we have real data — a new
+      // member with no history isn't a "weakest link," they're an
+      // unknown. Setting riskScore=0 keeps them out of the weakestLink
+      // selection below.
+      const riskScore = (hasCprData && weight > 0 && posCpr < 60)
+        ? Math.round((1 - effectiveSuccessProb) * weight)
+        : 0;
       slotRisks.push({
         uid, name: nameMap[uid] || s.user?.name || uid,
         position: s.position, cpr: posCpr, weight,
         riskScore, successProb: effectiveSuccessProb,
         histRate: histSuccessRate !== null ? Math.round(histSuccessRate * 100) : null,
+        // True when there's no CPR cache for this member at all — UI can
+        // render a "new member" badge instead of pretending the CPR is 0.
+        isNewMember: !hasCprData,
       });
     }
 
@@ -3805,9 +4132,16 @@ function runFailureRisk(factionId, data) {
       crimeId: crime.id, crimeName: crime.name, difficulty: crime.difficulty || 0,
       failureRisk, overallSuccess: Math.round(overallSuccess * 1000) / 10,
       totalSlots, filledSlots: filledSlots.length, emptySlots: slots.filter(s => !s.user_id && !s.user?.id).length,
-      weakestLink: weakestLink ? { name: weakestLink.name, position: weakestLink.position, cpr: weakestLink.cpr, weight: weakestLink.weight } : null,
+      weakestLink: weakestLink ? {
+        name: weakestLink.name, position: weakestLink.position,
+        cpr: weakestLink.cpr, weight: weakestLink.weight,
+        isNewMember: !!weakestLink.isNewMember,
+      } : null,
       dangerSlots: dangerSlots.map(s => ({ name: s.name, position: s.position, cpr: s.cpr, weight: s.weight })),
       slotRisks,
+      // Count of new members in this OC — useful for the UI to show
+      // "+N new" when failure-risk is artificially uncertain.
+      newMembers: slotRisks.filter(s => s.isNewMember).length,
     });
   }
 
@@ -4552,7 +4886,6 @@ const OWNER_PLAYER_ID = 137558; // RussianRob — receives Xanax payments // Fac
 // Owner-only endpoints the admin UI calls to add / remove / list
 // partner factions without touching code.
 async function _resolveAdminKey(req, res) {
-  res.set("Access-Control-Allow-Origin", "*");
   // v4.9.97: prefer the cookie session issued via /admin/login over a
   // key in URL / body / header. Falls back to the key flow so CLI /
   // tooling that wants to script admin ops can still authenticate.
@@ -4721,7 +5054,7 @@ router.get("/api/admin/faction-lookup", async (req, res) => {
   const ownerKey = process.env.OWNER_API_KEY;
   if (!ownerKey) return res.status(503).json({ error: 'OWNER_API_KEY not configured' });
   try {
-    const r = await fetch(`https://api.torn.com/v2/faction/${fid}/basic?key=${encodeURIComponent(ownerKey)}`);
+    const r = await fetch(`https://api.torn.com/v2/faction/${fid}/basic?key=${encodeURIComponent(ownerKey)}&comment=wb-routes`);
     if (!r.ok) return res.status(502).json({ error: `Torn HTTP ${r.status}` });
     const d = await r.json();
     if (d?.error) return res.status(502).json({ error: d.error.error || String(d.error) });
@@ -4753,7 +5086,7 @@ const OC_MIN_VERSION = '3.1.4';
 // for a recent Xanax send to RussianRob. If found, grant access immediately.
 async function checkInstantXanax(apiKey, playerInfo) {
   try {
-    const res = await fetch(`https://api.torn.com/v2/user/events?limit=20&key=${encodeURIComponent(apiKey)}`);
+    const res = await fetch(`https://api.torn.com/v2/user/events?limit=20&key=${encodeURIComponent(apiKey)}&comment=wb-routes`);
     if (!res.ok) return false;
     const data = await res.json();
     if (data.error) return false;
@@ -4799,7 +5132,6 @@ function versionTooOld(v) {
 
 router.get("/api/oc/spawn-key", async (req, res) => {
   // Explicit wildcard CORS: WebKit (TornPDA) sends Origin: null which cors middleware skips
-  res.set("Access-Control-Allow-Origin", "*");
 
   // Build viewer object with subscription info
   function buildViewer(playerInfo) {
@@ -4864,6 +5196,17 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       console.log(`[oc/spawn-key] Verified ${info.playerName} (faction ${info.factionId})`);
     } catch (err) {
       console.warn("[oc/spawn-key] Verify failed:", err.message);
+      // Distinguish transient failures (5xx gateway timeouts, Torn code 5
+      // rate limits) from bad-key failures so the userscript can show a
+      // friendlier "Torn is slow, retrying" instead of a scary "Verify
+      // failed". Code 5 = Too many requests, clears within seconds.
+      const isTornTransient = /HTTP 5\d\d|\(code 5\)|Too many requests/.test(err.message);
+      if (isTornTransient) {
+        return res.status(503).json({
+          error: "Torn API rate limit hit — please retry in a few seconds.",
+          transient: true,
+        });
+      }
       return res.status(401).json({ error: err.message });
     }
   }
@@ -5039,7 +5382,6 @@ router.get("/api/oc/spawn-key", async (req, res) => {
 // the guard used in /api/oc/spawn-key so new /api/oc/* endpoints can
 // reuse the same auth path without duplicating code.
 async function resolveSpawnKeyInfo(req, res) {
-  res.set("Access-Control-Allow-Origin", "*");
   const key = req.query.key;
   if (!key || typeof key !== "string" || key.length < 10) {
     res.status(400).json({ error: "Invalid key" });
@@ -5063,6 +5405,83 @@ async function resolveSpawnKeyInfo(req, res) {
   }
   return info;
 }
+
+// ── GET /api/oc/engines ──────────────────────────────────────────────
+// Aggregated engine endpoint for the warboard-native Android app. Runs
+// all six engines (slotOptimizer, failureRisk, cprForecaster,
+// memberProjector, memberReliability, autoDispatcher) unconditionally,
+// caches the heavy ones per-faction for 1h, and serves the result as a
+// single JSON. Bypasses per-faction engine_X feature toggles so the
+// native client always gets a complete picture without depending on
+// admins having flipped each switch.
+router.get("/api/oc/engines", async (req, res) => {
+  if (versionTooOld(req.query.v)) {
+    return res.status(426).json({ error: 'Outdated client', updateUrl: 'https://tornwar.com/warboard-native.apk' });
+  }
+  const info = await resolveSpawnKeyInfo(req, res);
+  if (!info) return;
+  const fid = String(info.factionId);
+  const key = req.query.key;
+  try {
+    if (info.hasFactionAccess) addFactionKey(fid, key);
+    keyUsage.logCall(key, 'faction/spawn (engines)', `oc-engines:${info.playerName}`);
+    const data = await getOcSpawnData(info.factionId, key);
+
+    // Same joinable/effectiveTop recompute the spawn-key handler does
+    // — uses faction's MINCPR / CPR_BOOST instead of the cache defaults.
+    const fSettings = store.getFactionSettings(fid);
+    const fMincpr = fSettings.oc_mincpr ?? 60;
+    const fBoost  = fSettings.oc_cpr_boost ?? 15;
+    for (const [, d] of Object.entries(data.cprCache || {})) {
+      const lc = {};
+      for (const e of (d.entries || [])) {
+        if (!lc[e.diff]) lc[e.diff] = { sum: 0, count: 0 };
+        lc[e.diff].sum += e.rate; lc[e.diff].count += 1;
+      }
+      let effTop = d.highestLevel || 0;
+      for (let lvl = effTop; lvl >= 1; lvl--) {
+        const lv = lc[lvl]; if (!lv) continue;
+        if ((lv.sum / lv.count) >= fMincpr) { effTop = lvl; break; }
+      }
+      d.effectiveTop = effTop;
+      d.joinable = d.cpr >= fMincpr + fBoost ? Math.min(effTop + 1, 10) : effTop;
+    }
+
+    // Heavy engines — cached per-faction, 1h TTL. Skip recompute if
+    // the cached result is still warm.
+    const cached = _allEnginesCache.get(fid);
+    let heavy;
+    if (cached && (Date.now() - cached.ts) < 3600_000) {
+      heavy = cached.engines;
+    } else {
+      heavy = {
+        slotOptimizer:     runSlotOptimizer(fid, data),
+        failureRisk:       runFailureRisk(fid, data),
+        cprForecaster:     runCprForecaster(fid, data),
+        memberProjector:   runMemberProjector(fid, data),
+        memberReliability: runMemberReliability(fid, data),
+      };
+      _allEnginesCache.set(fid, { ts: Date.now(), engines: heavy });
+    }
+
+    // Auto-dispatcher is per-player so we run it on every request.
+    const engines = {
+      ...heavy,
+      autoDispatcher: runAutoDispatcher(fid, data, info.playerId),
+    };
+
+    return res.json({
+      engines,
+      viewer: { playerId: info.playerId, playerName: info.playerName, factionId: fid },
+      hitRates: computeScenarioHitRates(fid),
+      recentCompletions: computeRecentCompletions(fid, 10),
+      fetchedAt: Date.now(),
+    });
+  } catch (err) {
+    console.error(`[oc/engines] failed for ${info.playerName} (faction ${fid}): ${err.message}`);
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 // ── POST /api/oc/flyer-delay ──────────────────────────────────────────
 // Client-side observation: a crew member was flying while their OC was
@@ -5252,7 +5671,6 @@ async function fetchFlyerTakeoffTime(uid, preferredKey, factionKey) {
 // Server-side cache (5 min per uid) means 100-member wars fan out to
 // ~100 upstream calls over ~5min then coast on cached data.
 router.post("/api/flights/batch", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const callerKey = req.body?.key || req.query.key;
   if (!callerKey || callerKey.length < 10) return res.status(400).json({ error: "Missing key" });
   const suffix = callerKey.slice(-8);
@@ -5376,7 +5794,6 @@ function publicRateLimit(keySuffix, maxPerMin = 30) {
 }
 
 async function resolvePublicCaller(req, res) {
-  res.set("Access-Control-Allow-Origin", "*");
   const key = req.query.key || req.get("x-torn-key") || (req.body && req.body.key);
   if (!key || String(key).length < 10) {
     res.status(400).json({ error: "Missing Torn API key (pass as ?key= or X-Torn-Key header)" });
@@ -5563,7 +5980,6 @@ router.get("/api/public/oc/spawn", async (req, res) => {
 
 // -- GET /api/oc/settings ---------------------------------------------------
 router.get("/api/oc/settings", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const key = req.query.key;
   if (!key || key.length < 10) return res.status(400).json({ error: "Invalid key" });
   const suffix = key.slice(-8);
@@ -5619,7 +6035,6 @@ router.get("/api/oc/version", (req, res) => {
 // Admin-gated. Body: { key, ffsKey }. Never accepts the FFS key via URL
 // params — always POST body so it doesn't land in access logs.
 router.post("/api/oc/ffs-key", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const key = req.body?.key;
   if (!key || key.length < 10) return res.status(400).json({ error: "Missing key" });
   const suffix = key.slice(-8);
@@ -5677,7 +6092,6 @@ router.get("/api/oc/scope", async (req, res) => {
 
 // -- GET /api/oc/engines/update — engine toggles only, separate from main settings
 router.get("/api/oc/engines/update", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const key = req.query.key;
   if (!key || key.length < 10) return res.status(400).json({ error: "Invalid key" });
   const suffix = key.slice(-8);
@@ -5720,7 +6134,6 @@ router.get("/api/oc/engines/update", async (req, res) => {
 //   scenario  — OC name matching GetSupportedScenarios (e.g. "Blast from the Past")
 //   cprs      — comma-separated CPRs in slot order, e.g. "70,65,80,72,68,75"
 router.get("/api/oc/outcome", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const key = req.query.key;
   if (!key || key.length < 10) return res.status(400).json({ error: "Invalid key" });
   const suffix = key.slice(-8);
@@ -5762,7 +6175,6 @@ router.get("/api/oc/outcome", async (req, res) => {
 
 // -- GET /api/oc/settings/update --------------------------------------------
 router.get("/api/oc/settings/update", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const key = req.query.key;
   if (!key || key.length < 10) return res.status(400).json({ error: "Invalid key" });
   const suffix = key.slice(-8);
@@ -5816,7 +6228,6 @@ router.get("/api/oc/settings/update", async (req, res) => {
 // GET = list current admin roles for caller's faction
 // POST = replace the role list (caller must currently have admin access)
 router.get("/api/oc/admin-roles", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
   return res.json({
@@ -5826,7 +6237,6 @@ router.get("/api/oc/admin-roles", async (req, res) => {
 });
 
 router.post("/api/oc/admin-roles", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
   const { info } = ctx;
@@ -5915,7 +6325,6 @@ async function resolveVaultCaller(req, res) {
 
 // List pending requests for the caller's faction.
 router.get("/api/oc/vault-requests", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
   // Piggy-back cleanup: use the caller's own key to poll their own
@@ -5931,7 +6340,6 @@ router.get("/api/oc/vault-requests", async (req, res) => {
 
 // Submit a new request. Amount auto-capped at caller's vault balance.
 router.post("/api/oc/vault-request", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
   const { info, key } = ctx;
@@ -6014,7 +6422,6 @@ router.post("/api/oc/vault-request", async (req, res) => {
 // Return the caller's personal faction-vault balance so the client can
 // show a "max: $X" hint + a $ tap-to-fill button without guessing.
 router.get("/api/oc/vault-balance", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
   try {
@@ -6030,7 +6437,6 @@ router.get("/api/oc/vault-balance", async (req, res) => {
 // Cancel a request. Requester can cancel their own; faction-API-access/dev
 // can cancel any.
 router.delete("/api/oc/vault-request/:id", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
   const { info } = ctx;
@@ -6046,7 +6452,6 @@ router.delete("/api/oc/vault-request/:id", async (req, res) => {
 // the claim TTL, the claim expires and the request reappears on every
 // client's next list fetch.
 router.post("/api/oc/vault-request/:id/claim", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
   const { info } = ctx;
@@ -6061,6 +6466,26 @@ router.post("/api/oc/vault-request/:id/claim", async (req, res) => {
   return res.json({ ok: true, request: result });
 });
 
+// Banker / userscript-driven fulfillment report. Bankers' apps fire
+// this on Send-button tap (optimistic — assumes the click means the
+// transfer happened) so we don't depend on the daily-quota-limited
+// fundsnews poller. Auth via existing apiKey lookup (same path as
+// other /api/oc/* endpoints — no JWT required for parity).
+router.post("/api/oc/vault-fulfillment-report", async (req, res) => {
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info } = ctx;
+  const recipientId = req.body?.recipientId;
+  const amount = Number(req.body?.amount || 0);
+  const source = String(req.body?.source || 'unknown');
+  if (!recipientId || amount <= 0) {
+    return res.status(400).json({ error: "recipientId and positive amount required" });
+  }
+  const cleared = vaultRequests.reportFulfillment(info.factionId, recipientId, amount);
+  console.log(`[vault-requests] fulfillment-report from ${info.playerName} (${info.playerId}, source=${source}): ${cleared} cleared`);
+  return res.json({ ok: true, cleared });
+});
+
 // Per-user push-notification preferences, auth'd by Torn API key so the
 // OC Spawn Assistance settings panel can read/write them without needing
 // a FactionOps JWT. Currently exposes vault_request only; extend the
@@ -6068,7 +6493,6 @@ router.post("/api/oc/vault-request/:id/claim", async (req, res) => {
 const OC_PUSH_PREF_KEYS = new Set(["vault_request", "oc_ready_to_spawn", "oc_completed"]);
 
 router.get("/api/oc/notification-prefs", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
   const all = push.getPreferences(ctx.info.playerId) || {};
@@ -6078,7 +6502,6 @@ router.get("/api/oc/notification-prefs", async (req, res) => {
 });
 
 router.post("/api/oc/notification-prefs", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
   const prefs = (req.body && req.body.preferences) || {};
@@ -6116,7 +6539,6 @@ const OC_TEST_PRESETS = {
 };
 
 router.post("/api/oc/notification-test", express.json({ limit: '2kb' }), async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
   const type = String(req.body?.type || 'vault_request');
@@ -6155,6 +6577,99 @@ router.get("/api/debug/key-usage", async (req, res) => {
   }
 });
 
+// Localhost-only key-usage stats. No Torn key needed — but the IP gate
+// means it's only reachable from on-box callers (curl 127.0.0.1, pm2 helpers,
+// the dev shell). Public clients still need the auth'd /api/debug/key-usage
+// endpoint above.
+//
+// Optional query params:
+//   ?window=10        — minutes (1..15)
+//   ?keySuffix=XXXX   — filter to a single last-4
+//   ?playerId=137558  — aggregate ALL keys associated with this player
+//                       (their pooled personal key + the faction-stored
+//                       key if their factionId matches)
+router.get("/api/debug/key-usage-local", (req, res) => {
+  const ip = req.ip || req.socket?.remoteAddress || "";
+  if (ip !== "127.0.0.1" && ip !== "::1" && ip !== "::ffff:127.0.0.1") {
+    return res.status(403).json({ error: "localhost only" });
+  }
+  const windowMin = Math.max(1, Math.min(15, Number(req.query.window) || 10));
+  const keySuffix = req.query.keySuffix ? String(req.query.keySuffix) : null;
+  const playerId  = req.query.playerId  ? String(req.query.playerId)  : null;
+
+  // If playerId requested, resolve all keys that warboard associates
+  // with that player. Returns a list of last-4 suffixes to filter the
+  // log by; never returns the full key material.
+  let playerSuffixes = null;
+  if (playerId) {
+    playerSuffixes = [];
+    const personal = store.getApiKeyForPlayer(playerId);
+    if (personal) {
+      playerSuffixes.push({ suffix: String(personal).slice(-4), source: "personal-pool" });
+    }
+    // The faction key isn't owned by an individual but if the requested
+    // player is in a faction we know about, surface it for context.
+    const opt = store.getKeyPoolingOpt(playerId);
+    const fid = opt?.factionId;
+    if (fid) {
+      const fkey = store.getFactionApiKey(String(fid));
+      if (fkey) {
+        const sfx = String(fkey).slice(-4);
+        if (!playerSuffixes.some(s => s.suffix === sfx)) {
+          playerSuffixes.push({ suffix: sfx, source: `faction-key:${fid}` });
+        }
+      }
+    }
+  }
+
+  const r = keyUsage.getRecent(windowMin, keySuffix);
+  // Per-key aggregation for headroom math (Torn cap: 100/min/key).
+  const byKey = {};
+  for (const e of r.entries) {
+    byKey[e.keySuffix] = (byKey[e.keySuffix] || 0) + 1;
+  }
+  const perKey = Object.entries(byKey)
+    .map(([suffix, n]) => ({
+      suffix,
+      calls: n,
+      perMin: +(n / windowMin).toFixed(2),
+      headroomPerMin: +(100 - n / windowMin).toFixed(2),
+      pctOfCap: +((n / windowMin) / 100 * 100).toFixed(1),
+    }))
+    .sort((a, b) => b.calls - a.calls);
+
+  let playerView = null;
+  if (playerSuffixes) {
+    playerView = playerSuffixes.map(({ suffix, source }) => {
+      const calls = byKey[suffix] || 0;
+      // Per-source breakdown for just this key.
+      const bySource = {};
+      for (const e of r.entries) {
+        if (e.keySuffix !== suffix) continue;
+        bySource[e.source] = (bySource[e.source] || 0) + 1;
+      }
+      return {
+        suffix,
+        role: source,
+        calls,
+        perMin: +(calls / windowMin).toFixed(2),
+        pctOfCap: +((calls / windowMin) / 100 * 100).toFixed(1),
+        headroomPerMin: +(100 - calls / windowMin).toFixed(2),
+        bySource,
+      };
+    });
+  }
+
+  return res.json({
+    windowMin,
+    totalCalls: r.total,
+    callsPerMin: +r.callsPerMin.toFixed(2),
+    bySource: r.bySource,
+    perKey,
+    ...(playerView ? { playerId, playerKeys: playerView } : {}),
+  });
+});
+
 router.post("/api/debug/key-usage/clear", async (req, res) => {
   const key = (req.body && req.body.key) || req.query.key;
   if (!key || String(key).length < 10) return res.status(400).json({ error: "key required" });
@@ -6166,6 +6681,82 @@ router.post("/api/debug/key-usage/clear", async (req, res) => {
   } catch (e) {
     return res.status(401).json({ error: e.message });
   }
+});
+
+// ── /api/debug/shim-ping ───────────────────────────────────────────────
+// Diagnostic beacon fired by the WebView's GM shim on injection. Lets
+// us tell from server logs whether (a) userscripts are being injected
+// at all, (b) fetch() can actually leave the WebView. Echoes the
+// request UA + origin + querystring so we can correlate. CORS is
+// permissive — explicitly cross-origin from the torn.com page origin.
+router.get("/api/debug/shim-ping", (req, res) => {
+  const ua = (req.headers['user-agent'] || '').slice(0, 120);
+  const origin = req.headers['origin'] || '-';
+  const at = String(req.query.at || '').slice(0, 100);
+  console.log(`[shim-ping] origin=${origin} at=${at} ua="${ua}"`);
+  res.status(204).end();
+});
+
+// ── /api/apns/subscribe ────────────────────────────────────────────────
+// Native iOS device-token registration. Stored in the same
+// fcm-subscriptions.json file as Android tokens — the `platform`
+// discriminator ('ios' vs 'android') tells the send path which
+// transport to use. Send-side wiring still TODO (apns2 module + .p8
+// auth key from Apple Developer); for now this just persists the
+// token so the registration round-trip is observable end-to-end.
+router.post("/api/apns/subscribe", express.json({ limit: '4kb' }), async (req, res) => {
+  const { key, token, platform, appBundle } = req.body || {};
+  if (!key || !token) return res.status(400).json({ error: "key and token required" });
+  let info;
+  try {
+    info = await verifyTornApiKey(String(key));
+  } catch (e) {
+    return res.status(401).json({ error: e.message });
+  }
+  const fcm = await import('./fcm-subscriptions.js').catch(() => null);
+  if (!fcm) return res.status(500).json({ error: "subscription module unavailable" });
+  fcm.upsertSubscription({
+    playerId:   String(info.playerId),
+    playerName: info.playerName,
+    factionId:  String(info.factionId),
+    token:      String(token),
+    platform:   String(platform || 'ios'),
+    appPackage: String(appBundle || ''),
+  });
+  console.log(`[apns] subscribed ${info.playerName} (${info.playerId}) — token ${String(token).slice(0, 16)}…`);
+  return res.json({ ok: true });
+});
+
+// ── /api/fcm/subscribe ─────────────────────────────────────────────────
+// Native Android (and eventually iOS) device-token registration. Stage
+// 1B: persist the (playerId, FCM token, platform, package) tuple to
+// data/fcm-subscriptions.json. Stage 1C will add the actual send path
+// using firebase-admin once the service account JSON is on disk at
+// data/firebase-service-account.json.
+router.post("/api/fcm/subscribe", express.json({ limit: '4kb' }), async (req, res) => {
+  const { key, token, platform, appPackage } = req.body || {};
+  if (!key || !token) return res.status(400).json({ error: "key and token required" });
+  let info;
+  try {
+    info = await verifyTornApiKey(String(key));
+  } catch (e) {
+    return res.status(401).json({ error: e.message });
+  }
+
+  // Lazy-load the persistence module so a missing data dir doesn't
+  // crash route registration at server boot.
+  const fcm = await import('./fcm-subscriptions.js').catch(() => null);
+  if (!fcm) return res.status(500).json({ error: "fcm module unavailable" });
+  fcm.upsertSubscription({
+    playerId: String(info.playerId),
+    playerName: info.playerName,
+    factionId: String(info.factionId),
+    token: String(token),
+    platform: String(platform || 'android'),
+    appPackage: String(appPackage || ''),
+  });
+  console.log(`[fcm] subscribed ${info.playerName} (${info.playerId}) — token ${String(token).slice(0, 16)}…`);
+  return res.json({ ok: true });
 });
 
 // Start the OC ready-to-spawn background poller. Uses the faction-key

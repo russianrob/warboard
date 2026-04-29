@@ -144,6 +144,10 @@ export function startChainMonitor(io, warId) {
             war.warResult = myScore > enemyScore ? 'victory' : myScore < enemyScore ? 'defeat' : 'draw';
             store.saveState();
             console.log(`[chain] War ended: ${war.factionId} vs ${war.enemyFactionId} — ${war.warResult.toUpperCase()} (${myScore} vs ${enemyScore})`);
+            // War chat is now persistent (data/war-chat.json) and
+            // accumulates across war boundaries — factions asked for
+            // permanent history. Manual wipe still available via
+            // chat.clearForWar() if an admin ever needs it.
             // Broadcast war-ended event to all clients
             if (io) {
               io.to(`war_${warId}`).emit('war_ended', {
