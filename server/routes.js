@@ -3228,6 +3228,16 @@ router.get("/api/oc-verify", async (req, res) => {
 // Verifies faction membership, then returns spawn data with 6h CPR cache.
 
 const _spawnKeyCache  = new Map(); // keySuffix  → { ts, factionId, playerName, playerId, factionPosition, hasFactionAccess }
+// keySuffix → epoch-ms expiry. While entry exists & is in the future,
+// /api/oc/spawn-key skips the primary call for that key and goes
+// straight to pool fallback. Set when Torn returns code 6 (Incorrect
+// ID-entity relation) on the primary path — typically a Torn-side
+// flake from the late-Apr 2026 auth refactor where their server
+// transiently forgets which faction a key holder belongs to. 30 min
+// window is long enough to suppress per-30s polling spam, short
+// enough that real recoveries (key permission re-enabled, faction
+// re-joined, Torn cache settles) propagate within an hour.
+const _spawnKeySuspect = new Map();
 const _engineCache    = new Map(); // factionId  → { ts, engines, settingsHash }
 // Always-on engine cache for /api/oc/engines — runs ALL six engines
 // regardless of faction settings, so the warboard-native client gets a
@@ -5216,6 +5226,22 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     // this will fail and fall back to the cached faction key below.
     const fid = String(playerInfo.factionId);
     if (playerInfo.hasFactionAccess) addFactionKey(fid, key);
+    // Suspect-cache: when a key returns Torn code 6 (Incorrect ID-entity)
+    // we tag it for a 30-min skip so we stop hammering both Torn and our
+    // log file with the same useless primary call. The fallback path
+    // still serves the user via pool keys; this just trims the noise
+    // until either the user re-verifies or the suspect window expires.
+    const suspectUntil = _spawnKeySuspect.get(suffix);
+    const isSuspect = suspectUntil && Date.now() < suspectUntil;
+    if (isSuspect) {
+      // Synthesize the same error the primary path would have thrown
+      // so the existing fallback block below picks up unchanged.
+      // _suspectSkip flag tells the catch handler to suppress the
+      // "primary failed" log (the whole point is reducing log spam).
+      const synthetic = new Error('Incorrect ID-entity relation (cached suspect)');
+      synthetic._suspectSkip = true;
+      throw synthetic;
+    }
     keyUsage.logCall(key, 'faction/spawn (primary)', `oc-spawn:${playerInfo.playerName}`);
     const data = await getOcSpawnData(playerInfo.factionId, key);
     ocReadyCheck(playerInfo.factionId, data.availableCrimes, data.members, getCachedCompletedCrimes(playerInfo.factionId), data.cprCache);
@@ -5317,10 +5343,20 @@ router.get("/api/oc/spawn-key", async (req, res) => {
     // is unaffected because leader/banker refreshes continuously seed
     // the cache.
     const keysToTry = getFactionKeys(fid).filter(k => k !== key);
+    // Tag this key as suspect for 30 min if Torn returned code 6 —
+    // suppresses per-call log spam and lets us skip the wasted primary
+    // fetch on subsequent requests until the suspicion window expires.
+    if (/Incorrect ID-entity/i.test(String(err.message))) {
+      _spawnKeySuspect.set(suffix, Date.now() + 30 * 60_000);
+    }
     if (keysToTry.length > 0) {
-      // Log WHY we're falling back so debug output ties pool 429s back to the
-      // original caller whose key triggered the retry.
-      console.warn(`[oc/spawn-key] primary failed for ${playerInfo.playerName} (${playerInfo.playerId}, faction ${fid}) key ****${String(key).slice(-4)}: ${err.message} — trying ${keysToTry.length} pool key(s)`);
+      // Log WHY we're falling back so debug output ties pool 429s back
+      // to the original caller whose key triggered the retry. Skip the
+      // log entirely when this is a synthetic suspect-skip — that's
+      // the whole point of the cache, and re-logging defeats it.
+      if (!err._suspectSkip) {
+        console.warn(`[oc/spawn-key] primary failed for ${playerInfo.playerName} (${playerInfo.playerId}, faction ${fid}) key ****${String(key).slice(-4)}: ${err.message} — trying ${keysToTry.length} pool key(s)`);
+      }
       for (const poolKey of keysToTry) {
         try {
           keyUsage.logCall(poolKey, 'faction/spawn (fallback)', `oc-spawn-fallback:for:${playerInfo.playerName}`);
@@ -6780,11 +6816,19 @@ startOcReadyPoller({
     } catch (_) { /* settings enumeration optional */ }
     return Array.from(ids);
   },
-  getFreshKey: (fid) => {
-    const poolKey = getFactionKeys(fid)[0];
-    if (poolKey) return poolKey;
+  getFreshKey: (fid, opts = {}) => {
+    // opts.all === true → return the entire candidate list so the
+    // poller can iterate through pool keys when one fails. Default
+    // (no opts) keeps the original single-key contract for any
+    // older callers.
+    const pool = getFactionKeys(fid) || [];
     const ffsKey = store.getFactionSettings(fid)?.oc_ffs_key;
-    return ffsKey || null;
+    if (opts.all) {
+      const out = pool.slice();
+      if (ffsKey && !out.includes(ffsKey)) out.push(ffsKey);
+      return out;
+    }
+    return pool[0] || ffsKey || null;
   },
   fetchOcData: async (fid, key) => {
     const d = await getOcSpawnData(fid, key);

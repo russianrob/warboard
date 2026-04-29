@@ -417,13 +417,31 @@ async function runPoll() {
   let factionIds = [];
   try { factionIds = _listFactions() || []; } catch (_) { return; }
   for (const fid of factionIds) {
-    const key = _getFreshKey(fid);
-    if (!key) continue;
-    try {
-      const data = await _fetchOcData(fid, key);
-      await checkAndNotify(fid, data.availableCrimes, data.members, data.completedCrimes, data.cprCache);
-    } catch (e) {
-      console.warn(`[oc-notif][poller] faction ${fid}:`, e.message);
+    // Try every pool key in order until one succeeds. Previously we
+    // grabbed only `getFactionKeys(fid)[0]` and gave up on its first
+    // failure, which produced minute-by-minute "Incorrect ID-entity
+    // relation" log spam whenever the front-of-pool key was broken
+    // (Torn occasionally returns code 6 spuriously after the late-Apr
+    // 2026 auth refactor). Now we walk through the candidates the
+    // same way /api/oc/spawn-key's fallback path does.
+    const candidates = _getFreshKey(fid, { all: true }) || [];
+    if (candidates.length === 0) continue;
+    let succeeded = false;
+    let lastErr = null;
+    for (const key of candidates) {
+      try {
+        const data = await _fetchOcData(fid, key);
+        await checkAndNotify(fid, data.availableCrimes, data.members, data.completedCrimes, data.cprCache);
+        succeeded = true;
+        break;
+      } catch (e) {
+        lastErr = e;
+        // Don't log per-key failure here — only log once at the end if
+        // every key failed. Keeps the per-minute log volume bounded.
+      }
+    }
+    if (!succeeded && lastErr) {
+      console.warn(`[oc-notif][poller] faction ${fid}: all ${candidates.length} pool key(s) failed — last error: ${lastErr.message}`);
     }
   }
 }
