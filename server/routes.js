@@ -4410,24 +4410,62 @@ function runMemberProjector(factionId, data) {
     if (!cpr) continue;
 
     const history = memberHistory[uid];
-    // "OC Lvl" in the Member Projector = the highest level the member
-    // has actually completed. Previously used effectiveTop, which
-    // downgrades the number when the member's avg CPR at that level
-    // is below the faction's MINCPR — e.g. a member who did Lvl 8 at
-    // 66% avg while MINCPR is 67 showed as Lvl 7. That's the wrong
-    // concept for "how far have they gotten"; effectiveTop belongs to
-    // "what level should they join now" (still exposed via `joinable`).
-    const currentLevel = cpr.highestLevel || cpr.effectiveTop || 0;
-    const joinable = cpr.joinable || cpr.effectiveTop || currentLevel;
+    // Highest level the member has actually completed (regardless of
+    // how well). Used as the upper bound for "what they're attempting".
+    const completedLevel = cpr.highestLevel || cpr.effectiveTop || 0;
+    const joinable = cpr.joinable || cpr.effectiveTop || completedLevel;
     const isEstimated = !!cpr.estimated; // no real OC data, using level-based estimate
+    const MINCPR = 60; // viability threshold for "stable at this level"
 
-    // Current level CPR
-    let currentLevelCpr = cpr.cpr;
-    if (history?.byLevel[currentLevel]) {
-      currentLevelCpr = Math.round(history.byLevel[currentLevel].rateSum / history.byLevel[currentLevel].count * 10) / 10;
+    // "Anchor" = highest level where the member's avg CPR meets MINCPR.
+    // This is the level the member is genuinely solid at. If their
+    // completed level is above the anchor, they've TRIED a higher
+    // level but aren't yet stable there — the right projection target
+    // is that higher level (they're building toward it), and the
+    // anchor's CPR is the right number to display as "their stable
+    // skill" instead of the lower CPR they're still grinding up.
+    //
+    // Example fixed by this: a member completed Lvl 6 with avg CPR 57%
+    // and Lvl 5 with avg CPR 65%. Old logic: currentLevel=6,
+    // currentLevelCpr=57, nextLevel=7, readiness=not_ready ("Not
+    // Ready for Lvl 7"). New logic: anchor=5, anchorCpr=65,
+    // projectionTarget=6, readiness=building ("Building for Lvl 6")
+    // — accurately describes "stable at 5, working toward solid 6".
+    const cprAtLevel = (lvl) => {
+      const lvlData = history?.byLevel[lvl];
+      if (!lvlData || lvlData.count === 0) return null;
+      return Math.round(lvlData.rateSum / lvlData.count * 10) / 10;
+    };
+    const completedCpr = cprAtLevel(completedLevel) ?? cpr.cpr;
+
+    let anchorLevel = completedLevel;
+    let anchorCpr = completedCpr;
+    let attemptingAbove = false;
+    if (completedLevel >= 1 && completedCpr < MINCPR) {
+      // Walk down looking for the highest level where they ARE stable.
+      for (let lvl = completedLevel - 1; lvl >= 1; lvl--) {
+        const c = cprAtLevel(lvl);
+        if (c !== null && c >= MINCPR) {
+          anchorLevel = lvl;
+          anchorCpr = c;
+          attemptingAbove = true;
+          break;
+        }
+      }
+      // If no stable lower level exists either, anchor stays at the
+      // completed level — they're a brand-new operator at level 1
+      // who hasn't hit MINCPR anywhere yet. The projection still
+      // targets completedLevel (the level they're trying to solidify).
+      if (!attemptingAbove && completedLevel >= 1) {
+        attemptingAbove = true;          // still building current level
+      }
     }
 
-    // Best roles at current level
+    // Display values reflect the anchor — the member's stable skill.
+    const currentLevel = anchorLevel;
+    const currentLevelCpr = anchorCpr;
+
+    // Best roles at the anchor level (the level the member is solid at).
     const bestRoles = [];
     if (history?.byLevel[currentLevel]?.roles) {
       for (const [role, rd] of Object.entries(history.byLevel[currentLevel].roles)) {
@@ -4436,16 +4474,17 @@ function runMemberProjector(factionId, data) {
       bestRoles.sort((a, b) => b.cpr - a.cpr);
     }
 
-    // Projection: can they move up?
-    const nextLevel = currentLevel + 1;
+    // Projection target: the level they're actively trying to make
+    // stable. If they've attempted above their anchor, that's the
+    // attempted level itself; otherwise, the next level up.
+    const nextLevel = attemptingAbove ? completedLevel : currentLevel + 1;
     let projection = null;
     if (nextLevel <= 10) {
       const nextBench = levelBenchmarks[nextLevel];
       const progressKey = `${currentLevel}->${nextLevel}`;
       const progression = avgProgressionDays[progressKey];
 
-      // CPR gap analysis
-      const MINCPR = 60; // minimum to be viable
+      // CPR gap analysis (MINCPR declared at the outer member scope).
       const gapToBenchmark = nextBench ? Math.round((nextBench.avgCpr - currentLevelCpr) * 10) / 10 : null;
 
       // Estimate readiness based on CPR trend from CPR Forecaster data
@@ -4505,6 +4544,13 @@ function runMemberProjector(factionId, data) {
       currentLevelCpr,
       joinableLevel: joinable,
       isEstimated,
+      // Context for "they've already attempted a higher level but
+      // aren't stable there yet" — lets the renderer say e.g.
+      // "Building for Lvl 6  (attempting at 57%)" instead of just
+      // "Building for Lvl 6".
+      attemptingAbove,
+      attemptedLevel: attemptingAbove ? completedLevel : null,
+      attemptedCpr: attemptingAbove ? completedCpr : null,
       bestRoles: bestRoles.slice(0, 3),
       totalOCs,
       daysSinceFirstOC: daysSinceFirst,

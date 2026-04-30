@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.75
+// @version      3.1.76
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.76 — Member Projector now anchors on the member's highest STABLE OC level (avg CPR ≥ MINCPR), not just their highest completed. Previously a member who'd touched Lvl 6 at 57% avg CPR was shown as "OC Lvl 6 / 57%" with the projection targeting Lvl 7 ("Not Ready for Lvl 7") — a misleading double whammy: the displayed CPR was their unstable struggling number rather than where they're actually competent, and the projection skipped over the level they're still building. New logic: walk down from completedLevel to find the first level with CPR ≥ MINCPR, use that as the displayed anchor (currentOcLevel + currentLevelCpr); set the projection target to the level they've already attempted but not solidified (so their case becomes "OC Lvl 5 / 65% / attempting Lvl 6 at 57%" rendered as "Building for Lvl 6"). When no stable level exists yet (brand new member at Lvl 1 below MINCPR), anchor stays at completed level and projection targets that same level. Renderer surfaces an inline "attempting Lvl X at N%" tag in orange so the displayed numbers don't read as a contradiction with the projection.
 // v3.1.75 — Loan + retrieve: accept both `entry.user.userID` and `entry.user.id` shapes. Torn's late-Apr 2026 auth refactor (changelog "Optimized authentication and last action updates by improving session log logic") flipped some loaned-item entries to expose the borrower as `user.id` instead of `user.userID`. The retrieve match condition (`String(entry.user.userID) === String(userID)`) silently failed against the new shape — every retrieve from the Unused tab raised "Could not find armory item" with no context (the catch block only set "Error" on the button). Fix: cascade `entry.user.userID ?? entry.user.id` everywhere we read the borrower id, both in retrieve's match check AND in `mgr_fetchArmoryIDsForCategory`'s isUnused check (which was mis-classifying loaned-to-others items as available, risking double-loans). Also widened retrieve's category sweep from [hint, alternate-spelling-of-armor] to every loanable bucket (utilities/weapons/armor/armour/medical/boosters/drugs/clothing) since Torn's `/v2/faction` selection name doesn't always match the page-AJAX `type` field. Replaced the silent "Error" button text with the actual reason (truncated to 28 chars, full text in tooltip + console.warn), so the next time something breaks the fix is one screenshot away.
 // v3.1.70 — Banker-claim optimistic clear on vault-request Send. Hitting Send now POSTs to /api/oc/vault-request/:id/claim before opening the Controls tab. Server marks the request as claimed-by-this-banker and hides it from listRequests() for every viewer immediately, so all admins see it disappear without waiting for the 20s fundsnews poll → 15s client poll cycle (previously took ~3 manual refreshes to clear). If the matching fundsnews event arrives within the 90s claim TTL, the request is fully deleted as before. If the banker bails (closes Torn tab, never sends the money), the claim expires and the request reappears on every client's next list fetch — no orphaned requests. Two bankers clicking the same Send near-simultaneously: the second gets a 409 Conflict with "Already claimed by X" and their UI shows that message instead of removing the row.
 // v3.1.69 — Scope DOM reader now rejects elements nested inside a completed-crime reward block. Torn's Completed tab shows per-OC "+N scope" chips (e.g. Pet Project +2 scope) whose wrapper class also contains the word "scope", so strategies 1 and 2 were scraping those per-OC rewards and pushing them as if they were the faction's current scope balance. That's the source of the 16 → 2 → 5 oscillation in v3.1.68's stability window logs. New insideCompletedContext() walks up ancestors and bails on any node whose className matches completed|executed|ended|reward|payout|result|history. Both strategy 1 (class-match) and strategy 2 (text-match) honor the guard.
@@ -262,7 +263,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.75';
+    const SCRIPT_VERSION = '3.1.76';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -3299,6 +3300,13 @@
             html += `<span style="color:#9ca3af;font-size:10px;">Lvl ${m.level}</span>`;
             html += `<span style="color:#6b7280;font-size:10px;">OC Lvl ${m.currentOcLevel}</span>`;
             html += `<span style="color:${cprColor};font-weight:600;font-size:10px;">${m.currentLevelCpr}%</span>`;
+            // When the member has already touched a higher level than
+            // their stable anchor, surface that context inline so the
+            // displayed OC Lvl + CPR isn't confusing on its own.
+            // ("OC Lvl 5 / 65% / attempting Lvl 6 at 57%")
+            if (m.attemptingAbove && m.attemptedLevel != null && m.attemptedCpr != null) {
+                html += `<span style="color:#fb923c;font-size:9px;font-style:italic;">attempting Lvl ${m.attemptedLevel} at ${m.attemptedCpr}%</span>`;
+            }
             if (m.isEstimated) html += `<span style="color:#60a5fa;font-size:9px;font-style:italic;">est.</span>`;
             html += `</div>`;
 
