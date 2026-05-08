@@ -13,11 +13,11 @@ import express from "express";
 import { createServer } from "node:http";
 import { Server as SocketIOServer } from "socket.io";
 import cors from "cors";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import helmet from "helmet";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { readFileSync, existsSync, appendFileSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 
 import routes, { setIO, gateMiddleware } from "./routes.js";
 import "./war-scanner.js";
@@ -28,8 +28,6 @@ import { startWarStatusMonitor, stopAll as stopAllWarStatusMonitors } from "./wa
 import { loadHeatmaps, stopFlush as stopHeatmapFlush } from "./activity-heatmap.js";
 import { startMembershipSchedule, stopMembershipSchedule } from "./membership-check.js";
 import { startXanaxSubscriptions, stopXanaxSubscriptions, getActiveSubscribedFactionIds } from "./xanax-subscriptions.js";
-import { startWeav3rCache, getWeav3rSnapshot, subscribeToWeav3r, kickVerifyOnPoolGrowth } from "./weav3r-cache.js";
-import * as weav3rPool from "./weav3r-pool.js";
 import * as vaultRequests from "./vault-requests.js";
 import { startSubscriptionManager, stopSubscriptionManager } from "./subscription-manager.js";
 import * as store from "./store.js";
@@ -51,33 +49,29 @@ const app = express();
 // Trust Nginx proxy for correct IP detection (needed for rate limiting)
 app.set("trust proxy", 1);
 
-// Enable CORS for all API routes
+// Enable CORS for all API routes. ONE invocation only — registering
+// the cors middleware twice was emitting Access-Control-Allow-Origin
+// twice on every response, which Chrome's WebView rejects as
+// malformed (browsers require exactly one ACAO header). Surfaced as
+// "Failed to fetch" / status=0 in the warboard-android WebView for
+// every cross-origin call from a torn.com page.
 app.use(
   cors({
     origin: function (origin, callback) {
+      // Allow requests with no Origin (PDA Flutter InAppWebView,
+      // native HTTP clients, curl health checks).
       if (!origin) return callback(null, true);
-      if (/.torn.com$/.test(origin) || /tornwar.com/.test(origin) || /^https?:\/\/localhost/.test(origin)) {
+      // Allow torn.com subdomains, tornwar.com (admin pages), and
+      // localhost for dev.
+      if (/\.torn\.com$/.test(origin) ||
+          /^https?:\/\/(www\.)?tornwar\.com/.test(origin) ||
+          /^https?:\/\/localhost/.test(origin)) {
         return callback(null, true);
       }
       callback(null, false);
     },
     credentials: true,
   })
-);
-
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      // Allow requests with no origin (PDA webview, mobile apps, curl)
-      if (!origin) return callback(null, true);
-      // Allow torn.com subdomains and localhost dev
-      if (/\.torn\.com$/.test(origin) || /^https?:\/\/localhost/.test(origin)) {
-        return callback(null, true);
-      }
-      callback(null, false);
-    },
-    credentials: true,
-  }),
 );
 // 1MB is comfortable for scout-report / post-war-report payloads that
 // carry BSP + FFScouter estimates for every enemy + own faction member
@@ -86,7 +80,20 @@ app.use(
 app.use(express.json({ limit: '1mb' }));
 
 // ── Security headers ───────────────────────────────────────────────────────
-app.use(helmet({ contentSecurityPolicy: false }));
+// Helmet defaults Cross-Origin-Resource-Policy to "same-origin", which
+// tells browsers to refuse to deliver the response body to any other-
+// origin context — even when CORS would otherwise allow. That broke
+// every Warboard-Android WebView fetch from a torn.com page to a
+// tornwar.com endpoint: the server replied 204 OK with valid CORS
+// headers, but Chrome's CORP enforcement stripped the response and
+// surfaced it as a generic network error in the userscript. Setting
+// crossOriginResourcePolicy: cross-origin allows the cross-context
+// reads we explicitly want (warboard exists to be called from
+// torn.com pages). Same applies to Mac/iOS WebKit clients.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 
 // ── Rate limiting ────────────────────────────────────────────────────────
 
@@ -116,16 +123,18 @@ const publicApiLimiter = rateLimit({
 app.use('/api/public', publicApiLimiter);
 
 // General limiter on all routes as a backstop.
-// 500/15min (≈33/min) is too tight for authenticated clients — an active
-// faction member with a couple of tabs open easily burns through that in
-// normal play (polling, assist reports, viewing updates, static asset
-// re-fetches, socket.io polling transport, etc.). 5000/15min (≈333/min)
-// still protects against scrapers/scanners while giving legitimate clients
-// headroom. Static scripts & socket.io are also excluded since they
-// shouldn't consume the API budget.
+// Bumped 2026-05-06 from 5000/15min → 30000/15min after iOS Chat tab
+// opens were generating bursts of 1500+ req/sec (chat fetch + retry
+// loop + poll + heatmap + travel-info × multiple devices on one NAT
+// IP). 5000/15min ≈ 5.5 req/s sustained which is fine for ONE active
+// device but blew up under multi-device + tab-transition fanouts. New
+// cap of 30000/15min ≈ 33 req/s sustained still rejects scrapers,
+// gives legitimate multi-device users headroom for tab transitions
+// without 429 storms. Static scripts & socket.io are excluded since
+// they shouldn't consume the API budget.
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5000,
+  max: 30000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, slow down' },
@@ -138,7 +147,70 @@ const globalLimiter = rateLimit({
 });
 app.use(globalLimiter);
 
+// v5.0.2: per-key limit on /api/oc/spawn-key. The IP-based globalLimiter
+// can't catch a single leaked/scraped key being replayed from many IPs
+// (botnet, residential proxy pool). Cap each key at 240 req/min ≈ 4/s,
+// which is ~6-8× heavier than a single active user with multiple tabs.
+// Falls back to per-IP keying if the key param is missing/short.
+const spawnKeyPerKeyLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 240,
+  keyGenerator: (req) => {
+    const k = req.query?.key || (req.body && req.body.key) || '';
+    if (typeof k === 'string' && k.length >= 8) return `key:${k.slice(-8)}`;
+    // Fallback to IP — use ipKeyGenerator helper so IPv6 /56 subnets are
+    // grouped (raw req.ip would let one /128 evade by rotating).
+    return `ip:${ipKeyGenerator(req.ip)}`;
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Per-key rate limit hit — slow down' },
+});
+app.use('/api/oc/spawn-key', spawnKeyPerKeyLimiter);
+
+// v5.0.3: per-JWT limit on the iOS / FactionOps "war room" endpoints.
+// Bounds the blast radius of a single client's runaway loop (e.g. the
+// known iOS WarRoomViewModel SwiftUI re-render storm where .onAppear
+// fires start() many times per second). Without this hedge, one user's
+// bug consumes the whole globalLimiter budget (30k/15min = ~33 r/s) and
+// forces 429s on EVERY user behind that IP. Per-JWT keying isolates
+// the cost to that one user's session — they get 429s instantly while
+// everyone else is unaffected.
+//
+// Cap: 240 req/min per JWT ≈ 4 req/s. A normal iOS tick fires 5-7
+// requests every 15 s = ~28/min, so this is ~9× normal headroom but
+// still bounds a 100+ req/sec storm to the offending session.
+const warRoomPerJwtLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 240,
+  keyGenerator: (req) => {
+    const auth = req.headers?.authorization || '';
+    const tokenFromHeader = auth.startsWith('Bearer ') ? auth.slice(7) : auth;
+    const tokenFromQuery  = (req.query?.token && typeof req.query.token === 'string') ? req.query.token : '';
+    const t = tokenFromHeader || tokenFromQuery;
+    if (t && t.length >= 20) return 'jwt:' + t.slice(-20);
+    return 'ip:' + ipKeyGenerator(req.ip);
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Per-session rate limit hit — runaway loop detected. Restart the app.' },
+});
+// Applied to the endpoints where the SwiftUI storm hits hardest. The
+// underlying bug fires fetchPoll + 2× fetchHeatmap + fetchTravelInfo +
+// fetchWars together, so capping any one of them breaks the wave.
+app.use('/api/poll',                   warRoomPerJwtLimiter);
+app.use('/api/heatmap',                warRoomPerJwtLimiter);
+app.use(/^\/api\/faction\/[^/]+\/war/, warRoomPerJwtLimiter);
+app.use(/^\/api\/war\/[^/]+\/travel-info/, warRoomPerJwtLimiter);
+
 // ── Landing page is public — gate is applied only to /scripts/*.user.js below ──
+
+// (Removed: temp [req-log] middleware that diagnosed the Android
+// WebView CORS issue. Root cause was Chromium's CORS layer rejecting
+// cross-origin tornwar.com calls from torn.com pages despite correct
+// server headers; resolved by routing userscript HTTP through a
+// native Kotlin bridge in the Warboard Android app — see
+// WarboardNativeBridge.kt + gm-shim.js's nativeRequest() path.)
 
 // ── Landing page gate ───────────────────────────────────────────────────
 app.use(gateMiddleware);
@@ -237,6 +309,215 @@ app.get("/socket.io.min.js", (_req, res) => {
   }
 });
 
+// ── One-shot file upload (warboard-mac/ios Apple cert + profile drop) ──
+// Open while /tmp/cert-upload-token exists; the file's mere presence
+// gates the route. Each successful upload closes the window — drop one
+// file at a time, recreate the token between drops.
+//
+// Uploaded files land in /tmp under their original filename (capped to
+// alphanumerics + dot/dash to keep the writes contained). The route
+// accepts a `?name=` query param to set the destination filename, since
+// we now juggle multiple file types (.cer, .mobileprovision, .p8).
+const CERT_UPLOAD_TOKEN_PATH = "/tmp/cert-upload-token";
+
+function uploadOpen() {
+  return existsSync(CERT_UPLOAD_TOKEN_PATH);
+}
+
+function safeFilename(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  if (!/^[A-Za-z0-9._-]{1,80}$/.test(raw)) return null;
+  if (raw.startsWith(".") || raw.includes("..")) return null;
+  return raw;
+}
+
+// Tiny companion form for posting App Store Connect's Key ID + Issuer
+// ID at the same time — two short strings, not worth a base64 round.
+app.get("/upload-ids", (_req, res) => {
+  if (!uploadOpen()) {
+    return res.status(410).type("text/plain").send("Upload window closed.");
+  }
+  res.setHeader("Content-Type", "text/html; charset=UTF-8");
+  res.setHeader("Cache-Control", "no-store");
+  res.send(`<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>App Store Connect IDs</title>
+<style>
+  body { font: 16px system-ui; padding: 24px; max-width: 480px; margin: 0 auto; }
+  label { display: block; margin: 16px 0 4px; font-weight: 600; }
+  input { display: block; width: 100%; padding: 10px; font: 15px monospace; box-sizing: border-box; }
+  button { margin-top: 20px; font-size: 17px; padding: 12px 20px; width: 100%; border: 0; border-radius: 8px; background: #0a84ff; color: #fff; }
+  #status { margin-top: 16px; padding: 12px; border-radius: 6px; }
+  .ok { background: #d4edda; color: #155724; }
+  .err { background: #f8d7da; color: #721c24; }
+</style></head><body>
+<h2>App Store Connect IDs</h2>
+
+<label>Key ID (10 characters)</label>
+<input type="text" id="kid" placeholder="ABCD1234EF" maxlength="20">
+
+<label>Issuer ID (UUID)</label>
+<input type="text" id="iss" placeholder="01234567-89ab-cdef-0123-456789abcdef" maxlength="50">
+
+<button id="b">Upload both</button>
+<div id="status"></div>
+<script>
+  const kid = document.getElementById('kid');
+  const iss = document.getElementById('iss');
+  const b = document.getElementById('b');
+  const s = document.getElementById('status');
+  b.addEventListener('click', async () => {
+    const k = kid.value.trim(), i = iss.value.trim();
+    if (!k || !i) { s.className = 'err'; s.textContent = 'Both fields required.'; return; }
+    b.disabled = true;
+    s.className = ''; s.textContent = 'Uploading…';
+    try {
+      const r = await fetch(location.pathname, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key_id: k, issuer_id: i }),
+      });
+      const text = await r.text();
+      if (r.ok) { s.className = 'ok'; s.textContent = text; }
+      else { s.className = 'err'; s.textContent = 'Failed: ' + text; b.disabled = false; }
+    } catch (e) { s.className = 'err'; s.textContent = 'Error: ' + e.message; b.disabled = false; }
+  });
+</script>
+</body></html>`);
+});
+
+app.post("/upload-ids", express.json({ limit: "1kb" }), (req, res) => {
+  if (!uploadOpen()) {
+    return res.status(410).type("text/plain").send("Upload window closed.");
+  }
+  const { key_id, issuer_id } = req.body || {};
+  if (typeof key_id !== "string" || !/^[A-Z0-9]{8,15}$/i.test(key_id)) {
+    return res.status(400).type("text/plain").send("Bad key_id (need 8-15 alphanum).");
+  }
+  if (typeof issuer_id !== "string" || !/^[a-f0-9-]{30,40}$/i.test(issuer_id)) {
+    return res.status(400).type("text/plain").send("Bad issuer_id (need a UUID).");
+  }
+  try {
+    writeFileSync("/tmp/key_id.txt", key_id);
+    writeFileSync("/tmp/issuer_id.txt", issuer_id);
+    try { unlinkSync(CERT_UPLOAD_TOKEN_PATH); } catch {}
+    console.log(`[server] ASC IDs written: key_id=${key_id}, issuer_id=${issuer_id}`);
+    res.type("text/plain").send("Saved both IDs. Window closed.");
+  } catch (err) {
+    console.error("[server] ASC IDs write failed:", err.message);
+    res.status(500).type("text/plain").send("Server error.");
+  }
+});
+
+app.get("/upload", (_req, res) => {
+  if (!uploadOpen()) {
+    return res.status(410).type("text/plain").send("Upload window closed.");
+  }
+  res.setHeader("Content-Type", "text/html; charset=UTF-8");
+  res.setHeader("Cache-Control", "no-store");
+  res.send(`<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Drop file</title>
+<style>
+  body { font: 16px system-ui; padding: 24px; max-width: 480px; margin: 0 auto; }
+  input, select, textarea { display: block; margin: 8px 0 16px; width: 100%; box-sizing: border-box; }
+  button { font-size: 17px; padding: 12px 20px; width: 100%; border: 0; border-radius: 8px; background: #0a84ff; color: #fff; }
+  button:disabled { opacity: 0.5; }
+  #status { margin-top: 16px; padding: 12px; border-radius: 6px; }
+  .ok { background: #d4edda; color: #155724; }
+  .err { background: #f8d7da; color: #721c24; }
+  hr { margin: 24px 0; }
+</style></head><body>
+<h2>Drop file → /tmp</h2>
+
+<label>Destination filename (in /tmp/):</label>
+<input type="text" id="name" placeholder="e.g. ios_dist.cer or warboard.mobileprovision">
+
+<label>File:</label>
+<input type="file" id="f">
+<button id="b" disabled>Upload file</button>
+
+<hr>
+<label>Or paste base64:</label>
+<textarea id="t" rows="6" style="font:13px monospace" placeholder="paste base64 content"></textarea>
+<button id="bp">Upload pasted</button>
+
+<div id="status"></div>
+<script>
+  const f = document.getElementById('f');
+  const b = document.getElementById('b');
+  const t = document.getElementById('t');
+  const bp = document.getElementById('bp');
+  const n = document.getElementById('name');
+  const s = document.getElementById('status');
+  f.addEventListener('change', () => { b.disabled = !f.files.length; if (!n.value && f.files[0]) n.value = f.files[0].name; });
+
+  async function send(buf) {
+    if (!n.value) { s.className = 'err'; s.textContent = 'Set the destination filename first.'; return false; }
+    s.className = ''; s.textContent = 'Uploading…';
+    const r = await fetch(location.pathname + '?name=' + encodeURIComponent(n.value), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: buf,
+    });
+    const text = await r.text();
+    if (r.ok) { s.className = 'ok'; s.textContent = text; }
+    else { s.className = 'err'; s.textContent = 'Failed: ' + text; }
+    return r.ok;
+  }
+
+  b.addEventListener('click', async () => {
+    const file = f.files[0]; if (!file) return;
+    b.disabled = true;
+    try { await send(await file.arrayBuffer()); }
+    catch (e) { s.className = 'err'; s.textContent = 'Error: ' + e.message; b.disabled = false; }
+  });
+
+  bp.addEventListener('click', async () => {
+    const raw = t.value.replace(/\\s+/g, '');
+    if (!raw) { s.className = 'err'; s.textContent = 'Paste something first.'; return; }
+    bp.disabled = true;
+    try {
+      const bin = atob(raw);
+      const arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      await send(arr.buffer);
+    } catch (e) { s.className = 'err'; s.textContent = 'Bad base64: ' + e.message; bp.disabled = false; }
+  });
+</script>
+</body></html>`);
+});
+
+app.post(
+  "/upload",
+  express.raw({ type: "application/octet-stream", limit: "256kb" }),
+  (req, res) => {
+    if (!uploadOpen()) {
+      return res.status(410).type("text/plain").send("Upload window closed.");
+    }
+    const name = safeFilename(req.query.name);
+    if (!name) {
+      return res.status(400).type("text/plain").send("Bad or missing ?name= filename.");
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).type("text/plain").send("Empty body.");
+    }
+    if (req.body.length > 200 * 1024) {
+      return res.status(413).type("text/plain").send("File too large (>200 KB).");
+    }
+    const dest = "/tmp/" + name;
+    try {
+      writeFileSync(dest, req.body);
+      try { unlinkSync(CERT_UPLOAD_TOKEN_PATH); } catch {}
+      console.log(`[server] Upload (${req.body.length} bytes) → ${dest}`);
+      res.type("text/plain").send(`Uploaded ${req.body.length} bytes → ${dest}. Window closed; recreate the token to drop another.`);
+    } catch (err) {
+      console.error("[server] Upload failed:", err.message);
+      res.status(500).type("text/plain").send("Server error writing file.");
+    }
+  }
+);
+
 // ── WhisperBoard training telemetry ─────────────────────────────────────
 // Receives one-shot training-run reports from the keyboard so the user can
 // see whether overnight auto-training actually ran (and succeeded). No auth:
@@ -281,142 +562,6 @@ app.get("/whisperboard/training_log", (_req, res) => {
     res.send(content);
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// ── Weav3r dollar-deals cache ───────────────────────────────────────────
-// Shared snapshot of weav3r.dev's dollar-bazaars list, refreshed every 30s
-// by one background poller. Userscript clients connect via SSE and get live
-// pushes instead of each polling weav3r themselves.
-app.get("/api/weav3r/deals", (_req, res) => {
-  res.setHeader("Cache-Control", "no-store");
-  weav3rDealsHits++;
-  res.json(getWeav3rSnapshot());
-});
-
-// Lightweight usage telemetry for weav3r endpoints. Used to decide
-// whether the polling budget is worth the 60/min API calls it burns.
-let weav3rDealsHits = 0;
-let weav3rStreamSubs = 0;
-let weav3rStreamOpens = 0;
-
-app.get("/api/weav3r/stream", (req, res) => {
-  res.writeHead(200, {
-    "Content-Type":  "text/event-stream",
-    "Cache-Control": "no-cache, no-transform",
-    "Connection":    "keep-alive",
-    // CORS allowed separately at top of file for torn.com origins.
-  });
-
-  weav3rStreamSubs++;
-  weav3rStreamOpens++;
-  const clientIp = req.ip || req.headers['x-forwarded-for'] || '?';
-  console.log(`[weav3r-usage] stream-open from ${clientIp} — active subs: ${weav3rStreamSubs}`);
-
-  // Immediate snapshot on connect so the client has data within ~1 RTT.
-  const initial = getWeav3rSnapshot();
-  res.write(`event: snapshot\ndata: ${JSON.stringify(initial)}\n\n`);
-
-  // Subscribe to refresh events.
-  const unsub = subscribeToWeav3r((snap) => {
-    try {
-      res.write(`event: update\ndata: ${JSON.stringify(snap)}\n\n`);
-    } catch (_) { /* client gone, cleanup via close below */ }
-  });
-
-  // Periodic keepalive so intermediaries / mobile networks don't drop idle.
-  const ping = setInterval(() => {
-    try { res.write(":ping\n\n"); } catch (_) {}
-  }, 25_000);
-
-  req.on("close", () => {
-    clearInterval(ping);
-    unsub();
-    weav3rStreamSubs--;
-    console.log(`[weav3r-usage] stream-close — active subs: ${weav3rStreamSubs}`);
-  });
-});
-
-// Admin-only usage snapshot. Dev XID 137558 only.
-app.get("/api/weav3r/usage", (req, res) => {
-  const key = req.query.key;
-  if (!key) return res.status(400).json({ error: "key required" });
-  // Lightweight check: just require it matches the dev key. Intentionally
-  // no Torn API verify here to keep it cheap — leaks nothing sensitive.
-  import("./auth.js").then(async ({ verifyTornApiKey }) => {
-    try {
-      const info = await verifyTornApiKey(key);
-      if (String(info.playerId) !== '137558') {
-        return res.status(403).json({ error: "dev only" });
-      }
-      res.json({
-        dealsHits: weav3rDealsHits,
-        streamSubsActive: weav3rStreamSubs,
-        streamOpensTotal: weav3rStreamOpens,
-        snapshot: getWeav3rSnapshot(),
-      });
-    } catch (e) {
-      res.status(401).json({ error: e.message });
-    }
-  });
-});
-
-// Weav3r verify-key pool (see weav3r-pool.js). Users contribute their
-// Torn API key to spread the per-seller bazaar verify load across many
-// members instead of burning OWNER_API_KEY's 100/min budget. The query
-// selection `user/<id>?selections=bazaar` is public — pooling is safe.
-app.get("/api/weav3r/pool/status", async (req, res) => {
-  const key = req.query.key;
-  if (!key || String(key).length < 10) return res.status(400).json({ error: "key required" });
-  try {
-    const { verifyTornApiKey } = await import("./auth.js");
-    const info = await verifyTornApiKey(String(key));
-    res.json({
-      optedIn:  weav3rPool.hasKey(info.playerId),
-      poolSize: weav3rPool.size(),
-      playerId: String(info.playerId),
-    });
-  } catch (e) {
-    res.status(401).json({ error: e.message });
-  }
-});
-
-app.post("/api/weav3r/pool/opt-in", async (req, res) => {
-  const key = (req.body && req.body.key) || req.query.key;
-  if (!key || String(key).length < 10) return res.status(400).json({ error: "key required" });
-  try {
-    const { verifyTornApiKey } = await import("./auth.js");
-    const info = await verifyTornApiKey(String(key));
-    if (weav3rPool.isBlocked(info.playerId)) {
-      // Dev / owner — intentionally never enrolled so pool load stays
-      // spread across community contributors. Return ok so the UI shows
-      // the expected "off" state without showing an error.
-      return res.json({ ok: true, optedIn: false, blocked: true, poolSize: weav3rPool.size() });
-    }
-    const sizeBefore = weav3rPool.size();
-    weav3rPool.addKey(info.playerId, String(key));
-    const sizeAfter = weav3rPool.size();
-    console.log(`[weav3r-pool] opt-in: ${info.playerName} (${info.playerId}) — pool size: ${sizeAfter}`);
-    // First contributor after an empty pool? Kick verify immediately so we
-    // don't wait ~15s for the next weav3r refresh cycle.
-    if (sizeBefore === 0 && sizeAfter > 0) kickVerifyOnPoolGrowth();
-    res.json({ ok: true, optedIn: true, poolSize: sizeAfter });
-  } catch (e) {
-    res.status(401).json({ error: e.message });
-  }
-});
-
-app.post("/api/weav3r/pool/opt-out", async (req, res) => {
-  const key = (req.body && req.body.key) || req.query.key;
-  if (!key || String(key).length < 10) return res.status(400).json({ error: "key required" });
-  try {
-    const { verifyTornApiKey } = await import("./auth.js");
-    const info = await verifyTornApiKey(String(key));
-    weav3rPool.removeKey(info.playerId);
-    console.log(`[weav3r-pool] opt-out: ${info.playerName} (${info.playerId}) — pool size: ${weav3rPool.size()}`);
-    res.json({ ok: true, optedIn: false, poolSize: weav3rPool.size() });
-  } catch (e) {
-    res.status(401).json({ error: e.message });
   }
 });
 
@@ -547,7 +692,6 @@ for (const [warId, war] of store.getAllWars()) {
 // Schedule weekly membership verification (every Tuesday)
 startMembershipSchedule();
   startXanaxSubscriptions();
-  startWeav3rCache();
   // Background poller handles OWNER faction only (uses OWNER_API_KEY).
   // Other factions get "piggy-back" cleanup — /api/oc/vault-requests
   // opportunistically triggers a fundsnews poll using the caller's OWN
