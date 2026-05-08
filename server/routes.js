@@ -3,7 +3,7 @@
  */
 
 import express, { Router } from "express";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join as pathJoin, dirname as pathDirname } from "node:path";
 import { fileURLToPath } from 'node:url';
 import axios from "axios";
@@ -77,6 +77,13 @@ function _adminLoginFail(ip) {
 function _adminLoginClear(ip) { _adminLoginAttempts.delete(ip); }
 import * as store from "./store.js";
 import * as chat from "./chat.js";
+import { encrypt as encryptKey, decrypt as decryptKey, isEncrypted as isEncryptedKey } from "./key-encryption.js";
+import * as pendingBroadcasts from "./pending-broadcasts.js";
+import * as missingOverrides from "./missing-overrides.js";
+import * as webauthn from "./webauthn.js";
+import busboy from "busboy";
+import { createWriteStream as _uploadCreateWriteStream } from "node:fs";
+import { join as _uploadPathJoin, basename as _uploadBasename, extname as _uploadExtname } from "node:path";
 import { getAllowedBroadcastRoles, updateFactionSettings } from "./store.js";
 import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBasic, fetchRankedWarReport, fetchFactionAttacks } from "./torn-api.js";
 
@@ -542,9 +549,23 @@ router.get("/api/faction/:factionId/war", requireAuth, (req, res) => {
   const synthetic = allWars.find(w =>
     w.factionId === factionId && w.warId === `war_${factionId}` && w.warOrigTarget,
   );
+  // Drop wars that ended more than POST_WAR_RETAIN_MS ago. Inside that
+  // window we keep surfacing them so the warboard-native VICTORY/DEFEAT
+  // banner has time to render; beyond it they're irrelevant to "what
+  // war am I in?" and only confuse client selection logic. Without this
+  // filter, the warboard-iOS war picker (which prefers the first non-
+  // synthetic warId) would land on a multi-day-old ended war while
+  // ignoring the active synthetic record for the new matchup. Post-war
+  // report retrieval is unaffected — those endpoints look up by warId
+  // directly against store.getAllWars() and don't depend on this list.
+  const POST_WAR_RETAIN_MS = 30 * 60 * 1000; // 30 min
+  const cutoff = Date.now() - POST_WAR_RETAIN_MS;
   const result = [];
   for (const war of allWars) {
-    if (war.factionId === factionId) {
+    if (war.factionId !== factionId) continue;
+    const endedMs = Number(war.warEndedAt) || 0;
+    if (war.warEnded && endedMs > 0 && endedMs < cutoff) continue;
+    {
       // v3.1.74 (reverted): we tried aging `until` by our cache
       // staleness, but Torn API itself caches the field — that double-
       // compensation made the timer race ~10 s ahead of the FFS banner
@@ -840,6 +861,11 @@ router.get("/api/poll", (req, res, next) => {
     // Option B faction cooldowns — included here so PDA clients (which
     // use HTTP polling, not Socket.IO / SSE) pick up bars updates.
     memberBars: store.getFactionBars(war.factionId),
+    // Pending broadcasts/shouts queued for THIS player. Drains the
+    // queue on each poll so PDA clients (which can't use SSE/Socket.IO)
+    // see in-app shout toasts within ~1 polling interval. Empty array
+    // if nothing's pending — no extra round-trip cost when idle.
+    broadcasts: pendingBroadcasts.drainForPlayer(playerId),
   });
 });
 
@@ -1153,16 +1179,43 @@ router.post("/api/broadcast", requireAuth, (req, res) => {
     io.to(`war_${warId}`).emit("global_toast", payload);
   }
 
-  // 2. Broadcast to SSE clients in this war room
-  broadcastSSE(warId, { type: "global_toast", ...payload });
+  // 2. Broadcast to SSE clients in this war room.
+  // Bug fix 2026-05-06: payload has its own `type` field ("info"/"error"
+  // = the toast severity from req.body.type). With the previous order
+  // `{ type: "global_toast", ...payload }`, the spread overwrote the
+  // discriminator with payload.type → SSE clients saw `data.type ===
+  // "info"` and skipped the global_toast handler. Putting `type:
+  // "global_toast"` AFTER the spread keeps the discriminator intact, and
+  // we move severity to `toastSeverity` so the client can still render
+  // the right colour. (Socket.IO path is unaffected — that uses an
+  // event NAME, not a `type` field.)
+  broadcastSSE(warId, {
+    ...payload,
+    type: "global_toast",
+    toastSeverity: payload.type || "info",
+  });
 
-  // 3. Send Push Notifications to subscribed faction members (offline/background)
+  // 3. Queue for HTTP-poll clients (TornPDA WebView, browsers blocked
+  // from EventSource / Socket.IO). /api/poll drains the queue per
+  // requesting player. Queued for currently-tracked online players
+  // immediately (no API call needed) and additionally for the full
+  // faction member list once we've fetched it for push.
+  for (const p of store.getOnlinePlayersForWar(warId)) {
+    pendingBroadcasts.queueForPlayer(p.id, payload);
+  }
+
+  // 4. Send Push Notifications to subscribed faction members (offline/background)
   // Fetch full faction member list to reach offline users who have push enabled
   const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
   if (apiKey) {
     fetchFactionMembers(factionId, apiKey).then(members => {
       const memberIds = Object.keys(members);
       push.notifyBroadcast(memberIds, warId, playerName, message);
+      // Also queue for any faction member we didn't already capture
+      // above as "online" — this catches PDA polls that come in within
+      // the next minute or two, before the player's next poll tick
+      // re-establishes their "online" status.
+      pendingBroadcasts.queueForPlayers(memberIds, payload);
     }).catch(err => {
       console.error(`[api] Failed to fetch members for broadcast push: ${err.message}`);
     });
@@ -4824,7 +4877,12 @@ function _persistFactionKeysToDisk() {
     for (const [fid, pool] of _factionKeyCache) {
       const fresh = {};
       for (const [key, info] of pool) {
-        if (info.lastUsedAt >= cutoff) fresh[key] = info;
+        if (info.lastUsedAt >= cutoff) {
+          // Encrypt the key — used as a JSON property name. Loader
+          // detects the enc:v1: prefix and decrypts. Plaintext entries
+          // (legacy, pre-encryption) are still accepted on load.
+          fresh[encryptKey(key)] = info;
+        }
       }
       if (Object.keys(fresh).length) out[fid] = fresh;
     }
@@ -4853,11 +4911,21 @@ function _loadFactionKeysFromDisk() {
     let loaded = 0, dropped = 0;
     for (const [fid, keys] of Object.entries(obj || {})) {
       const pool = new Map();
-      for (const [key, info] of Object.entries(keys || {})) {
+      for (const [storedKey, info] of Object.entries(keys || {})) {
         const lastUsedAt = Number(info?.lastUsedAt) || 0;
         const addedAt    = Number(info?.addedAt) || lastUsedAt;
-        if (!key || lastUsedAt < cutoff) { dropped++; continue; }
-        pool.set(key, { addedAt, lastUsedAt });
+        if (!storedKey || lastUsedAt < cutoff) { dropped++; continue; }
+        // Backward-compat: storedKey may be encrypted (enc:v1:...) or
+        // legacy plaintext. decryptKey passes plaintext through unchanged.
+        let plainKey;
+        try {
+          plainKey = isEncryptedKey(storedKey) ? decryptKey(storedKey) : storedKey;
+        } catch (e) {
+          console.warn(`[oc-spawn-keys] failed to decrypt key for faction ${fid}: ${e.message} — dropping`);
+          dropped++;
+          continue;
+        }
+        pool.set(plainKey, { addedAt, lastUsedAt });
         loaded++;
       }
       if (pool.size) _factionKeyCache.set(fid, pool);
@@ -4949,7 +5017,7 @@ async function _resolveAdminKey(req, res) {
   if (sess) return { playerId: sess.playerId, playerName: 'owner' };
   const key = req.query.key || (req.body && req.body.key) || req.get('x-torn-key');
   if (!key || String(key).length < 10) {
-    res.status(401).json({ error: "Not authenticated (login at /admin/login)" });
+    res.status(401).json({ error: "Not authenticated (login at /admin)" });
     return null;
   }
   const suffix = String(key).slice(-8);
@@ -5037,10 +5105,380 @@ router.post("/admin/logout", (_req, res) => {
   return res.json({ ok: true });
 });
 
-// GET /admin/login — dead-simple login form, no auth required.
-router.get("/admin/login", (_req, res) => {
+// GET /admin/login → permanent redirect to /admin (login URL renamed
+// 2026-05-07 — admin lives at /admin now, the page handles both
+// authenticated and unauthenticated visitors). Kept as a 302 for any
+// stale bookmarks / external links.
+router.get("/admin/login", (_req, res) => res.redirect(302, '/admin'));
+
+// GET /admin — admin entry point. If the visitor has a valid session,
+// 302 to /admin/partners (the dashboard). Otherwise, render the
+// dual-flow login screen:
+//   - TOTP form (legacy, still works)
+//   - "Sign in with security key" (WebAuthn assertion)
+//   - "Register a security key" (WebAuthn attestation; bootstrap-allowed
+//     when zero passkeys exist anywhere)
+// ── /upload-<token>  no-auth file drop ──────────────────────────────
+//
+// Token-in-path "no-auth" upload (same pattern as the unguessable URL
+// the apple-csr file used). The token is loaded from
+// /etc/warboard/upload-token (24+ hex chars). Anyone with the URL can
+// drop a file; anyone without it sees a default Express 404. nginx
+// already validates the path shape with a regex location and bumps
+// client_max_body_size to 100m before proxying here.
+//
+// Storage: /var/uploads/<unix-ts>_<safe-filename>. No overwrites,
+// filename is sanitised to alphanumerics/dash/underscore/dot. Caller
+// gets back the saved path so I can read it after they upload.
+
+const _UPLOAD_TOKEN_PATH = '/etc/warboard/upload-token';
+const _UPLOAD_DIR = '/var/uploads';
+let _UPLOAD_TOKEN = '';
+try {
+    _UPLOAD_TOKEN = readFileSync(_UPLOAD_TOKEN_PATH, 'utf8').trim();
+    if (_UPLOAD_TOKEN.length >= 16) {
+        console.log(`[upload] no-auth drop endpoint enabled at /upload-${_UPLOAD_TOKEN.slice(0,4)}…`);
+    } else {
+        _UPLOAD_TOKEN = '';
+    }
+} catch (_) { /* file absent → endpoint disabled */ }
+
+function _uploadSafeName(name) {
+    const base = _uploadBasename(String(name || 'file'));
+    // Strip everything that isn't a-zA-Z0-9._-, collapse repeats,
+    // cap length to 80 chars to keep paths sane.
+    return base.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').slice(0, 80) || 'file';
+}
+
+router.get(/^\/upload-([a-f0-9]{16,})\/?$/, (req, res) => {
+    const token = req.params[0];
+    if (!_UPLOAD_TOKEN || token !== _UPLOAD_TOKEN) return res.status(404).send('Not found');
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Upload</title>
+<style>
+:root{color-scheme:dark}body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:40px;display:flex;justify-content:center}
+.card{background:#0f1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:24px;max-width:480px;width:100%}
+h1{font-size:18px;margin:0 0 14px}
+.drop{border:2px dashed #1e3a5f;border-radius:6px;padding:40px 20px;text-align:center;cursor:pointer;transition:all .2s}
+.drop:hover,.drop.over{border-color:#2d6a4f;background:rgba(45,106,79,.1)}
+.drop p{margin:0;color:#9ca3af;font-size:13px}
+input[type=file]{display:none}
+.status{font-size:11px;margin-top:12px;min-height:16px;color:#9ca3af;line-height:1.5}
+.status.ok{color:#74c69d}
+.status.err{color:#ef4444}
+.bar{height:4px;background:#1e3a5f;border-radius:2px;margin-top:10px;overflow:hidden;display:none}
+.bar div{height:100%;background:#2d6a4f;width:0;transition:width .15s}
+</style></head><body><div class="card">
+<h1>Upload</h1>
+<label class="drop" id="drop"><p>Drop a file here or click to choose</p><input id="f" type="file"></label>
+<div class="bar" id="bar"><div></div></div>
+<div class="status" id="s"></div>
+</div>
+<script>
+const drop=document.getElementById('drop'),inp=document.getElementById('f'),s=document.getElementById('s'),bar=document.getElementById('bar'),barFill=bar.firstElementChild;
+function setS(t,c){s.textContent=t||'';s.className='status '+(c||'');}
+['dragover','dragenter'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop',ev=>{const f=ev.dataTransfer.files[0];if(f)up(f);});
+inp.addEventListener('change',()=>{if(inp.files[0])up(inp.files[0]);});
+function up(file){
+  setS('Uploading '+file.name+' ('+(file.size/1024/1024).toFixed(2)+' MB)…','');
+  bar.style.display='block';barFill.style.width='0%';
+  const fd=new FormData();fd.append('file',file);
+  const xhr=new XMLHttpRequest();xhr.open('POST',location.pathname);
+  xhr.upload.onprogress=e=>{if(e.lengthComputable)barFill.style.width=Math.round((e.loaded/e.total)*100)+'%'};
+  xhr.onload=()=>{bar.style.display='none';try{const d=JSON.parse(xhr.responseText);if(xhr.status===200)setS('✓ Uploaded as '+d.savedAs,'ok');else setS(d.error||('HTTP '+xhr.status),'err');}catch{setS('Upload failed (HTTP '+xhr.status+')','err');}};
+  xhr.onerror=()=>{bar.style.display='none';setS('Network error','err');};
+  xhr.send(fd);
+}
+</script></body></html>`);
+});
+
+router.post(/^\/upload-([a-f0-9]{16,})\/?$/, (req, res) => {
+    const token = req.params[0];
+    if (!_UPLOAD_TOKEN || token !== _UPLOAD_TOKEN) return res.status(404).json({ error: 'Not found' });
+    if (!existsSync(_UPLOAD_DIR)) mkdirSync(_UPLOAD_DIR, { recursive: true });
+    const bb = busboy({
+        headers: req.headers,
+        limits: { files: 1, fileSize: 100 * 1024 * 1024 },   // 100 MB cap
+    });
+    let savedAs = null;
+    let aborted = false;
+    bb.on('file', (_name, fileStream, info) => {
+        const safe = _uploadSafeName(info.filename);
+        const ts = Date.now();
+        savedAs = `${ts}_${safe}`;
+        const dest = _uploadPathJoin(_UPLOAD_DIR, savedAs);
+        const out = _uploadCreateWriteStream(dest, { mode: 0o644 });
+        fileStream.on('limit', () => {
+            aborted = true;
+            try { out.destroy(); } catch (_) {}
+            try { unlinkSync(dest); } catch (_) {}
+        });
+        fileStream.pipe(out);
+    });
+    bb.on('finish', () => {
+        if (aborted) return res.status(413).json({ error: 'File too large (100MB max)' });
+        if (!savedAs) return res.status(400).json({ error: 'No file in request' });
+        console.log(`[upload] saved /var/uploads/${savedAs} (${req.ip})`);
+        return res.json({ ok: true, savedAs });
+    });
+    bb.on('error', (e) => res.status(500).json({ error: e.message }));
+    req.pipe(bb);
+});
+
+router.get("/admin", (req, res) => {
+  // If already logged in, skip the login UI.
+  if (_verifyAdminCookie(req)) {
+    return res.redirect(302, '/admin/partners');
+  }
   res.set('Content-Type', 'text/html; charset=utf-8');
-  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin login</title><style>:root{color-scheme:dark}body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:40px;display:flex;justify-content:center}.card{background:#0f1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:20px;max-width:360px;width:100%}h1{font-size:18px;margin:0 0 14px}label{display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px}input{width:100%;box-sizing:border-box;background:#060b12;border:1px solid #1e3a5f;color:#e5e7eb;border-radius:4px;padding:9px 10px;font-family:monospace;font-size:13px;margin-bottom:12px}button{background:#2d6a4f;color:white;border:0;border-radius:4px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;width:100%}.status{font-size:11px;margin-top:10px;min-height:16px;color:#ef4444}</style></head><body><div class="card"><h1>Admin</h1><form id="f"><label for="k">Torn API Key</label><input id="k" type="password" autocomplete="off" placeholder="..." required><label for="t">6-digit TOTP code</label><input id="t" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" placeholder="123456" required><button type="submit">Unlock</button><div class="status" id="s"></div><div style="font-size:10px;color:#6b7280;margin-top:12px;text-align:center"><a href="/terms" style="color:#6b7280;text-decoration:none">Terms</a> · <a href="/privacy" style="color:#6b7280;text-decoration:none">Privacy</a></div></form><script>document.getElementById('f').addEventListener('submit',async e=>{e.preventDefault();const k=document.getElementById('k').value.trim();const totp=document.getElementById('t').value.trim();const s=document.getElementById('s');s.textContent='Verifying…';s.style.color='#9ca3af';try{const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,totp})});const d=await r.json();if(!r.ok)throw new Error(d.error||'HTTP '+r.status);location.href='/admin/partners'}catch(x){s.textContent=x.message;s.style.color='#ef4444'}});</script></div></body></html>`);
+  res.send(`<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin login</title>
+<style>
+  :root{color-scheme:dark}
+  body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:40px;display:flex;justify-content:center}
+  .card{background:#0f1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:20px;max-width:380px;width:100%}
+  h1{font-size:18px;margin:0 0 14px}
+  h2{font-size:12px;color:#9ca3af;margin:18px 0 10px;text-transform:uppercase;letter-spacing:.3px;border-top:1px solid #1e3a5f;padding-top:14px}
+  h2:first-of-type{border-top:0;padding-top:0;margin-top:0}
+  label{display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px}
+  input{width:100%;box-sizing:border-box;background:#060b12;border:1px solid #1e3a5f;color:#e5e7eb;border-radius:4px;padding:9px 10px;font-family:monospace;font-size:13px;margin-bottom:10px}
+  button{background:#2d6a4f;color:white;border:0;border-radius:4px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;width:100%}
+  button.secondary{background:#1e3a5f}
+  button.secondary:hover{background:#2a4f7a}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .status{font-size:11px;margin-top:8px;min-height:16px;color:#ef4444;line-height:1.4}
+  .status.ok{color:#74c69d}
+  .status.info{color:#9ca3af}
+  details{margin-top:14px}
+  details summary{font-size:11px;color:#9ca3af;cursor:pointer;text-transform:uppercase;letter-spacing:.3px;padding:6px 0}
+  details summary:hover{color:#e5e7eb}
+  details[open] summary{margin-bottom:10px}
+  .footer{font-size:10px;color:#6b7280;margin-top:16px;text-align:center;border-top:1px solid #1e3a5f;padding-top:12px}
+  .footer a{color:#6b7280;text-decoration:none}
+</style>
+</head><body>
+<div class="card">
+<h1>Admin</h1>
+
+<h2>Sign in</h2>
+<button id="webauthn-login" class="secondary">🔑 Use security key</button>
+<div id="webauthn-status" class="status"></div>
+
+<form id="totp-form" style="margin-top:14px">
+  <label for="k">Torn API Key</label>
+  <input id="k" type="password" autocomplete="off" placeholder="..." required>
+  <label for="t">6-digit TOTP code</label>
+  <input id="t" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" placeholder="123456" required>
+  <button type="submit">Unlock with TOTP</button>
+  <div class="status" id="totp-status"></div>
+</form>
+
+<details>
+  <summary>Register a new security key</summary>
+  <label for="rk">Torn API Key</label>
+  <input id="rk" type="password" autocomplete="off" placeholder="...">
+  <label for="rd">Device name</label>
+  <input id="rd" type="text" autocomplete="off" placeholder="e.g. YubiKey 5C" maxlength="64">
+  <button id="register-btn" class="secondary">Register</button>
+  <div class="status" id="register-status"></div>
+  <div style="font-size:10px;color:#6b7280;margin-top:8px;line-height:1.4">
+    First-time setup: enter your Torn key + a label, click Register, then touch your security key when prompted.
+    Once any key is registered, future registrations require an existing admin session.
+  </div>
+</details>
+
+<div class="footer">
+  <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a>
+</div>
+</div>
+
+<script>
+// ── WebAuthn b64url helpers ─────────────────────────────────────
+function b64urlToBytes(s){const pad='='.repeat((4-s.length%4)%4);const b64=(s+pad).replace(/-/g,'+').replace(/_/g,'/');const bin=atob(b64);const out=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);return out;}
+function abToB64url(buf){const b=new Uint8Array(buf);let s='';for(let i=0;i<b.length;i++)s+=String.fromCharCode(b[i]);return btoa(s).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=/g,'');}
+function attestationToJson(c){return{id:c.id,rawId:abToB64url(c.rawId),type:c.type,response:{clientDataJSON:abToB64url(c.response.clientDataJSON),attestationObject:abToB64url(c.response.attestationObject),transports:c.response.getTransports?.()||[]},clientExtensionResults:c.getClientExtensionResults?.()||{}};}
+function assertionToJson(c){return{id:c.id,rawId:abToB64url(c.rawId),type:c.type,response:{clientDataJSON:abToB64url(c.response.clientDataJSON),authenticatorData:abToB64url(c.response.authenticatorData),signature:abToB64url(c.response.signature),userHandle:c.response.userHandle?abToB64url(c.response.userHandle):null},clientExtensionResults:c.getClientExtensionResults?.()||{}};}
+
+function setStatus(id, text, cls){const e=document.getElementById(id);e.textContent=text||'';e.className='status '+(cls||'');}
+
+// ── TOTP login (legacy path, unchanged) ─────────────────────────
+document.getElementById('totp-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const k = document.getElementById('k').value.trim();
+  const totp = document.getElementById('t').value.trim();
+  setStatus('totp-status', 'Verifying…', 'info');
+  try {
+    const r = await fetch('/admin/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key:k, totp})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP '+r.status);
+    location.href = '/admin/partners';
+  } catch (x) { setStatus('totp-status', x.message, ''); }
+});
+
+// ── WebAuthn login ──────────────────────────────────────────────
+document.getElementById('webauthn-login').addEventListener('click', async () => {
+  setStatus('webauthn-status', 'Touch your security key…', 'info');
+  try {
+    const beginRes = await fetch('/admin/webauthn/login/begin', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const opts = await beginRes.json();
+    if (!beginRes.ok) throw new Error(opts.error || 'HTTP '+beginRes.status);
+    opts.challenge = b64urlToBytes(opts.challenge);
+    if (opts.allowCredentials) opts.allowCredentials = opts.allowCredentials.map(c => ({...c, id: b64urlToBytes(c.id)}));
+    const cred = await navigator.credentials.get({publicKey: opts});
+    const finishRes = await fetch('/admin/webauthn/login/finish', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({assertion: assertionToJson(cred)})});
+    const result = await finishRes.json();
+    if (!finishRes.ok) throw new Error(result.error || 'HTTP '+finishRes.status);
+    setStatus('webauthn-status', '✓ Authenticated', 'ok');
+    location.href = '/admin/partners';
+  } catch (x) { setStatus('webauthn-status', x.message || 'Cancelled', ''); }
+});
+
+// ── WebAuthn registration (bootstrap or admin-session) ──────────
+document.getElementById('register-btn').addEventListener('click', async () => {
+  const key = document.getElementById('rk').value.trim();
+  const deviceName = document.getElementById('rd').value.trim() || 'Security Key';
+  if (!key) { setStatus('register-status', 'Torn API key required', ''); return; }
+  setStatus('register-status', 'Touch your security key when prompted…', 'info');
+  try {
+    const beginRes = await fetch('/admin/webauthn/register/begin', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key})});
+    const opts = await beginRes.json();
+    if (!beginRes.ok) throw new Error(opts.error || 'HTTP '+beginRes.status);
+    opts.challenge = b64urlToBytes(opts.challenge);
+    opts.user.id = b64urlToBytes(opts.user.id);
+    if (opts.excludeCredentials) opts.excludeCredentials = opts.excludeCredentials.map(c => ({...c, id: b64urlToBytes(c.id)}));
+    const cred = await navigator.credentials.create({publicKey: opts});
+    const finishRes = await fetch('/admin/webauthn/register/finish', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key, deviceName, attestation: attestationToJson(cred)})});
+    const result = await finishRes.json();
+    if (!finishRes.ok) throw new Error(result.error || 'HTTP '+finishRes.status);
+    setStatus('register-status', '✓ Registered "'+deviceName+'". You can now sign in with your security key.', 'ok');
+    document.getElementById('rk').value = '';
+    document.getElementById('rd').value = '';
+  } catch (x) { setStatus('register-status', x.message || 'Cancelled', ''); }
+});
+</script>
+</body></html>`);
+});
+
+// ── WebAuthn / FIDO2 admin authentication ──────────────────────────────
+//
+// Bootstrap rule: when ZERO passkeys are registered yet, the registration
+// endpoints accept a verified-owner Torn API key in lieu of an admin
+// session cookie. This lets the admin enroll their first key after
+// losing TOTP, without needing a separate emergency-bypass env var.
+// Once any passkey exists, the registration flow requires a current
+// admin session — preventing a remote attacker who somehow learns the
+// owner's Torn API key from silently adding their own YubiKey.
+
+async function _webauthnRequireAdminOrBootstrap(req, res) {
+    // Path 1: existing admin session
+    const session = _verifyAdminCookie(req);
+    if (session) return { playerId: String(session.playerId), playerName: 'admin' };
+    // Path 2: bootstrap — only valid when 0 passkeys exist anywhere
+    if (webauthn.totalPasskeyCount() > 0) {
+        res.status(401).json({ error: "Not authenticated. Log in via TOTP first, then register your YubiKey." });
+        return null;
+    }
+    const key = req.body?.key;
+    if (!key || String(key).length < 10) {
+        res.status(400).json({ error: "Bootstrap registration requires your Torn API key in the body." });
+        return null;
+    }
+    try {
+        const t = await verifyTornApiKey(key);
+        if (String(t.playerId) !== String(OWNER_PLAYER_ID)) {
+            res.status(403).json({ error: "Not authorised — only the owner can bootstrap-register the first passkey." });
+            return null;
+        }
+        return { playerId: String(t.playerId), playerName: t.playerName };
+    } catch (e) {
+        res.status(401).json({ error: e.message });
+        return null;
+    }
+}
+
+router.post("/admin/webauthn/register/begin", express.json({ limit: '4kb' }), async (req, res) => {
+    const ctx = await _webauthnRequireAdminOrBootstrap(req, res);
+    if (!ctx) return;
+    try {
+        const opts = await webauthn.beginRegistration(ctx.playerId, ctx.playerName);
+        return res.json(opts);
+    } catch (e) { return res.status(500).json({ error: e.message }); }
+});
+
+router.post("/admin/webauthn/register/finish", express.json({ limit: '16kb' }), async (req, res) => {
+    const ctx = await _webauthnRequireAdminOrBootstrap(req, res);
+    if (!ctx) return;
+    const attestation = req.body?.attestation;
+    const deviceName = req.body?.deviceName;
+    if (!attestation) return res.status(400).json({ error: "attestation required" });
+    try {
+        const result = await webauthn.finishRegistration(ctx.playerId, attestation, deviceName);
+        console.log(`[admin][webauthn] registered passkey "${deviceName || 'Security Key'}" for ${ctx.playerName} (${ctx.playerId})`);
+        return res.json(result);
+    } catch (e) { return res.status(400).json({ error: e.message }); }
+});
+
+router.post("/admin/webauthn/login/begin", express.json({ limit: '4kb' }), async (req, res) => {
+    // Step 1 of login: client identifies which player it's logging in as
+    // (for now always the owner — multi-admin would generalise this).
+    // Server returns the challenge + list of allowed credentials.
+    const playerId = String(req.body?.playerId || OWNER_PLAYER_ID);
+    try {
+        const opts = await webauthn.beginAuthentication(playerId);
+        return res.json(opts);
+    } catch (e) {
+        if (e.code === "NO_PASSKEYS") {
+            return res.status(404).json({ error: "No passkeys registered. Use TOTP login instead." });
+        }
+        return res.status(500).json({ error: e.message });
+    }
+});
+
+router.post("/admin/webauthn/login/finish", express.json({ limit: '16kb' }), async (req, res) => {
+    const ip = String(req.ip || req.connection?.remoteAddress || 'unknown');
+    if (!_adminLoginAllowed(ip)) {
+        return res.status(429).json({ error: "Too many failed attempts. Wait 15 minutes." });
+    }
+    const playerId = String(req.body?.playerId || OWNER_PLAYER_ID);
+    const assertion = req.body?.assertion;
+    if (!assertion) { _adminLoginFail(ip); return res.status(400).json({ error: "assertion required" }); }
+    if (String(playerId) !== String(OWNER_PLAYER_ID)) {
+        _adminLoginFail(ip);
+        return res.status(403).json({ error: "Not authorised" });
+    }
+    try {
+        await webauthn.finishAuthentication(playerId, assertion);
+        _adminLoginClear(ip);
+        const token = issueToken({ playerId, scope: 'admin' });
+        const twelveHours = 12 * 60 * 60;
+        res.set('Set-Cookie', `admin_token=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${twelveHours}`);
+        console.log(`[admin][webauthn] login OK for player ${playerId}; cookie set len=${token.length}`);
+        return res.json({ ok: true });
+    } catch (e) {
+        _adminLoginFail(ip);
+        return res.status(401).json({ error: e.message });
+    }
+});
+
+// ── Passkey management (list + remove) ──────────────────────────────
+router.get("/api/admin/passkeys", async (req, res) => {
+    const session = _verifyAdminCookie(req);
+    if (!session) return res.status(401).json({ error: "Not authenticated" });
+    return res.json({ passkeys: webauthn.listPasskeys(session.playerId) });
+});
+
+router.delete("/api/admin/passkeys/:idShort", async (req, res) => {
+    const session = _verifyAdminCookie(req);
+    if (!session) return res.status(401).json({ error: "Not authenticated" });
+    const idShort = decodeURIComponent(req.params.idShort);
+    const removed = webauthn.removePasskey(session.playerId, idShort);
+    return res.json({ ok: removed });
 });
 
 // Owner-gated admin page. Access requires the admin_token cookie set
@@ -5051,7 +5489,7 @@ router.get("/admin/partners", async (req, res) => {
   const session = _verifyAdminCookie(req);
   if (!session) {
     console.log(`[admin] /admin/partners redirect to login. cookieHeader=${req.headers.cookie ? 'present(len=' + req.headers.cookie.length + ')' : 'MISSING'}`);
-    return res.redirect(302, '/admin/login');
+    return res.redirect(302, '/admin');
   }
   console.log(`[admin] /admin/partners allowed for playerId=${session.playerId}`);
   // Inline HTML — the owner is already authenticated via cookie, so
@@ -6369,6 +6807,56 @@ router.post("/api/oc/admin-roles", async (req, res) => {
   return res.json({ ok: true, roles: saved, removed });
 });
 
+// ── /api/oc/missing-override ───────────────────────────────────────────────
+// Record (or list) "this slot is a Torn API false-positive — the user
+// does have the item." The OC Manager userscript auto-detects these
+// via DOM scrape (orange no-item SVG missing) AND admins can flag them
+// manually with the ✓ Has it button. Either path POSTs here so the
+// override sticks across page navigation and is shared with every
+// admin in the faction. 30-min TTL on each entry — long enough to span
+// a normal OC management session, short enough that the next scope's
+// state is never contaminated.
+//
+// Auth: same admin gate as the other OC management endpoints. Only
+// faction admins (per oc_admin_roles + dev override) can record / list.
+
+router.post("/api/oc/missing-override", express.json({ limit: '4kb' }), async (req, res) => {
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info } = ctx;
+  const adminRoles = store.getAdminRoles(info.factionId).map(r => String(r).toLowerCase());
+  const isDev = String(info.playerId) === '137558';
+  const myPos = String(info.factionPosition || '').toLowerCase();
+  if (!isDev && !adminRoles.includes(myPos)) {
+    return res.status(403).json({ error: "Admin role required" });
+  }
+  const userID = String(req.body?.userID || '').trim();
+  const itemID = Number(req.body?.itemID);
+  if (!userID || !Number.isFinite(itemID) || itemID <= 0) {
+    return res.status(400).json({ error: "userID and itemID required" });
+  }
+  // Optional: client can pass the crime's scheduled execution time
+  // (epoch ms). Server caps the override TTL to that, so the entry
+  // naturally lapses when the crime runs even if the 3-day default
+  // would've kept it alive longer.
+  const crimeExpiresAtMs = Number(req.body?.crimeExpiresAtMs) || null;
+  missingOverrides.recordOverride(info.factionId, userID, itemID, crimeExpiresAtMs);
+  return res.json({ ok: true });
+});
+
+router.get("/api/oc/missing-overrides", async (req, res) => {
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info } = ctx;
+  const adminRoles = store.getAdminRoles(info.factionId).map(r => String(r).toLowerCase());
+  const isDev = String(info.playerId) === '137558';
+  const myPos = String(info.factionPosition || '').toLowerCase();
+  if (!isDev && !adminRoles.includes(myPos)) {
+    return res.json({ overrides: [] });   // non-admins see no-op
+  }
+  return res.json({ overrides: missingOverrides.listOverrides(info.factionId) });
+});
+
 // ── Vault requests (faction members ask for $X from the vault) ─────────────
 // Everyone in the faction sees pending requests. When Torn's currencynews
 // shows the requester received money ≥ their ask, the poller auto-removes
@@ -6404,6 +6892,59 @@ async function resolveVaultCaller(req, res) {
   }
   return { info, key };
 }
+
+// SSE stream of vault-list events for the caller's faction. Lets the
+// admin panel UI swap its 15s poll for a real-time push:
+//
+//   - Member submits a request → admin sees it within ~1s
+//   - Banker claims (Send) → request disappears for everyone within ~1s
+//   - fundsnews / reportFulfillment matches a transfer → request cleared
+//
+// Auth: same per-key resolution as other OC endpoints (?key=...). Uses
+// GM_xmlhttpRequest streaming on the client (the proven pattern factionops
+// uses for /api/stream — see canUseSSEStream there). Falls back to slower
+// polling on the client if the stream fails.
+router.get("/api/oc/stream/vault", async (req, res) => {
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const fid = String(ctx.info.factionId);
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  // 1KB preamble forces the client's onprogress to fire immediately so
+  // the script can flip its UI from "connecting" to "connected" without
+  // waiting for the first real event.
+  res.write(": preamble " + ".".repeat(1024) + "\n\n");
+  res.write(`data: ${JSON.stringify({ type: "hello", factionId: fid })}\n\n`);
+  if (typeof res.flush === "function") res.flush();
+
+  const unsubscribe = vaultRequests.subscribeVaultEvents(fid, (payload) => {
+    try {
+      res.write(`data: ${JSON.stringify({ type: "vault", ...payload })}\n\n`);
+      if (typeof res.flush === "function") res.flush();
+    } catch (_) { /* client gone, cleanup runs on close */ }
+  });
+
+  // Heartbeat every 15s. nginx's proxy_read_timeout on this site is 24h
+  // but client-side intermediaries (mobile carriers, corporate proxies)
+  // commonly close idle TCP after 60-120s. The keepalive line is parsed
+  // as a comment by SSE clients so it doesn't trigger an event.
+  const ka = setInterval(() => {
+    try {
+      res.write(": keepalive\n\n");
+      if (typeof res.flush === "function") res.flush();
+    } catch (_) { /* close handler will clean up */ }
+  }, 15000);
+
+  req.on("close", () => {
+    clearInterval(ka);
+    unsubscribe();
+  });
+});
 
 // List pending requests for the caller's faction.
 router.get("/api/oc/vault-requests", async (req, res) => {
@@ -6777,6 +7318,44 @@ router.get("/api/debug/shim-ping", (req, res) => {
   const at = String(req.query.at || '').slice(0, 100);
   console.log(`[shim-ping] origin=${origin} at=${at} ua="${ua}"`);
   res.status(204).end();
+});
+
+// ── /api/live-activity/chain/subscribe ────────────────────────────────
+// iOS Live Activity push token registration. The activity-side push
+// token (distinct from the device-wide push token used by /api/apns/
+// subscribe) is the per-activity address Apple uses when we POST a
+// liveactivity push. One token per (warId, playerId) — re-subscribing
+// replaces any prior token for that pair, which matches Apple's
+// behavior when the user kills + restarts the activity.
+router.post("/api/live-activity/chain/subscribe", requireAuth, express.json({ limit: '4kb' }), async (req, res) => {
+  const { warId, token } = req.body || {};
+  if (!warId || !token) return res.status(400).json({ error: "warId and token required" });
+  const liveActivityTokens = await import("./live-activity-tokens.js");
+  liveActivityTokens.upsert({
+    warId: String(warId),
+    playerId: String(req.user.playerId),
+    token: String(token),
+  });
+  console.log(`[live-activity/chain] subscribed ${req.user.playerName} (${req.user.playerId}) → war ${warId}`);
+  return res.json({ ok: true });
+});
+
+// ── /api/live-activity/chain/unsubscribe ───────────────────────────────
+// Client calls this when its activity ends (chain broken, war over,
+// user manually dismissed, etc.) so the server stops trying to push to
+// a token Apple has already invalidated.
+router.post("/api/live-activity/chain/unsubscribe", requireAuth, express.json({ limit: '4kb' }), async (req, res) => {
+  const { warId } = req.body || {};
+  if (!warId) return res.status(400).json({ error: "warId required" });
+  const liveActivityTokens = await import("./live-activity-tokens.js");
+  const removed = liveActivityTokens.remove({
+    warId: String(warId),
+    playerId: String(req.user.playerId),
+  });
+  if (removed) {
+    console.log(`[live-activity/chain] unsubscribed ${req.user.playerName} (${req.user.playerId}) from war ${warId}`);
+  }
+  return res.json({ ok: true, removed });
 });
 
 // ── /api/apns/subscribe ────────────────────────────────────────────────

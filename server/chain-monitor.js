@@ -13,6 +13,8 @@
 import * as store from "./store.js";
 import { fetchFactionChain, fetchRankedWar } from "./torn-api.js";
 import * as push from "./push-notifications.js";
+import * as apns from "./apns.js";
+import * as liveActivityTokens from "./live-activity-tokens.js";
 
 // Fallback interval when we can't resolve the dynamic one (e.g. no war
 // context yet). Normal operation uses store.getPollInterval(factionId,
@@ -88,6 +90,21 @@ export function startChainMonitor(io, warId) {
       const prevChain = { ...war.chainData };
       war.chainData = chain;
       store.saveState();
+
+      // ── iOS chain Live Activity push fan-out ──
+      // Whenever chain count or timeout meaningfully changes, push the
+      // new state to every iOS Live Activity token registered against
+      // this warId so the lock-screen / Dynamic Island countdown stays
+      // fresh while the app is backgrounded. No-op if APNs isn't
+      // configured (the apns module checks env vars).
+      const countChanged = (prevChain.current || 0) !== (chain.current || 0);
+      const cooldownFlipped = ((prevChain.cooldown || 0) > 0) !== ((chain.cooldown || 0) > 0);
+      const broke = (prevChain.current || 0) > 0 && (chain.current || 0) === 0;
+      if (countChanged || cooldownFlipped || broke) {
+        broadcastChainLiveActivity(warId, war, chain, broke).catch((e) =>
+          console.warn(`[chain] Live Activity broadcast failed: ${e.message}`)
+        );
+      }
 
       // Reset backoff on success
       backoffs.set(warId, POLL_INTERVAL_MS);
@@ -249,6 +266,10 @@ export function startChainMonitor(io, warId) {
     } catch (err) {
       if (/Incorrect ID-entity relation/i.test(err.message)) {
         store.quarantinePoolKey(apiKey, war.factionId, 'chain code 7');
+      } else if (/Incorrect key|\(code 2\)/i.test(err.message)) {
+        // v5.0.3: code 2 = key regenerated/revoked; quarantine same as
+        // code 7 so the rotation stops picking the dead key.
+        store.quarantinePoolKey(apiKey, war.factionId, 'chain code 2');
       }
       // Exponential backoff on failure
       const current = backoffs.get(warId) || POLL_INTERVAL_MS;
@@ -278,6 +299,68 @@ export function stopChainMonitor(warId) {
   lastScoreCheck.delete(warId);
   warTargetNotified.delete(warId);
   console.log(`[chain] Stopped monitoring for war ${warId}`);
+}
+
+/**
+ * Push a chain ContentState to every iOS Live Activity registered
+ * against this warId. Reaps tokens that APNs rejects as invalid
+ * (BadDeviceToken / Unregistered) so the storage doesn't accumulate
+ * dead registrations.
+ *
+ * Mirrors the field shape of ChainActivityAttributes.ContentState in
+ * the iOS app — each key here MUST match a property name there or the
+ * widget will silently render stale values for missing keys.
+ */
+async function broadcastChainLiveActivity(warId, war, chain, broke) {
+  const tokens = liveActivityTokens.listForWar(warId);
+  if (tokens.length === 0) return;
+  const nowMs = Date.now();
+  const timeoutDeadlineMs = chain.timeout > 0
+    ? nowMs + Math.round(chain.timeout * 1000)
+    : 0;
+  const cooldownDeadlineMs = chain.cooldown > 0
+    ? nowMs + Math.round(chain.cooldown * 1000)
+    : 0;
+  const contentState = {
+    chain: chain.current || 0,
+    timeoutDeadlineMs,
+    cooldownDeadlineMs,
+    myScore: war.warScores?.myScore || 0,
+    enemyScore: war.warScores?.enemyScore || 0,
+  };
+  const event = broke ? "end" : "update";
+  // Stale-date is "after this point iOS should treat the widget as
+  // outdated." Setting it to (timeout + 30s) gives the activity a
+  // graceful fade once the deadline passes if no further push arrives.
+  const staleDateUnix = timeoutDeadlineMs > 0
+    ? Math.floor(timeoutDeadlineMs / 1000) + 30
+    : Math.floor(nowMs / 1000) + 600;
+
+  await Promise.all(tokens.map(async (row) => {
+    const result = await apns.sendLiveActivity(row.token, contentState, {
+      event,
+      staleDateUnix,
+      // For end events, dismiss within ~1 minute so the user isn't
+      // staring at a dead chain banner forever.
+      dismissalDateUnix: event === "end"
+        ? Math.floor(nowMs / 1000) + 60
+        : undefined,
+    });
+    if (!result.ok) {
+      // BadDeviceToken / Unregistered → token is permanently dead,
+      // drop it. Other failures (transient network, ExpiredProviderToken
+      // already auto-refreshes) are logged but the row stays.
+      if (result.reason === "BadDeviceToken" || result.reason === "Unregistered") {
+        liveActivityTokens.removeByToken(row.token);
+        console.log(`[chain/la] dropped dead token for player ${row.playerId} (${result.reason})`);
+      } else if (result.reason !== "not-configured") {
+        console.warn(`[chain/la] push failed for player ${row.playerId}: ${result.reason}`);
+      }
+    }
+  }));
+  if (event === "end") {
+    liveActivityTokens.clearWar(warId);
+  }
 }
 
 /**
