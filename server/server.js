@@ -518,53 +518,6 @@ app.post(
   }
 );
 
-// ── WhisperBoard training telemetry ─────────────────────────────────────
-// Receives one-shot training-run reports from the keyboard so the user can
-// see whether overnight auto-training actually ran (and succeeded). No auth:
-// personal fork on one device, and the log is append-only JSON lines with
-// no sensitive content (samples count + loss + error message, nothing
-// user-typed). View at /whisperboard/training_log.
-const WHISPERBOARD_LOG_DIR = join(__dirname, "..", "logs");
-const WHISPERBOARD_LOG_PATH = join(WHISPERBOARD_LOG_DIR, "whisperboard_training.log");
-try { mkdirSync(WHISPERBOARD_LOG_DIR, { recursive: true }); } catch {}
-
-app.post("/whisperboard/training_log", (req, res) => {
-  const body = req.body || {};
-  const entry = {
-    ts: new Date().toISOString(),
-    ip: req.ip,
-    versionName: String(body.versionName || "").slice(0, 32),
-    versionCode: Number.isFinite(+body.versionCode) ? +body.versionCode : null,
-    success: !!body.success,
-    state: String(body.state || "").slice(0, 32),
-    samples: Number.isFinite(+body.samples) ? +body.samples : null,
-    loss: Number.isFinite(+body.loss) ? +body.loss : null,
-    durationMs: Number.isFinite(+body.durationMs) ? +body.durationMs : null,
-    trigger: String(body.trigger || "").slice(0, 32),
-    error: body.error ? String(body.error).slice(0, 512) : null,
-  };
-  try {
-    appendFileSync(WHISPERBOARD_LOG_PATH, JSON.stringify(entry) + "\n");
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("[whisperboard] log append failed:", err.message);
-    res.status(500).json({ ok: false });
-  }
-});
-
-app.get("/whisperboard/training_log", (_req, res) => {
-  try {
-    const content = existsSync(WHISPERBOARD_LOG_PATH)
-      ? readFileSync(WHISPERBOARD_LOG_PATH, "utf-8")
-      : "";
-    res.setHeader("Content-Type", "text/plain; charset=UTF-8");
-    res.setHeader("Cache-Control", "no-cache");
-    res.send(content);
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
 // Anonymous diagnostic channel for in-browser userscripts. Accepts a small
 // JSON body and logs it with a tag we can grep from pm2. Used temporarily
 // to debug why a feature fires or doesn't on a user's browser without
