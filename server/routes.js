@@ -84,6 +84,7 @@ import * as webauthn from "./webauthn.js";
 import busboy from "busboy";
 import { createWriteStream as _uploadCreateWriteStream } from "node:fs";
 import { join as _uploadPathJoin, basename as _uploadBasename, extname as _uploadExtname } from "node:path";
+import { timingSafeEqual as _uploadTimingSafeEqual } from "node:crypto";
 import { getAllowedBroadcastRoles, updateFactionSettings } from "./store.js";
 import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBasic, fetchRankedWarReport, fetchFactionAttacks } from "./torn-api.js";
 
@@ -5132,8 +5133,10 @@ router.get("/admin/login", (_req, res) => res.redirect(302, '/admin'));
 // gets back the saved path so I can read it after they upload.
 
 const _UPLOAD_TOKEN_PATH = '/etc/warboard/upload-token';
+const _UPLOAD_PW_PATH    = '/etc/warboard/upload-password';
 const _UPLOAD_DIR = '/var/uploads';
 let _UPLOAD_TOKEN = '';
+let _UPLOAD_PW    = '';
 try {
     _UPLOAD_TOKEN = readFileSync(_UPLOAD_TOKEN_PATH, 'utf8').trim();
     if (_UPLOAD_TOKEN.length >= 16) {
@@ -5142,6 +5145,44 @@ try {
         _UPLOAD_TOKEN = '';
     }
 } catch (_) { /* file absent → endpoint disabled */ }
+try {
+    _UPLOAD_PW = readFileSync(_UPLOAD_PW_PATH, 'utf8').trim();
+    if (_UPLOAD_PW.length >= 8) {
+        console.log(`[upload] basic-auth endpoint enabled at /upload (password: ${_UPLOAD_PW.length} chars)`);
+    } else {
+        _UPLOAD_PW = '';
+    }
+} catch (_) { /* file absent → /upload disabled */ }
+
+/**
+ * Constant-time check of an incoming Basic auth header against the
+ * configured upload password. Username is ignored — only the password
+ * matters. Returns true on match, false on missing/wrong header.
+ *
+ * Uses node:crypto's timingSafeEqual under a length guard so a wrong-
+ * length attempt doesn't leak length via response time. Buffer.from on
+ * a malformed base64 still produces a buffer (truncated/empty), so the
+ * length-mismatch fast path catches that case too.
+ */
+function _checkUploadBasicAuth(req) {
+    if (!_UPLOAD_PW) return false;
+    const header = req.headers.authorization || '';
+    if (!header.startsWith('Basic ')) return false;
+    let decoded = '';
+    try { decoded = Buffer.from(header.slice(6), 'base64').toString('utf8'); } catch { return false; }
+    const idx = decoded.indexOf(':');
+    if (idx < 0) return false;
+    const provided = decoded.slice(idx + 1);
+    if (provided.length !== _UPLOAD_PW.length) return false;
+    try {
+        return _uploadTimingSafeEqual(Buffer.from(provided), Buffer.from(_UPLOAD_PW));
+    } catch { return false; }
+}
+
+function _uploadSendBasicAuthChallenge(res) {
+    res.set('WWW-Authenticate', 'Basic realm="warboard upload"');
+    return res.status(401).send('Auth required');
+}
 
 function _uploadSafeName(name) {
     const base = _uploadBasename(String(name || 'file'));
@@ -5199,6 +5240,32 @@ function up(file){
 router.post(/^\/upload-([a-f0-9]{16,})\/?$/, (req, res) => {
     const token = req.params[0];
     if (!_UPLOAD_TOKEN || token !== _UPLOAD_TOKEN) return res.status(404).json({ error: 'Not found' });
+    return _uploadHandlePost(req, res);
+});
+
+// ── /upload (basic-auth) — same drop UI, gated by HTTP basic auth ───
+// Browser prompts for username + password on first visit; password is
+// read from /etc/warboard/upload-password. Username is ignored —
+// only the password matters. Same storage path + 100MB cap as the
+// token-URL route. Useful when you want a simple memorable URL but
+// still need protection against /.env-style scanner abuse (see access
+// log: /upload/ already has 7 unauth probes before this endpoint
+// was even live).
+router.get('/upload', (req, res) => {
+    if (!_UPLOAD_PW) return res.status(404).send('Not found');
+    if (!_checkUploadBasicAuth(req)) return _uploadSendBasicAuthChallenge(res);
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(_uploadHtmlPage());
+});
+
+router.post('/upload', (req, res) => {
+    if (!_UPLOAD_PW) return res.status(404).json({ error: 'Not found' });
+    if (!_checkUploadBasicAuth(req)) return _uploadSendBasicAuthChallenge(res);
+    return _uploadHandlePost(req, res);
+});
+
+/** Stream-and-store handler shared by /upload-<token> and /upload. */
+function _uploadHandlePost(req, res) {
     if (!existsSync(_UPLOAD_DIR)) mkdirSync(_UPLOAD_DIR, { recursive: true });
     const bb = busboy({
         headers: req.headers,
@@ -5227,7 +5294,51 @@ router.post(/^\/upload-([a-f0-9]{16,})\/?$/, (req, res) => {
     });
     bb.on('error', (e) => res.status(500).json({ error: e.message }));
     req.pipe(bb);
-});
+}
+
+/** Standalone HTML page so both /upload and /upload-<token> can share. */
+function _uploadHtmlPage() {
+    return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Upload</title>
+<style>
+:root{color-scheme:dark}body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:40px;display:flex;justify-content:center}
+.card{background:#0f1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:24px;max-width:480px;width:100%}
+h1{font-size:18px;margin:0 0 14px}
+.drop{border:2px dashed #1e3a5f;border-radius:6px;padding:40px 20px;text-align:center;cursor:pointer;transition:all .2s}
+.drop:hover,.drop.over{border-color:#2d6a4f;background:rgba(45,106,79,.1)}
+.drop p{margin:0;color:#9ca3af;font-size:13px}
+input[type=file]{display:none}
+.status{font-size:11px;margin-top:12px;min-height:16px;color:#9ca3af;line-height:1.5}
+.status.ok{color:#74c69d}
+.status.err{color:#ef4444}
+.bar{height:4px;background:#1e3a5f;border-radius:2px;margin-top:10px;overflow:hidden;display:none}
+.bar div{height:100%;background:#2d6a4f;width:0;transition:width .15s}
+</style></head><body><div class="card">
+<h1>Upload</h1>
+<label class="drop" id="drop"><p>Drop a file here or click to choose</p><input id="f" type="file"></label>
+<div class="bar" id="bar"><div></div></div>
+<div class="status" id="s"></div>
+</div>
+<script>
+const drop=document.getElementById('drop'),inp=document.getElementById('f'),s=document.getElementById('s'),bar=document.getElementById('bar'),barFill=bar.firstElementChild;
+function setS(t,c){s.textContent=t||'';s.className='status '+(c||'');}
+['dragover','dragenter'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop',ev=>{const f=ev.dataTransfer.files[0];if(f)up(f);});
+inp.addEventListener('change',()=>{if(inp.files[0])up(inp.files[0]);});
+function up(file){
+  setS('Uploading '+file.name+' ('+(file.size/1024/1024).toFixed(2)+' MB)…','');
+  bar.style.display='block';barFill.style.width='0%';
+  const fd=new FormData();fd.append('file',file);
+  const xhr=new XMLHttpRequest();xhr.open('POST',location.pathname);
+  xhr.upload.onprogress=e=>{if(e.lengthComputable)barFill.style.width=Math.round((e.loaded/e.total)*100)+'%'};
+  xhr.onload=()=>{bar.style.display='none';try{const d=JSON.parse(xhr.responseText);if(xhr.status===200)setS('✓ Uploaded as '+d.savedAs,'ok');else setS(d.error||('HTTP '+xhr.status),'err');}catch{setS('Upload failed (HTTP '+xhr.status+')','err');}};
+  xhr.onerror=()=>{bar.style.display='none';setS('Network error','err');};
+  xhr.send(fd);
+}
+</script></body></html>`;
+}
 
 router.get("/admin", (req, res) => {
   // If already logged in, skip the login UI.
