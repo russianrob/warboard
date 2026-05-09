@@ -3310,15 +3310,19 @@ async function handlePostWarReport(req, res) {
   const { factionId, factionPosition } = req.user;
   const { warId } = req.params;
 
-  // Admin gate — only faction leadership sees post-war analytics. The
-  // report includes per-member accountability data (xanax usage, attack
-  // deficits, energy efficiency, "areas to improve" callouts) that's
-  // not appropriate for general membership to browse. Same role tiers
-  // as priority tagging (LEADER_POSITIONS = leader / co-leader / war
-  // leader / banker — the codebase's "admin tier" definition).
+  // Admin gate — uses the same per-faction "broadcast roles" config
+  // that controls who can shout to the war room. Defaults to leader /
+  // co-leader / war leader / banker, but each faction's admins can
+  // customize the role list via /api/broadcast/roles. One concept
+  // covers both broadcast access AND post-war report access — admins
+  // are admins.
   const pos = (factionPosition || "").toLowerCase();
-  if (!LEADER_POSITIONS.includes(pos)) {
-    return res.status(403).json({ error: "Post-war reports are leadership-only (leader, co-leader, war leader, banker)." });
+  const adminRoles = (store.getAllowedBroadcastRoles(factionId) || [])
+    .map(r => String(r).toLowerCase());
+  if (!adminRoles.includes(pos)) {
+    return res.status(403).json({
+      error: "Post-war reports are admin-only. Configure who counts as admin via the Broadcast Roles setting.",
+    });
   }
 
   const war = requireWarMember(req, res, warId);
