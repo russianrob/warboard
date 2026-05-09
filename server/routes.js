@@ -3307,8 +3307,19 @@ function savePostWarCache(warId, payload) {
 }
 
 async function handlePostWarReport(req, res) {
-  const { factionId } = req.user;
+  const { factionId, factionPosition } = req.user;
   const { warId } = req.params;
+
+  // Admin gate — only faction leadership sees post-war analytics. The
+  // report includes per-member accountability data (xanax usage, attack
+  // deficits, energy efficiency, "areas to improve" callouts) that's
+  // not appropriate for general membership to browse. Same role tiers
+  // as priority tagging (LEADER_POSITIONS = leader / co-leader / war
+  // leader / banker — the codebase's "admin tier" definition).
+  const pos = (factionPosition || "").toLowerCase();
+  if (!LEADER_POSITIONS.includes(pos)) {
+    return res.status(403).json({ error: "Post-war reports are leadership-only (leader, co-leader, war leader, banker)." });
+  }
 
   const war = requireWarMember(req, res, warId);
   if (!war) {
