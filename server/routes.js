@@ -3248,6 +3248,42 @@ function formatWarDuration(seconds) {
 }
 
 /** Shared handler for post-war report generation (GET and POST). */
+/**
+ * Per-war cache for the expensive Torn API responses (ranked war
+ * report + paginated attack log). For ENDED wars the data is final;
+ * once cached, repeat report requests skip Torn entirely. For ACTIVE
+ * wars we still go to the API every time since scores keep moving.
+ *
+ * Stored in dedicated files (data/post-war-cache/<warId>.json) instead
+ * of inline in wars.json — the attack log can be 1-3 MB per war and
+ * inlining would bloat wars.json + slow every store.saveState() call.
+ */
+const POST_WAR_CACHE_DIR = pathJoin(serverDataPath(), "post-war-cache");
+function serverDataPath() {
+  return pathJoin(pathDirname(fileURLToPath(import.meta.url)), "data");
+}
+function postWarCachePath(warId) {
+  return pathJoin(POST_WAR_CACHE_DIR, String(warId).replace(/[^A-Za-z0-9_-]/g, "_") + ".json");
+}
+function loadPostWarCache(warId) {
+  try {
+    const p = postWarCachePath(warId);
+    if (!existsSync(p)) return null;
+    return JSON.parse(readFileSync(p, "utf-8"));
+  } catch (e) {
+    console.warn(`[post-war/cache] read failed for ${warId}: ${e.message}`);
+    return null;
+  }
+}
+function savePostWarCache(warId, payload) {
+  try {
+    if (!existsSync(POST_WAR_CACHE_DIR)) mkdirSync(POST_WAR_CACHE_DIR, { recursive: true });
+    writeFileSync(postWarCachePath(warId), JSON.stringify(payload));
+  } catch (e) {
+    console.warn(`[post-war/cache] write failed for ${warId}: ${e.message}`);
+  }
+}
+
 async function handlePostWarReport(req, res) {
   const { factionId } = req.user;
   const { warId } = req.params;
@@ -3259,54 +3295,79 @@ async function handlePostWarReport(req, res) {
       : undefined;
   }
 
-  // Cooldown check
-  const lastReport = postWarReportCooldowns.get(warId) || 0;
-  const elapsed = Date.now() - lastReport;
-  if (elapsed < POST_WAR_REPORT_COOLDOWN_MS) {
-    const waitSec = Math.ceil((POST_WAR_REPORT_COOLDOWN_MS - elapsed) / 1000);
-    return res.status(429).json({ error: `Please wait ${waitSec}s before requesting another post-war report` });
-  }
-
-  const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
-  if (!apiKey) {
-    return res.status(503).json({ error: "No API key available — set a faction API key in settings" });
-  }
-
   // Accept estimates from POST body
   const estimates = (req.body && req.body.estimates) || {};
 
-  try {
-    postWarReportCooldowns.set(warId, Date.now());
-    const warReportData = await fetchRankedWarReport(factionId, apiKey);
-
-    if (!warReportData || (!warReportData.factions && !warReportData.war)) {
-      return res.status(404).json({ error: "No ranked war report available — a ranked war may not have been completed recently" });
+  // Cache lookup — for ended wars, the warReportData + attackLog are
+  // permanently final, so we can skip Torn entirely. The xanaxStats
+  // and estimates can still change (backfill, fresh client estimates),
+  // so analyzePostWarReport always re-runs against whichever inputs
+  // are current.
+  let warReportData = null;
+  let attackLog = null;
+  let cacheStatus = "miss";
+  if (war.warEnded) {
+    const cached = loadPostWarCache(warId);
+    if (cached && cached.warReportData) {
+      warReportData = cached.warReportData;
+      attackLog     = cached.attackLog || [];
+      cacheStatus   = "hit";
     }
+  }
 
-    // Fetch attack log for bleed analysis
-    let attackLog = [];
-    try {
-      const startTs = warReportData.rankedwarreport?.start || warReportData.start || 0;
-      const endTs = warReportData.rankedwarreport?.end || warReportData.end || 0;
-      if (startTs && endTs) {
-        attackLog = await fetchFactionAttacks(war.factionId, apiKey, startTs, endTs);
-        console.log(`[post-war] Fetched ${attackLog.length} ranked war attacks for bleed analysis`);
+  // Cooldown only applies to fresh fetches (which hit Torn); cache
+  // hits are free, no rate limit needed.
+  if (cacheStatus === "miss") {
+    const lastReport = postWarReportCooldowns.get(warId) || 0;
+    const elapsed = Date.now() - lastReport;
+    if (elapsed < POST_WAR_REPORT_COOLDOWN_MS) {
+      const waitSec = Math.ceil((POST_WAR_REPORT_COOLDOWN_MS - elapsed) / 1000);
+      return res.status(429).json({ error: `Please wait ${waitSec}s before requesting another post-war report` });
+    }
+  }
+
+  try {
+    if (cacheStatus === "miss") {
+      const apiKey = store.getFactionApiKey(factionId) || store.getApiKeyForFaction(factionId);
+      if (!apiKey) {
+        return res.status(503).json({ error: "No API key available — set a faction API key in settings" });
       }
-    } catch (atkErr) {
-      console.warn(`[post-war] Attack log fetch failed (bleed analysis will be skipped):`, atkErr.message);
+      postWarReportCooldowns.set(warId, Date.now());
+      warReportData = await fetchRankedWarReport(factionId, apiKey);
+      if (!warReportData || (!warReportData.factions && !warReportData.war)) {
+        return res.status(404).json({ error: "No ranked war report available — a ranked war may not have been completed recently" });
+      }
+      // Fetch attack log for bleed analysis
+      attackLog = [];
+      try {
+        const startTs = warReportData.rankedwarreport?.start || warReportData.start || 0;
+        const endTs = warReportData.rankedwarreport?.end || warReportData.end || 0;
+        if (startTs && endTs) {
+          attackLog = await fetchFactionAttacks(war.factionId, apiKey, startTs, endTs);
+          console.log(`[post-war] Fetched ${attackLog.length} ranked war attacks for bleed analysis`);
+        }
+      } catch (atkErr) {
+        console.warn(`[post-war] Attack log fetch failed (bleed analysis will be skipped):`, atkErr.message);
+      }
+      // Persist to cache only when the war is ended — active wars'
+      // data still changes, so caching would freeze stale numbers.
+      if (war.warEnded) {
+        savePostWarCache(warId, {
+          warReportData,
+          attackLog,
+          fetchedAt: Date.now(),
+        });
+        cacheStatus = "stored";
+      }
     }
 
     // Xanax accountability stats — populated by xanax-tracker.js while
-    // the war is active. Falls through to undefined if the war pre-dated
-    // the tracker, in which case the report's xanaxAccountability
-    // section will be empty (enabled: false).
+    // the war is active. Always re-read from war.xanaxStats so backfill
+    // updates flow through even when the rest is cached.
     let xanaxStats;
     try {
       const xt = await import("./xanax-tracker.js");
       xanaxStats = xt.getStats(warId);
-      // Treat absence-of-data as no-tracker-ran (rather than reporting
-      // a misleading "0 xanax taken across the whole war"). Surface
-      // only if we actually polled at least once.
       if (!xanaxStats || xanaxStats.lastPolledAt === 0) xanaxStats = null;
     } catch (xtErr) {
       console.warn(`[post-war] xanax-tracker import failed:`, xtErr.message);
@@ -3314,7 +3375,7 @@ async function handlePostWarReport(req, res) {
     }
 
     const report = analyzePostWarReport(warReportData, estimates, attackLog, xanaxStats);
-    console.log(`[post-war] Generated post-war report for war ${warId} (faction: ${factionId}, xanax-stats: ${xanaxStats ? `${Object.keys(xanaxStats.taken).length} member(s)` : 'none'})`);
+    console.log(`[post-war] Generated for war ${warId} (faction: ${factionId}, cache: ${cacheStatus}, xanax: ${xanaxStats ? `${Object.keys(xanaxStats.taken).length} member(s)` : 'none'})`);
     return res.json({ report });
   } catch (err) {
     console.error("[post-war] Post-war report failed:", err.message);
