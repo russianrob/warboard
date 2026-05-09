@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.6
+// @version      5.0.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -53,7 +53,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.6';
+    const SCRIPT_VERSION = '5.0.7';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2284,6 +2284,39 @@ body.wb-chain-active {
 .wb-postwar-member-table .eff-green { color: #00b894; }
 .wb-postwar-member-table .eff-yellow { color: #fdcb6e; }
 .wb-postwar-member-table .eff-red { color: #ff7675; }
+/* Compact table for the Xanax Accountability section. Mirrors the
+   iOS layout: single line of small monospaced numbers per member,
+   no horizontal scroll, name truncates if it'd push columns
+   off-viewport. */
+.wb-postwar-xanax-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    table-layout: fixed;
+}
+.wb-postwar-xanax-table th {
+    text-align: left;
+    font-size: 9px;
+    color: var(--wb-text-muted);
+    padding: 4px 4px;
+    border-bottom: 1px solid var(--wb-border);
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.wb-postwar-xanax-table td {
+    padding: 3px 4px;
+    border-bottom: 1px solid var(--wb-border);
+    color: var(--wb-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.wb-postwar-xanax-table tr:last-child td { border-bottom: none; }
+.wb-postwar-xanax-table .col-mark  { width: 18px; text-align: center; padding-right: 0; }
+.wb-postwar-xanax-table .col-name  { /* takes remaining width */ }
+.wb-postwar-xanax-table .col-num   { width: 36px; text-align: right; }
+.wb-postwar-xanax-table .col-delta { width: 44px; text-align: right; }
 .wb-postwar-energy-bar {
     height: 20px;
     background: var(--wb-bg-secondary);
@@ -10609,13 +10642,14 @@ body.wb-chain-active {
                     <span class="wb-postwar-achievement" style="${xa.membersFlagged > 0 ? 'background:rgba(255,118,117,.18);color:#ff7675;' : 'background:rgba(0,184,148,.18);color:#00b894;'}">${xa.membersFlagged} flagged</span>
                 </div>
                 <div style="font-size:10px;color:var(--wb-text-muted);margin-bottom:6px;">${escapeHtml(xa.rule || '1 xanax = 10 expected war attacks')}</div>
-                <div class="wb-postwar-member-table-wrap"><table class="wb-postwar-member-table">
+                <table class="wb-postwar-xanax-table">
                 <thead><tr>
-                    <th></th><th style="text-align:left">Member</th>
-                    <th style="text-align:right">Xanax</th>
-                    <th style="text-align:right">Atks</th>
-                    <th style="text-align:right">Need</th>
-                    <th style="text-align:right">Δ</th>
+                    <th class="col-mark"></th>
+                    <th class="col-name">Member</th>
+                    <th class="col-num">X</th>
+                    <th class="col-num">Atk</th>
+                    <th class="col-num">Need</th>
+                    <th class="col-delta">Δ</th>
                 </tr></thead><tbody>`;
             for (const r of (xa.rows || [])) {
                 const flagBg = r.flagged ? 'background:rgba(255,118,117,.06);' : '';
@@ -10624,15 +10658,15 @@ body.wb-chain-active {
                     : '<span style="color:#00b894">✓</span>';
                 const deficitColor = r.flagged ? '#ff7675' : 'var(--wb-text-muted)';
                 xanaxContent += `<tr style="${flagBg}">
-                    <td style="text-align:center;width:18px">${flagMark}</td>
-                    <td>${escapeHtml(r.name || '?')}</td>
-                    <td style="text-align:right">${r.xanaxTaken}</td>
-                    <td style="text-align:right">${r.attacks}</td>
-                    <td style="text-align:right;color:var(--wb-text-muted)">${r.expectedAttacks}</td>
-                    <td style="text-align:right;font-weight:${r.flagged?'600':'400'};color:${deficitColor}">${r.attackDeficit > 0 ? '-' + r.attackDeficit : '—'}</td>
+                    <td class="col-mark">${flagMark}</td>
+                    <td class="col-name">${escapeHtml(r.name || '?')}</td>
+                    <td class="col-num">${r.xanaxTaken}</td>
+                    <td class="col-num">${r.attacks}</td>
+                    <td class="col-num" style="color:var(--wb-text-muted)">${r.expectedAttacks}</td>
+                    <td class="col-delta" style="font-weight:${r.flagged?'600':'400'};color:${deficitColor}">${r.attackDeficit > 0 ? '-' + r.attackDeficit : '—'}</td>
                 </tr>`;
             }
-            xanaxContent += `</tbody></table></div>`;
+            xanaxContent += `</tbody></table>`;
             html += makeSection('Xanax Accountability', xanaxContent, false);
         }
 
