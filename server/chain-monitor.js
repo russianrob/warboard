@@ -100,6 +100,11 @@ export function startChainMonitor(io, warId) {
       const countChanged = (prevChain.current || 0) !== (chain.current || 0);
       const cooldownFlipped = ((prevChain.cooldown || 0) > 0) !== ((chain.cooldown || 0) > 0);
       const broke = (prevChain.current || 0) > 0 && (chain.current || 0) === 0;
+      // Temporary diagnostic — log every poll so we can see whether the
+      // monitor is actually polling and detecting change. Drop once we
+      // confirm pushes are firing on real chain hits.
+      const tokenCount = liveActivityTokens.listForWar(warId).length;
+      console.log(`[chain/poll] war=${warId} prev=${prevChain.current||0} curr=${chain.current||0} cooldown=${chain.cooldown} timeout=${chain.timeout} tokens=${tokenCount} willPush=${countChanged || cooldownFlipped || broke}`);
       if (countChanged || cooldownFlipped || broke) {
         broadcastChainLiveActivity(warId, war, chain, broke).catch((e) =>
           console.warn(`[chain] Live Activity broadcast failed: ${e.message}`)
@@ -347,12 +352,18 @@ async function broadcastChainLiveActivity(warId, war, chain, broke) {
         : undefined,
     });
     if (!result.ok) {
-      // BadDeviceToken / Unregistered → token is permanently dead,
-      // drop it. Other failures (transient network, ExpiredProviderToken
-      // already auto-refreshes) are logged but the row stays.
-      if (result.reason === "BadDeviceToken" || result.reason === "Unregistered") {
+      // Permanently-dead token reasons. ExpiredToken means iOS killed
+      // the activity (typically the 8-hour Live Activity cap) and
+      // invalidated this push token; the user must reopen the app to
+      // create a new activity + register a new token. BadDeviceToken /
+      // Unregistered cover earlier-stage invalidations (app uninstalled,
+      // never properly registered, etc.). All three: drop the row so
+      // we stop pushing into the void.
+      if (result.reason === "BadDeviceToken" ||
+          result.reason === "Unregistered" ||
+          result.reason === "ExpiredToken") {
         liveActivityTokens.removeByToken(row.token);
-        console.log(`[chain/la] dropped dead token for player ${row.playerId} (${result.reason})`);
+        console.log(`[chain/la] dropped dead token for player ${row.playerId} (${result.reason}) — needs app reopen for re-registration`);
       } else if (result.reason !== "not-configured") {
         console.warn(`[chain/la] push failed for player ${row.playerId}: ${result.reason}`);
       }
