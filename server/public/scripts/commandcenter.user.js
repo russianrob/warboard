@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CommandCenter - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.22
+// @version      4.9.25
 // @description  Real-time faction war coordination tool for Torn.com (CommandCenter build).
 // @author       RussianRob
 // @license      MIT
@@ -4277,13 +4277,14 @@ body.wb-chain-active {
             </div>
 
             <div style="margin: 14px 0;">
-                <label for="wb-input-broadcast-roles">Custom Broadcast Roles (comma-separated)</label>
+                <label for="wb-input-broadcast-roles">Custom Admin Roles (comma-separated)</label>
                 <div style="display:flex;gap:6px;">
                     <input type="text" id="wb-input-broadcast-roles" placeholder="e.g. leader,co-leader,banker,warmaster" style="margin-bottom:0;flex:1;">
                     <button class="wb-btn wb-btn-sm" id="wb-btn-save-roles">Save</button>
                 </div>
                 <div style="font-size:11px;opacity:0.6;margin-top:4px;">
-                    Define which faction positions can use "Shout". <br>
+                    Faction positions counted as admins. Admins can use "Shout"
+                    and view post-war reports. <br>
                     <span id="fo-enabled-roles-label">Loading enabled roles...<br></span>
                     <em>Note: Saving a list replaces the defaults. Clear and save to reset.</em>
                 </div>
