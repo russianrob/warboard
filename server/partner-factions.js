@@ -1,7 +1,9 @@
 // Persisted partner factions — free-access allowlist managed via the
 // admin UI. Replaces the hard-coded PARTNER_FACTIONS array in routes.js.
 //
-// Schema: { [factionId]: { factionId, factionName, note, addedAt } }
+// Schema: { [factionId]: { factionId, factionName, note, addedAt, services } }
+//   services: array of "oc-spawn" | "factionops". Missing => ["oc-spawn"]
+//   so legacy entries (added before per-service grants) keep working.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname as pathDirname, join as pathJoin } from "node:path";
@@ -41,15 +43,51 @@ function _save() {
   }
 }
 
-export function listPartnerFactions() {
-  return Object.values(_state).sort((a, b) => a.factionId.localeCompare(b.factionId));
+/** Canonical service identifiers. Anything outside this set is dropped
+ *  on persist so a typo can't accidentally grant access to nothing. */
+export const VALID_SERVICES = ['oc-spawn', 'factionops'];
+
+function _normalizeServices(input) {
+  if (input == null) return null;
+  const arr = Array.isArray(input) ? input : String(input).split(',');
+  const out = [];
+  for (const raw of arr) {
+    const v = String(raw || '').trim().toLowerCase();
+    if (VALID_SERVICES.includes(v) && !out.includes(v)) out.push(v);
+  }
+  return out.length > 0 ? out : null;
 }
 
+/** Services a partner is granted. Empty list (or missing field) defaults
+ *  to ["oc-spawn"] so legacy entries keep working without migration. */
+function _servicesFor(p) {
+  if (!p) return [];
+  if (Array.isArray(p.services) && p.services.length > 0) return p.services;
+  return ['oc-spawn'];
+}
+
+export function listPartnerFactions() {
+  return Object.values(_state)
+    .map(p => ({ ...p, services: _servicesFor(p) }))
+    .sort((a, b) => a.factionId.localeCompare(b.factionId));
+}
+
+/** Backwards-compat: was a binary "is this a partner at all". Existing
+ *  callers (all OC Spawn auth gates) keep working — every partner gets
+ *  oc-spawn by default. New callers should prefer isPartnerFor(). */
 export function isPartnerFaction(factionId) {
+  return isPartnerFor(factionId, 'oc-spawn');
+}
+
+/** Per-service partner check. Use this to gate FactionOps separately
+ *  from OC Spawn. Returns false on expired entries even if the service
+ *  is granted. */
+export function isPartnerFor(factionId, service) {
   const p = _state[String(factionId)];
   if (!p) return false;
   if (p.expiresAt && Date.now() > p.expiresAt) return false;
-  return true;
+  const svc = String(service || '').toLowerCase();
+  return _servicesFor(p).includes(svc);
 }
 
 export function addPartnerFaction(factionId, factionName = '', note = '', opts = {}) {
@@ -67,6 +105,15 @@ export function addPartnerFaction(factionId, factionName = '', note = '', opts =
       expiresAt = null;
     }
   }
+  // Services: explicit override wins; missing => preserve existing
+  // (or default ["oc-spawn"] for brand-new partners). Caller can pass
+  // an empty array to clear, but we coerce that back to oc-spawn so
+  // a partner is never "granted nothing" by accident.
+  let services = _servicesFor(existing);
+  if (Object.prototype.hasOwnProperty.call(opts, 'services')) {
+    const normalized = _normalizeServices(opts.services);
+    if (normalized) services = normalized;
+  }
   _state[fid] = {
     factionId: fid,
     factionName: String(factionName || '').slice(0, 64),
@@ -74,6 +121,7 @@ export function addPartnerFaction(factionId, factionName = '', note = '', opts =
     addedAt: existing?.addedAt || Date.now(),
     updatedAt: Date.now(),
     expiresAt,
+    services,
   };
   _save();
   return _state[fid];
