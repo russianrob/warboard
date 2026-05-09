@@ -559,13 +559,28 @@ router.get("/api/faction/:factionId/war", requireAuth, (req, res) => {
   // ignoring the active synthetic record for the new matchup. Post-war
   // report retrieval is unaffected — those endpoints look up by warId
   // directly against store.getAllWars() and don't depend on this list.
-  const POST_WAR_RETAIN_MS = 30 * 60 * 1000; // 30 min
+  //
+  // 2026-05-09: bumped from 30 min → 12 hours. 30 min was too short for
+  // the realistic case where someone opens the app after the war ends
+  // overnight or hours later — they'd see "no active war" instead of
+  // the victory/defeat outcome they remembered watching unfold. 12h
+  // covers a full day-night cycle without showing day-old results.
+  // Client-side picker confusion is also mitigated by also filtering
+  // ended wars when ANY non-ended war exists for the faction (below).
+  const POST_WAR_RETAIN_MS = 12 * 60 * 60 * 1000; // 12 hours
   const cutoff = Date.now() - POST_WAR_RETAIN_MS;
+  // Pre-pass: if there's any active (non-ended) war for this faction,
+  // don't surface ended ones at all — clients should only see the
+  // currently-running war, not yesterday's victory banner alongside it.
+  const hasActive = allWars.some(w => w.factionId === factionId && !w.warEnded);
   const result = [];
   for (const war of allWars) {
     if (war.factionId !== factionId) continue;
     const endedMs = Number(war.warEndedAt) || 0;
     if (war.warEnded && endedMs > 0 && endedMs < cutoff) continue;
+    // If a fresh war is active, suppress ended ones so the iOS war
+    // picker doesn't pick the older ended war over the active one.
+    if (hasActive && war.warEnded) continue;
     {
       // v3.1.74 (reverted): we tried aging `until` by our cache
       // staleness, but Torn API itself caches the field — that double-
@@ -7447,7 +7462,16 @@ router.post("/api/live-activity/chain/subscribe", requireAuth, express.json({ li
     playerId: String(req.user.playerId),
     token: String(token),
   });
-  console.log(`[live-activity/chain] subscribed ${req.user.playerName} (${req.user.playerId}) → war ${warId}`);
+  // Crucial: ensure the chain monitor is running for this war so it
+  // can detect chain changes and push them to the registered token.
+  // Without this, chain-monitor only starts when /api/poll is hit (i.e.
+  // app in foreground) — defeating the whole point of background push.
+  // startChainMonitor is idempotent (no-op if already running).
+  const war = store.getWar(String(warId));
+  if (war && !war.warEnded) {
+    startChainMonitor(null, String(warId));
+  }
+  console.log(`[live-activity/chain] subscribed ${req.user.playerName} (${req.user.playerId}) → war ${warId} (chain monitor: ${war ? 'started' : 'no-such-war'})`);
   return res.json({ ok: true });
 });
 
