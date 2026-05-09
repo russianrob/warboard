@@ -249,12 +249,23 @@ export async function fetchUserProfile(userId, apiKey) {
  * @param {number} fromTs Unix seconds (only news newer than this returned)
  */
 export async function fetchFactionArmouryNews(factionId, apiKey, fromTs) {
+  return fetchFactionArmouryNewsRange(factionId, apiKey, fromTs, null);
+}
+
+/**
+ * Like fetchFactionArmouryNews but also accepts a `toTs` upper bound.
+ * Useful for time-window queries (e.g. "all xanax events between
+ * warStart-24h and warEnd"). Both bounds inclusive in unix seconds.
+ * Pass null/undefined for either bound to leave it open.
+ */
+export async function fetchFactionArmouryNewsRange(factionId, apiKey, fromTs, toTs) {
   const params = new URLSearchParams({
     selections: "armorynews",
     key: apiKey,
     comment: "wb-armory",
   });
   if (fromTs && Number.isFinite(+fromTs)) params.set("from", String(+fromTs));
+  if (toTs   && Number.isFinite(+toTs))   params.set("to",   String(+toTs));
   const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?${params}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Torn API returned HTTP ${res.status}`);

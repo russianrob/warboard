@@ -3216,10 +3216,12 @@ function analyzePostWarReport(warReportData, estimates, attackLog, xanaxStats) {
     membersWhoTook:  xanaxRows.length,
     membersFlagged:  xanaxRows.filter(r => r.flagged).length,
     rows: xanaxRows,
-    // Helpful caveat for the UI to render: the rule (1 xanax = 10 atks)
-    // is energy-budget-based and doesn't account for legitimate misses
-    // (hospitalized, stockpiling for next war, banker role, etc.).
-    rule: "1 xanax = 10 expected war attacks (250 energy / 25 e per atk)",
+    // Plainspoken accountability: 1 xanax = 250 energy = 10 attacks. If
+    // a member took xanax in the 24h before war + during the war and
+    // didn't translate it to ≥ N×10 attacks, they're flagged. No
+    // exceptions — the leader can interpret context if needed; the
+    // report just surfaces the math.
+    rule: "1 xanax = 10 expected war attacks (250 energy ÷ 25 e per atk). Window = 24h pre-war + war.",
   };
 
   return {

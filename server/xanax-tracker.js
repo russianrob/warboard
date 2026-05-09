@@ -24,10 +24,16 @@
  */
 
 import * as store from "./store.js";
-import { fetchFactionArmouryNews } from "./torn-api.js";
+import { fetchFactionArmouryNews, fetchFactionArmouryNewsRange } from "./torn-api.js";
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;     // 5 min
 const MAX_BACKOFF_MS   = 30 * 60 * 1000;    // 30 min cap on retry backoff
+// Many factions stack xanax in the 24h before a ranked war starts
+// (legitimate energy prep — you take xanax now so the energy is
+// available when the war kicks off). Counting only xanax taken AFTER
+// warStart would unfairly flag everyone who pre-stacked. Backfill the
+// window so the deficit math credits pre-war energy too.
+const PRE_WAR_LOOKBACK_SEC = 24 * 60 * 60;  // 24 hours
 
 /** Per-warId timeout handles so we can cancel cleanly. */
 const timers   = new Map();
@@ -163,9 +169,38 @@ async function pollOnce(warId) {
   if (!apiKey) throw new Error("no pool key available");
 
   const stats = war.xanaxStats || { lastPolledAt: 0, taken: {}, names: {}, entryCount: 0 };
-  const fromTs = stats.lastPolledAt || war.warStart || (Math.floor(Date.now()/1000) - 3600);
-
-  const entries = await fetchFactionArmouryNews(war.factionId, apiKey, fromTs);
+  // First-ever poll for this war: walk back PRE_WAR_LOOKBACK_SEC so we
+  // capture the pre-war stacking phase (faction members typically take
+  // 1-3 xanax in the 24h before kickoff to bank energy). Subsequent
+  // polls only fetch from lastPolledAt forward.
+  const fromTs = stats.lastPolledAt
+    || ((war.warStart || Math.floor(Date.now()/1000)) - PRE_WAR_LOOKBACK_SEC);
+  // Torn caps results at 100 entries per call. For a busy faction this
+  // can mean a single fetch only covers 1-3 hours of news, so the first
+  // pull (covering 24h+ of pre-war + war-so-far) needs pagination. Walk
+  // backwards in time using `to` until we either reach fromTs or get a
+  // partial page (signal that we've drained the window).
+  const allEntries = [];
+  let to = Math.floor(Date.now()/1000);
+  for (let page = 0; page < 30; page++) {
+    const batch = await fetchFactionArmouryNewsRange(war.factionId, apiKey, fromTs, to);
+    if (batch.length === 0) break;
+    allEntries.push(...batch);
+    if (batch.length < 100) break;
+    // The fetcher returns sorted-ascending; use the oldest to step `to`
+    // backwards by 1s for the next page so we don't double-count.
+    to = batch[0].timestamp - 1;
+    if (to <= fromTs) break;
+  }
+  // De-dup by entry id in case pages overlap (defense-in-depth).
+  const seen = new Set();
+  const entries = [];
+  for (const e of allEntries) {
+    if (seen.has(e.id)) continue;
+    seen.add(e.id);
+    entries.push(e);
+  }
+  entries.sort((a, b) => a.timestamp - b.timestamp);
   let newCount = 0;
   let highestTs = stats.lastPolledAt;
   for (const e of entries) {
