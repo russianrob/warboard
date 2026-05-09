@@ -142,13 +142,25 @@ export async function sendLiveActivity(deviceToken, contentState, opts = {}) {
       return resolve({ ok: false, reason: `session-failed: ${err.message}` });
     }
 
+    // apns-expiration: when set to 0, Apple treats the push as "deliver
+    // right now or discard." That's a problem for backgrounded /
+    // locked-screen devices that aren't immediately ready to render —
+    // the push silently drops on the floor. Setting a TTL of 5 minutes
+    // means Apple retries delivery for that long if the device isn't
+    // ready, which lines up with how often chain state meaningfully
+    // changes (chain timer is 5min, hits land more frequently than
+    // that). For "end" events with a near-term dismissal-date, no TTL
+    // is needed since the dismissal handles cleanup.
+    const expiresAt = opts.event === "end"
+      ? 0
+      : Math.floor(Date.now() / 1000) + 300;
     const headers = {
       ":method": "POST",
       ":path": `/3/device/${deviceToken}`,
       "apns-topic": `${BUNDLE_ID}.push-type.liveactivity`,
       "apns-push-type": "liveactivity",
       "apns-priority": String(opts.priority ?? 10),
-      "apns-expiration": "0",
+      "apns-expiration": String(expiresAt),
       "authorization": `bearer ${getProviderJwt()}`,
       "content-type": "application/json",
     };
@@ -185,6 +197,97 @@ export async function sendLiveActivity(deviceToken, contentState, opts = {}) {
 
     req.setEncoding("utf8");
     req.end(JSON.stringify(payload));
+  });
+}
+
+/**
+ * Send a regular alert/banner push to a device token.
+ *
+ * Distinct from sendLiveActivity in two ways:
+ * - apns-topic is just the bundle ID (no ".push-type.liveactivity")
+ * - apns-push-type is "alert" (default banner/sound notification)
+ *
+ * @param {string} deviceToken hex-encoded device push token (the one
+ *   posted by /api/apns/subscribe at app launch, NOT the per-activity
+ *   token used by sendLiveActivity)
+ * @param {object} payload
+ * @param {string} payload.title alert title shown on lock screen
+ * @param {string} payload.body alert body
+ * @param {object} [payload.data] optional structured data payload
+ * @param {string} [payload.sound] sound name, default "default"
+ * @param {string} [payload.threadId] APNs thread-id for grouping
+ * @param {object} [opts]
+ * @param {number} [opts.priority] 1 | 5 | 10 (default 10)
+ * @param {number} [opts.ttlSec] retry window in seconds (default 300)
+ * @returns {Promise<{ok: boolean, status?: number, reason?: string}>}
+ */
+export async function sendAlert(deviceToken, payload, opts = {}) {
+  if (!isConfigured()) return { ok: false, reason: "not-configured" };
+  if (!deviceToken || typeof deviceToken !== "string") {
+    return { ok: false, reason: "missing-token" };
+  }
+
+  const aps = {
+    alert: {
+      title: payload.title || "",
+      body: payload.body || "",
+    },
+    sound: payload.sound || "default",
+  };
+  if (payload.threadId) aps["thread-id"] = String(payload.threadId);
+  const body = { aps };
+  // Tuck arbitrary data into a sibling key so iOS receives it via
+  // userInfo without polluting `aps`.
+  if (payload.data && typeof payload.data === "object") {
+    Object.assign(body, payload.data);
+  }
+
+  return new Promise((resolve) => {
+    let session;
+    try {
+      session = getClient();
+    } catch (err) {
+      return resolve({ ok: false, reason: `session-failed: ${err.message}` });
+    }
+
+    const expiresAt = Math.floor(Date.now() / 1000) + (opts.ttlSec ?? 300);
+    const headers = {
+      ":method": "POST",
+      ":path": `/3/device/${deviceToken}`,
+      "apns-topic": BUNDLE_ID,
+      "apns-push-type": "alert",
+      "apns-priority": String(opts.priority ?? 10),
+      "apns-expiration": String(expiresAt),
+      "authorization": `bearer ${getProviderJwt()}`,
+      "content-type": "application/json",
+    };
+
+    let req;
+    try {
+      req = session.request(headers);
+    } catch (err) {
+      return resolve({ ok: false, reason: `request-failed: ${err.message}` });
+    }
+    let respStatus = 0;
+    let respBody = "";
+    req.on("response", (h) => { respStatus = Number(h[":status"]) || 0; });
+    req.on("data", (chunk) => { respBody += chunk.toString("utf8"); });
+    req.on("end", () => {
+      if (respStatus === 200) return resolve({ ok: true, status: 200 });
+      let reason = `status-${respStatus}`;
+      try {
+        const j = JSON.parse(respBody);
+        if (j.reason) reason = j.reason;
+      } catch {}
+      if (reason === "ExpiredProviderToken") _cachedToken = null;
+      resolve({ ok: false, status: respStatus, reason });
+    });
+    req.on("error", (err) => {
+      resolve({ ok: false, reason: `req-error: ${err.message}` });
+    });
+
+    req.setEncoding("utf8");
+    req.end(JSON.stringify(body));
   });
 }
 
