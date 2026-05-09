@@ -311,6 +311,29 @@ export async function sendToPlayer(playerId, payload, notifType, pushOptions) {
     (expiredEndpoints.length ? `, ${expiredEndpoints.length} expired` : '') +
     `)`
   );
+
+  // FCM fanout — independent transport for native Android devices.
+  // Pref gate already passed above (no need to re-check). Failure of
+  // FCM doesn't block the Web Push success above; logged separately.
+  fanoutFcm([playerId], payload, notifType).catch(() => { /* logged inside */ });
+}
+
+// Lazy-loaded FCM fan-out. Imported on first call so the module load
+// path stays clean even if fcm-subscriptions.js can't be loaded.
+let _fcm = null;
+async function fanoutFcm(playerIds, payload, notifType) {
+  try {
+    if (!_fcm) _fcm = await import('./fcm-subscriptions.js').catch(() => null);
+    if (!_fcm) return;
+    if (playerIds.length === 0) return;
+    await _fcm.sendToPlayers(playerIds, {
+      title: payload.title,
+      body: payload.body,
+      data: { ...(payload.data || {}), type: notifType || (payload.data?.type ?? '') },
+    });
+  } catch (e) {
+    console.warn('[push] FCM fanout failed:', e.message);
+  }
 }
 
 /**
@@ -321,6 +344,10 @@ export async function sendToPlayer(playerId, payload, notifType, pushOptions) {
  * @param {object} [pushOptions] - web-push options (e.g. { urgency: 'high' })
  */
 export async function sendToPlayers(playerIds, payload, notifType, pushOptions) {
+  // sendToPlayer handles both Web Push and FCM fanout, so this is just
+  // a parallel map. Per-player FCM cost is negligible (1 RPC per call
+  // regardless of recipient count when batched at the firebase-admin
+  // layer; even the per-player split is cheap).
   await Promise.allSettled(playerIds.map((id) => sendToPlayer(id, payload, notifType, pushOptions)));
 }
 
@@ -358,6 +385,17 @@ async function hasWarStarted(warId) {
   return nowSec >= war.warStart;
 }
 
+/** Check if the war has ended. Used to gate chain panic / alert
+ *  notifications that should stop after the war is over — factions
+ *  often keep chaining post-war for the bonus, but the panic urgency
+ *  is gone and the push notifications become noise on PDA / FCM. */
+async function hasWarEnded(warId) {
+  const store = await import('./store.js');
+  const war = store.getWar(warId);
+  if (!war) return false;
+  return war.warEnded === true;
+}
+
 /**
  * Notify war room that a target was called.
  */
@@ -383,6 +421,7 @@ export async function notifyTargetCalled(warPlayers, warId, callerName, targetNa
  */
 export async function notifyChainAlert(warPlayers, warId, current, timeout, timeLeft) {
   if (!(await hasWarStarted(warId))) return;
+  if (await hasWarEnded(warId)) return;
   const playerIds = warPlayers.map((p) => p.playerId || p.id);
   await sendToPlayers(
     playerIds.filter((id) => isSubscribed(id)),
@@ -403,6 +442,7 @@ export async function notifyChainAlert(warPlayers, warId, current, timeout, time
  */
 export async function notifyChainPanic(warPlayers, warId, current, timeLeft) {
   if (!(await hasWarStarted(warId))) return;
+  if (await hasWarEnded(warId)) return;
   const playerIds = warPlayers.map((p) => p.playerId || p.id);
   await sendToPlayers(
     playerIds.filter((id) => isSubscribed(id)),
