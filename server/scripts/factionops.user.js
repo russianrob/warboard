@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.1
+// @version      5.0.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -53,7 +53,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.1';
+    const SCRIPT_VERSION = '5.0.2';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -10436,6 +10436,7 @@ body.wb-chain-active {
         const nh = report.negativeHighlights || {};
         const recs = report.recommendations || [];
         const mt = report.memberTable || [];
+        const xa = report.xanaxAccountability || null;
 
         function fmtNum(n) { return n != null ? Number(n).toLocaleString() : '\u2014'; }
         function fmtResp(n) { return n != null ? Number(n).toFixed(2) : '\u2014'; }
@@ -10594,6 +10595,47 @@ body.wb-chain-active {
             </tr>`;
         }
         tableContent += `</table></div>`;
+        // ── G. XANAX ACCOUNTABILITY ──
+        // Per-member xanax-vs-attacks audit. The server already sorted
+        // rows by deficit DESC, so worst offenders surface first. Rule:
+        // 1 xanax = 250 energy = 10 expected war attacks. Window covers
+        // the 24h pre-war stacking phase + the war itself. Plain
+        // numbers, no excuses; leader can interpret context.
+        if (xa && (xa.membersWhoTook || 0) > 0) {
+            let xanaxContent = `
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+                    <span class="wb-postwar-achievement">${xa.totalXanaxTaken} total</span>
+                    <span class="wb-postwar-achievement">${xa.membersWhoTook} members</span>
+                    <span class="wb-postwar-achievement" style="${xa.membersFlagged > 0 ? 'background:rgba(255,118,117,.18);color:#ff7675;' : 'background:rgba(0,184,148,.18);color:#00b894;'}">${xa.membersFlagged} flagged</span>
+                </div>
+                <div style="font-size:10px;color:var(--wb-text-muted);margin-bottom:6px;">${escapeHtml(xa.rule || '1 xanax = 10 expected war attacks')}</div>
+                <div class="wb-postwar-table-wrap"><table class="wb-postwar-member-table">
+                <thead><tr>
+                    <th></th><th style="text-align:left">Member</th>
+                    <th style="text-align:right">Xanax</th>
+                    <th style="text-align:right">Atks</th>
+                    <th style="text-align:right">Need</th>
+                    <th style="text-align:right">Δ</th>
+                </tr></thead><tbody>`;
+            for (const r of (xa.rows || [])) {
+                const flagBg = r.flagged ? 'background:rgba(255,118,117,.06);' : '';
+                const flagMark = r.flagged
+                    ? '<span style="color:#ff7675">⚠</span>'
+                    : '<span style="color:#00b894">✓</span>';
+                const deficitColor = r.flagged ? '#ff7675' : 'var(--wb-text-muted)';
+                xanaxContent += `<tr style="${flagBg}">
+                    <td style="text-align:center;width:18px">${flagMark}</td>
+                    <td>${escapeHtml(r.name || '?')}</td>
+                    <td style="text-align:right">${r.xanaxTaken}</td>
+                    <td style="text-align:right">${r.attacks}</td>
+                    <td style="text-align:right;color:var(--wb-text-muted)">${r.expectedAttacks}</td>
+                    <td style="text-align:right;font-weight:${r.flagged?'600':'400'};color:${deficitColor}">${r.attackDeficit > 0 ? '-' + r.attackDeficit : '—'}</td>
+                </tr>`;
+            }
+            xanaxContent += `</tbody></table></div>`;
+            html += makeSection('Xanax Accountability', xanaxContent, false);
+        }
+
         html += makeSection('Member Performance', tableContent, true);
 
         body.innerHTML = html;
