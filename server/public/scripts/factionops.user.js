@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.5
+// @version      5.0.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -53,7 +53,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.5';
+    const SCRIPT_VERSION = '5.0.6';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -10609,7 +10609,7 @@ body.wb-chain-active {
                     <span class="wb-postwar-achievement" style="${xa.membersFlagged > 0 ? 'background:rgba(255,118,117,.18);color:#ff7675;' : 'background:rgba(0,184,148,.18);color:#00b894;'}">${xa.membersFlagged} flagged</span>
                 </div>
                 <div style="font-size:10px;color:var(--wb-text-muted);margin-bottom:6px;">${escapeHtml(xa.rule || '1 xanax = 10 expected war attacks')}</div>
-                <div class="wb-postwar-table-wrap"><table class="wb-postwar-member-table">
+                <div class="wb-postwar-member-table-wrap"><table class="wb-postwar-member-table">
                 <thead><tr>
                     <th></th><th style="text-align:left">Member</th>
                     <th style="text-align:right">Xanax</th>
