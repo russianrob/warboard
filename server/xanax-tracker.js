@@ -37,15 +37,21 @@ const cursors  = new Map();
 const backoffs = new Map();
 
 /**
- * Match every "took N x Xanax from the armoury" event in a faction
- * news string. Tolerates pluralisation, missing "x", and
- * case-insensitive Xanax. Returns array of { playerId, playerName, qty }.
+ * Match a "used one of the faction's Xanax items" event in a faction
+ * news string. Real Torn armoury-news format (verified against live
+ * /v2/faction/?selections=armorynews on 2026-05-09):
  *
- * Torn news format examples (HTML):
- *   <a href = "https://www.torn.com/profiles.php?XID=12345">Foo</a> took 2 x Xanax from their faction armoury
- *   <a href = "https://www.torn.com/profiles.php?XID=12345">Foo</a> took 1 of Xanax from their faction armoury
+ *   <a href = "http://www.torn.com/profiles.php?XID=3924994">Wintermoore</a>
+ *     used one of the faction's Xanax items
+ *
+ * Each entry corresponds to ONE xanax (Torn doesn't batch). Returns
+ * { playerId, playerName, qty: 1 } on match, null otherwise. Excludes
+ * deposits ("deposited 1x Xanax") and item-creation events.
+ *
+ * Earlier draft assumed "took N x Xanax from the armoury" which doesn't
+ * exist in live data — that phrasing applied to weapons/armor only.
  */
-const TOOK_XANAX_RE = /<a[^>]*XID=(\d+)[^>]*>([^<]+)<\/a>\s+took\s+(\d+)\s+(?:x|of)\s+Xanax/i;
+const TOOK_XANAX_RE = /<a[^>]*XID=(\d+)[^>]*>([^<]+)<\/a>\s+used\s+one\s+of\s+the\s+faction's\s+Xanax\s+items/i;
 function parseXanaxEntry(news) {
   if (!news || typeof news !== "string") return null;
   const m = news.match(TOOK_XANAX_RE);
@@ -53,7 +59,7 @@ function parseXanaxEntry(news) {
   return {
     playerId: m[1],
     playerName: m[2].trim(),
-    qty: Number(m[3]) || 0,
+    qty: 1,
   };
 }
 
