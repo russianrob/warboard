@@ -175,6 +175,14 @@ async function pollOnce(warId) {
   // polls only fetch from lastPolledAt forward.
   const fromTs = stats.lastPolledAt
     || ((war.warStart || Math.floor(Date.now()/1000)) - PRE_WAR_LOOKBACK_SEC);
+  // Cap polling at warEndedAt for ended wars. The "final flush" poll
+  // that fires when the tracker is started against an already-ended
+  // war was previously fetching all news up to NOW, picking up post-
+  // war xanax events that have nothing to do with the war (members
+  // taking xanax for normal training etc.). For active wars, no cap.
+  const warEndedSec = war.warEnded && war.warEndedAt
+    ? Math.floor(Number(war.warEndedAt) / 1000)
+    : null;
   // Torn caps results at 100 entries per call. For a busy faction this
   // can mean a single fetch only covers 1-3 hours of news, so the first
   // pull (covering 24h+ of pre-war + war-so-far) needs pagination. Walk
@@ -205,6 +213,9 @@ async function pollOnce(warId) {
   let highestTs = stats.lastPolledAt;
   for (const e of entries) {
     if (e.timestamp <= stats.lastPolledAt) continue;
+    // Cap at warEndedAt for ended wars — events past the war end
+    // belong to normal-life xanax usage, not war accountability.
+    if (warEndedSec && e.timestamp > warEndedSec) continue;
     if (e.timestamp > highestTs) highestTs = e.timestamp;
     stats.entryCount++;
     const parsed = parseXanaxEntry(e.news);
