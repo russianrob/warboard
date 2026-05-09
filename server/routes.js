@@ -5324,6 +5324,90 @@ router.post(/^\/upload-([a-f0-9]{16,})\/?$/, (req, res) => {
     return _uploadHandlePost(req, res);
 });
 
+// ── /api/admin/xanax-backfill ─────────────────────────────────────────
+// Backfill an already-ended war's xanax stats by scraping armoury news
+// for the (warStart - hours .. warEndedAt or now) window. Useful for
+// wars that ended before the tracker was deployed, or to re-pull a
+// window if the data got corrupted/cleared. New wars start the tracker
+// live and don't need this.
+//
+// Auth: owner Torn API key. Idempotent — running twice for the same
+// war just rewrites war.xanaxStats with the freshly-scraped totals.
+router.post('/api/admin/xanax-backfill', async (req, res) => {
+  let authed = false;
+  if (req.query.key) {
+    try {
+      const info = await verifyTornApiKey(String(req.query.key));
+      if (String(info.playerId) === String(process.env.OWNER_PLAYER_ID || '137558')) authed = true;
+    } catch {}
+  }
+  if (!authed) return res.status(403).json({ error: 'owner-key required' });
+  const warId = String(req.query.warId || '');
+  const hoursBack = Math.min(72, Math.max(1, Number(req.query.hours) || 24));
+  if (!warId) return res.status(400).json({ error: 'warId required' });
+  const war = store.getWar(warId);
+  if (!war) return res.status(404).json({ error: `war ${warId} not found` });
+  if (!war.factionId) return res.status(400).json({ error: 'war has no factionId' });
+  const apiKey = store.getFactionApiKey(war.factionId)
+    || store.getApiKeyForFaction(war.factionId);
+  if (!apiKey) return res.status(503).json({ error: `no api key for faction ${war.factionId}` });
+
+  const fromTs = (war.warStart || Math.floor(Date.now()/1000)) - (hoursBack * 3600);
+  const toTs   = war.warEndedAt
+    ? Math.floor(Number(war.warEndedAt) / 1000)
+    : Math.floor(Date.now() / 1000);
+  try {
+    const torn = await import('./torn-api.js');
+    const xt   = await import('./xanax-tracker.js');
+    // Walk back through pages (Torn caps at 100/call) until we cover
+    // the full window. Same pagination strategy the tracker's first
+    // poll uses internally.
+    const all = [];
+    const seen = new Set();
+    let to = toTs;
+    for (let page = 0; page < 30; page++) {
+      const batch = await torn.fetchFactionArmouryNewsRange(war.factionId, apiKey, fromTs, to);
+      if (batch.length === 0) break;
+      let oldest = Infinity;
+      for (const e of batch) {
+        if (seen.has(e.id)) continue;
+        seen.add(e.id);
+        all.push(e);
+        if (e.timestamp < oldest) oldest = e.timestamp;
+      }
+      if (batch.length < 100 || oldest <= fromTs) break;
+      to = oldest - 1;
+    }
+    const taken = {}, names = {};
+    for (const e of all) {
+      const p = xt._internal.parseXanaxEntry(e.news);
+      if (!p) continue;
+      taken[p.playerId] = (taken[p.playerId] || 0) + 1;
+      names[p.playerId] = p.playerName;
+    }
+    war.xanaxStats = {
+      lastPolledAt: toTs,
+      taken,
+      names,
+      entryCount: all.length,
+      backfilledFrom: fromTs,
+      backfilledTo: toTs,
+    };
+    store.saveState();
+    res.json({
+      ok: true,
+      warId,
+      windowFrom: fromTs,
+      windowTo: toTs,
+      armouryEntries: all.length,
+      xanaxMembers: Object.keys(taken).length,
+      totalXanax: Object.values(taken).reduce((s, n) => s + n, 0),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── /upload (basic-auth) — same drop UI, gated by HTTP basic auth ───
 // Browser prompts for username + password on first visit; password is
 // read from /etc/warboard/upload-password. Username is ignored —
