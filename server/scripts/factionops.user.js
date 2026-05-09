@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.8
+// @version      5.0.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -53,7 +53,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.8';
+    const SCRIPT_VERSION = '5.0.9';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -4254,6 +4254,7 @@ body.wb-chain-active {
                         // their cooldowns never registered on the faction
                         // panel. startEnergyPoll is idempotent.
                         try { startEnergyPoll(); } catch (_) {}
+                        try { startAttacksPoll(); } catch (_) {}
 
                         // Fetch faction's custom broadcast roles so
                         // isLeader() gates Shout + Cooldowns the same way
@@ -5779,6 +5780,48 @@ body.wb-chain-active {
         if (energyPollInterval) {
             clearInterval(energyPollInterval);
             energyPollInterval = null;
+        }
+    }
+
+    // ---- Attack telemetry via personal API ----
+    // Polls /user/?selections=attacks every 60s (the user's own key, no
+    // pool budget) and POSTs the last-100 fight history to warboard.
+    // Server attributes each fight to the active war by faction +
+    // timestamp window and dedupes by Torn fight ID — produces richer
+    // per-attack analytics in the post-war report than the faction
+    // attacks-feed alone (mug $, modifiers, defends, KO outcomes).
+    const ATTACKS_POLL_MS = 60000;
+    let attacksPollInterval = null;
+
+    function pollAttacks() {
+        if (!CONFIG.API_KEY || !state.jwtToken) return;
+        const url = `https://api.torn.com/user/?selections=attacks&key=${encodeURIComponent(CONFIG.API_KEY)}&comment=warboard-attacks`;
+        httpRequest({
+            method: 'GET',
+            url,
+            onload(res) {
+                try {
+                    const data = JSON.parse(res.responseText);
+                    if (data.error || !data.attacks) return;
+                    if (Object.keys(data.attacks).length === 0) return;
+                    postAction('/api/me/attacks', { attacks: data.attacks }).catch(() => {});
+                } catch (e) { /* silent */ }
+            },
+            onerror() { /* silent */ },
+        });
+    }
+
+    function startAttacksPoll() {
+        if (attacksPollInterval) return;
+        pollAttacks();
+        attacksPollInterval = setInterval(pollAttacks, ATTACKS_POLL_MS);
+        log('Attack telemetry poll started (every 60s)');
+    }
+
+    function stopAttacksPoll() {
+        if (attacksPollInterval) {
+            clearInterval(attacksPollInterval);
+            attacksPollInterval = null;
         }
     }
 
@@ -7636,6 +7679,7 @@ body.wb-chain-active {
         // Move Torn's native #barChain into our overlay header
         moveTornChainBar();
         startEnergyPoll();
+        startAttacksPoll();
 
         // Fetch Fair Fight data from ffscouter.com (initial + periodic refresh)
         fetchFairFightBatch();
@@ -11407,6 +11451,7 @@ body.wb-chain-active {
         stopDirectChainPoll();
         stopChainDOMObserver();
         stopEnergyPoll();
+        stopAttacksPoll();
         stopKeepAlive();
         if (lateChainWatcher) {
             lateChainWatcher.disconnect();

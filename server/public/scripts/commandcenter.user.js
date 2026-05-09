@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CommandCenter - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      4.9.25
+// @version      4.9.26
 // @description  Real-time faction war coordination tool for Torn.com (CommandCenter build).
 // @author       RussianRob
 // @license      MIT
@@ -5127,6 +5127,45 @@ body.wb-chain-active {
         }
     }
 
+    // ---- Attack telemetry via personal API ----
+    // Polls /user/?selections=attacks every 60s and POSTs the last-100
+    // fight history to warboard so post-war reports get rich per-attack
+    // data (mug $, modifiers, defends) the faction attacks-feed misses.
+    const ATTACKS_POLL_MS = 60000;
+    let attacksPollInterval = null;
+
+    function pollAttacks() {
+        if (!CONFIG.API_KEY || !state.jwtToken) return;
+        const url = `https://api.torn.com/user/?selections=attacks&key=${encodeURIComponent(CONFIG.API_KEY)}&comment=warboard-attacks`;
+        httpRequest({
+            method: 'GET',
+            url,
+            onload(res) {
+                try {
+                    const data = JSON.parse(res.responseText);
+                    if (data.error || !data.attacks) return;
+                    if (Object.keys(data.attacks).length === 0) return;
+                    postAction('/api/me/attacks', { attacks: data.attacks }).catch(() => {});
+                } catch (e) { /* silent */ }
+            },
+            onerror() { /* silent */ },
+        });
+    }
+
+    function startAttacksPoll() {
+        if (attacksPollInterval) return;
+        pollAttacks();
+        attacksPollInterval = setInterval(pollAttacks, ATTACKS_POLL_MS);
+        log('Attack telemetry poll started (every 60s)');
+    }
+
+    function stopAttacksPoll() {
+        if (attacksPollInterval) {
+            clearInterval(attacksPollInterval);
+            attacksPollInterval = null;
+        }
+    }
+
     function updateEnergyDisplay() {
         const valEl = document.getElementById('fo-energy-value');
         const timerEl = document.getElementById('fo-energy-timer');
@@ -6543,6 +6582,7 @@ body.wb-chain-active {
         // Move Torn's native #barChain into our overlay header
         moveTornChainBar();
         startEnergyPoll();
+        startAttacksPoll();
 
         // Fetch Fair Fight data from ffscouter.com (initial + periodic refresh)
         fetchFairFightBatch();
@@ -10132,6 +10172,7 @@ body.wb-chain-active {
         stopDirectChainPoll();
         stopChainDOMObserver();
         stopEnergyPoll();
+        stopAttacksPoll();
         stopKeepAlive();
         if (lateChainWatcher) {
             lateChainWatcher.disconnect();

@@ -80,6 +80,7 @@ import * as chat from "./chat.js";
 import { encrypt as encryptKey, decrypt as decryptKey, isEncrypted as isEncryptedKey } from "./key-encryption.js";
 import * as pendingBroadcasts from "./pending-broadcasts.js";
 import * as missingOverrides from "./missing-overrides.js";
+import * as attackLedger from "./attack-ledger.js";
 import * as webauthn from "./webauthn.js";
 import busboy from "busboy";
 import { createWriteStream as _uploadCreateWriteStream } from "node:fs";
@@ -624,6 +625,44 @@ router.get("/api/faction/:factionId/war", requireAuth, (req, res) => {
     }
   }
 
+  // Fallback: if no wars survived the 12h cutoff filter AND nothing
+  // active is running, surface the single most-recently-ended war so
+  // clients can display a VICTORY/DEFEAT banner instead of "No active
+  // war". Without this, opening warboard the day after a war ended
+  // shows nothing — the banner only persisted via in-memory hold while
+  // the app was foregrounded during the war's end transition.
+  if (result.length === 0 && !hasActive) {
+    let mostRecent = null;
+    let mostRecentEnd = 0;
+    for (const war of allWars) {
+      if (war.factionId !== factionId) continue;
+      if (!war.warEnded) continue;
+      const endedMs = Number(war.warEndedAt) || 0;
+      if (endedMs <= 0) continue;
+      if (endedMs > mostRecentEnd) {
+        mostRecent = war;
+        mostRecentEnd = endedMs;
+      }
+    }
+    if (mostRecent) {
+      result.push({
+        warId: mostRecent.warId,
+        enemyFactionId: mostRecent.enemyFactionId,
+        enemyFactionName: mostRecent.enemyFactionName || null,
+        warEnded: true,
+        warResult: mostRecent.warResult || null,
+        warScores: mostRecent.warScores || null,
+        warStart: mostRecent.warStart || null,
+        warOrigTarget: mostRecent.warOrigTarget || null,
+        currentTarget: (mostRecent.warEta?.currentTarget) || null,
+        calls: mostRecent.calls,
+        priorities: mostRecent.priorities,
+        enemyStatuses: mostRecent.enemyStatuses,
+        chainData: mostRecent.chainData,
+      });
+    }
+  }
+
   return res.json({ wars: result });
 });
 
@@ -1002,6 +1041,66 @@ router.post("/api/me/bars", requireAuth, (req, res) => {
   console.log(`[bars] broadcast to ${broadcastCount} war room(s) for faction ${factionId}`);
 
   return res.json({ ok: true });
+});
+
+// Per-user attack telemetry. Members POST their own /user/?selections=attacks
+// last-100 history every ~60s from any client. Server attributes each
+// fight to active war(s) by timestamp + faction match, dedupes by Torn
+// fight ID, persists to a per-war ledger. Captures attacks made anywhere
+// (browser, in-app browser, PDA) since the data lives in Torn's user
+// object, not in any DOM.
+router.post("/api/me/attacks", requireAuth, (req, res) => {
+  const { playerId, playerName, factionId } = req.user;
+  const attacks = req?.body?.attacks;
+  if (!attacks || typeof attacks !== "object") {
+    return res.status(400).json({ error: "attacks object required" });
+  }
+
+  // Collect candidate active wars for this faction. A fight is attributed
+  // to the war if (a) it falls inside the war window [warStart, warEndedAt
+  // or now] and (b) either side of the fight is in the war (our faction
+  // or the enemy faction). The 24h pre/post pad mirrors xanax-tracker's
+  // window so chain-finishing attacks just before/after the formal war
+  // window still get captured.
+  const PAD_SEC = 24 * 60 * 60;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const candidateWars = [];
+  for (const [wid, w] of store.getAllWars()) {
+    if (String(w.factionId) !== String(factionId)) continue;
+    const startSec = (w.warStart || 0) - PAD_SEC;
+    const endSec = (w.warEndedAt || nowSec) + PAD_SEC;
+    candidateWars.push({ warId: wid, factionId: String(w.factionId), enemyFactionId: String(w.enemyFactionId || ""), startSec, endSec });
+  }
+
+  if (candidateWars.length === 0) {
+    return res.json({ ok: true, ingested: 0, reason: "no active war for faction" });
+  }
+
+  let totalAdded = 0;
+  for (const war of candidateWars) {
+    // Filter the user's posted fights down to those that belong to this war
+    const buf = {};
+    for (const [fid, raw] of Object.entries(attacks)) {
+      if (!raw || typeof raw !== "object") continue;
+      const ended = Number(raw.timestamp_ended) || Number(raw.timestamp_started) || 0;
+      if (!ended || ended < war.startSec || ended > war.endSec) continue;
+      const aFac = String(raw.attacker_faction ?? "");
+      const dFac = String(raw.defender_faction ?? "");
+      const involvesUs = aFac === war.factionId || dFac === war.factionId;
+      const involvesEnemy = war.enemyFactionId
+        ? (aFac === war.enemyFactionId || dFac === war.enemyFactionId)
+        : false;
+      if (!involvesUs || !involvesEnemy) continue;
+      buf[fid] = raw;
+    }
+    if (Object.keys(buf).length === 0) continue;
+    totalAdded += attackLedger.ingestForWar(war.warId, war.factionId, buf);
+  }
+
+  if (totalAdded > 0) {
+    console.log(`[attacks] ${playerName} (${playerId}) reported ${Object.keys(attacks).length} fights, ${totalAdded} new ingested across ${candidateWars.length} war(s)`);
+  }
+  return res.json({ ok: true, ingested: totalAdded });
 });
 
 // Full snapshot for when a client joins. Returns every fresh member
@@ -2800,8 +2899,9 @@ const postWarReportCooldowns = new Map();
 const POST_WAR_REPORT_COOLDOWN_MS = 60000;
 
 /** Analyze ranked war report data into a structured post-war performance breakdown. */
-function analyzePostWarReport(warReportData, estimates, attackLog, xanaxStats) {
+function analyzePostWarReport(warReportData, estimates, attackLog, xanaxStats, telemetry, war) {
   estimates = estimates || {};
+  telemetry = Array.isArray(telemetry) ? telemetry : [];
   const report = warReportData || {};
 
   // Extract war-level data
@@ -3258,6 +3358,101 @@ function analyzePostWarReport(warReportData, estimates, attackLog, xanaxStats) {
     rule: "1 xanax = 10 expected war attacks (250 energy ÷ 25 e per atk). Window = 24h pre-war + war + 24h post-war chain finish.",
   };
 
+  // ── ATTACK TELEMETRY ──
+  // Built from per-user /user/?selections=attacks pushed by each
+  // member's client during the war. Captures data the faction attacks-
+  // feed doesn't expose: mug $, fight modifiers, defends, true respect.
+  // Empty if no clients reported (telemetry is opt-in via app/userscript
+  // being open during the war).
+  const ourFid = String(ourFaction.id || "");
+  const telemetryByAttacker = {};
+  const telemetryByDefender = {};
+  let totalMugged = 0;
+  let totalFights = 0;
+  let totalRespectGain = 0;
+  const modifierTotals = { war: 0, retaliation: 0, group: 0, overseas: 0, chainBonus: 0, fairFight: 0, count: 0 };
+  for (const f of telemetry) {
+    totalFights++;
+    const isOurAttack = f.attackerFactionId === ourFid;
+    const isOurDefend = f.defenderFactionId === ourFid;
+    if (isOurAttack) {
+      const a = telemetryByAttacker[f.attackerId] = telemetryByAttacker[f.attackerId] ||
+        { id: f.attackerId, name: f.attackerName, attacks: 0, mugged: 0, respectGain: 0,
+          hospitalizations: 0, mugs: 0, leaves: 0, stalemates: 0, escapes: 0, losses: 0,
+          warBonus: 0, retaliationBonus: 0, groupBonus: 0, overseasPenalty: 0, chainBonus: 0, fairFightAvg: 0, _ffSamples: 0 };
+      a.attacks++;
+      a.mugged += f.moneyMugged || 0;
+      a.respectGain += f.respectGain || 0;
+      const r = String(f.result || "").toLowerCase();
+      if (r === "hospitalized") a.hospitalizations++;
+      else if (r === "mugged") a.mugs++;
+      else if (r === "left") a.leaves++;
+      else if (r === "stalemate") a.stalemates++;
+      else if (r === "escape") a.escapes++;
+      else if (r === "lost") a.losses++;
+      if (f.modifiers) {
+        if (f.modifiers.war > 1)         a.warBonus++;
+        if (f.modifiers.retaliation > 1) a.retaliationBonus++;
+        if (f.modifiers.group > 1)       a.groupBonus++;
+        if (f.modifiers.overseas < 1)    a.overseasPenalty++;
+        if (f.modifiers.chainBonus > 1)  a.chainBonus++;
+        if (f.modifiers.fairFight > 0)   { a.fairFightAvg += f.modifiers.fairFight; a._ffSamples++; }
+      }
+      totalMugged += f.moneyMugged || 0;
+      totalRespectGain += f.respectGain || 0;
+      if (f.modifiers) {
+        if (f.modifiers.war > 1)         modifierTotals.war++;
+        if (f.modifiers.retaliation > 1) modifierTotals.retaliation++;
+        if (f.modifiers.group > 1)       modifierTotals.group++;
+        if (f.modifiers.overseas < 1)    modifierTotals.overseas++;
+        if (f.modifiers.chainBonus > 1)  modifierTotals.chainBonus++;
+        if (f.modifiers.fairFight > 0)   { modifierTotals.fairFight += f.modifiers.fairFight; modifierTotals.count++; }
+      }
+    }
+    if (isOurDefend) {
+      const d = telemetryByDefender[f.defenderId] = telemetryByDefender[f.defenderId] ||
+        { id: f.defenderId, name: f.defenderName, defends: 0, hospitalizedCount: 0, muggedAmount: 0 };
+      d.defends++;
+      const r = String(f.result || "").toLowerCase();
+      if (r === "hospitalized") d.hospitalizedCount++;
+      if (r === "mugged") d.muggedAmount += f.moneyMugged || 0;
+    }
+  }
+  const telemetryRows = Object.values(telemetryByAttacker).map(a => ({
+    ...a,
+    fairFightAvg: a._ffSamples > 0 ? Math.round((a.fairFightAvg / a._ffSamples) * 100) / 100 : 0,
+    defends: telemetryByDefender[a.id]?.defends || 0,
+    defendHospitalized: telemetryByDefender[a.id]?.hospitalizedCount || 0,
+    defendMugged: telemetryByDefender[a.id]?.muggedAmount || 0,
+  })).sort((a, b) => b.respectGain - a.respectGain);
+  // Members who only got attacked (no offensive contribution) — surface
+  // them too so the report reflects who took the heat.
+  for (const d of Object.values(telemetryByDefender)) {
+    if (telemetryByAttacker[d.id]) continue;
+    telemetryRows.push({
+      id: d.id, name: d.name, attacks: 0, mugged: 0, respectGain: 0,
+      hospitalizations: 0, mugs: 0, leaves: 0, stalemates: 0, escapes: 0, losses: 0,
+      warBonus: 0, retaliationBonus: 0, groupBonus: 0, overseasPenalty: 0, chainBonus: 0, fairFightAvg: 0,
+      defends: d.defends, defendHospitalized: d.hospitalizedCount, defendMugged: d.muggedAmount,
+    });
+  }
+  const attackTelemetry = {
+    available: totalFights > 0,
+    totalFights,
+    totalMugged,
+    totalRespectGain: Math.round(totalRespectGain * 100) / 100,
+    modifierPrevalence: {
+      war:         modifierTotals.war,
+      retaliation: modifierTotals.retaliation,
+      group:       modifierTotals.group,
+      overseas:    modifierTotals.overseas,
+      chainBonus:  modifierTotals.chainBonus,
+      fairFightAvg: modifierTotals.count > 0 ? Math.round((modifierTotals.fairFight / modifierTotals.count) * 100) / 100 : 0,
+    },
+    members: telemetryRows,
+    rule: "From per-member /user/?selections=attacks polling. Shows mug $, true respect, modifiers, and defends — data the faction attacks-feed doesn't expose. Coverage depends on which members had a warboard client open during the war.",
+  };
+
   return {
     warSummary,
     factionPerformance,
@@ -3267,6 +3462,7 @@ function analyzePostWarReport(warReportData, estimates, attackLog, xanaxStats) {
     recommendations,
     memberTable,
     xanaxAccountability,
+    attackTelemetry,
     generatedAt: Date.now(),
   };
 }
@@ -3423,8 +3619,14 @@ async function handlePostWarReport(req, res) {
       xanaxStats = null;
     }
 
-    const report = analyzePostWarReport(warReportData, estimates, attackLog, xanaxStats);
-    console.log(`[post-war] Generated for war ${warId} (faction: ${factionId}, cache: ${cacheStatus}, xanax: ${xanaxStats ? `${Object.keys(xanaxStats.taken).length} member(s)` : 'none'})`);
+    // Per-user attack telemetry — captured live during the war by each
+    // member's client polling /user/?selections=attacks. Richer than the
+    // faction attacks-feed (mug $, modifiers, defends), and works on iOS/
+    // Android in-app browsers since it doesn't depend on userscript hooks.
+    const telemetry = attackLedger.getAttacksForWar(warId, war.factionId);
+
+    const report = analyzePostWarReport(warReportData, estimates, attackLog, xanaxStats, telemetry, war);
+    console.log(`[post-war] Generated for war ${warId} (faction: ${factionId}, cache: ${cacheStatus}, xanax: ${xanaxStats ? `${Object.keys(xanaxStats.taken).length} member(s)` : 'none'}, telemetry: ${telemetry.length} fights)`);
     return res.json({ report });
   } catch (err) {
     console.error("[post-war] Post-war report failed:", err.message);
