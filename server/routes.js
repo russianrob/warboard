@@ -2546,6 +2546,15 @@ const scoutReportCooldowns = new Map();
 const SCOUT_REPORT_COOLDOWN_MS = 60000; // 1 minute between requests per war
 
 /** Shared handler for scout/war report generation (GET and POST). */
+// In-memory response cache for scout reports. Faction-basic data
+// (member list, levels, respect, etc.) doesn't change minute-to-minute
+// even mid-war, so 10 min TTL is conservative — saves the 2× Torn
+// fetchFactionBasic calls + paginated FFScouter lookup on every
+// subsequent client open. Cleared on warEnded transition + manual
+// invalidation if needed.
+const _scoutReportCache = new Map(); // warId → { ts, report, estimateCount }
+const SCOUT_REPORT_TTL_MS = 10 * 60 * 1000;
+
 async function handleWarReport(req, res) {
   const { factionId } = req.user;
   const { warId } = req.params;
@@ -2561,7 +2570,15 @@ async function handleWarReport(req, res) {
     return res.status(400).json({ error: "No enemy faction configured for this war" });
   }
 
-  // Cooldown check
+  // Cache hit — skip Torn entirely. Cache hits aren't subject to the
+  // cooldown rate-limit (no API budget consumed).
+  const cached = _scoutReportCache.get(warId);
+  if (cached && (Date.now() - cached.ts) < SCOUT_REPORT_TTL_MS) {
+    console.log(`[scout] Cache hit for war ${warId} (estimates: ${cached.estimateCount})`);
+    return res.json({ report: cached.report, cached: true });
+  }
+
+  // Cooldown check (only applies to fresh fetches that hit Torn)
   const lastReport = scoutReportCooldowns.get(warId) || 0;
   const elapsed = Date.now() - lastReport;
   if (elapsed < SCOUT_REPORT_COOLDOWN_MS) {
@@ -2632,7 +2649,12 @@ async function handleWarReport(req, res) {
 
     const warScores = war.warScores || null;
     const report = analyzeWarReport(ourData, enemyData, estimates, warScores);
-    console.log(`[scout] Generated war report for war ${warId} (us: ${war.factionId}, enemy: ${war.enemyFactionId}); estimates filled: ${Object.keys(estimates).length}`);
+    _scoutReportCache.set(warId, {
+      ts: Date.now(),
+      report,
+      estimateCount: Object.keys(estimates).length,
+    });
+    console.log(`[scout] Generated war report for war ${warId} (us: ${war.factionId}, enemy: ${war.enemyFactionId}); estimates filled: ${Object.keys(estimates).length}; cached for ${SCOUT_REPORT_TTL_MS/60000}min`);
     return res.json({ report });
   } catch (err) {
     console.error("[scout] War report failed:", err.message);
