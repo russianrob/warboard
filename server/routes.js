@@ -1007,7 +1007,19 @@ router.post("/api/me/bars", requireAuth, (req, res) => {
 // Full snapshot for when a client joins. Returns every fresh member
 // bars entry for the caller's faction.
 router.get("/api/faction/bars", requireAuth, (req, res) => {
-  const { factionId } = req.user;
+  const { factionId, factionPosition } = req.user;
+  // Admin gate — same config as broadcast/post-war. Member bars +
+  // cooldowns are leadership coordination data; the Members panel UI
+  // on iOS / Android already hides for non-admins, but a non-admin
+  // could otherwise hit this endpoint directly with their JWT.
+  const adminRoles = (store.getAllowedBroadcastRoles(factionId) || [])
+    .map(r => String(r).toLowerCase());
+  const pos = (factionPosition || "").toLowerCase();
+  if (!adminRoles.includes(pos)) {
+    return res.status(403).json({
+      error: "Member bars are admin-only. Configure who counts as admin via the Admin Roles setting.",
+    });
+  }
   return res.json({ memberBars: store.getFactionBars(factionId) });
 });
 
