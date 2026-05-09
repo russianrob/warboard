@@ -10,7 +10,7 @@ const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
  * Returns a map of memberId → { status, until, lastAction, online, level, name }.
  */
 export async function fetchFactionMembers(factionId, apiKey) {
-  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=basic&key=${encodeURIComponent(apiKey)}`;
+  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=basic&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
 
   const res = await fetch(url);
   if (!res.ok) {
@@ -61,7 +61,7 @@ export async function fetchFactionMembers(factionId, apiKey) {
  * (name, age, best_chain, respect, members) and per-member data.
  */
 export async function fetchFactionBasic(factionId, apiKey) {
-  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=basic&key=${encodeURIComponent(apiKey)}`;
+  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=basic&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
 
   const res = await fetch(url);
   if (!res.ok) {
@@ -82,7 +82,7 @@ export async function fetchFactionBasic(factionId, apiKey) {
  * Returns { current, max, timeout, cooldown }.
  */
 export async function fetchFactionChain(factionId, apiKey) {
-  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=chain&key=${encodeURIComponent(apiKey)}`;
+  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=chain&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
 
   const res = await fetch(url);
   if (!res.ok) {
@@ -112,7 +112,7 @@ export async function fetchFactionChain(factionId, apiKey) {
  * Torn API v1: GET /faction/<factionId>?selections=rankedwars&key=KEY
  */
 export async function fetchRankedWar(factionId, apiKey) {
-  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=rankedwars&key=${encodeURIComponent(apiKey)}`;
+  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=rankedwars&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
 
   const res = await fetch(url);
   if (!res.ok) {
@@ -169,7 +169,7 @@ export async function fetchRankedWarReport(factionId, apiKey, warId) {
   // If no warId provided, fetch rankedwars first to find the last completed war
   let rwId = warId;
   if (!rwId) {
-    const rwUrl = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=rankedwars&key=${encodeURIComponent(apiKey)}`;
+    const rwUrl = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=rankedwars&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
     const rwRes = await fetch(rwUrl);
     if (rwRes.ok) {
       const rwData = await rwRes.json();
@@ -192,7 +192,7 @@ export async function fetchRankedWarReport(factionId, apiKey, warId) {
     }
   }
   if (!rwId) throw new Error("No ranked war found");
-  const url = `https://api.torn.com/v2/faction/rankedwarreport?id=${encodeURIComponent(rwId)}&key=${encodeURIComponent(apiKey)}`;
+  const url = `https://api.torn.com/v2/faction/rankedwarreport?id=${encodeURIComponent(rwId)}&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
 
   const res = await fetch(url);
   if (!res.ok) {
@@ -213,7 +213,7 @@ export async function fetchRankedWarReport(factionId, apiKey, warId) {
  * Returns the raw Torn profile response; caller parses status/activity.
  */
 export async function fetchUserProfile(userId, apiKey) {
-  const url = `https://api.torn.com/user/${encodeURIComponent(userId)}?selections=profile&key=${encodeURIComponent(apiKey)}`;
+  const url = `https://api.torn.com/user/${encodeURIComponent(userId)}?selections=profile&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`Torn API returned HTTP ${res.status}`);
@@ -231,8 +231,43 @@ export async function fetchUserProfile(userId, apiKey) {
  * detection. `fromTs` is a Unix timestamp in seconds — only attacks newer
  * than that are returned.
  */
+/**
+ * Fetch faction armoury-category news entries newer than `fromTs`.
+ *
+ * Returns array of { id, news (HTML), timestamp } sorted ascending. The
+ * news string is HTML — extract player name + action via regex on the
+ * caller side. Examples of armory entries:
+ *   "<a href=...>Foo</a> took 2 x Xanax from the armoury"
+ *   "<a href=...>Bar</a> deposited 1 x EPI from the armoury"
+ *   "<a href=...>Baz</a> used 1 x SE from the armoury"
+ *
+ * Pagination: Torn returns up to ~100 entries per call. For long
+ * gaps (server downtime, etc.) the caller should walk back in chunks.
+ *
+ * @param {string} factionId
+ * @param {string} apiKey
+ * @param {number} fromTs Unix seconds (only news newer than this returned)
+ */
+export async function fetchFactionArmouryNews(factionId, apiKey, fromTs) {
+  const params = new URLSearchParams({
+    selections: "armorynews",
+    key: apiKey,
+    comment: "wb-armory",
+  });
+  if (fromTs && Number.isFinite(+fromTs)) params.set("from", String(+fromTs));
+  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?${params}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Torn API returned HTTP ${res.status}`);
+  const data = await res.json();
+  if (data.error) throw new Error(`Torn API error: ${data.error.error} (code ${data.error.code})`);
+  const raw = data.armorynews || {};
+  return Object.entries(raw)
+    .map(([id, v]) => ({ id, news: v.news || "", timestamp: Number(v.timestamp) || 0 }))
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
 export async function fetchRecentFactionAttacks(factionId, apiKey, fromTs) {
-  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=attacks&from=${encodeURIComponent(fromTs)}&key=${encodeURIComponent(apiKey)}`;
+  const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=attacks&from=${encodeURIComponent(fromTs)}&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`Torn API returned HTTP ${res.status}`);
@@ -254,7 +289,7 @@ export async function fetchFactionAttacks(factionId, apiKey, fromTs, toTs) {
   const MAX_PAGES = 30; // safety limit
 
   for (let page = 0; page < MAX_PAGES; page++) {
-    const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=attacks&from=${currentFrom}&to=${toTs}&key=${encodeURIComponent(apiKey)}`;
+    const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=attacks&from=${currentFrom}&to=${toTs}&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
     const res = await fetch(url);
     if (!res.ok) break;
     const data = await res.json();
@@ -284,7 +319,7 @@ export async function fetchFactionAttacks(factionId, apiKey, fromTs, toTs) {
  * Returns { energy: { current, maximum, fulltime }, nerve: { current, maximum, fulltime }, cooldowns: { drug, medical, booster } }.
  */
 export async function fetchUserBars(apiKey) {
-  const url = `https://api.torn.com/user/?selections=bars,cooldowns&key=${encodeURIComponent(apiKey)}`;
+  const url = `https://api.torn.com/user/?selections=bars,cooldowns&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
 
   const res = await fetch(url);
   if (!res.ok) {

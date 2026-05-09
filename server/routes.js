@@ -2766,7 +2766,7 @@ const postWarReportCooldowns = new Map();
 const POST_WAR_REPORT_COOLDOWN_MS = 60000;
 
 /** Analyze ranked war report data into a structured post-war performance breakdown. */
-function analyzePostWarReport(warReportData, estimates, attackLog) {
+function analyzePostWarReport(warReportData, estimates, attackLog, xanaxStats) {
   estimates = estimates || {};
   const report = warReportData || {};
 
@@ -2828,19 +2828,34 @@ function analyzePostWarReport(warReportData, estimates, attackLog) {
   // Build member performance arrays
   // v2 API returns 'score' per member which IS the respect/score contribution
   // There's no separate 'respect' field — score is used for both
+  const xanaxTaken = (xanaxStats && xanaxStats.taken) || {};
   const ourMemberList = Object.entries(ourMembers).map(([id, m]) => {
     const bleed = bleedByMember[id] || { timesAttacked: 0, respectBled: 0 };
+    const xanax = Number(xanaxTaken[id]) || 0;
+    const attacks = m.attacks || 0;
+    // 1 xanax = 250 energy = 10 war attacks at 25 e each. So if a
+    // member took N xanax during the war, they should have made at
+    // least N*10 war attacks. Anything less = unaccounted-for energy.
+    const expectedAttacks = xanax * 10;
+    const attackDeficit = Math.max(0, expectedAttacks - attacks);
     return {
       id,
       name: m.name || "Unknown",
       level: m.level || 0,
-      hits: (m.attacks || 0) + (m.assists || 0),
-      attacks: m.attacks || 0,
+      hits: attacks + (m.assists || 0),
+      attacks,
       assists: m.assists || 0,
       respect: m.score || m.respect || 0,
       score: m.score || 0,
       timesAttacked: bleed.timesAttacked,
       respectBled: Math.round(bleed.respectBled * 100) / 100,
+      // xanax accountability — only meaningful for members who actually
+      // took xanax during the war. xanax==0 members get null deficit so
+      // the UI can skip them in the "suspicious" callout.
+      xanaxTaken: xanax,
+      expectedAttacks,
+      attackDeficit: xanax > 0 ? attackDeficit : null,
+      xanaxFlagged: xanax > 0 && attackDeficit > 0,
     };
   });
 
@@ -3176,6 +3191,37 @@ function analyzePostWarReport(warReportData, estimates, attackLog) {
   });
   memberTable.sort((a, b) => b.netScore - a.netScore);
 
+  // ── Xanax accountability summary ──
+  // Roll up per-member xanax stats into faction-level totals + a sorted
+  // list of "took xanax but didn't deliver expected attacks" members.
+  // The user wanted the rule of thumb: 1 xanax = 10 expected attacks.
+  // Members are flagged when their attack count is below xanax * 10.
+  // The full list is sorted by deficit DESC so the worst offenders sit
+  // at the top.
+  const xanaxRows = ourMemberList
+    .filter(m => (m.xanaxTaken || 0) > 0)
+    .map(m => ({
+      id: m.id,
+      name: m.name,
+      xanaxTaken: m.xanaxTaken,
+      attacks: m.attacks,
+      expectedAttacks: m.expectedAttacks,
+      attackDeficit: m.attackDeficit,
+      flagged: m.xanaxFlagged,
+    }))
+    .sort((a, b) => (b.attackDeficit || 0) - (a.attackDeficit || 0));
+  const xanaxAccountability = {
+    enabled: !!xanaxStats,
+    totalXanaxTaken: xanaxRows.reduce((s, r) => s + r.xanaxTaken, 0),
+    membersWhoTook:  xanaxRows.length,
+    membersFlagged:  xanaxRows.filter(r => r.flagged).length,
+    rows: xanaxRows,
+    // Helpful caveat for the UI to render: the rule (1 xanax = 10 atks)
+    // is energy-budget-based and doesn't account for legitimate misses
+    // (hospitalized, stockpiling for next war, banker role, etc.).
+    rule: "1 xanax = 10 expected war attacks (250 energy / 25 e per atk)",
+  };
+
   return {
     warSummary,
     factionPerformance,
@@ -3184,6 +3230,7 @@ function analyzePostWarReport(warReportData, estimates, attackLog) {
     negativeHighlights,
     recommendations,
     memberTable,
+    xanaxAccountability,
     generatedAt: Date.now(),
   };
 }
@@ -3247,8 +3294,25 @@ async function handlePostWarReport(req, res) {
       console.warn(`[post-war] Attack log fetch failed (bleed analysis will be skipped):`, atkErr.message);
     }
 
-    const report = analyzePostWarReport(warReportData, estimates, attackLog);
-    console.log(`[post-war] Generated post-war report for war ${warId} (faction: ${factionId})`);
+    // Xanax accountability stats — populated by xanax-tracker.js while
+    // the war is active. Falls through to undefined if the war pre-dated
+    // the tracker, in which case the report's xanaxAccountability
+    // section will be empty (enabled: false).
+    let xanaxStats;
+    try {
+      const xt = await import("./xanax-tracker.js");
+      xanaxStats = xt.getStats(warId);
+      // Treat absence-of-data as no-tracker-ran (rather than reporting
+      // a misleading "0 xanax taken across the whole war"). Surface
+      // only if we actually polled at least once.
+      if (!xanaxStats || xanaxStats.lastPolledAt === 0) xanaxStats = null;
+    } catch (xtErr) {
+      console.warn(`[post-war] xanax-tracker import failed:`, xtErr.message);
+      xanaxStats = null;
+    }
+
+    const report = analyzePostWarReport(warReportData, estimates, attackLog, xanaxStats);
+    console.log(`[post-war] Generated post-war report for war ${warId} (faction: ${factionId}, xanax-stats: ${xanaxStats ? `${Object.keys(xanaxStats.taken).length} member(s)` : 'none'})`);
     return res.json({ report });
   } catch (err) {
     console.error("[post-war] Post-war report failed:", err.message);

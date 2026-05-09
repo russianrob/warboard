@@ -105,6 +105,12 @@ const intervals = new Map();
 export function startWarStatusMonitor(io, warId) {
   if (timeouts.has(warId)) return; // already monitoring
 
+  // Co-start the xanax accountability tracker for this war. Polls
+  // armoury news every 5 min and accumulates per-member xanax-pulled
+  // counts for the post-war report. Idempotent; safe to call on
+  // every war detection.
+  import("./xanax-tracker.js").then(m => m.startXanaxTracker(warId)).catch(() => {});
+
   const scheduleNext = (delay) => {
     const tid = setTimeout(poll, delay);
     timeouts.set(warId, tid);
@@ -138,6 +144,12 @@ export function startWarStatusMonitor(io, warId) {
       applyAttackOverrides(warId, freshStatuses);
 
       war.enemyStatuses = freshStatuses;
+      // v3.1.74: stamp the moment we fetched these so HTTP-polling
+      // clients (warboard-native) can age the per-member `until`
+      // counters by the staleness when they read them — eliminates
+      // the up-to-POLL_INTERVAL_MS lag the hospital countdown was
+      // showing relative to the FFS banner script's live readout.
+      war.enemyStatusesFetchedAt = Date.now();
       store.saveState();
 
       // Success — reset backoff
@@ -213,6 +225,12 @@ export function startWarStatusMonitor(io, warId) {
     } catch (err) {
       if (/Incorrect ID-entity relation/i.test(err.message)) {
         store.quarantinePoolKey(apiKey, war.factionId, 'war-status code 7');
+      } else if (/Incorrect key|\(code 2\)/i.test(err.message)) {
+        // v5.0.3: also quarantine on code 2 (key regenerated / revoked).
+        // Torn rejects the OLD key forever in that case; without this
+        // the pool keeps round-robining onto the dead key, spamming
+        // the error log and wasting one poll slot per cycle.
+        store.quarantinePoolKey(apiKey, war.factionId, 'war-status code 2');
       }
       // Exponential backoff on failure
       const current = backoffs.get(warId) || POLL_INTERVAL_MS;
@@ -310,6 +328,8 @@ function startEnemyAttacksMonitor(io, warId) {
     } catch (err) {
       if (/Incorrect ID-entity relation/i.test(err.message)) {
         store.quarantinePoolKey(apiKey, war.factionId, 'enemy-attacks code 7');
+      } else if (/Incorrect key|\(code 2\)/i.test(err.message)) {
+        store.quarantinePoolKey(apiKey, war.factionId, 'enemy-attacks code 2');
       }
       const current = enemyAttacksBackoffs.get(warId) || 30_000;
       const next = Math.min(current * 2, MAX_BACKOFF_MS);
@@ -428,6 +448,8 @@ function startAttacksFeedMonitor(io, warId) {
       // failing — pull it out of the pool until the owner re-enables it.
       if (/Incorrect ID-entity relation/i.test(err.message)) {
         store.quarantinePoolKey(apiKey, war.factionId, 'attacks-feed code 7');
+      } else if (/Incorrect key|\(code 2\)/i.test(err.message)) {
+        store.quarantinePoolKey(apiKey, war.factionId, 'attacks-feed code 2');
       }
       const current = attacksFeedBackoffs.get(warId) || ATTACKS_FEED_INTERVAL_MS;
       const next = Math.min(current * 2, MAX_BACKOFF_MS);
@@ -614,8 +636,17 @@ function startEnemyProfileMonitor(io, warId) {
       io.to(`war_${warId}`).emit("status_update", { [targetId]: updated });
       broadcastSSE(warId, { enemyStatuses: { [targetId]: updated } });
     } catch (err) {
-      if (!/Too many requests/i.test(err.message || "")) {
-        console.warn(`[enemy-profile] ${targetId}: ${err.message}`);
+      const msg = err.message || "";
+      if (!/Too many requests/i.test(msg)) {
+        console.warn(`[enemy-profile] ${targetId}: ${msg}`);
+      }
+      // v5.0.3: per-enemy poller cycles through MANY pool keys per second,
+      // so a single bad key spams hundreds of these per minute. Quarantine
+      // on either code 7 (left faction) OR code 2 (regenerated/revoked).
+      const curWar = store.getWar(warId);
+      if (curWar && (/Incorrect ID-entity relation/i.test(msg) || /Incorrect key|\(code 2\)/i.test(msg))) {
+        const reason = /Incorrect ID-entity relation/i.test(msg) ? 'enemy-profile code 7' : 'enemy-profile code 2';
+        store.quarantinePoolKey(apiKey, curWar.factionId, reason);
       }
     }
   }
