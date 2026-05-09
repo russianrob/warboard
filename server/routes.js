@@ -3221,7 +3221,7 @@ function analyzePostWarReport(warReportData, estimates, attackLog, xanaxStats) {
     // didn't translate it to ≥ N×10 attacks, they're flagged. No
     // exceptions — the leader can interpret context if needed; the
     // report just surfaces the math.
-    rule: "1 xanax = 10 expected war attacks (250 energy ÷ 25 e per atk). Window = 24h pre-war + war.",
+    rule: "1 xanax = 10 expected war attacks (250 energy ÷ 25 e per atk). Window = 24h pre-war + war + 24h post-war chain finish.",
   };
 
   return {
@@ -5353,8 +5353,15 @@ router.post('/api/admin/xanax-backfill', async (req, res) => {
   if (!apiKey) return res.status(503).json({ error: `no api key for faction ${war.factionId}` });
 
   const fromTs = (war.warStart || Math.floor(Date.now()/1000)) - (hoursBack * 3600);
+  // Extend toTs by 24h post-war so chain-finishing xanax counts —
+  // matches the live tracker's POST_WAR_LOOKAHEAD_SEC. Capped at now
+  // so we don't query future timestamps.
+  const POST_WAR_LOOKAHEAD_SEC = 24 * 3600;
   const toTs   = war.warEndedAt
-    ? Math.floor(Number(war.warEndedAt) / 1000)
+    ? Math.min(
+        Math.floor(Number(war.warEndedAt) / 1000) + POST_WAR_LOOKAHEAD_SEC,
+        Math.floor(Date.now() / 1000),
+      )
     : Math.floor(Date.now() / 1000);
   try {
     const torn = await import('./torn-api.js');
