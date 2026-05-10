@@ -20,10 +20,11 @@ Automated organized-crime slot filling, ready-to-spawn signals, and a banker-cla
 
 The script asks for your **Torn API key** on first load. Use a **Limited Access** key — never a Full key.
 
-- Generate at <https://www.torn.com/preferences.php#tab=api>
-- Click **Create a new key**, pick **Limited Access**
-- Tick the **permission checkboxes** (Torn calls them "selections") for: **crimes**, **members**, **basic**
-- Save, copy the key string, paste into the OC Spawn panel's key field
+- Open <https://www.torn.com/preferences.php#tab=api>
+- Click **Create a new key**, pick the **Limited Access** radio option, give it a name, click **Create**
+- Copy the key string and paste it into the OC Spawn panel's key field
+
+Limited tier already covers everything OC Spawn reads (faction crimes, members, basic faction info). Don't use Full Access — OC Spawn never needs write permissions.
 
 **Key safety**: every API key warboard stores is **encrypted at rest with AES-256-GCM**. The decryption key lives only in the server's environment variables. Keys are never sent back to the browser after the first paste, never logged, and never exposed via any API endpoint. Revoke any key at any time at <https://www.torn.com/preferences.php#tab=api> and the next warboard call using it will fail.
 

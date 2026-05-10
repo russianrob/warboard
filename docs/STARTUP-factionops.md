@@ -18,14 +18,14 @@ Real-time war coordination for Torn factions: target calls, chain bar, hospital 
 
 ## 2. Create your API keys
 
-You'll create two keys at <https://www.torn.com/preferences.php#tab=api>. Both should be **Limited Access** — never a Full key.
+You'll create two keys at <https://www.torn.com/preferences.php#tab=api>. Both must be **Limited Access** tier.
 
-On Torn's API page, click **Create a new key**, pick **Limited Access**, then tick the **permission checkboxes** for the data this key is allowed to read. Torn's UI calls these "selections" — they're the boxes labeled "user", "faction", "attacks", "bars", and so on. Tick the ones listed below for each key, save, then copy the key string.
+On Torn's API page, click **Create a new key**, pick the **Limited Access** radio option, give it a name (so you can identify it later), and click **Create**. That's it — Limited tier already covers every endpoint warboard reads (chain, faction members, attacks, bars, cooldowns, armoury news, etc.). Don't use Full Access — warboard never needs write permissions.
 
 ### 2a. FactionOps key (every member, personal)
 
-- Name it something like **"FactionOps"** so you can recognize it later
-- Tick these permission boxes: **attacks**, **bars**, **cooldowns**, **profile**, **travel**, **chain**, **members**, **armorynews**
+- Name it something like **"FactionOps"** so you can recognize it later in your key list
+- Pick **Limited Access** and create
 - When the FactionOps overlay loads on Torn, paste this key into the prompt — it's stored locally per member
 
 This is the key each member uses individually. It powers their personal status (energy, cooldowns) and lets them act inside FactionOps (calls, claims, broadcasts).
@@ -33,7 +33,7 @@ This is the key each member uses individually. It powers their personal status (
 ### 2b. Faction key (one per faction, admin sets once)
 
 - Name it something like **"FactionKey"** so it's clearly the shared one
-- Tick the same permission boxes as 2a (attacks + armorynews especially — those drive the war polling)
+- Pick **Limited Access** and create
 - One faction admin pastes this in **⚙ Settings → Faction API Key** field
 
 The faction key is **stored server-side and used by warboard's pollers on behalf of the whole faction** — chain monitor, war-status sweeps, attacks-feed, ranked-war report. It's what keeps everyone's data fresh even if no member has FactionOps open at that moment. Set it once; warboard handles the rest.
