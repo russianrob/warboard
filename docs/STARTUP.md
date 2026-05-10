@@ -63,7 +63,6 @@ This list gates: Member bars / cooldowns view, post-war report, shout / broadcas
 |---|---|
 | **iOS** | TestFlight invite from RussianRob [137558] |
 | **Android** | Download <https://tornwar.com/warboard.apk> and install (allow unknown sources) |
-| **Mac** | <https://tornwar.com/mac> — auto-updates via Sparkle |
 
 The apps add:
 - Live Activity / Dynamic Island chain timer (iOS)
@@ -177,6 +176,5 @@ Send a message to **RussianRob [137558]** in Torn with:
 - **OC Spawn Assistance**: <https://tornwar.com/scripts/oc-spawn-assistance.user.js>
 - **OC Spawn notifications PWA**: <https://tornwar.com/notifications>
 - **Android APK**: <https://tornwar.com/warboard.apk>
-- **Mac app**: <https://tornwar.com/mac>
 - **Owner contact**: RussianRob [137558]
 - **Privacy / Terms**: <https://tornwar.com/privacy> · <https://tornwar.com/terms>
