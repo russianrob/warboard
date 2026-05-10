@@ -1,5 +1,6 @@
 import { fetchFactionBasic } from "./torn-api.js";
 import * as store from "./store.js";
+import * as checkpointHistory from "./oc-checkpoint-history.js";
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join as pathJoin } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -415,6 +416,24 @@ export async function getOcSpawnData(factionId, apiKey) {
     mergedCrimes.push(c);
   }
   cprCache = buildCprCache(mergedCrimes, currentPlacements);
+
+  // Per-checkpoint attribution: parsed by the userscript fetch
+  // interceptor from page-level completed-crime responses (only
+  // place per-checkpoint outcomes are exposed — public API only
+  // returns aggregate checkpoint_pass_rate). Merge into each
+  // member's cprCache entry so engines can render checkpoint
+  // heatmaps without a second round-trip. Cold-start gap: nothing
+  // here until at least one admin opens the Completed tab and the
+  // userscript uploads the parsed scenario.
+  try {
+    const byCheckpoint = checkpointHistory.aggregateByMember(factionId);
+    for (const uid in byCheckpoint) {
+      if (!cprCache[uid]) continue; // member has no CPR data — skip
+      cprCache[uid].byCheckpoint = byCheckpoint[uid];
+    }
+  } catch (e) {
+    console.warn(`[oc-spawn] byCheckpoint merge failed for ${factionId}: ${e.message}`);
+  }
 
   // Short-lived cache for faction basic data (member list + status) —
   // avoids calling this endpoint once per spawn-key request per user.

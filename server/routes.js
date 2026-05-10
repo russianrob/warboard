@@ -80,6 +80,7 @@ import * as chat from "./chat.js";
 import { encrypt as encryptKey, decrypt as decryptKey, isEncrypted as isEncryptedKey } from "./key-encryption.js";
 import * as pendingBroadcasts from "./pending-broadcasts.js";
 import * as missingOverrides from "./missing-overrides.js";
+import * as ocCheckpointHistory from "./oc-checkpoint-history.js";
 import * as attackLedger from "./attack-ledger.js";
 import * as webauthn from "./webauthn.js";
 import busboy from "busboy";
@@ -7637,6 +7638,47 @@ router.post("/api/oc/admin-roles", async (req, res) => {
 //
 // Auth: same admin gate as the other OC management endpoints. Only
 // faction admins (per oc_admin_roles + dev override) can record / list.
+
+// ── POST /api/oc/checkpoint-history ─────────────────────────────────────
+// Userscript fetch interceptor catches Torn's page-level
+// `page.php?sid=organizedCrimesData&step=crimeList` POST responses
+// (when an admin opens the Completed tab on faction.php), parses the
+// per-checkpoint outcome markers ([C\d+-P/F]) from the scenario
+// dialogue, attributes each pass/fail to a player by name, and POSTs
+// the structured result here. Server stores per-faction so engines
+// can render per-checkpoint heatmaps. Admin-gated.
+//
+// Body: { scenarios: [ { id, name, executedAt, checkpoints: [{checkpoint,outcome,playerId,role}] } ] }
+router.post("/api/oc/checkpoint-history", express.json({ limit: '256kb' }), async (req, res) => {
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info } = ctx;
+  const adminRoles = store.getAdminRoles(info.factionId).map(r => String(r).toLowerCase());
+  const isDev = String(info.playerId) === '137558';
+  const myPos = String(info.factionPosition || '').toLowerCase();
+  if (!isDev && !adminRoles.includes(myPos)) {
+    return res.status(403).json({ error: "Admin role required" });
+  }
+  const scenarios = Array.isArray(req.body?.scenarios) ? req.body.scenarios : [];
+  if (scenarios.length === 0) {
+    return res.status(400).json({ error: "scenarios array required" });
+  }
+  let totalNew = 0;
+  let scenariosNew = 0;
+  for (const s of scenarios) {
+    const sid = String(s?.id || '').trim();
+    if (!sid) continue;
+    const before = ocCheckpointHistory.scenarioCount(info.factionId);
+    const added = ocCheckpointHistory.ingestScenario(info.factionId, sid, s);
+    const after = ocCheckpointHistory.scenarioCount(info.factionId);
+    totalNew += added;
+    if (after > before) scenariosNew++;
+  }
+  if (scenariosNew > 0) {
+    console.log(`[oc-checkpoints] ${info.playerName} ingested ${scenariosNew} new scenarios (${totalNew} checkpoints) for faction ${info.factionId}`);
+  }
+  return res.json({ ok: true, scenariosNew, checkpointsNew: totalNew, total: ocCheckpointHistory.scenarioCount(info.factionId) });
+});
 
 router.post("/api/oc/missing-override", express.json({ limit: '4kb' }), async (req, res) => {
   const ctx = await resolveVaultCaller(req, res);

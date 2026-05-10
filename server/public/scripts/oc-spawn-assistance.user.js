@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.93
+// @version      3.1.94
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -265,7 +265,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.93';
+    const SCRIPT_VERSION = '3.1.94';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1062,10 +1062,154 @@
                             if (typeof s === 'number') handleDetectedScope(s, 'AJAX (Fetch)');
                         }).catch(() => {});
                     }
+                    // v3.1.94: per-checkpoint attribution. Torn's page-
+                    // level POST to organizedCrimesData includes the
+                    // scenario dialogue with [C\d+-P/F] markers — the
+                    // ONLY place per-checkpoint outcomes are exposed
+                    // (public /v2/faction API only returns aggregate
+                    // checkpoint_pass_rate per slot). When the user
+                    // opens the Completed tab, intercept + parse +
+                    // upload to warboard so the byCheckpoint heatmap
+                    // populates in Member Projector + Reliability cards.
+                    if (url && url.includes('sid=organizedCrimesData') && url.includes('step=crimeList')) {
+                        const config = args[1];
+                        let isCompleted = false;
+                        if (config?.body instanceof FormData) {
+                            isCompleted = config.body.get('group') === 'Completed';
+                        } else if (config?.body) {
+                            isCompleted = String(config.body).includes('group=Completed');
+                        }
+                        if (isCompleted) {
+                            res.clone().json().then(data => {
+                                if (data?.success && Array.isArray(data.data)) {
+                                    captureCompletedScenarios(data.data);
+                                }
+                            }).catch(() => {});
+                        }
+                    }
                 } catch (e) {}
             }).catch(() => {}); // never swallow the original rejection
             return p; // return original promise chain untouched
         };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  PER-CHECKPOINT ATTRIBUTION  — parses [C\d+-P/F] markers from the
+    //  page-level Completed-group response and uploads to warboard. Cold-
+    //  start: only captures crimes the user actually expands on the
+    //  Completed tab. No backfill possible (page-level data is the only
+    //  source; not exposed via /v2/faction API).
+    // ═══════════════════════════════════════════════════════════════════════
+    const _UPLOADED_KEY = 'oc_checkpoint_uploaded';
+    const _UPLOADED_TTL_MS = 30 * 86400000; // remember 30 days; prevents
+                                            // re-POST on every page load
+    function _getUploadedSet() {
+        try {
+            const raw = GM_getValue(_UPLOADED_KEY, '{}');
+            const obj = JSON.parse(raw);
+            const cutoff = Date.now() - _UPLOADED_TTL_MS;
+            const fresh = {};
+            for (const [sid, ts] of Object.entries(obj)) {
+                if (Number(ts) > cutoff) fresh[sid] = ts;
+            }
+            return fresh;
+        } catch { return {}; }
+    }
+    function _markUploaded(sid) {
+        const m = _getUploadedSet();
+        m[String(sid)] = Date.now();
+        try { GM_setValue(_UPLOADED_KEY, JSON.stringify(m)); } catch {}
+    }
+
+    /**
+     * Parse one Torn page-level scenario object into the structured
+     * shape the warboard server expects. Returns null if the scenario
+     * has no parseable checkpoint markers.
+     *
+     * Attribution strategy: each dialogue's `description` text is
+     * scanned for any player name appearing in the scenario's
+     * playerSlots. First match wins. If no match (e.g. dialogue
+     * doesn't name the responsible player), the checkpoint is dropped
+     * — better to record nothing than mis-attribute.
+     */
+    function parseScenario(scenario) {
+        if (!scenario || !scenario.ID) return null;
+        const slots = Array.isArray(scenario.playerSlots) ? scenario.playerSlots : [];
+        const playersByName = new Map();
+        for (const s of slots) {
+            const pid = s?.player?.ID;
+            const name = s?.player?.name;
+            if (!pid || !name) continue;
+            playersByName.set(String(name).toLowerCase(), {
+                playerId: String(pid),
+                role: String(s.name || s.key || ''),
+            });
+        }
+        if (playersByName.size === 0) return null;
+
+        const checkpoints = [];
+        const scenes = Array.isArray(scenario?.scenario?.scenes) ? scenario.scenario.scenes : [];
+        for (const scene of scenes) {
+            const dialogues = Array.isArray(scene?.dialogues) ? scene.dialogues : [];
+            for (const d of dialogues) {
+                const m = String(d?.id || '').match(/^\[C(\d+)-([PF])\]$/);
+                if (!m) continue;
+                const checkpoint = parseInt(m[1], 10);
+                const outcome = m[2];
+                const desc = String(d?.description || '').toLowerCase();
+                let attributed = null;
+                for (const [nameLower, who] of playersByName) {
+                    if (desc.includes(nameLower)) { attributed = who; break; }
+                }
+                if (!attributed) continue;
+                checkpoints.push({
+                    checkpoint, outcome,
+                    playerId: attributed.playerId,
+                    role: attributed.role,
+                });
+            }
+        }
+        if (checkpoints.length === 0) return null;
+        return {
+            id: String(scenario.ID),
+            name: String(scenario?.scenario?.name || ''),
+            executedAt: Number(scenario?.expiresAt) || 0,
+            checkpoints,
+        };
+    }
+
+    function captureCompletedScenarios(rawScenarios) {
+        const apiKey = getApiKey();
+        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
+        const uploaded = _getUploadedSet();
+        const fresh = [];
+        for (const raw of rawScenarios) {
+            const sid = String(raw?.ID || '');
+            if (!sid || uploaded[sid]) continue;
+            const parsed = parseScenario(raw);
+            if (parsed) fresh.push(parsed);
+        }
+        if (fresh.length === 0) return;
+        const url = SERVER + '/api/oc/checkpoint-history?key=' + encodeURIComponent(apiKey);
+        const body = JSON.stringify({ scenarios: fresh });
+        if (typeof GM_xmlhttpRequest === 'function') {
+            GM_xmlhttpRequest({
+                method: 'POST', url, data: body,
+                headers: { 'Content-Type': 'application/json' },
+                onload: (resp) => {
+                    if (resp.status >= 200 && resp.status < 300) {
+                        for (const s of fresh) _markUploaded(s.id);
+                        try {
+                            const r = JSON.parse(resp.responseText);
+                            if (r.scenariosNew > 0) {
+                                console.log(`[OC Spawn][checkpoints] uploaded ${r.scenariosNew} new scenarios (${r.checkpointsNew} checkpoints), faction total: ${r.total}`);
+                            }
+                        } catch (_) {}
+                    }
+                },
+                onerror: () => {},
+            });
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3114,10 +3258,46 @@
             return `<tr><td>Lvl ${lvl}</td><td>${byLevel[lvl].count} crime${byLevel[lvl].count > 1 ? 's' : ''}</td><td style="color:${c}">${avg}%</td></tr>`;
         }).join('');
         const oc = data.cpr >= 80 ? '#74c69d' : data.cpr >= 60 ? '#f4a261' : '#9ca3af';
+        // v3.1.94: per-checkpoint heatmap. Group byCheckpoint keys
+        // ("OcName::Role::Cn") into rows of (OcName + Role) → cells per
+        // checkpoint, color-coded by pass rate. Only renders if the
+        // userscript captured at least one Completed-tab response that
+        // contained this member; otherwise the section is omitted.
+        let checkpointHtml = '';
+        const cps = data.byCheckpoint || {};
+        const cpKeys = Object.keys(cps);
+        if (cpKeys.length > 0) {
+            const groups = {};
+            for (const k of cpKeys) {
+                const parts = k.split('::');
+                if (parts.length !== 3) continue;
+                const groupKey = parts[0] + '::' + parts[1];
+                const cpNum = Number(String(parts[2]).replace(/^C/, ''));
+                if (!groups[groupKey]) groups[groupKey] = {};
+                groups[groupKey][cpNum] = cps[k];
+            }
+            const groupRows = Object.entries(groups).map(([groupKey, byCp]) => {
+                const [oc, role] = groupKey.split('::');
+                const nums = Object.keys(byCp).map(Number).sort((a, b) => a - b);
+                const cells = nums.map(n => {
+                    const e = byCp[n];
+                    const total = (e.pass || 0) + (e.fail || 0);
+                    const rate = total > 0 ? e.rate : 0;
+                    const bg = rate >= 80 ? '#1b4332' : rate >= 60 ? '#3d3010' : '#3d1010';
+                    const fg = rate >= 80 ? '#74c69d' : rate >= 60 ? '#f4a261' : '#ef4444';
+                    return `<td style="text-align:center;background:${bg};color:${fg};font-size:10px;padding:1px 4px;" title="C${n}: ${e.pass}/${total} pass">${rate}%</td>`;
+                }).join('');
+                return `<tr><td style="font-size:10px;padding-right:6px;">${oc} <span style="color:#6b7280">${role}</span></td>${cells}</tr>`;
+            }).join('');
+            checkpointHtml = `<div class="oc-tt-note" style="margin-top:7px;border-top:1px solid #1a2e20;padding-top:5px;font-weight:600;color:#d1d5db;">Per-checkpoint pass rate</div>
+                <table style="margin-top:3px;"><tbody>${groupRows}</tbody></table>`;
+        }
+
         cprTooltipEl.innerHTML = `
             <div class="oc-tt-title">${data.name}</div>
             <div class="oc-tt-avg">Avg: <b style="color:${oc}">${data.cpr}%</b> from ${data.entries.length} crime${data.entries.length > 1 ? 's' : ''}</div>
             <table><thead><tr><th>Level</th><th>Crimes</th><th>Avg CPR</th></tr></thead><tbody>${rows}</tbody></table>
+            ${checkpointHtml}
             <div class="oc-tt-note">Only counts crimes within 1 level of player's best</div>`;
         cprTooltipEl.style.display = 'block';
         const rect = el.getBoundingClientRect();
@@ -3285,6 +3465,7 @@
                 cprEstimated: cpr?.estimated || false,
                 cprEntries: cpr?.entries ?? [],
                 byPosition: cpr?.byPosition ?? {},
+                byCheckpoint: cpr?.byCheckpoint ?? {},
             };
             const daysInFaction = m.days_in_faction ?? 999;
             if (daysInFaction < 3) { skipped.push({ ...enriched, skipReason: `New member (${daysInFaction}d, need 3d)` }); continue; }
@@ -4192,7 +4373,7 @@
             else if (m.cpr !== null && m.cpr >= CONFIG.MINCPR) cc = 'oc-cpr-mid';
             let cs;
             if (m.cpr !== null && !m.cprEstimated) {
-                cprBreakdownMap[m.id] = { name: m.name, cpr: m.cpr, entries: m.cprEntries };
+                cprBreakdownMap[m.id] = { name: m.name, cpr: m.cpr, entries: m.cprEntries, byCheckpoint: m.byCheckpoint };
                 cs = `<span class="oc-cpr-click ${cc}" data-uid="${m.id}">${m.cpr}%</span>`;
             } else if (m.cprEstimated) {
                 cs = `<span class="oc-cpr-est" title="Estimated from level — no faction crime history yet">~${m.cpr}%</span>`;
