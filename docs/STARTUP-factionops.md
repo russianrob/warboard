@@ -46,7 +46,17 @@ This list gates: Member bars / cooldowns view, post-war report, shout / broadcas
 
 ---
 
-## 4. Install the mobile apps (optional, recommended)
+## 4. Opt into the faction key pool (recommended)
+
+Warboard polls Torn for chain status, hospital events, attack feeds, and war scores. To avoid burning a single key's 100 calls/min quota, members can opt their key into a **shared pool** that warboard rotates through.
+
+**Recommendation**: encourage 5+ members to opt in. Spreads polling load and means you survive any one member being offline / their key being revoked. Use **Limited keys** only.
+
+The setting is in FactionOps ⚙ Settings → **Share my API key with faction pool**.
+
+---
+
+## 5. Install the mobile apps (optional, recommended)
 
 | Platform | How |
 |---|---|
@@ -57,16 +67,6 @@ The apps add:
 - Live Activity / Dynamic Island chain timer (iOS)
 - Push notifications: chain panic, target hospitalized, target called, war started/ended
 - Coordination from your phone without an open browser tab
-
----
-
-## 5. Opt into the faction key pool (recommended)
-
-Warboard polls Torn for chain status, hospital events, attack feeds, and war scores. To avoid burning a single key's 100 calls/min quota, members can opt their key into a **shared pool** that warboard rotates through.
-
-**Recommendation**: encourage 5+ members to opt in. Spreads polling load and means you survive any one member being offline / their key being revoked. Use **Limited keys** only.
-
-The setting is in FactionOps ⚙ Settings → **Share my API key with faction pool**.
 
 ---
 
