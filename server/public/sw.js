@@ -16,6 +16,41 @@ self.addEventListener("push", (event) => {
   }
 
   const type = payload.data?.type;
+
+  // ── War-end cleanup ─────────────────────────────────────────────────
+  // When the server detects a war ended, it sends type=clear-chain-alerts
+  // so we can dismiss any sticky chain-alert / chain-panic notifications
+  // still pinned to the OS panel from pre-end fires. Without this, the
+  // requireInteraction:true flag below leaves chain-break alerts visible
+  // for days until the user manually swipes — surfacing 1-2 day old
+  // "CHAIN BREAKING!" notifications at random screen unlocks.
+  //
+  // Always shows a brief, low-priority summary alongside the close
+  // because iOS Web Push will revoke a subscription that doesn't
+  // visibly notify on every push.
+  if (type === "clear-chain-alerts") {
+    event.waitUntil((async () => {
+      try {
+        const notifs = await self.registration.getNotifications();
+        for (const n of notifs) {
+          if (n.tag === "chain-alert" || n.tag === "chain-panic") {
+            n.close();
+          }
+        }
+      } catch (_) { /* swallow */ }
+      await self.registration.showNotification(payload.title || "Chain alerts cleared", {
+        body: payload.body || "",
+        icon: payload.icon || "/icon-192.png",
+        tag: "chain-cleared",
+        renotify: false,
+        silent: true,
+        requireInteraction: false,
+        data: payload.data || {},
+      });
+    })());
+    return;
+  }
+
   const isUrgent = type === "chain-alert";
 
   const options = {

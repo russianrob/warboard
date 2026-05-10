@@ -191,6 +191,15 @@ export function startChainMonitor(io, warId) {
             war.warResult = myScore > enemyScore ? 'victory' : myScore < enemyScore ? 'defeat' : 'draw';
             store.saveState();
             console.log(`[chain] War ended: ${war.factionId} vs ${war.enemyFactionId} — ${war.warResult.toUpperCase()} (${myScore} vs ${enemyScore})`);
+            // Tell every player's service worker to dismiss any sticky
+            // chain-alert / chain-panic notifications still pinned from
+            // pre-end alerts. Without this, requireInteraction:true in
+            // sw.js leaves chain-break notifications pinned to the OS
+            // notification panel until manual swipe — surfacing
+            // day-old "chain breaking" alerts at random.
+            const warPlayersForClear = store.getOnlinePlayersForWar(warId);
+            push.notifyClearChainAlerts(warPlayersForClear, warId, war.warResult)
+              .catch((e) => console.warn(`[chain] clear-chain-alerts push failed: ${e.message}`));
             // War chat is now persistent (data/war-chat.json) and
             // accumulates across war boundaries — factions asked for
             // permanent history. Manual wipe still available via

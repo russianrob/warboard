@@ -493,6 +493,39 @@ export async function notifyBonusImminent(warPlayers, warId, current, nextBonus)
 }
 
 /**
+ * Fired when a war ends — tells every player's service worker to
+ * dismiss any sticky chain-alert / chain-panic notifications still
+ * pinned from before the war ended. Without this, the
+ * `requireInteraction: true` flag on chain alerts in sw.js leaves
+ * notifications pinned to the OS notification panel until manually
+ * dismissed, which surfaces 1-2 day old alerts at random. Service
+ * worker handles `data.type === "clear-chain-alerts"` by enumerating
+ * notifications and calling .close() on the chain-tagged ones.
+ *
+ * Always shows a brief, low-priority summary notification along with
+ * the clear because iOS Web Push will revoke a subscription that
+ * delivers a payload without showing anything to the user.
+ */
+export async function notifyClearChainAlerts(warPlayers, warId, warResult) {
+  const playerIds = warPlayers.map((p) => p.playerId || p.id);
+  const subtitle = warResult === 'victory' ? '🏆 Victory'
+                : warResult === 'defeat'  ? '💀 Defeat'
+                : '⚖️ Draw';
+  await sendToPlayers(
+    playerIds.filter((id) => isSubscribed(id)),
+    {
+      title: `${subtitle} — chain alerts cleared`,
+      body: "War ended. Sticky chain notifications dismissed.",
+      tag: "chain-cleared",
+      icon: "/icon-192.png",
+      data: { type: "clear-chain-alerts", warId },
+    },
+    "chain_alert", // re-use chain_alert pref so opt-outs cascade naturally
+    { urgency: "low", TTL: 60 },
+  );
+}
+
+/**
  * Notify the war room that the count of online enemies just jumped
  * sharply — i.e. the enemy is rallying. Suppressed post-war (matches
  * chain-panic gating) since a surge after the war's over is just
