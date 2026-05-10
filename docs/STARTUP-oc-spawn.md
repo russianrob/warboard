@@ -21,9 +21,9 @@ Automated organized-crime slot filling, ready-to-spawn signals, and a banker-cla
 The script asks for your **Torn API key** on first load. Use a **Limited Access** key — never a Full key.
 
 - Generate at <https://www.torn.com/preferences.php#tab=api>
-- Pick **Limited Access**
-- Required selections: `crimes`, `members`, `basic`
-- Paste into the OC Spawn panel's key field
+- Click **Create a new key**, pick **Limited Access**
+- Tick the **permission checkboxes** (Torn calls them "selections") for: **crimes**, **members**, **basic**
+- Save, copy the key string, paste into the OC Spawn panel's key field
 
 ---
 
