@@ -99,6 +99,7 @@ import * as vaultRequests from "./vault-requests.js";
 import * as keyUsage from "./key-usage-log.js";
 import { hasXanaxSubscription, grantFactionAccess, getXanaxSubscription } from "./xanax-subscriptions.js";
 import { startChainMonitor } from "./chain-monitor.js";
+import { startEnemySurgeMonitor, stopEnemySurgeMonitor } from "./enemy-surge-monitor.js";
 import * as push from "./push-notifications.js";
 import { isFactionAllowed, getAllSubscriptions, getOwnerFactionId, getSubscriptionRejectionMessage } from "./subscription-manager.js";
 
@@ -899,6 +900,11 @@ router.get("/api/poll", (req, res, next) => {
   // Skip if war already ended.
   if (!war.warEnded) {
     startChainMonitor(null, warId);
+    // Enemy-surge monitor — sample every 30s, fires when threshold hit.
+    // Self-gates on the per-faction enabled flag, so cheap to always-start.
+    startEnemySurgeMonitor(warId);
+  } else {
+    stopEnemySurgeMonitor(warId);
   }
 
   // Track player as online - but DON'T overwrite an active real-time session with a "poll" status
@@ -1283,6 +1289,29 @@ router.post("/api/broadcast/roles", requireAuth, (req, res) => {
 
   updateFactionSettings(factionId, { broadcastRoles: roles });
   return res.json({ success: true, roles });
+});
+
+// ── Enemy-online-surge config (per-faction) ─────────────────────────────
+// GET returns the current config (with defaults filled in).
+// POST updates one or more fields; admin-only (uses the faction's
+// admin-roles list, same gate as Member bars / Post-war report).
+router.get("/api/enemy-surge/settings", requireAuth, (req, res) => {
+  const { factionId } = req.user;
+  return res.json({ settings: store.getEnemySurgeConfig(factionId) });
+});
+router.post("/api/enemy-surge/settings", requireAuth, (req, res) => {
+  const { factionId, factionPosition } = req.user;
+  const adminRoles = (store.getAllowedBroadcastRoles(factionId) || [])
+    .map(r => String(r).toLowerCase());
+  const pos = (factionPosition || "").toLowerCase();
+  if (!adminRoles.includes(pos)) {
+    return res.status(403).json({ error: "Enemy-surge settings are admin-only." });
+  }
+  const { enabled, jumpThreshold, windowSec, cooldownSec } = (req.body || {});
+  const updated = store.setEnemySurgeConfig(factionId, {
+    enabled, jumpThreshold, windowSec, cooldownSec,
+  });
+  return res.json({ ok: true, settings: updated });
 });
 
 router.post("/api/broadcast", requireAuth, (req, res) => {

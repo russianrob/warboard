@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.10
+// @version      5.0.11
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -53,7 +53,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.10';
+    const SCRIPT_VERSION = '5.0.11';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -4857,6 +4857,39 @@ body.wb-chain-active {
                 </div>
             </div>
 
+            <!-- Enemy Online Surge — admin-only per-faction config. Server runs
+                 the watcher on data clients are already pushing, so zero extra
+                 Torn API cost. Defaults: disabled / +5 enemies / 60s / 10min. -->
+            <div style="margin: 14px 0;">
+                <label>Enemy Online Surge Alert <span style="font-weight:400;opacity:0.6;font-size:11px;">(admin-only)</span></label>
+                <div style="font-size:11px;opacity:0.7;margin-bottom:8px;">
+                    Push notification when N+ enemies come online inside a short window — coordinated-rally signal during war.
+                </div>
+                <div class="wb-settings-row" style="margin-bottom:8px;">
+                    <span>Enable surge alerts</span>
+                    <label class="wb-toggle">
+                        <input type="checkbox" id="wb-toggle-surge-enabled">
+                        <span class="wb-toggle-slider"></span>
+                    </label>
+                </div>
+                <div id="wb-surge-tunables" style="display:none;">
+                    <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+                        <span style="font-size:12px;opacity:0.8;flex:1;">Trigger when</span>
+                        <input type="number" id="wb-input-surge-threshold" min="1" max="50" step="1" style="width:60px;text-align:center;margin-bottom:0;">
+                        <span style="font-size:12px;opacity:0.8;">enemies online within</span>
+                        <input type="number" id="wb-input-surge-window" min="30" max="600" step="10" style="width:70px;text-align:center;margin-bottom:0;">
+                        <span style="font-size:12px;opacity:0.8;">seconds</span>
+                    </div>
+                    <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+                        <span style="font-size:12px;opacity:0.8;flex:1;">Re-fire cooldown</span>
+                        <input type="number" id="wb-input-surge-cooldown" min="60" max="3600" step="60" style="width:70px;text-align:center;margin-bottom:0;">
+                        <span style="font-size:12px;opacity:0.8;">seconds (60–3600)</span>
+                    </div>
+                </div>
+                <button class="wb-btn wb-btn-sm" id="wb-btn-save-surge" style="margin-top:4px;">Save surge settings</button>
+                <div id="wb-surge-result" style="font-size:11px;opacity:0.7;margin-top:4px;min-height:14px;"></div>
+            </div>
+
             <!-- v4.9.82: faction-wide FFScouter key for flight tracker. Shared
                  with OC Spawn Assistance (oc_ffs_key in faction settings),
                  so setting it here also enables OC delay attribution and
@@ -5213,6 +5246,55 @@ body.wb-chain-active {
                 }
             } catch (e) {
                 showToast('Failed to connect to server.', 'error');
+            }
+        });
+
+        // ── Enemy Online Surge config (admin-only) ──────────────────────
+        // Hydrate the four inputs from the server's current config, wire
+        // the toggle to show/hide the tunables, and POST the bundle on save.
+        const surgeToggle    = document.getElementById('wb-toggle-surge-enabled');
+        const surgeTunables  = document.getElementById('wb-surge-tunables');
+        const surgeThreshold = document.getElementById('wb-input-surge-threshold');
+        const surgeWindow    = document.getElementById('wb-input-surge-window');
+        const surgeCooldown  = document.getElementById('wb-input-surge-cooldown');
+        const surgeResult    = document.getElementById('wb-surge-result');
+        const surgeBtn       = document.getElementById('wb-btn-save-surge');
+        function applySurgeConfig(cfg) {
+            if (!cfg) return;
+            surgeToggle.checked = !!cfg.enabled;
+            surgeThreshold.value = cfg.jumpThreshold;
+            surgeWindow.value    = cfg.windowSec;
+            surgeCooldown.value  = cfg.cooldownSec;
+            surgeTunables.style.display = surgeToggle.checked ? 'block' : 'none';
+        }
+        surgeToggle.addEventListener('change', () => {
+            surgeTunables.style.display = surgeToggle.checked ? 'block' : 'none';
+        });
+        getAction('/api/enemy-surge/settings')
+            .then(r => applySurgeConfig(r && r.settings))
+            .catch(() => { /* admin-only — silent for non-admins */ });
+        surgeBtn.addEventListener('click', async () => {
+            surgeResult.textContent = 'Saving...';
+            surgeResult.style.color = '#9ca3af';
+            try {
+                const body = {
+                    enabled: !!surgeToggle.checked,
+                    jumpThreshold: Number(surgeThreshold.value),
+                    windowSec:     Number(surgeWindow.value),
+                    cooldownSec:   Number(surgeCooldown.value),
+                };
+                const resp = await postAction('/api/enemy-surge/settings', body);
+                if (resp && resp.ok) {
+                    applySurgeConfig(resp.settings);
+                    surgeResult.textContent = '✓ Saved';
+                    surgeResult.style.color = '#4ade80';
+                } else {
+                    surgeResult.textContent = (resp && resp.error) || 'Failed to save';
+                    surgeResult.style.color = '#ef4444';
+                }
+            } catch (e) {
+                surgeResult.textContent = 'Failed: ' + (e.message || 'network error');
+                surgeResult.style.color = '#ef4444';
             }
         });
 

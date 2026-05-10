@@ -7,6 +7,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { encryptMap, decryptMap } from "./key-encryption.js";
 
 const DATA_DIR = process.env.DATA_DIR || "./data";
 const WARS_FILE = path.join(DATA_DIR, "wars.json");
@@ -261,7 +262,10 @@ export function loadPlayerKeys() {
   try {
     const raw = fs.readFileSync(PLAYER_KEYS_FILE, "utf-8");
     const data = JSON.parse(raw);
-    for (const [playerId, key] of Object.entries(data)) {
+    // decryptMap is backward-compat: legacy plaintext entries pass
+    // through unchanged so an in-place upgrade just works.
+    const decrypted = decryptMap(data);
+    for (const [playerId, key] of Object.entries(decrypted)) {
       apiKeys.set(playerId, key);
     }
     console.log(`[store] Loaded ${apiKeys.size} player API key(s) from disk`);
@@ -270,12 +274,13 @@ export function loadPlayerKeys() {
   }
 }
 
-/** Persist player API keys to disk. */
+/** Persist player API keys to disk (encrypted). */
 function savePlayerKeys() {
   ensureDataDir();
   try {
     const obj = Object.fromEntries(apiKeys);
-    fs.writeFileSync(PLAYER_KEYS_FILE, JSON.stringify(obj, null, 2));
+    const encrypted = encryptMap(obj);
+    fs.writeFileSync(PLAYER_KEYS_FILE, JSON.stringify(encrypted, null, 2));
   } catch (err) {
     console.error("[store] Failed to persist player keys:", err.message);
   }
@@ -351,6 +356,43 @@ export function getAdminRoles(factionId) {
   return settings.adminRoles;
 }
 
+/**
+ * Per-faction enemy-online-surge alert config. Controls how the
+ * server-side monitor decides "a meaningful number of enemies just
+ * came online" — used to fire a coordinated-attack warning push
+ * during active wars. Persisted in faction-settings.json so admins
+ * can tune it without code changes.
+ *
+ * Defaults: disabled, 5-enemy jump, 60s window, 10-min cooldown.
+ */
+const ENEMY_SURGE_DEFAULTS = Object.freeze({
+  enabled: false,
+  jumpThreshold: 5,
+  windowSec: 60,
+  cooldownSec: 600,
+});
+export function getEnemySurgeConfig(factionId) {
+  const s = getFactionSettings(factionId);
+  const cfg = s.enemySurge || {};
+  return {
+    enabled:       typeof cfg.enabled === 'boolean' ? cfg.enabled : ENEMY_SURGE_DEFAULTS.enabled,
+    jumpThreshold: Number.isFinite(cfg.jumpThreshold) && cfg.jumpThreshold >= 1 ? cfg.jumpThreshold : ENEMY_SURGE_DEFAULTS.jumpThreshold,
+    windowSec:     Number.isFinite(cfg.windowSec)     && cfg.windowSec     >= 30  ? cfg.windowSec     : ENEMY_SURGE_DEFAULTS.windowSec,
+    cooldownSec:   Number.isFinite(cfg.cooldownSec)   && cfg.cooldownSec   >= 60  ? cfg.cooldownSec   : ENEMY_SURGE_DEFAULTS.cooldownSec,
+  };
+}
+export function setEnemySurgeConfig(factionId, partial) {
+  const current = getFactionSettings(factionId);
+  const merged = { ...(current.enemySurge || {}) };
+  if (typeof partial.enabled === 'boolean') merged.enabled = partial.enabled;
+  if (Number.isFinite(partial.jumpThreshold)) merged.jumpThreshold = Math.max(1, Math.min(50, Math.round(partial.jumpThreshold)));
+  if (Number.isFinite(partial.windowSec))     merged.windowSec     = Math.max(30, Math.min(600, Math.round(partial.windowSec)));
+  if (Number.isFinite(partial.cooldownSec))   merged.cooldownSec   = Math.max(60, Math.min(3600, Math.round(partial.cooldownSec)));
+  factionSettings.set(String(factionId), { ...current, enemySurge: merged });
+  saveFactionSettings();
+  return getEnemySurgeConfig(factionId);
+}
+
 export function setAdminRoles(factionId, roles) {
   const cleaned = Array.isArray(roles)
     ? roles.map(r => String(r).trim().toLowerCase()).filter(Boolean).slice(0, 30)
@@ -388,7 +430,8 @@ export function loadFactionKeys() {
   try {
     const raw = fs.readFileSync(FACTION_KEYS_FILE, "utf-8");
     const data = JSON.parse(raw);
-    for (const [factionId, key] of Object.entries(data)) {
+    const decrypted = decryptMap(data);
+    for (const [factionId, key] of Object.entries(decrypted)) {
       factionApiKeys.set(factionId, key);
     }
     console.log(`[store] Loaded ${factionApiKeys.size} faction API key(s) from disk`);
@@ -397,12 +440,13 @@ export function loadFactionKeys() {
   }
 }
 
-/** Persist faction API keys to disk. */
+/** Persist faction API keys to disk (encrypted). */
 export function saveFactionKeys() {
   ensureDataDir();
   try {
     const obj = Object.fromEntries(factionApiKeys);
-    fs.writeFileSync(FACTION_KEYS_FILE, JSON.stringify(obj, null, 2));
+    const encrypted = encryptMap(obj);
+    fs.writeFileSync(FACTION_KEYS_FILE, JSON.stringify(encrypted, null, 2));
   } catch (err) {
     console.error("[store] Failed to persist faction keys:", err.message);
   }
@@ -454,6 +498,33 @@ function saveKeyPoolingOpt() {
 }
 
 /**
+ * v3.1.75: stamp the player's pool entry as freshly active. Called
+ * from auth middleware on every authenticated request — the warboard-
+ * native app's polls, userscript polls, and web UI polls all flow
+ * through here, so `lastActiveAt` reflects the actual last time we
+ * heard from the user regardless of surface.
+ *
+ * No-op when the player isn't in the pool map (e.g. opted out, or never
+ * registered). Doesn't bump opt-in state — only writes a timestamp on
+ * an existing entry.
+ */
+export function touchPoolActivity(playerId) {
+  const pid = String(playerId || "");
+  if (!pid) return;
+  const existing = keyPoolingOpt.get(pid);
+  if (!existing) return;
+  // Throttle disk writes — in-memory updates every request, persist at
+  // most once per minute per player so we don't churn the JSON file
+  // for every poll. Dirty flag flushes opportunistically.
+  const now = Date.now();
+  existing.lastActiveAt = now;
+  if (!existing._lastSavedAt || (now - existing._lastSavedAt) > 60_000) {
+    existing._lastSavedAt = now;
+    saveKeyPoolingOpt();
+  }
+}
+
+/**
  * Record a player's opt-in/out decision for the key pool.
  * Stores the factionId at opt-in time so if they later switch factions
  * their key isn't used for their old faction's pool. Optional auth
@@ -479,6 +550,31 @@ export function setKeyPoolingOpt(playerId, enabled, factionId, meta = {}) {
   }
   keyPoolingOpt.set(String(playerId), next);
   saveKeyPoolingOpt();
+}
+
+/**
+ * Hard-delete a player's pool opt. Used by the weekly membership check
+ * when the player has left the faction entirely — leaving their pool
+ * entry around with enabled=true is harmless (getPooledKeysForFaction
+ * silently skips when the apiKeys.get() lookup returns null) but it
+ * accumulates and confuses anyone reading the file.
+ */
+export function removePoolOpt(playerId) {
+  const pid = String(playerId);
+  if (!keyPoolingOpt.has(pid)) return false;
+  keyPoolingOpt.delete(pid);
+  saveKeyPoolingOpt();
+  return true;
+}
+
+/** Drop the player's last-known faction mapping. Companion to
+ *  removeApiKey + removePoolOpt for full membership cleanup. */
+export function removePlayerFaction(playerId) {
+  const pid = String(playerId);
+  if (!lastKnownFaction.has(pid)) return false;
+  lastKnownFaction.delete(pid);
+  savePlayerFactions();
+  return true;
 }
 
 /**

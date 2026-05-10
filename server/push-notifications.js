@@ -43,6 +43,7 @@ export const NOTIFICATION_TYPES = {
   call_stolen:     { label: "Call Contested",        description: "When someone else views a target you called",       default: true  },
   war_target:      { label: "War Target Reached",    description: "When faction hits the custom war target",           default: true  },
   enemy_attacking: { label: "Enemy Attacking",        description: "When an enemy is caught mid-attack by the poller",  default: false },
+  enemy_surge:     { label: "Enemy Online Surge",     description: "When the enemy faction's online count jumps sharply (rallying)", default: false },
   // oc: true marks a type as OC-Spawn-only. The FactionOps settings UI
   // filters these out via /api/push/types so war-overlay users don't see
   // OC-specific toggles; they're managed instead from the /notifications
@@ -488,6 +489,31 @@ export async function notifyBonusImminent(warPlayers, warId, current, nextBonus)
       data: { type: "bonus", warId },
     },
     "bonus_imminent",
+  );
+}
+
+/**
+ * Notify the war room that the count of online enemies just jumped
+ * sharply — i.e. the enemy is rallying. Suppressed post-war (matches
+ * chain-panic gating) since a surge after the war's over is just
+ * noise. Per-faction config (threshold/window/cooldown) is enforced
+ * in enemy-surge-monitor.js, not here.
+ */
+export async function notifyEnemySurge(warPlayers, warId, online, delta, windowSec) {
+  if (!(await hasWarStarted(warId))) return;
+  if (await hasWarEnded(warId)) return;
+  const playerIds = warPlayers.map((p) => p.playerId || p.id);
+  await sendToPlayers(
+    playerIds.filter((id) => isSubscribed(id)),
+    {
+      title: "🚨 Enemy Online Surge",
+      body: `+${delta} enemies came online in the last ${windowSec}s — ${online} now active`,
+      tag: "enemy-surge",
+      icon: "/icon-192.png",
+      data: { type: "enemy-surge", warId, online, delta, windowSec },
+    },
+    "enemy_surge",
+    { urgency: "high", TTL: 60 },
   );
 }
 
