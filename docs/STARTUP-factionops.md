@@ -38,6 +38,12 @@ This is the key each member uses individually. It powers their personal status (
 
 The faction key is **stored server-side and used by warboard's pollers on behalf of the whole faction** — chain monitor, war-status sweeps, attacks-feed, ranked-war report. It's what keeps everyone's data fresh even if no member has FactionOps open at that moment. Set it once; warboard handles the rest.
 
+### Key safety
+
+Every API key warboard stores — personal FactionOps keys, the faction key, and pool-shared keys — is **encrypted at rest with AES-256-GCM** before being written to disk. The decryption key lives only in the server's environment variables, separate from the data files. If a stored key file were ever leaked on its own, the contents would be unreadable without the env-side secret.
+
+Keys are also never sent to the browser after the first paste, never logged, and never exposed via any API endpoint. You can revoke any key at any time from <https://www.torn.com/preferences.php#tab=api> — the next warboard call using it will fail and the key auto-evicts from caches.
+
 ### Verify the connection
 
 Click ⚙ to open settings. The connection dot should turn green. The **Subscription** line shows your status:

@@ -25,6 +25,8 @@ The script asks for your **Torn API key** on first load. Use a **Limited Access*
 - Tick the **permission checkboxes** (Torn calls them "selections") for: **crimes**, **members**, **basic**
 - Save, copy the key string, paste into the OC Spawn panel's key field
 
+**Key safety**: every API key warboard stores is **encrypted at rest with AES-256-GCM**. The decryption key lives only in the server's environment variables. Keys are never sent back to the browser after the first paste, never logged, and never exposed via any API endpoint. Revoke any key at any time at <https://www.torn.com/preferences.php#tab=api> and the next warboard call using it will fail.
+
 ---
 
 ## 3. Configure admin roles (one-time, faction admin)
