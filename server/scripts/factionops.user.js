@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.9
+// @version      5.0.10
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -53,7 +53,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.9';
+    const SCRIPT_VERSION = '5.0.10';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -4244,6 +4244,13 @@ body.wb-chain-active {
                             state.myFactionName = body.player.factionName || '';
                             state.myFactionPosition = (body.player.factionPosition || '').toLowerCase();
                         }
+                        // Subscription expiry — 'permanent' for owner /
+                        // factionops partner; epoch-ms for xanax-paying
+                        // factions; null if unknown. Settings modal reads
+                        // this to render a "23 days left" line.
+                        state.subscriptionExpiresAt = (body.subscriptionExpiresAt !== undefined)
+                            ? body.subscriptionExpiresAt
+                            : null;
                         log('Authenticated as', state.myPlayerName || 'unknown',
                             '— factionId:', state.myFactionId);
 
@@ -4733,12 +4740,40 @@ body.wb-chain-active {
         if (state.connected) { connText = 'Connected'; connClass = 'connected'; }
         else if (state.connecting) { connText = 'Connecting...'; connClass = 'connecting'; }
 
+        // Subscription line \u2014 always renders so the user knows whether
+        // they're permanent (owner / factionops partner), counting down
+        // days (xanax sub), or unknown. Color-coded: green = permanent,
+        // amber under 7 days, red expired.
+        const exp = state.subscriptionExpiresAt;
+        let subLabel = 'Subscription: unknown';
+        let subColor = '#9ca3af';
+        if (exp === 'permanent') {
+            subLabel = 'Subscription: \u2605 Permanent';
+            subColor = '#4ade80';
+        } else if (typeof exp === 'number' && exp > 0) {
+            const ms = exp - Date.now();
+            if (ms <= 0) {
+                subLabel = 'Subscription: expired';
+                subColor = '#ef4444';
+            } else {
+                const days = Math.floor(ms / 86400000);
+                const hours = Math.floor((ms % 86400000) / 3600000);
+                const text = days >= 1 ? (days + ' day' + (days === 1 ? '' : 's')) : (hours + 'h');
+                subLabel = 'Subscription: ' + text + ' remaining';
+                subColor = days < 7 ? '#fbbf24' : '#4ade80';
+            }
+        }
+
         modal.innerHTML = `
             <h2>\u2699 FactionOps Settings</h2>
 
             <div class="wb-connection-status">
                 <span class="wb-status-dot ${connClass}" id="wb-settings-conn-dot"></span>
                 <span id="wb-settings-conn-text">${connText}</span>
+            </div>
+
+            <div style="font-size:12px;color:${subColor};margin:-8px 0 14px 0;padding:6px 10px;background:rgba(255,255,255,0.03);border-radius:4px;border-left:3px solid ${subColor};">
+                ${escapeHtml(subLabel)}
             </div>
 
             <label for="wb-input-server">Server URL</label>

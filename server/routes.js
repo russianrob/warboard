@@ -490,11 +490,30 @@ router.post("/api/auth", async (req, res) => {
       factionPosition: info.factionPosition,
     });
 
+    // Subscription expiry — surfaced so the userscript can show "23
+    // days left" in its settings panel. Owner faction + factionops
+    // partners are 'permanent'; xanax-paying factions get a real
+    // epoch-ms expiry timestamp.
+    let subscriptionExpiresAt = null;
+    const fidStr = String(info.factionId);
+    if (isFactionAllowed(info.factionId) || isPartnerFor(info.factionId, "factionops")) {
+      subscriptionExpiresAt = 'permanent';
+    } else {
+      const xSub = getXanaxSubscription(info.factionId);
+      if (xSub && xSub.expiresAt) subscriptionExpiresAt = xSub.expiresAt;
+      if (!subscriptionExpiresAt) {
+        const allSubs = getAllSubscriptions();
+        const match = Object.values(allSubs).find(s => String(s.factionId) === fidStr);
+        if (match && match.expiresAt) subscriptionExpiresAt = match.expiresAt;
+      }
+    }
+
     console.log(`[auth] Player ${info.playerName} (${info.playerId}) authenticated (FactionOps v${scriptVersion || 'unknown'})`);
 
     return res.json({
       token,
       player: info,
+      subscriptionExpiresAt,
       // Client uses this to show a one-time "your key is helping the
       // faction's polling pool" notice. Server only returns true on the
       // first auth for this player.
