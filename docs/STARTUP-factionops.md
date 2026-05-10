@@ -113,10 +113,10 @@ How to receive them depends on where you're using warboard:
 |---|---|
 | **iOS app** | Auto-enabled on first launch; allow notifications when prompted |
 | **Android app** | Auto-enabled on first launch; allow notifications when prompted |
-| **Torn PDA** (mobile WebView) | Open FactionOps ⚙ Settings → toggle **PDA Notifications** on, tap **Test PDA Notification** to verify |
+| **Torn PDA** (mobile WebView) | Two options: (a) inside PDA, open FactionOps ⚙ Settings → toggle **PDA Notifications** on (uses PDA's native bridge — chain alerts only); (b) open <https://tornwar.com/notifications> in your phone's **real browser** (Safari / Chrome — not inside PDA), tap **Add to Home Screen**, then open the new icon and enable. The PWA route works for the full set of warboard notifications and rings even when PDA isn't running. |
 | **Desktop browser** | In-overlay toast notifications only — no OS-level push (use the mobile apps if you need away-from-keyboard alerts) |
 
-Per-notification preferences (which types to ring) are configured per-app: open the app's settings tab.
+Per-notification preferences (which types to ring) are configured per-app: open the app's settings tab. The PWA at <https://tornwar.com/notifications> has its own preferences page once installed.
 
 ---
 

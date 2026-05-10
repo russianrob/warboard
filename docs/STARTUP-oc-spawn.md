@@ -59,14 +59,14 @@ A separate PWA at <https://tornwar.com/notifications> rings the device when:
 - An OC completes (success or failure) with payout
 
 Setup (per device):
-1. Open the URL on the phone you want to receive alerts
+1. **Important for Torn PDA users**: open the URL in your phone's **real browser** (Safari on iOS, Chrome on Android) — *not* inside the PDA app. PDA's WebView can't receive Web Push, so the PWA has to live outside it.
 2. Add to Home Screen (iOS Share menu → Add to Home Screen; Android ⋮ → Install app)
-3. Open from the home-screen icon
+3. Open from the new home-screen icon (this launches it as a standalone PWA, separate from your browser tabs)
 4. Paste your Torn API key, tap **Enable on this device**
 5. Tick the notification preferences you want
 6. Send a test push to confirm
 
-iOS 16.4+ required for Web Push. Notifications ring even when the page isn't open.
+iOS 16.4+ required for Web Push. Once installed, notifications ring even when the PWA isn't open and even when PDA isn't running.
 
 ---
 
