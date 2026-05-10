@@ -1,9 +1,11 @@
 // ==UserScript==
-// @name         OC Spawn Assistance
+// @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.71
+// @version      3.1.91
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
+// @copyright    2024-2026, RussianRob (https://tornwar.com)
+// @license      MIT (code) — OC Spawn Assistance™ name is an unregistered trademark of RussianRob; brand use requires permission
 // @match        https://www.torn.com/factions.php*
 // @grant        GM_addStyle
 // @grant        GM_setValue
@@ -19,6 +21,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGELOG
 // ═══════════════════════════════════════════════════════════════════════════════
+// v3.1.76 — Member Projector now anchors on the member's highest STABLE OC level (avg CPR ≥ MINCPR), not just their highest completed. Previously a member who'd touched Lvl 6 at 57% avg CPR was shown as "OC Lvl 6 / 57%" with the projection targeting Lvl 7 ("Not Ready for Lvl 7") — a misleading double whammy: the displayed CPR was their unstable struggling number rather than where they're actually competent, and the projection skipped over the level they're still building. New logic: walk down from completedLevel to find the first level with CPR ≥ MINCPR, use that as the displayed anchor (currentOcLevel + currentLevelCpr); set the projection target to the level they've already attempted but not solidified (so their case becomes "OC Lvl 5 / 65% / attempting Lvl 6 at 57%" rendered as "Building for Lvl 6"). When no stable level exists yet (brand new member at Lvl 1 below MINCPR), anchor stays at completed level and projection targets that same level. Renderer surfaces an inline "attempting Lvl X at N%" tag in orange so the displayed numbers don't read as a contradiction with the projection.
+// v3.1.75 — Loan + retrieve: accept both `entry.user.userID` and `entry.user.id` shapes. Torn's late-Apr 2026 auth refactor (changelog "Optimized authentication and last action updates by improving session log logic") flipped some loaned-item entries to expose the borrower as `user.id` instead of `user.userID`. The retrieve match condition (`String(entry.user.userID) === String(userID)`) silently failed against the new shape — every retrieve from the Unused tab raised "Could not find armory item" with no context (the catch block only set "Error" on the button). Fix: cascade `entry.user.userID ?? entry.user.id` everywhere we read the borrower id, both in retrieve's match check AND in `mgr_fetchArmoryIDsForCategory`'s isUnused check (which was mis-classifying loaned-to-others items as available, risking double-loans). Also widened retrieve's category sweep from [hint, alternate-spelling-of-armor] to every loanable bucket (utilities/weapons/armor/armour/medical/boosters/drugs/clothing) since Torn's `/v2/faction` selection name doesn't always match the page-AJAX `type` field. Replaced the silent "Error" button text with the actual reason (truncated to 28 chars, full text in tooltip + console.warn), so the next time something breaks the fix is one screenshot away.
 // v3.1.70 — Banker-claim optimistic clear on vault-request Send. Hitting Send now POSTs to /api/oc/vault-request/:id/claim before opening the Controls tab. Server marks the request as claimed-by-this-banker and hides it from listRequests() for every viewer immediately, so all admins see it disappear without waiting for the 20s fundsnews poll → 15s client poll cycle (previously took ~3 manual refreshes to clear). If the matching fundsnews event arrives within the 90s claim TTL, the request is fully deleted as before. If the banker bails (closes Torn tab, never sends the money), the claim expires and the request reappears on every client's next list fetch — no orphaned requests. Two bankers clicking the same Send near-simultaneously: the second gets a 409 Conflict with "Already claimed by X" and their UI shows that message instead of removing the row.
 // v3.1.69 — Scope DOM reader now rejects elements nested inside a completed-crime reward block. Torn's Completed tab shows per-OC "+N scope" chips (e.g. Pet Project +2 scope) whose wrapper class also contains the word "scope", so strategies 1 and 2 were scraping those per-OC rewards and pushing them as if they were the faction's current scope balance. That's the source of the 16 → 2 → 5 oscillation in v3.1.68's stability window logs. New insideCompletedContext() walks up ancestors and bails on any node whose className matches completed|executed|ended|reward|payout|result|history. Both strategy 1 (class-match) and strategy 2 (text-match) honor the guard.
 // v3.1.68 — Scope stability window: Torn's React re-renders the scope badge during OC state transitions and the DOM class-match strategy sometimes catches intermediate values. Observed 04-24 05:00:24-05:00:41 EDT: 16 → 2 → 5 → 2 pushed in 20s, all class:container___THb7U scope_, when real scope was 16. Delay the commit + push by 2.5s; if a different value arrives inside the window, reset the timer and drop the transient. Legitimate scope changes settle well inside 2.5s so real edits feel ~live. Also moves CONFIG.SCOPE and GM_setValue inside the timer (previously they committed immediately; only the push was debounced).
@@ -261,7 +265,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.71';
+    const SCRIPT_VERSION = '3.1.91';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -276,7 +280,7 @@
     const MET_CRIMES_API  = "https://api.torn.com/v2/faction/crimes";
     const MET_NEWS_API    = "https://api.torn.com/v2/faction/news";
     const MET_ITEMS_API   = "https://api.torn.com/v2/torn/items";
-    const MET_API_COMMENT = "OC-Spawn-Metrics";
+    const MET_API_COMMENT = "ocs-mtrcs";  // 9 chars — Torn truncates `comment=` to 10
     const MET_API_PAGE_CAP = 100;
     const MET_FIG = "\u2007";
     const MET_ITEM_CACHE_KEY = "oc-spawn-metrics:items_cache_v1.1";
@@ -1228,6 +1232,282 @@
     let   mgr_lastRefreshTime = 0;
     const MGR_REFRESH_COOLDOWN_MS = 10000;
     const mgr_recentlyLoaned = new Map(); // Map<string (UID), Set<number (IID)>>
+    // v3.1.79: per-row "✓ Has it" admin override. Same shape as
+    // mgr_recentlyLoaned but populated by an explicit admin click or
+    // (v3.1.87+) by the DOM auto-detect of Torn's orange no-item SVG.
+    //
+    // v3.1.89: now mirrored server-side via /api/oc/missing-override —
+    // POST when we add an override locally; GET on every Missing tab
+    // load to merge in any overrides recorded by other admins or by
+    // our own previous sessions. Two effects:
+    //   1) Persists across page navigation (the DOM auto-detect needs
+    //      the OC list rendered to fire; once admin leaves crime page,
+    //      DOM-only overrides would lapse — server-side keeps them).
+    //   2) Shared with other admins in the faction so multiple bankers
+    //      reviewing Missing don't all see the same false-positive.
+    // Server TTL is 30 min; entries auto-clear before next OC scope.
+    const mgr_haveItOverride = new Map(); // Map<string (UID), Set<number (IID)>>
+    /** Track which overrides we've already POSTed in this session so
+     *  we don't fire the same POST repeatedly (auto-detect runs on
+     *  every Missing tab load). Keys: "uid:iid". */
+    const mgr_haveItPosted = new Set();
+
+    // v3.1.80: auto-detect "user has the item bound" via Torn's React
+    // state / page DOM. If found, treat it the same as a manual ✓ Has it
+    // click — filter the row out of Missing. Best-effort; falls back to
+    // the manual button if it can't read state.
+
+    // v3.1.86: read each slot's WRAPPER state class. Confirmed Torn
+    // renders the wrapper as e.g.
+    //   div.wrapper___Lpz_D.successGreen___EPVxn
+    // and the inner slotBody as
+    //   div.slotBody___oxizq.validSlot___n6ueL
+    // when the slot is in a satisfied state. Color suffixes
+    // (successGreen / successYellow / successRed) and validSlot vs
+    // (presumably) invalidSlot are the per-state hints. We just dump
+    // the class strings and let the user look at the data before
+    // deciding what to filter on.
+    // v3.1.87: detect the orange "no-item" SVG indicator that Torn
+    // draws on slot icons whose required item isn't bound. Confirmed
+    // shape:
+    //   .slotIcon___VVnQy > svg > g > path[fill="#ff794c"]
+    // (Bound slots show a div.planning___ with conic-gradient instead;
+    // no SVG at all.)
+    //
+    // Returns Set of "userID:position(lowercase)" for slots whose DOM
+    // currently shows the missing-item icon. The filter logic in
+    // mgr_loadMissingTab uses this to distinguish genuine API Missing
+    // entries from API false-positives: if a slot is rendered AND
+    // doesn't have this icon, it's a false positive (the user has
+    // the item, Torn API just hasn't caught up).
+    function mgr_scrapeSlotMissingIndicators() {
+        const flagged = new Set();
+        try {
+            const headers = document.querySelectorAll('[class*="slotHeader___"]');
+            for (const header of headers) {
+                const slotIcon = header.querySelector('[class*="slotIcon___"]');
+                if (!slotIcon) continue;
+                const path = slotIcon.querySelector('svg path');
+                const fill = path?.getAttribute('fill') || '';
+                // Torn's no-item icon uses fill="#ff794c". Any other
+                // (or no) SVG in slotIcon means a different state.
+                if (fill.toLowerCase() !== '#ff794c') continue;
+                // Resolve (userID, position) for this slot
+                const titleEl = header.querySelector('[class*="title___"]');
+                const position = titleEl?.textContent?.trim().toLowerCase() || '';
+                let walkEl = header.parentElement;
+                let userID = null, walked = 0;
+                while (walkEl && walked < 6 && !userID) {
+                    const link = walkEl.querySelector('a[href*="XID="]');
+                    if (link) {
+                        const m = link.getAttribute('href').match(/XID=(\d+)/);
+                        if (m) userID = m[1];
+                    }
+                    if (!userID) walkEl = walkEl.parentElement;
+                    walked++;
+                }
+                if (userID && position) flagged.add(`${userID}:${position}`);
+            }
+        } catch (e) { console.warn('[OC Mgr] missing-icon scrape error:', e?.message); }
+        return flagged;
+    }
+
+    function mgr_scrapeSlotIconStates() {
+        const out = []; // [{ userID, position, deg, innerClass, wrapperClass, bodyClass, slotIconHTML }]
+        try {
+            const headers = document.querySelectorAll('[class*="slotHeader___"]');
+            for (const header of headers) {
+                const wrapperEl = header.parentElement;
+                const wrapperClass = wrapperEl?.className || '';
+                const bodyEl = header.nextElementSibling;
+                const bodyClass = bodyEl?.className || '';
+                const slotIcon = header.querySelector('[class*="slotIcon___"]');
+                const inner = slotIcon?.firstElementChild;
+                const innerClass = inner?.className || '';
+                const innerTag  = inner?.tagName || '';
+                const style = inner?.getAttribute('style') || '';
+                const degMatches = [...style.matchAll(/(-?\d+(?:\.\d+)?)deg/g)];
+                const deg = degMatches.length ? parseFloat(degMatches[degMatches.length - 1][1]) : null;
+                // v3.1.87: capture the slotIcon's COMPLETE outerHTML so we
+                // can inspect what changes when the user "doesn't have
+                // the item." Caps at 800 chars to keep console output
+                // readable.
+                const slotIconHTML = slotIcon?.outerHTML?.slice(0, 800) || '';
+                const titleEl = header.querySelector('[class*="title___"]');
+                const position = titleEl?.textContent?.trim() || null;
+                let walkEl = wrapperEl;
+                let userID = null, walked = 0;
+                while (walkEl && walked < 6 && !userID) {
+                    const link = walkEl.querySelector('a[href*="XID="]');
+                    if (link) {
+                        const m = link.getAttribute('href').match(/XID=(\d+)/);
+                        if (m) userID = m[1];
+                    }
+                    if (!userID) walkEl = walkEl.parentElement;
+                    walked++;
+                }
+                out.push({ userID, position, deg, innerTag, innerClass, wrapperClass, bodyClass, slotIconHTML });
+            }
+        } catch (e) { console.warn('[OC Mgr] slot scrape error:', e?.message); }
+        return out;
+    }
+
+    // v3.1.85: scrape Torn's per-slot Success Chance % from the OC page
+    // DOM. Returns Map<"userID:positionLowercase", { successPct: number,
+    // headerEl: Element }>. Used as authoritative state for "is this
+    // slot satisfied" — high success% = item bound + member qualifies;
+    // ~0% = something's missing.
+    //
+    // Class pattern (Torn's React CSS modules — hashed suffix):
+    //   .slotHeader___ABCDE  ← per-slot header button
+    //     .slotIcon___...
+    //     .title___...        ← position name (e.g. "Thief")
+    //     .successChance___…  ← "12%"
+    //   parent → slot wrapper containing the player profile link
+    function mgr_scrapeSlotSuccessChance() {
+        const out = new Map();
+        try {
+            const headers = document.querySelectorAll('[class*="slotHeader___"]');
+            for (const header of headers) {
+                // Position from the title__ span inside the header
+                const titleEl = header.querySelector('[class*="title___"]');
+                const position = titleEl?.textContent?.trim().toLowerCase() || '';
+                // Success chance from the successChance__ child
+                const scEl = header.querySelector('[class*="successChance___"]');
+                const scText = scEl?.textContent?.trim() || '';
+                const scMatch = scText.match(/(-?\d+(?:\.\d+)?)/);
+                const successPct = scMatch ? parseFloat(scMatch[1]) : 0;
+                // Player ID — walk up from header to the slot wrapper
+                // (any ancestor with an XID profile link). React's CSS-
+                // module naming hashes the slot wrapper's class too, so
+                // we can't target it directly — walking up to find a
+                // descendant XID link is more robust.
+                let wrapper = header.parentElement;
+                let userID = null;
+                let walked = 0;
+                while (wrapper && walked < 6 && !userID) {
+                    const link = wrapper.querySelector('a[href*="XID="]');
+                    if (link) {
+                        const m = link.getAttribute('href').match(/XID=(\d+)/);
+                        if (m) userID = m[1];
+                    }
+                    if (!userID) wrapper = wrapper.parentElement;
+                    walked++;
+                }
+                if (userID && position) {
+                    out.set(`${userID}:${position}`, { successPct, headerEl: header });
+                }
+            }
+        } catch (e) {
+            console.warn('[OC Mgr] slot scrape error:', e?.message);
+        }
+        return out;
+    }
+
+    function mgr_scrapeBoundItems() {
+        // Returns a Set of "userID:itemID" pairs where the slot's
+        // requirement is satisfied per Torn's React state. Walks the
+        // unsafeWindow.torn namespace (the scope reader uses the same
+        // path) for an exposed crimes list. v3.1.86 confirmed Torn
+        // doesn't currently expose OC slot data via unsafeWindow on
+        // the OC 2.0 page, so this function returns an empty set today.
+        // Kept as a fast pre-filter for future Torn deploys that might
+        // re-expose OC state — it's cheap and a no-op when nothing's
+        // there. The real auto-detect is mgr_scrapeSlotMissingIndicators
+        // which works against the rendered DOM.
+        const bound = new Set();
+        const win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
+        // Path 1: Torn React state. Same `unsafeWindow.torn` namespace
+        // the scope reader uses (v3.1.21 comment). Walk multiple known
+        // candidate paths since Torn renames properties between OC 1.0
+        // / 2.0 / future iterations.
+        try {
+            const candidates = [
+                win?.torn?.faction?.crimes,
+                win?.torn?.faction?.crimes2,
+                win?.torn?.faction?.organizedCrimes,
+                win?.torn?.crimes,
+            ].filter(Boolean);
+            for (const root of candidates) {
+                const list = Array.isArray(root) ? root : Object.values(root);
+                let stateHit = false;
+                for (const c of list) {
+                    const slots = Array.isArray(c?.slots) ? c.slots : null;
+                    if (!slots) continue;
+                    for (const s of slots) {
+                        const uid = s?.user?.id ?? s?.user?.userID;
+                        const iid = Number(s?.item_requirement?.id ?? 0);
+                        if (!uid || !iid) continue;
+                        // ANY of these flags being truthy means the slot
+                        // has the item bound. is_available is the API's
+                        // own answer, which we know is unreliable — but
+                        // include it for completeness (won't cause harm
+                        // since it's the same answer the API returned).
+                        const sat = s?.item_requirement?.is_satisfied
+                                  ?? s?.item_requirement?.has_item
+                                  ?? s?.has_required_item
+                                  ?? s?.item_requirement?.is_available;
+                        if (sat === true) {
+                            bound.add(`${uid}:${iid}`);
+                            stateHit = true;
+                        }
+                    }
+                }
+                if (stateHit) {
+                    console.log(`[OC Mgr] State scrape found ${bound.size} bound items`);
+                    return bound;
+                }
+            }
+        } catch (e) { console.warn('[OC Mgr] state scrape error:', e?.message); }
+
+        // Path 2: DOM scrape. Best-effort because Torn ships React with
+        // hashed CSS-module class names that change between deploys. We
+        // look for any element with both a check/success indicator AND
+        // an associated player-id link inside the same slot container.
+        try {
+            // Common patterns for "this slot is satisfied" — Torn often
+            // renders a green check SVG, success badge, or class with
+            // "satisfied" / "check" / "ok" in the name.
+            const checks = document.querySelectorAll(
+                'svg[class*="check"], svg[class*="Check"], ' +
+                '[class*="satisfied"], [class*="Satisfied"], ' +
+                '[class*="hasItem"], [class*="HasItem"], ' +
+                '[aria-label*="checked" i], [title*="has item" i]'
+            );
+            for (const el of checks) {
+                // Walk up to find the enclosing slot/row, then find the
+                // member's profile link to extract their userID.
+                const slotEl = el.closest('li, [class*="slot" i], [class*="position" i], tr, .row');
+                if (!slotEl) continue;
+                const link = slotEl.querySelector('a[href*="profiles.php?XID="], a[href*="XID="]');
+                const m = link?.href?.match(/XID=(\d+)/);
+                const uid = m?.[1];
+                if (!uid) continue;
+                // Item ID is harder to read from the DOM (Torn doesn't
+                // surface it as a data attribute on every slot). Use
+                // the item NAME from this slot and match against the
+                // known itemNameMap. If we can't resolve, skip — the
+                // manual button still works.
+                const itemNameEl = slotEl.querySelector('[class*="item" i] [class*="name" i], [class*="itemName" i]')
+                                || slotEl.querySelector('[class*="item" i]');
+                const itemName = itemNameEl?.textContent?.trim();
+                if (!itemName) continue;
+                // Reverse lookup: itemName → itemID via mgr's name cache.
+                let iid = null;
+                const nameMap = mgr_getItemNameMap();
+                for (const [id, name] of Object.entries(nameMap)) {
+                    if (name === itemName) { iid = Number(id); break; }
+                }
+                if (iid) bound.add(`${uid}:${iid}`);
+            }
+            if (bound.size > 0) {
+                console.log(`[OC Mgr] DOM scrape found ${bound.size} bound items`);
+            }
+        } catch (e) { console.warn('[OC Mgr] DOM scrape error:', e?.message); }
+
+        return bound;
+    }
     let   mgr_preparedArmoryID = null;
     let   mgr_pendingArmoryItemID = null;
 
@@ -1251,6 +1531,20 @@
 
     // --- Item name cache (localStorage) ---
     const ITEM_NAME_CACHE_KEY = 'OCLM_ITEM_ID_NAME_MAP';
+    // v3.1.90: HTML-escape every user-supplied string before
+    // interpolating into innerHTML. Torn restricts member names to
+    // alphanumerics+_/- (low risk there), but item names and crime
+    // names from /v2/torn/items + /v2/faction/crimes routinely
+    // include apostrophes/quotes/ampersands that break HTML rendering
+    // at minimum and create attribute-injection paths at worst.
+    // Defensive hardening before the Big Wheelers trial.
+    const mgr_esc = (s) => String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
     const mgr_getItemNameMap = () => { try { return JSON.parse(localStorage.getItem(ITEM_NAME_CACHE_KEY) || '{}'); } catch { return {}; } };
     const mgr_setItemName = (itemID, name) => {
         const map = mgr_getItemNameMap();
@@ -1263,7 +1557,7 @@
         if (mgr_membersLoaded) return;
         const key = getApiKey();
         if (!key || key === 'YOUR_API_KEY_HERE') throw new Error('API key required');
-        const res = await fetch(`https://api.torn.com/v2/faction/members?key=${key}`);
+        const res = await fetch(`https://api.torn.com/v2/faction/members?key=${key}&comment=oc-spawn`);
         if (!res.ok) throw new Error('Failed to load members');
         const data = await res.json();
         const members = Array.isArray(data?.members) ? data.members : Object.values(data?.members || {});
@@ -1284,7 +1578,7 @@
         if (!key || key === 'YOUR_API_KEY_HERE') throw new Error('API key required');
         _mgr_crimesInFlight = (async () => {
             try {
-                const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}`);
+                const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=available&key=${key}&comment=oc-spawn`);
                 if (!res.ok) throw new Error('Failed to load OC data');
                 const data = await res.json();
                 _mgr_crimesCache = { data, ts: Date.now() };
@@ -1302,7 +1596,13 @@
             crime.slots?.forEach(slot => {
                 if (slot.item_requirement && !slot.item_requirement.is_available && slot.user?.id && !BLACKLISTED_ITEM_IDS.has(Number(slot.item_requirement.id))) {
                     missing.push({
+                        crimeID: crime.id,
                         crimeName: crime.name, position: slot.position,
+                        // v3.1.91: expires_at lets the server cap the
+                        // override TTL to the crime's actual execution
+                        // time. Torn returns it in seconds; convert to
+                        // ms here so the server can compare to Date.now().
+                        crimeExpiresAtMs: crime.expires_at ? Number(crime.expires_at) * 1000 : null,
                         itemID: Number(slot.item_requirement.id),
                         userID: slot.user.id,
                         userName: mgr_memberNameMap.get(String(slot.user.id)) || `Unknown [${slot.user.id}]`
@@ -1335,7 +1635,7 @@
         if (!key || key === 'YOUR_API_KEY_HERE') throw new Error('API key required');
         const now = Math.floor(Date.now() / 1000);
         const thirtyDaysAgo = now - (30 * 24 * 60 * 60);
-        const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=successful&filter=executed_at&from=${thirtyDaysAgo}&to=${now}&sort=DESC&limit=100&key=${key}`);
+        const res = await fetch(`https://api.torn.com/v2/faction/crimes?cat=successful&filter=executed_at&from=${thirtyDaysAgo}&to=${now}&sort=DESC&limit=100&key=${key}&comment=oc-spawn`);
         if (!res.ok) throw new Error('Failed to load completed crimes');
         const data = await res.json();
         if (data?.error) throw new Error(`API error: ${data.error.error || JSON.stringify(data.error)}`);
@@ -1360,7 +1660,7 @@
         try {
             const key = getApiKey();
             if (!key || key === 'YOUR_API_KEY_HERE') return;
-            const res = await fetch(`https://api.torn.com/v2/torn/items?ids=${unique.join(',')}&key=${key}`);
+            const res = await fetch(`https://api.torn.com/v2/torn/items?ids=${unique.join(',')}&key=${key}&comment=oc-spawn`);
             const data = await res.json();
             const items = Array.isArray(data?.items) ? data.items : Object.values(data?.items || {});
             items.forEach(item => { if (item.id && item.name) mgr_setItemName(item.id, item.name); });
@@ -1372,7 +1672,7 @@
         const key = getApiKey();
         if (!key || key === 'YOUR_API_KEY_HERE') throw new Error('API key required');
         const selections = ARMORY_API_SELECTIONS.join(',');
-        const r = await gmRequest(`https://api.torn.com/v2/faction/?selections=${selections}&key=${encodeURIComponent(key)}`);
+        const r = await gmRequest(`https://api.torn.com/v2/faction/?selections=${selections}&key=${encodeURIComponent(key)}&comment=oc-spawn`);
         if (!r.ok) throw new Error('Failed to load armory data');
         const data = r.data;
         const allItems = [];
@@ -1413,7 +1713,14 @@
                 if (itemsArr.length === 0) break;
                 let added = 0;
                 for (const entry of itemsArr) {
-                    const isUnused = entry.user === false || entry.user === '' || entry.user === 0 || (entry.user && !entry.user.userID);
+                    // Accept either user.userID OR user.id when checking
+                    // "is this item loaned to someone?" — Torn ships
+                    // both shapes after the late-Apr 2026 auth refactor.
+                    // Without the e.user.id fallback, items loaned to
+                    // other members were being mis-classified as unused
+                    // and could be re-loaned over the existing loan.
+                    const occupant = entry.user && (entry.user.userID ?? entry.user.id);
+                    const isUnused = entry.user === false || entry.user === '' || entry.user === 0 || (entry.user && !occupant);
                     if (isUnused && entry.armoryID) {
                         ids.push({ armoryID: entry.armoryID, itemID: Number(entry.itemID) });
                         added++;
@@ -1537,35 +1844,97 @@
 
     // Wire up form submit + delete buttons after each render. Safe to call
     // repeatedly; replaces handlers each time since render() rebuilds DOM.
-    // Module-level timer so we don't accumulate multiple intervals across
-    // re-renders. Polls the vault-request list every 15s and updates the
-    // visible list in place — admins see auto-removals near-real-time
-    // without needing to wait for the next full panel refresh.
+    // v3.1.78: real-time vault list updates via SSE. Server pushes a
+    // {type:'vault', action:'create'|'claim'|'remove'|'fulfill', id} event
+    // whenever vault state changes; admin's open panel re-fetches the list
+    // immediately. The 60s interval below is a safety-net for any events
+    // missed during stream disconnect / reconnect — was 15s before SSE.
     let _vaultPollTimer = null;
+    let _vaultStreamAbort = null;
+    let _vaultStreamLastLen = 0;
+    let _vaultStreamBuf = '';
+
+    async function _refreshVaultListNow(apiKey, viewer) {
+        try {
+            const fresh = await fetchVaultRequests(apiKey);
+            // Diff: only re-render if the list actually changed.
+            const sigOld = (S.vaultRequests || []).map(r => r.id).sort().join(',');
+            const sigNew = fresh.map(r => r.id).sort().join(',');
+            if (sigOld === sigNew) return;
+            S.vaultRequests = fresh;
+            // Re-render the list portion only — extract the inner list
+            // HTML from a fresh renderVaultRequestSection call and swap.
+            const html = renderVaultRequestSection(viewer);
+            const m = html.match(/<div id="oc-vault-list">([\s\S]*?)<\/div>\s*<form/);
+            const list = document.getElementById('oc-vault-list');
+            if (m && list) {
+                list.innerHTML = m[1];
+                bindVaultRequestHandlers(apiKey, viewer);
+            }
+        } catch (_) { /* swallow */ }
+    }
+
+    function _connectVaultStream(apiKey, viewer) {
+        if (_vaultStreamAbort) return; // already connected / connecting
+        if (typeof GM_xmlhttpRequest !== 'function') return; // PDA / no streaming
+        _vaultStreamLastLen = 0;
+        _vaultStreamBuf = '';
+        try {
+            _vaultStreamAbort = GM_xmlhttpRequest({
+                method: 'GET',
+                url: `${SERVER}/api/oc/stream/vault?key=${encodeURIComponent(apiKey)}`,
+                responseType: 'text',
+                timeout: 0,
+                onloadstart: () => { console.log('[OC Spawn][vault-stream] connected'); },
+                onprogress: (resp) => {
+                    if (!resp || resp.responseText == null) return;
+                    const responseText = resp.responseText;
+                    const newText = responseText.substring(_vaultStreamLastLen);
+                    _vaultStreamLastLen = responseText.length;
+                    _vaultStreamBuf += newText;
+                    let boundary;
+                    while ((boundary = _vaultStreamBuf.indexOf('\n\n')) !== -1) {
+                        const chunk = _vaultStreamBuf.slice(0, boundary).trim();
+                        _vaultStreamBuf = _vaultStreamBuf.slice(boundary + 2);
+                        if (!chunk) continue;
+                        const m = chunk.match(/^data:\s*(.+)$/s);
+                        if (!m) continue; // skip ": keepalive" comments
+                        try {
+                            const data = JSON.parse(m[1]);
+                            if (data && data.type === 'vault') {
+                                _refreshVaultListNow(apiKey, viewer);
+                            }
+                        } catch (_) { /* malformed event, skip */ }
+                    }
+                },
+                onerror: () => {
+                    _vaultStreamAbort = null;
+                    setTimeout(() => _connectVaultStream(apiKey, viewer), 5000);
+                },
+                onload: () => {
+                    // Stream ended (server restarted, idle close) — reconnect.
+                    _vaultStreamAbort = null;
+                    setTimeout(() => _connectVaultStream(apiKey, viewer), 5000);
+                },
+            });
+        } catch (_) { _vaultStreamAbort = null; }
+    }
+
     function ensureVaultPolling(apiKey, viewer) {
         if (_vaultPollTimer) { clearInterval(_vaultPollTimer); _vaultPollTimer = null; }
+        if (_vaultStreamAbort) { try { _vaultStreamAbort.abort(); } catch (_) {} _vaultStreamAbort = null; }
         const myId = String(viewer?.playerId || '');
         const isAdmin = viewer?.hasFactionAccess === true || myId === '137558';
         if (!isAdmin) return;   // non-admins don't see the list anyway
+
+        _connectVaultStream(apiKey, viewer);
+
+        // Fallback safety-net poll. Was 15s before v3.1.78 — now 60s
+        // since SSE handles the live case. PDA falls back to this entirely
+        // since GM_xmlhttpRequest streaming isn't usable in InAppWebView.
         _vaultPollTimer = setInterval(async () => {
-            try {
-                const fresh = await fetchVaultRequests(apiKey);
-                // Diff: only re-render if the list actually changed.
-                const sigOld = (S.vaultRequests || []).map(r => r.id).sort().join(',');
-                const sigNew = fresh.map(r => r.id).sort().join(',');
-                if (sigOld === sigNew) return;
-                S.vaultRequests = fresh;
-                // Re-render the list portion only — extract the inner list
-                // HTML from a fresh renderVaultRequestSection call and swap.
-                const html = renderVaultRequestSection(viewer);
-                const m = html.match(/<div id="oc-vault-list">([\s\S]*?)<\/div>\s*<form/);
-                const list = document.getElementById('oc-vault-list');
-                if (m && list) {
-                    list.innerHTML = m[1];
-                    bindVaultRequestHandlers(apiKey, viewer);   // re-bind delete buttons
-                }
-            } catch (_) { /* swallow; next tick will retry */ }
-        }, 15_000);
+            await _refreshVaultListNow(apiKey, viewer);
+        }, 60_000);
     }
 
     // Parse "500k" / "2.5m" / "1b" / "500,000" / "$500" / "500" → integer cents-free amount.
@@ -1808,6 +2177,14 @@
             });
             await gmRequest(`${SERVER}/api/oc/scope?${p}`);
             console.log(`[OC Spawn][scope] pushed ${scope} to server (source=${source || 'auto'})`);
+            // v3.1.77: trigger an immediate full refresh so the UI shows
+            // scope-filtered data within ~3s instead of waiting 5-15s for
+            // the next regular poll. Fire-and-forget — runAnalysis is the
+            // same function the regular poll runs, so re-entrancy is the
+            // same risk profile as a fast user-clicked Refresh and is
+            // already tolerated. The 2.5s scope-detect debounce upstream
+            // means this fires at most once per ~3 seconds in practice.
+            try { runAnalysis(); } catch (e) { /* non-fatal */ }
         } catch (e) {
             console.warn('[OC Spawn][scope] push failed:', e.message);
         }
@@ -1826,6 +2203,13 @@
         if (r.status === 429) {
             const err = new Error(r.data?.error || 'Too many requests — please wait a moment.');
             err.status = 429; throw err;
+        }
+        // 503 = Torn-side transient (gateway timeout / backend slow). Surface
+        // as a tagged transient error so the retry loop can show a friendly
+        // "Torn slow" message instead of the bare "Server error 503".
+        if (r.status === 503) {
+            const err = new Error(r.data?.error || 'Torn API is slow right now — retrying…');
+            err.status = 503; err.transient = true; throw err;
         }
         if (!r.ok) throw new Error(r.data?.error || `Server error (${r.status})`);
         return r.data;
@@ -1985,7 +2369,21 @@
         .mgr-sub-tab:hover:not(.mgr-sub-tab-active) { color: #d1d5db; }
         .mgr-sub-tab-active { color: #74c69d; border-bottom-color: #74c69d; }
         /* Manager cards */
-        .mgr-card { background: #111f18; border: 1px solid #253525; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; transition: border-color .2s; }
+        .mgr-card { background: #111f18; border: 1px solid #253525; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; transition: border-color .2s; position: relative; }
+        /* v3.1.79: dismiss-chip in card corner — admin says "they have it,
+           hide this row." Quiet by default, lights up on hover so it's
+           discoverable without competing with the green Loan button. */
+        .mgr-haveit-x {
+            position: absolute; top: 6px; right: 6px;
+            width: 20px; height: 20px; padding: 0;
+            border-radius: 4px; border: 1px solid #2a3a2a;
+            background: transparent; color: #6b7280;
+            font-size: 11px; line-height: 1; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: all .15s ease;
+        }
+        .mgr-haveit-x:hover { background: rgba(116,198,157,.15); border-color: #2d6a4f; color: #74c69d; }
+        .mgr-haveit-x:disabled { opacity: .4; cursor: default; }
         .mgr-card:hover { border-color: #2d6a4f; }
         .mgr-card-header { display: flex; justify-content: space-between; margin-bottom: 6px; align-items: flex-start; }
         .mgr-crime-name { font-weight: 700; font-size: 12px; color: #f3f4f6; flex: 1; padding-right: 8px; }
@@ -3284,6 +3682,13 @@
             html += `<span style="color:#9ca3af;font-size:10px;">Lvl ${m.level}</span>`;
             html += `<span style="color:#6b7280;font-size:10px;">OC Lvl ${m.currentOcLevel}</span>`;
             html += `<span style="color:${cprColor};font-weight:600;font-size:10px;">${m.currentLevelCpr}%</span>`;
+            // When the member has already touched a higher level than
+            // their stable anchor, surface that context inline so the
+            // displayed OC Lvl + CPR isn't confusing on its own.
+            // ("OC Lvl 5 / 65% / attempting Lvl 6 at 57%")
+            if (m.attemptingAbove && m.attemptedLevel != null && m.attemptedCpr != null) {
+                html += `<span style="color:#fb923c;font-size:9px;font-style:italic;">attempting Lvl ${m.attemptedLevel} at ${m.attemptedCpr}%</span>`;
+            }
             if (m.isEstimated) html += `<span style="color:#60a5fa;font-size:9px;font-style:italic;">est.</span>`;
             html += `</div>`;
 
@@ -3896,7 +4301,7 @@
             : '';
 
         return `<div class="oc-viewer-card">
-            <div class="oc-viewer-name">${viewer.playerName} • Lvl ${joinable} • <span style="color:${cprColor}">${cprText}</span></div>
+            <div class="oc-viewer-name">${met_escapeHtml(viewer.playerName)} • Lvl ${joinable} • <span style="color:${cprColor}">${cprText}</span></div>
             ${posHtml}
             <div class="oc-viewer-meta">${statusHtml}</div>
             ${recsHtml}
@@ -4636,12 +5041,136 @@
         content.innerHTML = html;
     }
 
+    // v3.1.89: server-side mirror for the local mgr_haveItOverride map.
+    // Records a (userID, itemID) override on the warboard server so it
+    // outlasts page navigation AND syncs to other admins in the faction.
+    // Idempotent — re-POSTing the same pair just refreshes the TTL.
+    async function mgr_postMissingOverride(userID, itemID, crimeExpiresAtMs = null) {
+        const apiKey = getApiKey();
+        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
+        const sessionKey = `${userID}:${itemID}`;
+        if (mgr_haveItPosted.has(sessionKey)) return;   // already posted this session
+        mgr_haveItPosted.add(sessionKey);
+        try {
+            await new Promise((resolve) => {
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: `${SERVER}/api/oc/missing-override?key=${encodeURIComponent(apiKey)}`,
+                    headers: { 'Content-Type': 'application/json' },
+                    data: JSON.stringify({
+                        key: apiKey,
+                        userID: String(userID),
+                        itemID: Number(itemID),
+                        // v3.1.91: pass the crime's scheduled execution
+                        // time so the server caps the 3-day TTL to that.
+                        crimeExpiresAtMs: crimeExpiresAtMs || null,
+                    }),
+                    onload: () => resolve(),
+                    onerror: () => resolve(),
+                });
+            });
+        } catch (_) { /* non-fatal */ }
+    }
+
+    /** Fetch active server-side overrides and merge into the local
+     *  mgr_haveItOverride map. Called on every Missing tab load so a
+     *  fresh page sees overrides recorded earlier or by other admins. */
+    async function mgr_fetchMissingOverrides() {
+        const apiKey = getApiKey();
+        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
+        try {
+            const r = await gmRequest(`${SERVER}/api/oc/missing-overrides?key=${encodeURIComponent(apiKey)}`);
+            if (!r.ok) return;
+            const list = Array.isArray(r.data?.overrides) ? r.data.overrides : [];
+            for (const o of list) {
+                const uid = String(o.userID);
+                const iid = Number(o.itemID);
+                if (!uid || !iid) continue;
+                if (!mgr_haveItOverride.has(uid)) mgr_haveItOverride.set(uid, new Set());
+                mgr_haveItOverride.get(uid).add(iid);
+                // Don't bother re-POSTing entries we got from the server
+                mgr_haveItPosted.add(`${uid}:${iid}`);
+            }
+        } catch (_) { /* non-fatal */ }
+    }
+
     async function mgr_loadMissingTab() {
         const content = document.getElementById('mgr-sub-content');
         content.innerHTML = '<div class="mgr-loading">Loading OC data…</div>';
         try {
             await mgr_loadMembers();
-            const missing = (await mgr_getMissingOCItems()).filter(m => !mgr_recentlyLoaned.get(String(m.userID))?.has(m.itemID));
+            // v3.1.89: pull server-side overrides BEFORE the missing
+            // list loads so they're already in mgr_haveItOverride by
+            // the time we filter. Persists across navigation; shared
+            // across admins.
+            await mgr_fetchMissingOverrides();
+            // v3.1.80: scrape Torn's React state / page DOM for actual
+            // "user has the item bound" indicators. If a (user, item)
+            // pair turns up here, override the API's is_available=false
+            // automatically (no manual ✓ Has it click needed).
+            const domBound = mgr_scrapeBoundItems();
+            // v3.1.85 reverted: Success Chance shown in the DOM is the
+            // member's CPR for that position, NOT a "slot is satisfied"
+            // signal. CPR is independent of item state — a member with
+            // 80% CPR shows 80% even when the item isn't bound.
+            //
+            // v3.1.87: real auto-detect via Torn's "no item" SVG icon
+            // (fill="#ff794c"). Build two sets:
+            //   1. domSlots — every slot currently rendered, keyed
+            //      "userID:position(lowercase)". Tells us if we can
+            //      see the slot at all in this scope.
+            //   2. domMissingFlagged — slots whose icon shows the
+            //      orange no-item SVG. Genuinely missing.
+            // The Missing-list filter then drops any API entry where
+            // the slot IS rendered AND ISN'T flagged — that's the
+            // false-positive we've been chasing. Slots not in domSlots
+            // (different scope) stay because we can't verify them
+            // either way; default to API truth.
+            const slotStates = mgr_scrapeSlotIconStates();
+            const domSlots = new Set(
+                slotStates
+                    .filter(s => s.userID && s.position)
+                    .map(s => `${s.userID}:${s.position.toLowerCase()}`)
+            );
+            const domMissingFlagged = mgr_scrapeSlotMissingIndicators();
+
+            let domFilteredCount = 0;
+            const missing = (await mgr_getMissingOCItems()).filter(m => {
+                // Hide rows we just loaned (avoids re-showing during the
+                // few seconds before Torn's API reflects the loan).
+                if (mgr_recentlyLoaned.get(String(m.userID))?.has(m.itemID)) return false;
+                // Hide rows the admin marked as "✓ Has it" — manual
+                // session override for Torn API false-positives.
+                if (mgr_haveItOverride.get(String(m.userID))?.has(m.itemID)) return false;
+                // Hide rows where the page DOM/state already shows the
+                // item as bound (auto override, v3.1.80).
+                if (domBound.has(`${m.userID}:${m.itemID}`)) return false;
+                // v3.1.87: cross-check the DOM. If the slot is rendered
+                // on the page AND its icon doesn't show the orange "no
+                // item" SVG, it's a Torn API false-positive — the user
+                // does have the item; the API just hasn't caught up.
+                // Slots not rendered (different scope) fall through to
+                // API truth since we can't verify either way.
+                const posKey = `${m.userID}:${String(m.position||'').toLowerCase()}`;
+                if (domSlots.has(posKey) && !domMissingFlagged.has(posKey)) {
+                    domFilteredCount++;
+                    // v3.1.89: persist this auto-detected false-positive
+                    // server-side so it stays hidden after navigation
+                    // and is shared across faction admins.
+                    // v3.1.91: pass crime's expires_at so the server's
+                    // 3-day TTL is capped at the crime's execution time.
+                    if (!mgr_haveItOverride.has(String(m.userID))) {
+                        mgr_haveItOverride.set(String(m.userID), new Set());
+                    }
+                    mgr_haveItOverride.get(String(m.userID)).add(m.itemID);
+                    mgr_postMissingOverride(m.userID, m.itemID, m.crimeExpiresAtMs);
+                    return false;
+                }
+                return true;
+            });
+            if (domFilteredCount > 0) {
+                console.log(`[OC Mgr] DOM auto-filter: hid ${domFilteredCount} false-positive Missing entries`);
+            }
             if (!missing.length) { content.innerHTML = '<div class="mgr-ok">✓ All OC items allocated</div>'; return; }
             await mgr_resolveItemNames(missing.map(m => m.itemID));
             let html = '';
@@ -4649,12 +5178,13 @@
                 const itemName = mgr_getItemName(m.itemID) || `Item #${m.itemID}`;
                 html += `
                     <div class="mgr-card">
-                        <div class="mgr-card-header"><span class="mgr-crime-name">${m.crimeName}</span><span class="mgr-pos-tag">${m.position}</span></div>
+                        <button class="mgr-haveit-x mgr-haveit-btn" data-itemid="${m.itemID}" data-userid="${mgr_esc(m.userID)}" data-crime-expires="${m.crimeExpiresAtMs || ''}" title="Already has it — hide this row" aria-label="Already has it">✓</button>
+                        <div class="mgr-card-header"><span class="mgr-crime-name">${mgr_esc(m.crimeName)}</span><span class="mgr-pos-tag" style="margin-right:24px;">${mgr_esc(m.position)}</span></div>
                         <div class="mgr-card-body">
-                            <div class="mgr-item-row"><span class="mgr-label">Item</span><span class="mgr-value" style="font-weight:600;">${itemName}</span></div>
-                            <div class="mgr-player-row"><span class="mgr-label">Player</span><a href="/profiles.php?XID=${m.userID}" class="mgr-player-link">${m.userName}</a></div>
+                            <div class="mgr-item-row"><span class="mgr-label">Item</span><span class="mgr-value" style="font-weight:600;">${mgr_esc(itemName)}</span></div>
+                            <div class="mgr-player-row"><span class="mgr-label">Player</span><a href="/profiles.php?XID=${mgr_esc(m.userID)}" class="mgr-player-link">${mgr_esc(m.userName)}</a></div>
                         </div>
-                        <button class="mgr-action-btn mgr-btn-loan mgr-loan-btn" data-itemid="${m.itemID}" data-userid="${m.userID}" data-username="${m.userName}">${(location.hash.includes('tab=armoury') || location.hash.includes('tab=armory')) ? 'Loan Item' : 'Go to Armoury'}</button>
+                        <button class="mgr-action-btn mgr-btn-loan mgr-loan-btn" data-itemid="${m.itemID}" data-userid="${mgr_esc(m.userID)}" data-username="${mgr_esc(m.userName)}">${(location.hash.includes('tab=armoury') || location.hash.includes('tab=armory')) ? 'Loan Item' : 'Go to Armoury'}</button>
                     </div>
                 `;
             }
@@ -4731,6 +5261,47 @@
                     }
                 };
             });
+            // v3.1.79: "✓ Has it" override. Stamps the (user, item) pair
+            // into mgr_haveItOverride so subsequent renders skip the row,
+            // then fades + collapses the card the same way a successful
+            // loan does.
+            content.querySelectorAll('.mgr-haveit-btn').forEach(btn => {
+                btn.onclick = () => {
+                    const itemID = Number(btn.dataset.itemid);
+                    const userID = String(btn.dataset.userid);
+                    const crimeExpires = Number(btn.dataset.crimeExpires) || null;
+                    if (!mgr_haveItOverride.has(userID)) mgr_haveItOverride.set(userID, new Set());
+                    mgr_haveItOverride.get(userID).add(itemID);
+                    // v3.1.89: persist this manual override server-side.
+                    // v3.1.91: pass the crime's expires_at so the
+                    // 3-day TTL caps to crime execution time.
+                    mgr_postMissingOverride(userID, itemID, crimeExpires);
+                    btn.disabled = true;
+                    btn.textContent = '✓ Hidden';
+                    const card = btn.closest('.mgr-card');
+                    if (card) {
+                        card.style.transition = 'opacity 0.4s ease-out, max-height 0.4s ease-out, margin 0.4s ease-out, padding 0.4s ease-out';
+                        setTimeout(() => {
+                            card.style.opacity = '0';
+                            card.style.maxHeight = card.offsetHeight + 'px';
+                            requestAnimationFrame(() => {
+                                card.style.maxHeight = '0';
+                                card.style.marginTop = '0';
+                                card.style.marginBottom = '0';
+                                card.style.paddingTop = '0';
+                                card.style.paddingBottom = '0';
+                            });
+                            setTimeout(() => {
+                                card.remove();
+                                const remaining = content.querySelectorAll('.mgr-card').length;
+                                if (remaining === 0) {
+                                    content.innerHTML = '<div class="mgr-ok">✓ All OC items allocated</div>';
+                                }
+                            }, 450);
+                        }, 200);
+                    }
+                };
+            });
         } catch (e) { content.innerHTML = `<div class="mgr-error">${e.message}</div>`; }
     }
 
@@ -4774,10 +5345,10 @@
                 html += `
                     <div class="mgr-card">
                         <div class="mgr-card-body">
-                            <div class="mgr-item-row"><span class="mgr-label">Item</span><span class="mgr-value" style="font-weight:600;">${u.itemName}</span></div>
-                            <div class="mgr-player-row"><span class="mgr-label">Player</span><a href="/profiles.php?XID=${u.userID}" class="mgr-player-link">${u.userName}</a></div>
+                            <div class="mgr-item-row"><span class="mgr-label">Item</span><span class="mgr-value" style="font-weight:600;">${mgr_esc(u.itemName)}</span></div>
+                            <div class="mgr-player-row"><span class="mgr-label">Player</span><a href="/profiles.php?XID=${mgr_esc(u.userID)}" class="mgr-player-link">${mgr_esc(u.userName)}</a></div>
                         </div>
-                        <button class="mgr-action-btn mgr-btn-retrieve mgr-retrieve-btn" data-itemid="${u.itemID}" data-userid="${u.userID}" data-username="${u.userName}" data-category="${u.armoryCategory}">${(location.hash.includes('tab=armoury') || location.hash.includes('tab=armory')) ? 'Retrieve Item' : 'Go to Armoury'}</button>
+                        <button class="mgr-action-btn mgr-btn-retrieve mgr-retrieve-btn" data-itemid="${u.itemID}" data-userid="${mgr_esc(u.userID)}" data-username="${mgr_esc(u.userName)}" data-category="${mgr_esc(u.armoryCategory)}">${(location.hash.includes('tab=armoury') || location.hash.includes('tab=armory')) ? 'Retrieve Item' : 'Go to Armoury'}</button>
                     </div>
                 `;
             }
@@ -4795,41 +5366,76 @@
                     // Step 2: on armory tab, perform retrieve
                     btn.dataset.retrieving = 'true'; btn.disabled = true; btn.textContent = 'Finding item…';
                     try {
-                        const cat = btn.dataset.category || 'utilities';
+                        const hintCat = btn.dataset.category || 'utilities';
                         const itemID = parseInt(btn.dataset.itemid, 10);
                         const userID = parseInt(btn.dataset.userid, 10);
-                        // Fetch armoryIDs from page AJAX to find the specific loaned item
-                        const categoriesToTry = [cat];
-                        if (cat === 'armor') categoriesToTry.push('armour');
+                        // Sweep order: try the cached hint first (fast),
+                        // then every other loanable bucket. Torn's
+                        // /v2/faction selection name (utilities / armor /
+                        // …) doesn't always match the page-AJAX `type`,
+                        // and after Torn's auth refactor (changelog
+                        // 21–28 Apr) loaned-entry user keys flip between
+                        // user.userID and user.id, so a tight single-cat
+                        // search now misses items it used to find.
+                        const sweep = ['utilities','weapons','armor','armour','medical','boosters','drugs','clothing'];
+                        const categoriesToTry = Array.from(new Set([hintCat, ...(hintCat === 'armor' ? ['armour'] : []), ...sweep]));
                         let armoryID = null;
+                        let resolvedCat = hintCat;
+                        const reasons = [];
                         for (const c of categoriesToTry) {
                             const rfcv = mgr_getRfcvToken();
-                            if (!rfcv) throw new Error('Missing RFCV token');
+                            if (!rfcv) throw new Error('Missing RFCV cookie — refresh the page and try again.');
                             let start = 0;
+                            let pages = 0;
+                            let httpFail = '';
                             while (start < 1000 && !armoryID) {
                                 const body = new URLSearchParams({ step: 'armouryTabContent', type: c, start: String(start), ajax: 'true' });
                                 const res = await fetch(`https://www.torn.com/factions.php?rfcv=${rfcv}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' }, body, credentials: 'same-origin' });
-                                if (!res.ok) break;
-                                const data = await res.json();
-                                if (!data?.items) break;
+                                if (!res.ok) { httpFail = `http-${res.status}`; break; }
+                                let data;
+                                try { data = await res.json(); }
+                                catch { httpFail = 'parse-fail'; break; }
+                                if (!data?.items) { httpFail = 'no-items-key'; break; }
                                 const itemsArr = Array.isArray(data.items) ? data.items : Object.values(data.items);
                                 if (itemsArr.length === 0) break;
+                                pages += 1;
                                 for (const entry of itemsArr) {
-                                    if (Number(entry.itemID) === itemID && entry.user && String(entry.user.userID) === String(userID) && entry.armoryID) {
-                                        armoryID = entry.armoryID; break;
+                                    if (Number(entry.itemID) !== itemID) continue;
+                                    // Accept either user.userID OR user.id —
+                                    // Torn ships both shapes after this
+                                    // week's auth refactor.
+                                    const uid = entry.user && (entry.user.userID ?? entry.user.id);
+                                    if (uid !== undefined && String(uid) === String(userID) && entry.armoryID) {
+                                        armoryID = entry.armoryID;
+                                        resolvedCat = c;
+                                        break;
                                     }
                                 }
                                 if (itemsArr.length < 50) break;
                                 start += 50;
                             }
                             if (armoryID) break;
+                            reasons.push(`${c}:${httpFail || (pages === 0 ? 'empty-bucket' : `no-match-on-${pages}pg`)}`);
                         }
-                        if (!armoryID) throw new Error('Could not find armory item');
+                        if (!armoryID) {
+                            console.warn('[OC Mgr] Retrieve miss for itemID', itemID, 'user', userID, 'hint', hintCat, '— bucket reasons:', reasons.join(', '));
+                            throw new Error(`Not in armoury [${reasons.slice(0, 3).join(', ')}]`);
+                        }
                         btn.textContent = 'Retrieving…';
-                        const postType = ARMORY_TAB_TO_POST_TYPE[cat] || 'Tool';
+                        const postType = ARMORY_TAB_TO_POST_TYPE[resolvedCat] || 'Tool';
                         await mgr_retrieveItem({ armoryID, itemID, userID, userName: btn.dataset.username, postType });
                         btn.textContent = '✓ Retrieved'; btn.classList.add('mgr-btn-success');
-                    } catch (e) { btn.textContent = 'Error'; btn.classList.add('mgr-btn-warning'); btn.disabled = false; btn.dataset.retrieving = 'false'; }
+                    } catch (e) {
+                        // Surface the actual reason instead of just "Error"
+                        // — the silent catch was the reason every retrieve
+                        // failure read identically. Tooltip exposes the
+                        // full message; console.warn keeps the stack.
+                        console.warn('[OC Mgr] Retrieve failed:', e);
+                        btn.textContent = (e?.message || 'Error').slice(0, 28);
+                        btn.title = e?.message || String(e);
+                        btn.classList.add('mgr-btn-warning');
+                        btn.disabled = false; btn.dataset.retrieving = 'false';
+                    }
                 };
             });
         } catch (e) { content.innerHTML = `<div class="mgr-error">Error: ${e.message}</div>`; }
@@ -4983,13 +5589,20 @@
                         return;
                     }
                     if (err.status === 429 || attempt >= MAX_RETRIES) throw err;
-                    // Transient error — wait and retry
+                    // Transient error — wait and retry. 503 is Torn-side
+                    // (gateway timeout, backend slow); show a friendlier
+                    // hint than the generic "Retrying" so the user knows
+                    // it's not their key / their faction.
                     const delay = RETRY_DELAYS[attempt] || 20000;
+                    if (err.status === 503 || err.transient) {
+                        setStatus(`⏳ Torn API is slow — retrying… (${attempt + 1}/${MAX_RETRIES})`);
+                        _injectDispatcherStatus('⏳', 'Torn slow', '#f59e0b');
+                    }
                     console.warn(`[OC Spawn] Fetch attempt ${attempt + 1} failed: ${err.message}. Retrying in ${delay/1000}s…`);
                     await new Promise(r => setTimeout(r, delay));
                 }
             }
-            if (!fetchSuccess) throw new Error('Failed to fetch OC data after retries');
+            if (!fetchSuccess) throw new Error('Torn API is having issues right now — please refresh in a minute.');
 
             // No faction key cached yet — show actionable message based on Torn's error reason
             if (serverResp.pendingFactionData) {
