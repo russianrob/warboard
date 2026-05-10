@@ -78,21 +78,49 @@ The setting is in FactionOps ⚙ Settings → **Share my API key with faction po
 
 ---
 
-## 5. Install the mobile apps (optional, recommended)
+## 5. FFScouter API key (optional, admin-only)
+
+FFScouter (<https://ffscouter.com>) is a community stat-estimation service. If your faction has someone registered there, paste their key into FactionOps so warboard can use it server-side for:
+
+- **Flight tracker** — live landing countdown on enemy travel pills in the war overlay
+- **Abroad destinations** — country labels ("UK", "Mexico") on abroad pills
+- **OC delay attribution** — when OC Spawn Assistance is also installed, backdates blocker delays to the real takeoff time
+
+Set it once in **⚙ Settings → FFScouter API Key**. The same key is shared with OC Spawn Assistance — setting it in either place updates both. Leave blank if no one in your faction is on FFScouter; the rest of FactionOps still works fine.
+
+---
+
+## 6. Install the mobile apps (optional, recommended)
 
 | Platform | How |
 |---|---|
 | **iOS** | TestFlight invite from RussianRob [137558] |
 | **Android** | Download <https://tornwar.com/warboard.apk> and install (allow unknown sources) |
 
-The apps add:
+Once installed and signed in with your API key, the apps automatically register for push notifications (no extra setup). They add:
 - Live Activity / Dynamic Island chain timer (iOS)
-- Push notifications: chain panic, target hospitalized, target called, war started/ended
 - Coordination from your phone without an open browser tab
 
 ---
 
-## 6. FactionOps-specific issues
+## 7. Notifications
+
+FactionOps fires push notifications for: **chain panic**, **chain about to break**, **target hospitalized** (when one of your called targets pops out), **target called by another member**, **war started / ended**, and **bonus-imminent** (next chain milestone within 2 hits).
+
+How to receive them depends on where you're using warboard:
+
+| Platform | Setup |
+|---|---|
+| **iOS app** | Auto-enabled on first launch; allow notifications when prompted |
+| **Android app** | Auto-enabled on first launch; allow notifications when prompted |
+| **Torn PDA** (mobile WebView) | Open FactionOps ⚙ Settings → toggle **PDA Notifications** on, tap **Test PDA Notification** to verify |
+| **Desktop browser** | In-overlay toast notifications only — no OS-level push (use the mobile apps if you need away-from-keyboard alerts) |
+
+Per-notification preferences (which types to ring) are configured per-app: open the app's settings tab.
+
+---
+
+## 8. FactionOps-specific issues
 
 | Symptom | Likely cause | Fix |
 |---|---|---|

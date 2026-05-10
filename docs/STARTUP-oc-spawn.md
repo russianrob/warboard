@@ -43,7 +43,15 @@ Default: `leader, co-leader`. Add `banker` if your bankers handle vault claims.
 
 ---
 
-## 4. PWA notifications (optional, recommended for bankers)
+## 4. FFScouter API key (optional)
+
+If your faction has someone registered at <https://ffscouter.com>, paste their key into **OC Spawn → Settings → FFScouter API Key**. OC Spawn uses it server-side to attribute crime-blocker delays to each member's real takeoff time (so a member flying 6h shows 6h delay; one flying 20 min shows 20 min — instead of both showing the OC-ready age).
+
+Without it, OC Spawn falls back to each member's own stored key and only resolves the lookup for members personally registered at FFScouter. The same key is shared with FactionOps if you also use that service.
+
+---
+
+## 5. PWA notifications (optional, recommended for bankers)
 
 A separate PWA at <https://tornwar.com/notifications> rings the device when:
 - A faction member submits a vault request
@@ -62,7 +70,7 @@ iOS 16.4+ required for Web Push. Notifications ring even when the page isn't ope
 
 ---
 
-## 5. OC-specific issues
+## 6. OC-specific issues
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
