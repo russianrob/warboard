@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.94
+// @version      3.1.95
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -262,10 +262,11 @@
     let scopePushTimer  = null;
     let settingsReady    = false;  // true after server settings loaded
     let _lastDispatcherData;         // cache last dispatcher result for tab re-injection
+    let _coachingSnapshot = null;    // { cprCache, members } — populated each runAnalysis(); read on Coaching tab load
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.94';
+    const SCRIPT_VERSION = '3.1.95';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -2830,6 +2831,7 @@
             <button class="oc-tab oc-tab-active" data-tab="profile">My OC</button>
             <button class="oc-tab" data-tab="admin" id="oc-admin-tab" style="display:none;">Admin</button>
             <button class="oc-tab" data-tab="manager" id="oc-manager-tab" style="display:none;">Manager</button>
+            <button class="oc-tab" data-tab="coaching" id="oc-coaching-tab" style="display:none;">Coaching</button>
             <button class="oc-tab" data-tab="metrics" id="oc-metrics-tab" style="display:none;">Metrics</button>
             <button class="oc-tab" data-tab="engines" id="oc-engines-tab" style="display:none;">Engines</button>
         </div>
@@ -2837,6 +2839,7 @@
         <div id="oc-tab-profile"></div>
         <div id="oc-tab-admin" style="display:none;"></div>
         <div id="oc-tab-manager" style="display:none;"></div>
+        <div id="oc-tab-coaching" style="display:none;"></div>
         <div id="oc-tab-metrics" style="display:none;"></div>
         <div id="oc-tab-engines" style="display:none;"></div>
     `;
@@ -2994,15 +2997,17 @@
         document.querySelectorAll('.oc-tab').forEach(t => {
             t.classList.toggle('oc-tab-active', t.dataset.tab === name);
         });
-        document.getElementById('oc-tab-profile').style.display = name === 'profile' ? '' : 'none';
-        document.getElementById('oc-tab-admin').style.display   = name === 'admin'   ? '' : 'none';
-        document.getElementById('oc-tab-engines').style.display = name === 'engines' ? '' : 'none';
-        document.getElementById('oc-tab-manager').style.display = name === 'manager' ? '' : 'none';
-        document.getElementById('oc-tab-metrics').style.display = name === 'metrics' ? '' : 'none';
+        document.getElementById('oc-tab-profile').style.display  = name === 'profile'  ? '' : 'none';
+        document.getElementById('oc-tab-admin').style.display    = name === 'admin'    ? '' : 'none';
+        document.getElementById('oc-tab-engines').style.display  = name === 'engines'  ? '' : 'none';
+        document.getElementById('oc-tab-manager').style.display  = name === 'manager'  ? '' : 'none';
+        document.getElementById('oc-tab-coaching').style.display = name === 'coaching' ? '' : 'none';
+        document.getElementById('oc-tab-metrics').style.display  = name === 'metrics'  ? '' : 'none';
         // Close settings panel when switching away from admin
         if (name !== 'admin') document.getElementById('oc-settings-panel').style.display = 'none';
         // Load manager content when switching to it
-        if (name === 'manager') loadManagerTab();
+        if (name === 'manager')  loadManagerTab();
+        if (name === 'coaching') loadCoachingTab();
         // Init metrics tab when switching to it
         if (name === 'metrics') met_initTab();
     }
@@ -5125,6 +5130,188 @@
     // ═══════════════════════════════════════════════════════════════════════
     //  OC MANAGER TAB  — Missing / Unused / Payouts sub-tabs
     // ═══════════════════════════════════════════════════════════════════════
+    //  COACHING TAB  — surfaces the per-checkpoint heatmap data as
+    //  actionable "who needs help where" rows. Sortable list of
+    //  (member, OC, role, checkpoint) tuples ranked by gap-to-faction-
+    //  average. Min-sample filter (≥3 attempts at the checkpoint AND
+    //  ≥3 attempts faction-wide) keeps the list from being noise.
+    //
+    //  Data source: cprCache[uid].byCheckpoint that getOcSpawnData
+    //  populates from oc-checkpoint-history.aggregateByMember(). Cold-
+    //  start gap means an empty Coaching tab until at least one admin
+    //  has opened the Completed tab on faction.php a few times.
+    // ═══════════════════════════════════════════════════════════════════════
+    const COACHING_MIN_SAMPLES = 3;
+    let _coachingSort = { col: 'gap', dir: 'desc' };
+
+    function _computeFactionCheckpointAvgs(cprCache) {
+        // Roll up faction-wide pass rate per (OC::role::Cn) so we can
+        // compute per-member gap-to-average. Sum pass+fail counts across
+        // every member, then compute rate.
+        const sums = {}; // key → { pass, fail }
+        for (const uid in cprCache) {
+            const cps = cprCache[uid]?.byCheckpoint;
+            if (!cps) continue;
+            for (const k in cps) {
+                if (!sums[k]) sums[k] = { pass: 0, fail: 0 };
+                sums[k].pass += cps[k].pass || 0;
+                sums[k].fail += cps[k].fail || 0;
+            }
+        }
+        const avgs = {};
+        for (const k in sums) {
+            const total = sums[k].pass + sums[k].fail;
+            avgs[k] = {
+                rate: total > 0 ? Math.round((sums[k].pass / total) * 1000) / 10 : 0,
+                samples: total,
+            };
+        }
+        return avgs;
+    }
+
+    function _buildCoachingRows(snapshot) {
+        const cprCache = snapshot?.cprCache || {};
+        const members = snapshot?.members || [];
+        const memberById = new Map();
+        for (const m of members) memberById.set(String(m.id), m);
+        const factionAvgs = _computeFactionCheckpointAvgs(cprCache);
+        const rows = [];
+        for (const uid in cprCache) {
+            const cps = cprCache[uid]?.byCheckpoint;
+            if (!cps) continue;
+            const memberName = memberById.get(uid)?.name || `Player ${uid}`;
+            for (const k in cps) {
+                const e = cps[k];
+                const total = (e.pass || 0) + (e.fail || 0);
+                if (total < COACHING_MIN_SAMPLES) continue;
+                const fAvg = factionAvgs[k];
+                if (!fAvg || fAvg.samples < COACHING_MIN_SAMPLES) continue;
+                const gap = fAvg.rate - e.rate;
+                if (gap <= 0) continue; // member is at or above faction avg — no coaching needed
+                const parts = k.split('::');
+                rows.push({
+                    uid, memberName,
+                    oc: parts[0] || '?',
+                    role: parts[1] || '?',
+                    checkpoint: parts[2] || '?',
+                    rate: e.rate,
+                    factionRate: fAvg.rate,
+                    gap: Math.round(gap * 10) / 10,
+                    samples: total,
+                    factionSamples: fAvg.samples,
+                });
+            }
+        }
+        return rows;
+    }
+
+    function _sortCoachingRows(rows) {
+        const { col, dir } = _coachingSort;
+        const mul = dir === 'asc' ? 1 : -1;
+        rows.sort((a, b) => {
+            let va, vb;
+            switch (col) {
+                case 'member':  va = a.memberName.toLowerCase(); vb = b.memberName.toLowerCase(); break;
+                case 'oc':      va = a.oc;         vb = b.oc;         break;
+                case 'role':    va = a.role;       vb = b.role;       break;
+                case 'cp':      va = a.checkpoint; vb = b.checkpoint; break;
+                case 'rate':    va = a.rate;       vb = b.rate;       break;
+                case 'samples': va = a.samples;    vb = b.samples;    break;
+                case 'gap':
+                default:        va = a.gap;        vb = b.gap;        break;
+            }
+            if (va < vb) return -1 * mul;
+            if (va > vb) return  1 * mul;
+            return 0;
+        });
+    }
+
+    function loadCoachingTab() {
+        const container = document.getElementById('oc-tab-coaching');
+        if (!_coachingSnapshot) {
+            container.innerHTML = '<div class="mgr-loading">Refresh OC Spawn first to populate.</div>';
+            return;
+        }
+        const rows = _buildCoachingRows(_coachingSnapshot);
+        if (rows.length === 0) {
+            container.innerHTML = `
+                <div style="padding:14px;color:#9ca3af;font-size:11px;line-height:1.6;">
+                    <div style="font-size:13px;color:#f3f4f6;font-weight:600;margin-bottom:6px;">No coaching data yet</div>
+                    Per-checkpoint attribution requires the userscript to capture at least one
+                    completed-crime page response with parseable <code>[C\\d+-P/F]</code> dialogue
+                    markers. To populate:
+                    <ol style="margin-top:6px;padding-left:18px;">
+                        <li>Open Torn → faction.php → click <b>Completed</b> tab</li>
+                        <li>Wait a moment for the userscript to upload parsed scenarios</li>
+                        <li>Refresh OC Spawn</li>
+                    </ol>
+                    Filter requires ≥${COACHING_MIN_SAMPLES} attempts per (member, OC, role,
+                    checkpoint) AND ≥${COACHING_MIN_SAMPLES} faction-wide attempts at that
+                    checkpoint to count as actionable signal.
+                </div>`;
+            return;
+        }
+        _sortCoachingRows(rows);
+        const indicator = (col) => _coachingSort.col === col ? (_coachingSort.dir === 'asc' ? '▲' : '▼') : '';
+        let html = `
+            <div style="padding:8px 12px;color:#9ca3af;font-size:10px;border-bottom:1px solid #1a2e20;">
+                ${rows.length} coaching opportunit${rows.length === 1 ? 'y' : 'ies'} found.
+                Each row = a (member, OC, role, checkpoint) where the member's pass rate is
+                meaningfully below the faction's average at that same checkpoint.
+            </div>
+            <div style="overflow-x:auto;">
+            <table class="oc-table" style="width:100%;font-size:11px;">
+                <thead><tr>
+                    <th class="oc-coach-sort" data-col="member"  style="cursor:pointer;">Member ${indicator('member')}</th>
+                    <th class="oc-coach-sort" data-col="oc"      style="cursor:pointer;">OC ${indicator('oc')}</th>
+                    <th class="oc-coach-sort" data-col="role"    style="cursor:pointer;">Role ${indicator('role')}</th>
+                    <th class="oc-coach-sort" data-col="cp"      style="cursor:pointer;text-align:center;">CP ${indicator('cp')}</th>
+                    <th class="oc-coach-sort" data-col="rate"    style="cursor:pointer;text-align:right;">Their % ${indicator('rate')}</th>
+                    <th style="text-align:right;">Faction %</th>
+                    <th class="oc-coach-sort" data-col="gap"     style="cursor:pointer;text-align:right;">Gap ${indicator('gap')}</th>
+                    <th class="oc-coach-sort" data-col="samples" style="cursor:pointer;text-align:right;">Samples ${indicator('samples')}</th>
+                </tr></thead>
+                <tbody>`;
+        for (const r of rows) {
+            const rateColor = r.rate >= 80 ? '#74c69d' : r.rate >= 60 ? '#f4a261' : '#ef4444';
+            const gapColor  = r.gap >= 30 ? '#ef4444' : r.gap >= 15 ? '#f4a261' : '#9ca3af';
+            html += `<tr>
+                <td><span class="oc-member-name">${escapeHtml(r.memberName)}</span> <span class="oc-member-id">[${escapeHtml(r.uid)}]</span></td>
+                <td>${escapeHtml(r.oc)}</td>
+                <td style="color:#9ca3af;">${escapeHtml(r.role)}</td>
+                <td style="text-align:center;color:#d1d5db;">${escapeHtml(r.checkpoint)}</td>
+                <td style="text-align:right;color:${rateColor};font-weight:600;">${r.rate}%</td>
+                <td style="text-align:right;color:#9ca3af;">${r.factionRate}%</td>
+                <td style="text-align:right;color:${gapColor};font-weight:700;">−${r.gap}%</td>
+                <td style="text-align:right;color:#6b7280;font-size:10px;">${r.samples}/${r.factionSamples}</td>
+            </tr>`;
+        }
+        html += '</tbody></table></div>';
+        html += `<div style="padding:8px 12px;color:#6b7280;font-size:10px;line-height:1.5;border-top:1px solid #1a2e20;">
+            Color: ≥30% gap = red (priority), 15–29% = amber, &lt;15% = grey.
+            Samples shows (member's count / faction-wide count). Min ${COACHING_MIN_SAMPLES} of each.
+            <br>Data populates as members open the Completed tab — see the CPR tooltip heatmap on the
+            Admin tab for per-member detail.
+        </div>`;
+        container.innerHTML = html;
+
+        container.querySelectorAll('.oc-coach-sort').forEach(th => {
+            th.addEventListener('click', () => {
+                const c = th.dataset.col;
+                if (_coachingSort.col === c) {
+                    _coachingSort.dir = _coachingSort.dir === 'asc' ? 'desc' : 'asc';
+                } else {
+                    _coachingSort.col = c;
+                    _coachingSort.dir = (c === 'rate' || c === 'samples') ? 'asc' : 'desc';
+                }
+                loadCoachingTab(); // re-render with new sort
+            });
+        });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  OC MANAGER TAB  — Missing / Unused / Payouts sub-tabs
+    // ═══════════════════════════════════════════════════════════════════════
     let mgr_currentSubTab = 'missing';
 
     function loadManagerTab() {
@@ -5861,17 +6048,24 @@
             // on canViewAdmin (dev OR viewer's faction position is in the
             // admin-roles list). Non-admins see only the My OC tab — no stale
             // "requires API access" message, just hidden tabs entirely.
-            const tabBar     = document.getElementById('oc-tab-bar');
-            const adminTab   = document.getElementById('oc-admin-tab');
-            const managerTab = document.getElementById('oc-manager-tab');
-            const metricsTab = document.getElementById('oc-metrics-tab');
-            const enginesTab = document.getElementById('oc-engines-tab');
-            const canAdmin   = canViewAdmin(viewer);
+            const tabBar      = document.getElementById('oc-tab-bar');
+            const adminTab    = document.getElementById('oc-admin-tab');
+            const managerTab  = document.getElementById('oc-manager-tab');
+            const coachingTab = document.getElementById('oc-coaching-tab');
+            const metricsTab  = document.getElementById('oc-metrics-tab');
+            const enginesTab  = document.getElementById('oc-engines-tab');
+            const canAdmin    = canViewAdmin(viewer);
             tabBar.style.display = 'flex';
-            adminTab.style.display   = canAdmin ? '' : 'none';
-            managerTab.style.display = canAdmin ? '' : 'none';
-            if (metricsTab) metricsTab.style.display = canAdmin ? '' : 'none';
-            if (enginesTab) enginesTab.style.display = canAdmin ? '' : 'none';
+            adminTab.style.display    = canAdmin ? '' : 'none';
+            managerTab.style.display  = canAdmin ? '' : 'none';
+            if (coachingTab) coachingTab.style.display = canAdmin ? '' : 'none';
+            if (metricsTab)  metricsTab.style.display  = canAdmin ? '' : 'none';
+            if (enginesTab)  enginesTab.style.display  = canAdmin ? '' : 'none';
+
+            // Stash data needed by the Coaching tab (rendered on demand
+            // when the user clicks the tab — not on every refresh — so
+            // the cached snapshot must be kept here).
+            _coachingSnapshot = { cprCache, members };
 
             // Render Engines tab content
             document.getElementById('oc-tab-engines').innerHTML = renderEnginesTab(engines, viewer, availableCrimes, cprCache);
