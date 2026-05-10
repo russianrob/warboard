@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.92
+// @version      3.1.93
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -228,7 +228,7 @@
             FORECAST_HOURS:          Number(GM_getValue('cfg_forecast_hours',     24)),
             MINCPR:                  Number(GM_getValue('cfg_mincpr',              60)),
             CPR_BOOST:               Number(GM_getValue('cfg_cpr_boost',          15)),
-            CPR_LOOKBACK_DAYS:       Number(GM_getValue('cfg_lookback_days',      90)),
+            CPR_LOOKBACK_DAYS:       Number(GM_getValue('cfg_lookback_days',     120)),
             HIGH_WEIGHT_THRESHOLD:   Number(GM_getValue('cfg_high_weight_pct',    25)),
             HIGH_WEIGHT_MIN_CPR:     Number(GM_getValue('cfg_high_weight_mincpr', 75)),
             FFS_KEY:                 String(GM_getValue('cfg_ffs_key', '')),
@@ -265,7 +265,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.92';
+    const SCRIPT_VERSION = '3.1.93';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead

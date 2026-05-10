@@ -33,7 +33,20 @@ function loadAndNormalizeDiskHistory(factionId) {
   }
 }
 
-const CPR_LOOKBACK_DAYS = 90;
+// Default lookback used when a faction has no oc_lookback_days override.
+// Bumped from 90 → 120 (May 2026): per-faction setting now reads through
+// (was previously ignored — see getLookbackDays below). 120 days gives the
+// CPR Forecaster's trend detection a fuller window without burning much
+// extra API budget; per-faction admins can still tune via OC Settings.
+const DEFAULT_CPR_LOOKBACK_DAYS = 120;
+const MIN_CPR_LOOKBACK_DAYS = 7;
+const MAX_CPR_LOOKBACK_DAYS = 365;
+function getLookbackDays(factionId) {
+  const s = store.getFactionSettings(factionId) || {};
+  const raw = Number(s.oc_lookback_days ?? s.lookback_days);
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_CPR_LOOKBACK_DAYS;
+  return Math.max(MIN_CPR_LOOKBACK_DAYS, Math.min(MAX_CPR_LOOKBACK_DAYS, Math.round(raw)));
+}
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours — backstop only
 
 const factionOcsCache    = new Map(); // factionId -> { timestamp, cprCache, completedCrimes }
@@ -60,7 +73,8 @@ const basicCache         = new Map(); // factionId -> { ts, data }
 // walks back using the oldest executed_at of each batch until empty
 // or past the lookback cutoff.
 async function fetchCompletedCrimes(factionId, apiKey) {
-  const fromTs = Math.floor(Date.now() / 1000) - (CPR_LOOKBACK_DAYS * 86400);
+  const lookbackDays = getLookbackDays(factionId);
+  const fromTs = Math.floor(Date.now() / 1000) - (lookbackDays * 86400);
   const seen = new Set();
   const all = [];
   let toTs = null;
@@ -71,6 +85,7 @@ async function fetchCompletedCrimes(factionId, apiKey) {
       sort: 'DESC',
       from: String(fromTs),
       key: apiKey,
+      comment: 'wb-oc',
     });
     if (toTs) params.set('to', String(toTs));
     const url = `https://api.torn.com/v2/faction/crimes?${params}`;
@@ -104,7 +119,7 @@ async function fetchAvailableCrimes(factionId, apiKey) {
   const cached = availableCache.get(String(factionId));
   if (cached && (now - cached.ts) < AVAILABLE_TTL_MS) return cached.crimes;
 
-  const url = `https://api.torn.com/v2/faction/crimes?cat=available&key=${encodeURIComponent(apiKey)}`;
+  const url = `https://api.torn.com/v2/faction/crimes?cat=available&key=${encodeURIComponent(apiKey)}&comment=wb-oc`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Torn API HTTP ${res.status}`);
   const data = await res.json();
