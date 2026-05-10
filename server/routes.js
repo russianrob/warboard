@@ -2034,6 +2034,117 @@ router.get("/notifications", (_req, res) => {
 
 const LEGAL_STYLE = `:root{color-scheme:dark}body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:24px;max-width:760px;margin-left:auto;margin-right:auto;line-height:1.55}h1{font-size:22px;color:#f3f4f6;margin:0 0 4px}h2{font-size:15px;color:#93c5fd;margin:22px 0 8px;text-transform:uppercase;letter-spacing:.4px}.eff{color:#9ca3af;font-size:12px;margin-bottom:18px}p,li{color:#d1d5db;font-size:14px}.card{background:#0f1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:18px 22px;margin-bottom:14px}code{background:#060b12;padding:1px 5px;border-radius:3px;font-family:monospace;font-size:12px;color:#fbbf24}strong{color:#e5e7eb}ul{padding-left:22px;margin:8px 0}.nav{font-size:12px;color:#6b7280;margin-top:30px;border-top:1px solid #1e3a5f;padding-top:16px}.nav a{color:#93c5fd;text-decoration:none;margin-right:12px}.nav a:hover{text-decoration:underline}`;
 
+// ── GET /start — onboarding doc for new factions ──────────────────────
+// Reads /opt/warboard/docs/STARTUP.md and renders it as a styled HTML
+// page. Cached in-process for 5 min so doc edits show up quickly without
+// a pm2 reload.
+const _startDocCache = { html: null, ts: 0 };
+const _startDocPath = pathJoin(pathDirname(fileURLToPath(import.meta.url)), '..', 'docs', 'STARTUP.md');
+function _renderStartupMarkdown(md) {
+  // Minimal markdown → HTML converter. Supports: headings, hr, fenced
+  // code, tables (pipe), unordered + ordered lists, paragraphs, **bold**,
+  // *italic*, `code`, [text](url), and HTML escaping for raw < > &.
+  const esc = (s) => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  // Auto-link bare <https://...> before HTML escaping so the brackets
+  // don't get turned into &lt;/&gt; first. Replace with a placeholder
+  // unlikely to collide, then restore as a real <a> after escaping.
+  const _AUTOLINK = /<((?:https?|mailto):[^>\s]+)>/g;
+  const inline = (s) => {
+    const links = [];
+    s = s.replace(_AUTOLINK, (_m, url) => {
+      links.push(url);
+      return `AUTOLINK${links.length - 1}`;
+    });
+    return esc(s)
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      .replace(/AUTOLINK(\d+)/g, (_m, n) => {
+        const u = links[Number(n)];
+        return `<a href="${u}" target="_blank" rel="noopener">${u}</a>`;
+      });
+  };
+  const lines = md.replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // Horizontal rule
+    if (/^---+\s*$/.test(line)) { out.push('<hr>'); i++; continue; }
+    // Heading
+    const h = line.match(/^(#{1,4})\s+(.+)$/);
+    if (h) { const n = h[1].length; out.push(`<h${n}>${inline(h[2])}</h${n}>`); i++; continue; }
+    // Table — header row then |---|---| then body
+    if (/^\|.+\|$/.test(line) && /^\|[\s:|-]+\|$/.test(lines[i+1] || '')) {
+      const headerCells = line.slice(1, -1).split('|').map(s => s.trim());
+      const rows = [];
+      i += 2;
+      while (i < lines.length && /^\|.+\|$/.test(lines[i])) {
+        rows.push(lines[i].slice(1, -1).split('|').map(s => s.trim()));
+        i++;
+      }
+      out.push('<table><thead><tr>' + headerCells.map(c => `<th>${inline(c)}</th>`).join('') + '</tr></thead>');
+      out.push('<tbody>' + rows.map(r => '<tr>' + r.map(c => `<td>${inline(c)}</td>`).join('') + '</tr>').join('') + '</tbody></table>');
+      continue;
+    }
+    // Unordered list
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        const text = lines[i].replace(/^\s*[-*]\s+/, '');
+        // Checkbox: "- [ ] " or "- [x] "
+        const cb = text.match(/^\[([ xX])\]\s+(.*)$/);
+        if (cb) items.push(`<li class="cb">${cb[1].toLowerCase() === 'x' ? '☑' : '☐'} ${inline(cb[2])}</li>`);
+        else items.push(`<li>${inline(text)}</li>`);
+        i++;
+      }
+      out.push(`<ul>${items.join('')}</ul>`);
+      continue;
+    }
+    // Ordered list
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        items.push(`<li>${inline(lines[i].replace(/^\s*\d+\.\s+/, ''))}</li>`);
+        i++;
+      }
+      out.push(`<ol>${items.join('')}</ol>`);
+      continue;
+    }
+    // Blank line — paragraph break
+    if (line.trim() === '') { i++; continue; }
+    // Paragraph — collect until blank / heading / list / table
+    const para = [line];
+    i++;
+    while (i < lines.length && lines[i].trim() !== ''
+        && !/^#{1,4}\s/.test(lines[i])
+        && !/^\s*[-*]\s+/.test(lines[i])
+        && !/^\s*\d+\.\s+/.test(lines[i])
+        && !/^\|.+\|$/.test(lines[i])
+        && !/^---+\s*$/.test(lines[i])) {
+      para.push(lines[i]);
+      i++;
+    }
+    out.push(`<p>${inline(para.join(' '))}</p>`);
+  }
+  return out.join('\n');
+}
+router.get("/start", (_req, res) => {
+  if (!_startDocCache.html || (Date.now() - _startDocCache.ts) > 5 * 60_000) {
+    try {
+      const md = readFileSync(_startDocPath, 'utf8');
+      _startDocCache.html = _renderStartupMarkdown(md);
+      _startDocCache.ts = Date.now();
+    } catch (e) {
+      return res.status(503).send('Startup doc not available: ' + e.message);
+    }
+  }
+  const STYLE = `:root{color-scheme:dark}body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:24px;max-width:820px;margin-left:auto;margin-right:auto;line-height:1.6}h1{font-size:24px;color:#f3f4f6;margin:0 0 18px}h2{font-size:17px;color:#93c5fd;margin:28px 0 10px;border-bottom:1px solid #1e3a5f;padding-bottom:6px}h3{font-size:14px;color:#fbbf24;margin:20px 0 8px;text-transform:uppercase;letter-spacing:.4px}p,li{color:#d1d5db;font-size:14px}code{background:#060b12;padding:1px 5px;border-radius:3px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#fbbf24}strong{color:#e5e7eb}em{color:#cbd5e1}a{color:#60a5fa;text-decoration:none}a:hover{text-decoration:underline}ul,ol{padding-left:24px;margin:8px 0}li{margin:3px 0}li.cb{list-style:none;margin-left:-22px}hr{border:0;border-top:1px solid #1e3a5f;margin:24px 0}table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}th,td{text-align:left;padding:7px 10px;border-bottom:1px solid #1a2e20;vertical-align:top}th{color:#9ca3af;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.3px;background:rgba(30,58,95,0.3)}td code{font-size:11px}.nav{font-size:12px;color:#6b7280;margin-top:36px;border-top:1px solid #1e3a5f;padding-top:16px}.nav a{margin-right:14px}`;
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Getting started · warboard</title><style>${STYLE}</style></head><body>${_startDocCache.html}<div class="nav"><a href="/">Home</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a></div></body></html>`);
+});
+
 router.get("/terms", (_req, res) => {
   res.set('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Terms of Service · tornwar.com</title><style>${LEGAL_STYLE}</style></head><body>
