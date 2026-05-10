@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.70
+// @version      3.1.71
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @match        https://www.torn.com/factions.php*
@@ -261,7 +261,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.70';
+    const SCRIPT_VERSION = '3.1.71';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -3165,10 +3165,13 @@
                     html += `<div style="font-size:10px;color:#ef4444;padding:2px 0;">\u{1f6a8} <b>${d.name}</b> — ${d.position} (${d.cpr.toFixed(0)}% CPR, ${d.weight.toFixed(0)}% weight)</div>`;
                 }
             }
-            // Weakest link (if no danger slots, show weakest)
+            // Weakest link (if no danger slots, show weakest). New members
+            // (no CPR data yet) get a "new member" tag instead of the
+            // misleading "0% CPR" — they're an unknown, not a known weak link.
             if ((!c.dangerSlots || c.dangerSlots.length === 0) && c.weakestLink) {
                 const w = c.weakestLink;
-                html += `<div style="font-size:10px;color:#e5b567;padding:2px 0;">Weakest: <b>${w.name}</b> — ${w.position} (${w.cpr.toFixed(0)}% CPR, ${w.weight.toFixed(0)}% weight)</div>`;
+                const cprLabel = w.isNewMember ? 'new member' : `${w.cpr.toFixed(0)}% CPR`;
+                html += `<div style="font-size:10px;color:#e5b567;padding:2px 0;">Weakest: <b>${w.name}</b> — ${w.position} (${cprLabel}, ${w.weight.toFixed(0)}% weight)</div>`;
             }
             html += `</div>`;
         }
