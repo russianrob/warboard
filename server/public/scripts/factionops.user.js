@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.11
+// @version      5.0.12
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -53,7 +53,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.11';
+    const SCRIPT_VERSION = '5.0.12';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3952,6 +3952,18 @@ body.wb-chain-active {
             }
         });
 
+        // Enemy-online surge — server-side watcher fans this out via
+        // Socket.IO + SSE the moment N+ enemies came online inside the
+        // configured window. Always shows a toast (no permission needed);
+        // PDA notification + native push are independent / opt-in.
+        realtimeSocket.on('enemy_surge', (data) => {
+            const msg = `🚨 +${data.delta} enemies came online in ${data.windowSec}s — ${data.online} now active`;
+            showToast(msg, 'warning');
+            if (typeof firePdaNotification === 'function') {
+                firePdaNotification('enemy_surge', 'Enemy Online Surge', msg);
+            }
+        });
+
         // Listen for Assist Requests
         realtimeSocket.on('assist_request', (data) => {
             showAssistToast(data.playerName, data.targetName, data.attackUrl);
@@ -4119,6 +4131,12 @@ body.wb-chain-active {
                                 firePdaNotification('assist_request', '⚔️ Assist Needed!',
                                     `${data.playerName} needs help attacking ${data.targetName}!`,
                                     data.attackUrl);
+                            }
+                        } else if (data && data.type === 'enemy_surge') {
+                            const msg = `🚨 +${data.delta} enemies came online in ${data.windowSec}s — ${data.online} now active`;
+                            showToast(msg, 'warning');
+                            if (typeof firePdaNotification === 'function') {
+                                firePdaNotification('enemy_surge', 'Enemy Online Surge', msg);
                             }
                         } else {
                             applyServerData(data);

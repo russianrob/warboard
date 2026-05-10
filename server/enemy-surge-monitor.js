@@ -18,6 +18,8 @@ const _timers = new Map();
 const _history = new Map();
 /** @type {Map<string, number>} per-warId last-fired epoch ms */
 const _lastFired = new Map();
+/** @type {Map<string, any>} per-warId Socket.IO instance for in-overlay toast emit */
+const _ios = new Map();
 
 function _countOnline(war) {
   const statuses = war?.enemyStatuses || {};
@@ -75,13 +77,43 @@ function _poll(warId) {
   _lastFired.set(warId, nowMs);
   console.log(`[enemy-surge] war=${warId} surge detected: +${delta} enemies in ${cfg.windowSec}s (now ${online}, was ${baseline.online})`);
 
+  // 1. Push notification (opt-in via the enemy_surge pref)
   const warPlayers = store.getOnlinePlayersForWar(warId);
   push.notifyEnemySurge(warPlayers, warId, online, delta, cfg.windowSec)
     .catch(e => console.warn(`[enemy-surge] push failed: ${e.message}`));
+
+  // 2. In-overlay toast — fan out via Socket.IO + SSE so anyone with
+  // factionops open in the war room sees a toast immediately, no
+  // notification permission required.
+  const io = _ios.get(warId);
+  const toastPayload = {
+    online,
+    delta,
+    windowSec: cfg.windowSec,
+    ts: nowMs,
+  };
+  if (io) {
+    try { io.to(`war_${warId}`).emit('enemy_surge', toastPayload); }
+    catch (e) { console.warn(`[enemy-surge] socket emit failed: ${e.message}`); }
+  }
+  // SSE — dynamic import avoids a circular dep at module load time.
+  import('./routes.js').then(r => {
+    try { r.broadcastSSE(warId, { type: 'enemy_surge', ...toastPayload }); }
+    catch (_) { /* SSE bus might not be ready; non-fatal */ }
+  }).catch(() => {});
 }
 
-export function startEnemySurgeMonitor(warId) {
-  if (_timers.has(warId)) return;
+export function startEnemySurgeMonitor(io, warId) {
+  // Back-compat: callers that pass only warId (the original signature)
+  // still work, just without Socket.IO toast fan-out.
+  if (typeof warId === 'undefined' && typeof io === 'string') {
+    warId = io; io = null;
+  }
+  if (_timers.has(warId)) {
+    if (io) _ios.set(warId, io); // refresh io ref on repeat starts
+    return;
+  }
+  if (io) _ios.set(warId, io);
   // Prime history so the first sample isn't immediately compared to nothing
   _poll(warId);
   const tid = setInterval(() => _poll(warId), SAMPLE_INTERVAL_MS);
@@ -94,6 +126,7 @@ function _stopOne(warId) {
   if (tid) { clearInterval(tid); _timers.delete(warId); }
   _history.delete(warId);
   _lastFired.delete(warId);
+  _ios.delete(warId);
 }
 
 export function stopEnemySurgeMonitor(warId) {

@@ -902,7 +902,7 @@ router.get("/api/poll", (req, res, next) => {
     startChainMonitor(null, warId);
     // Enemy-surge monitor — sample every 30s, fires when threshold hit.
     // Self-gates on the per-faction enabled flag, so cheap to always-start.
-    startEnemySurgeMonitor(warId);
+    startEnemySurgeMonitor(io, warId);
   } else {
     stopEnemySurgeMonitor(warId);
   }
