@@ -881,6 +881,7 @@ router.get("/api/poll", (req, res, next) => {
             try {
               const freshStatuses = await fetchFactionMembers(rw.enemyFactionId, apiKey);
               war.enemyStatuses = freshStatuses;
+              war.enemyStatusesUpdatedAt = Date.now();
               console.log(`[api] Fetched ${Object.keys(freshStatuses).length} enemy members`);
             } catch (err) {
               console.error('[api] Failed to fetch enemy members:', err.message);
@@ -1732,6 +1733,7 @@ router.post("/api/status", requireAuth, async (req, res) => {
 
   // Bulk status update from intercepted data
   if (statuses && typeof statuses === "object") {
+    war.enemyStatusesUpdatedAt = Date.now();
     for (const [targetId, statusData] of Object.entries(statuses)) {
       const existing = war.enemyStatuses[targetId] || {};
       const wasHospital = existing.status && existing.status.toLowerCase().includes("hospital");
@@ -1802,6 +1804,7 @@ router.post("/api/status", requireAuth, async (req, res) => {
     try {
       const freshStatuses = await fetchFactionMembers(war.enemyFactionId, apiKey);
       war.enemyStatuses = freshStatuses;
+      war.enemyStatusesUpdatedAt = Date.now();
       store.saveState();
       broadcastWarUpdate(warId);
       console.log(`[api] Statuses refreshed for war ${warId} (${Object.keys(freshStatuses).length} members)`);

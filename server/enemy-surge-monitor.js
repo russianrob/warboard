@@ -8,9 +8,16 @@
 
 import * as store from "./store.js";
 import * as push from "./push-notifications.js";
+import { fetchFactionMembers } from "./torn-api.js";
 
 const SAMPLE_INTERVAL_MS = 30_000; // sample every 30s
 const HISTORY_RETENTION_MS = 15 * 60_000; // keep last 15 min of samples
+// If no client has refreshed enemyStatuses in this long, the monitor
+// fetches the enemy faction members itself using a pool key. Keeps
+// surge detection alive when no member has FactionOps / the apps open.
+const STALE_CLIENT_DATA_MS = 90_000;
+/** Per-warId rotating cursor for pool-key selection */
+let _surgePollCursor = 0;
 
 /** @type {Map<string, NodeJS.Timeout>} per-warId monitor timer */
 const _timers = new Map();
@@ -41,18 +48,50 @@ function _trimHistory(history, nowMs) {
 }
 
 /**
+ * Server-side fallback: when no client has refreshed enemyStatuses
+ * recently, fetch the enemy faction's members directly using a pool
+ * key. Keeps the monitor live during periods when nobody has
+ * FactionOps or the mobile apps open. Best-effort — failures are
+ * logged and the next sample retries.
+ */
+async function _refreshEnemyStatusesIfStale(war) {
+  const updatedAt = Number(war.enemyStatusesUpdatedAt) || 0;
+  const ageMs = Date.now() - updatedAt;
+  if (ageMs < STALE_CLIENT_DATA_MS) return false;
+  if (!war.enemyFactionId) return false;
+  _surgePollCursor = (_surgePollCursor + 1) | 0;
+  const apiKey = store.getPollingKey(war.factionId, "enemy-surge", _surgePollCursor)
+              || store.getFactionApiKey(war.factionId);
+  if (!apiKey) return false;
+  try {
+    const fresh = await fetchFactionMembers(war.enemyFactionId, apiKey);
+    war.enemyStatuses = fresh;
+    war.enemyStatusesUpdatedAt = Date.now();
+    console.log(`[enemy-surge] server-fallback fetched ${Object.keys(fresh).length} enemy members for war ${war.warId} (client data was ${Math.round(ageMs / 1000)}s stale)`);
+    return true;
+  } catch (e) {
+    console.warn(`[enemy-surge] fallback fetch failed for war ${war.warId}: ${e.message}`);
+    return false;
+  }
+}
+
+/**
  * Poll one war for enemy-online surges. Only fires the push if all
  * three conditions hold: (1) faction has surge enabled in settings,
  * (2) the war is active (not ended), (3) the count delta within the
  * configured window meets the threshold AND we're past the cooldown.
  */
-function _poll(warId) {
+async function _poll(warId) {
   const war = store.getWar(warId);
   if (!war) { _stopOne(warId); return; }
   if (war.warEnded) { _stopOne(warId); return; }
 
   const cfg = store.getEnemySurgeConfig(war.factionId);
   if (!cfg.enabled) return; // recorded sample skipped — re-enable starts fresh
+
+  // If client-driven status data is stale, fetch directly via pool key
+  // so the monitor isn't dependent on someone having FactionOps open.
+  await _refreshEnemyStatusesIfStale(war);
 
   const nowMs = Date.now();
   const online = _countOnline(war);
