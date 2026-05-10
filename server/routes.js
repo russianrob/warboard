@@ -2034,12 +2034,20 @@ router.get("/notifications", (_req, res) => {
 
 const LEGAL_STYLE = `:root{color-scheme:dark}body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:24px;max-width:760px;margin-left:auto;margin-right:auto;line-height:1.55}h1{font-size:22px;color:#f3f4f6;margin:0 0 4px}h2{font-size:15px;color:#93c5fd;margin:22px 0 8px;text-transform:uppercase;letter-spacing:.4px}.eff{color:#9ca3af;font-size:12px;margin-bottom:18px}p,li{color:#d1d5db;font-size:14px}.card{background:#0f1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:18px 22px;margin-bottom:14px}code{background:#060b12;padding:1px 5px;border-radius:3px;font-family:monospace;font-size:12px;color:#fbbf24}strong{color:#e5e7eb}ul{padding-left:22px;margin:8px 0}.nav{font-size:12px;color:#6b7280;margin-top:30px;border-top:1px solid #1e3a5f;padding-top:16px}.nav a{color:#93c5fd;text-decoration:none;margin-right:12px}.nav a:hover{text-decoration:underline}`;
 
-// ── GET /start — onboarding doc for new factions ──────────────────────
-// Reads /opt/warboard/docs/STARTUP.md and renders it as a styled HTML
-// page. Cached in-process for 5 min so doc edits show up quickly without
-// a pm2 reload.
-const _startDocCache = { html: null, ts: 0 };
-const _startDocPath = pathJoin(pathDirname(fileURLToPath(import.meta.url)), '..', 'docs', 'STARTUP.md');
+// ── Onboarding docs (/start, /start/factionops, /start/oc-spawn) ─────
+// /start is a chooser card UI; the two service-specific paths render
+// markdown docs from /opt/warboard/docs/. Per-file 5-min in-process
+// cache so edits flow without pm2 reload.
+const _docsDir = pathJoin(pathDirname(fileURLToPath(import.meta.url)), '..', 'docs');
+const _docCache = new Map();
+function _loadDocCached(filename) {
+  const cached = _docCache.get(filename);
+  if (cached && (Date.now() - cached.ts) < 5 * 60_000) return cached.html;
+  const md = readFileSync(pathJoin(_docsDir, filename), 'utf8');
+  const html = _renderStartupMarkdown(md);
+  _docCache.set(filename, { html, ts: Date.now() });
+  return html;
+}
 function _renderStartupMarkdown(md) {
   // Minimal markdown → HTML converter. Supports: headings, hr, fenced
   // code, tables (pipe), unordered + ordered lists, paragraphs, **bold**,
@@ -2130,20 +2138,44 @@ function _renderStartupMarkdown(md) {
   }
   return out.join('\n');
 }
+// Shared style for all /start pages
+const _START_STYLE = `:root{color-scheme:dark}body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:24px;max-width:820px;margin-left:auto;margin-right:auto;line-height:1.6}h1{font-size:24px;color:#f3f4f6;margin:0 0 18px}h2{font-size:17px;color:#93c5fd;margin:28px 0 10px;border-bottom:1px solid #1e3a5f;padding-bottom:6px}h3{font-size:14px;color:#fbbf24;margin:20px 0 8px;text-transform:uppercase;letter-spacing:.4px}p,li{color:#d1d5db;font-size:14px}code{background:#060b12;padding:1px 5px;border-radius:3px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#fbbf24}strong{color:#e5e7eb}em{color:#cbd5e1}a{color:#60a5fa;text-decoration:none}a:hover{text-decoration:underline}ul,ol{padding-left:24px;margin:8px 0}li{margin:3px 0}li.cb{list-style:none;margin-left:-22px}hr{border:0;border-top:1px solid #1e3a5f;margin:24px 0}table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}th,td{text-align:left;padding:7px 10px;border-bottom:1px solid #1a2e20;vertical-align:top}th{color:#9ca3af;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.3px;background:rgba(30,58,95,0.3)}td code{font-size:11px}.nav{font-size:12px;color:#6b7280;margin-top:36px;border-top:1px solid #1e3a5f;padding-top:16px}.nav a{margin-right:14px}.cards{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:24px 0}@media (max-width:600px){.cards{grid-template-columns:1fr}}.card-link{display:block;padding:22px;background:#0f1a2e;border:1px solid #1e3a5f;border-radius:10px;color:#e5e7eb;text-decoration:none;transition:border-color .15s,transform .15s}.card-link:hover{border-color:#60a5fa;transform:translateY(-2px);text-decoration:none}.card-link h3{margin:0 0 6px;font-size:16px;color:#60a5fa;text-transform:none;letter-spacing:0}.card-link p{margin:0;font-size:13px;color:#9ca3af;line-height:1.5}.intro{font-size:15px;color:#d1d5db;margin-bottom:8px}`;
+
+// /start — chooser landing page. Two cards: FactionOps / OC Spawn.
+// Each routes to its own setup page. Inline HTML (not markdown) so
+// the cards can be styled distinctively.
 router.get("/start", (_req, res) => {
-  if (!_startDocCache.html || (Date.now() - _startDocCache.ts) > 5 * 60_000) {
-    try {
-      const md = readFileSync(_startDocPath, 'utf8');
-      _startDocCache.html = _renderStartupMarkdown(md);
-      _startDocCache.ts = Date.now();
-    } catch (e) {
-      return res.status(503).send('Startup doc not available: ' + e.message);
-    }
-  }
-  const STYLE = `:root{color-scheme:dark}body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:24px;max-width:820px;margin-left:auto;margin-right:auto;line-height:1.6}h1{font-size:24px;color:#f3f4f6;margin:0 0 18px}h2{font-size:17px;color:#93c5fd;margin:28px 0 10px;border-bottom:1px solid #1e3a5f;padding-bottom:6px}h3{font-size:14px;color:#fbbf24;margin:20px 0 8px;text-transform:uppercase;letter-spacing:.4px}p,li{color:#d1d5db;font-size:14px}code{background:#060b12;padding:1px 5px;border-radius:3px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#fbbf24}strong{color:#e5e7eb}em{color:#cbd5e1}a{color:#60a5fa;text-decoration:none}a:hover{text-decoration:underline}ul,ol{padding-left:24px;margin:8px 0}li{margin:3px 0}li.cb{list-style:none;margin-left:-22px}hr{border:0;border-top:1px solid #1e3a5f;margin:24px 0}table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}th,td{text-align:left;padding:7px 10px;border-bottom:1px solid #1a2e20;vertical-align:top}th{color:#9ca3af;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.3px;background:rgba(30,58,95,0.3)}td code{font-size:11px}.nav{font-size:12px;color:#6b7280;margin-top:36px;border-top:1px solid #1e3a5f;padding-top:16px}.nav a{margin-right:14px}`;
   res.set('Content-Type', 'text/html; charset=utf-8');
-  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Getting started · warboard</title><style>${STYLE}</style></head><body>${_startDocCache.html}<div class="nav"><a href="/">Home</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a></div></body></html>`);
+  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Getting started · warboard</title><style>${_START_STYLE}</style></head><body>
+<h1>Warboard — Getting started</h1>
+<p class="intro">Two independent services. Each is granted separately by RussianRob [137558]. Pick the one your faction has access to.</p>
+<div class="cards">
+  <a class="card-link" href="/start/factionops">
+    <h3>FactionOps →</h3>
+    <p>Real-time war coordination — target calls, chain bar, hospital alerts, scout reports, post-war analytics, mobile apps with push.</p>
+  </a>
+  <a class="card-link" href="/start/oc-spawn">
+    <h3>OC Spawn Assistance →</h3>
+    <p>Automated organized-crime slot filling, ready-to-spawn signals, banker-claim flow, optional PWA push notifications.</p>
+  </a>
+</div>
+<p style="font-size:13px;color:#9ca3af">Have both? Walk through the FactionOps setup first, then come back for OC Spawn.</p>
+<div class="nav"><a href="/">Home</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a></div>
+</body></html>`);
 });
+
+// /start/factionops + /start/oc-spawn — service-specific setup docs
+function _serveStartDoc(filename, title) {
+  return (_req, res) => {
+    let html;
+    try { html = _loadDocCached(filename); }
+    catch (e) { return res.status(503).send(`Doc not available: ${e.message}`); }
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · warboard</title><style>${_START_STYLE}</style></head><body>${html}<div class="nav"><a href="/start">← Start</a><a href="/">Home</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a></div></body></html>`);
+  };
+}
+router.get("/start/factionops", _serveStartDoc('STARTUP-factionops.md', 'FactionOps setup'));
+router.get("/start/oc-spawn",   _serveStartDoc('STARTUP-oc-spawn.md',   'OC Spawn setup'));
 
 router.get("/terms", (_req, res) => {
   res.set('Content-Type', 'text/html; charset=utf-8');
