@@ -16,20 +16,34 @@ Real-time war coordination for Torn factions: target calls, chain bar, hospital 
 
 ---
 
-## 2. Authenticate
+## 2. Create your API keys
 
-When the overlay first loads, it asks for your **Torn API key**. Use a **Limited Access** key — never a Full key.
+You'll create two keys at <https://www.torn.com/preferences.php#tab=api>. Both should be **Limited Access** — never a Full key. Click **Create a new key**, pick **Limited Access**, tick the recommended selections below, and copy the key.
 
-Generate one at <https://www.torn.com/preferences.php#tab=api>:
-- Click **Create a new key**
-- Pick **Limited Access**
-- Recommended selections: `attacks`, `bars`, `cooldowns`, `profile`, `travel`, `chain`, `members`, `armorynews`
-- Paste into FactionOps' settings
+### 2a. FactionOps key (every member, personal)
+
+- Name it something like **"FactionOps"** so you can recognize it later
+- Selections: `attacks`, `bars`, `cooldowns`, `profile`, `travel`, `chain`, `members`, `armorynews`
+- When the FactionOps overlay loads on Torn, paste this key into the prompt — it's stored locally per member
+
+This is the key each member uses individually. It powers their personal status (energy, cooldowns) and lets them act inside FactionOps (calls, claims, broadcasts).
+
+### 2b. Faction key (one per faction, admin sets once)
+
+- Name it something like **"FactionKey"** so it's clearly the shared one
+- Same selections as above, plus `attacks` and `armorynews` are required for war polling
+- One faction admin pastes this in **⚙ Settings → Faction API Key** field
+
+The faction key is **stored server-side and used by warboard's pollers on behalf of the whole faction** — chain monitor, war-status sweeps, attacks-feed, ranked-war report. It's what keeps everyone's data fresh even if no member has FactionOps open at that moment. Set it once; warboard handles the rest.
+
+### Verify the connection
 
 Click ⚙ to open settings. The connection dot should turn green. The **Subscription** line shows your status:
 - **★ Permanent** — owner faction or partner with FactionOps grant
 - **N days remaining** — xanax-paying faction
 - **expired / unknown** — contact the warboard owner
+
+Below that, the **Faction API Key** section shows "Key saved ✓" once an admin has stored the faction key.
 
 ---
 
