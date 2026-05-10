@@ -98,7 +98,7 @@ import { getItemMarketValue, maybeRefreshItemValues } from "./item-values.js";
 import * as vaultRequests from "./vault-requests.js";
 import * as keyUsage from "./key-usage-log.js";
 import { hasXanaxSubscription, grantFactionAccess, getXanaxSubscription } from "./xanax-subscriptions.js";
-import { startChainMonitor } from "./chain-monitor.js";
+import { startChainMonitor, recordClientChainData } from "./chain-monitor.js";
 import { startEnemySurgeMonitor, stopEnemySurgeMonitor } from "./enemy-surge-monitor.js";
 import * as push from "./push-notifications.js";
 import { isFactionAllowed, getAllSubscriptions, getOwnerFactionId, getSubscriptionRejectionMessage } from "./subscription-manager.js";
@@ -1290,6 +1290,26 @@ router.post("/api/broadcast/roles", requireAuth, (req, res) => {
 
   updateFactionSettings(factionId, { broadcastRoles: roles });
   return res.json({ success: true, roles });
+});
+
+// ── POST /api/chain-update ─────────────────────────────────────────────
+// Each FactionOps client polls Torn directly for chain data (bar UI).
+// They forward that snapshot here so the server-side chain monitor can
+// gate its own pool-burning poll. Stale snapshots are silently dropped
+// by recordClientChainData (timestamp comparison). Auth so only real
+// faction members contribute.
+router.post("/api/chain-update", requireAuth, async (req, res) => {
+  const { factionId } = req.user;
+  const { warId, chainData } = (req.body || {});
+  if (!warId || !chainData || typeof chainData !== "object") {
+    return res.status(400).json({ error: "warId and chainData required" });
+  }
+  const war = store.getWar(String(warId));
+  if (!war || String(war.factionId) !== String(factionId)) {
+    return res.status(404).json({ error: "War not found for your faction" });
+  }
+  const accepted = await recordClientChainData(String(warId), chainData);
+  return res.json({ ok: true, accepted });
 });
 
 // ── Enemy-online-surge config (per-faction) ─────────────────────────────

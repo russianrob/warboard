@@ -26,7 +26,11 @@ const nextChain = (war) =>
   war && war.factionId
     ? store.getPollInterval(war.factionId, "chain")
     : POLL_INTERVAL_MS;
-// Client chain forwarding removed — server always polls directly.
+// If a client has pushed chain data within this window, the server-side
+// poll skips its Torn fetch — saves the pool budget on factions where
+// members already have FactionOps fetching chain client-side. Conservative
+// threshold so chain-panic alerts (30s trigger) never fire late.
+const CLIENT_CHAIN_FRESH_MS = 8_000;
 const CHAIN_ALERT_THRESHOLD = 60; // seconds — fire warning when chain timer <= this
 const CHAIN_PANIC_THRESHOLD = 30; // seconds — fire panic when chain timer <= this
 // Monotonic cursor used to rotate pool keys per chain-poll call.
@@ -55,7 +59,77 @@ const lastScoreCheck = new Map();
 /** Track if we already notified war target reached per warId. */
 const warTargetNotified = new Map();
 
-// recordClientChainReport removed — server always polls directly.
+/**
+ * Apply a fresh chain snapshot to a war and run the alert / Live
+ * Activity / war-target-evaluation pipeline. Source-agnostic — used
+ * by both the server's Torn poll and the client-push endpoint. The
+ * `source` arg is just for log lines so we can see in pm2 whether the
+ * data came from a client or our own poll.
+ */
+async function _processChain(warId, war, chain, io, source) {
+  const prevChain = { ...war.chainData };
+  war.chainData = chain;
+  war.chainDataUpdatedAt = Date.now();
+  store.saveState();
+
+  const countChanged = (prevChain.current || 0) !== (chain.current || 0);
+  const cooldownFlipped = ((prevChain.cooldown || 0) > 0) !== ((chain.cooldown || 0) > 0);
+  const broke = (prevChain.current || 0) > 0 && (chain.current || 0) === 0;
+  const tokenCount = liveActivityTokens.listForWar(warId).length;
+  console.log(`[chain/${source}] war=${warId} prev=${prevChain.current||0} curr=${chain.current||0} cooldown=${chain.cooldown} timeout=${chain.timeout} tokens=${tokenCount} willPush=${countChanged || cooldownFlipped || broke}`);
+  if (countChanged || cooldownFlipped || broke) {
+    broadcastChainLiveActivity(warId, war, chain, broke).catch((e) =>
+      console.warn(`[chain] Live Activity broadcast failed: ${e.message}`)
+    );
+  }
+
+  const isCoolingDown = chain.cooldown > 0;
+  if (!isCoolingDown && chain.timeout > 0 && chain.current >= CHAIN_MIN_HITS) {
+    if (chain.timeout <= CHAIN_PANIC_THRESHOLD) {
+      const lastPanic = lastPanicSent.get(warId) || 0;
+      if (Date.now() - lastPanic > CHAIN_PANIC_COOLDOWN_MS) {
+        lastPanicSent.set(warId, Date.now());
+        const warPlayers = store.getOnlinePlayersForWar(warId);
+        push.notifyChainPanic(warPlayers, warId, chain.current, Math.round(chain.timeout));
+        console.log(`[chain] PANIC alert: chain ${chain.current}, ${Math.round(chain.timeout)}s remaining (${source})`);
+      }
+    } else if (chain.timeout <= CHAIN_ALERT_THRESHOLD) {
+      const lastAlert = lastAlertSent.get(warId) || 0;
+      if (Date.now() - lastAlert > CHAIN_ALERT_COOLDOWN_MS) {
+        lastAlertSent.set(warId, Date.now());
+        const warPlayers = store.getOnlinePlayersForWar(warId);
+        push.notifyChainAlert(warPlayers, warId, chain.current, chain.timeout, Math.round(chain.timeout));
+        console.log(`[chain] Warning alert: chain ${chain.current}, ${Math.round(chain.timeout)}s remaining (${source})`);
+      }
+    }
+  }
+  if (!isCoolingDown && chain.current >= CHAIN_MIN_HITS) {
+    const nextBonus = BONUS_HITS.find((b) => b > chain.current);
+    if (nextBonus && nextBonus - chain.current <= 2 && (prevChain.current || 0) < chain.current) {
+      const warPlayers = store.getOnlinePlayersForWar(warId);
+      push.notifyBonusImminent(warPlayers, warId, chain.current, nextBonus);
+    }
+  }
+}
+
+/**
+ * Public entry: ingest a client-pushed chain snapshot. Updates
+ * chainDataUpdatedAt so the server-side poll's gate sees fresh
+ * data and skips its Torn fetch. Rejects snapshots older than what
+ * we already have so a slow client can't override fresh data.
+ */
+export async function recordClientChainData(warId, chain) {
+  const war = store.getWar(warId);
+  if (!war || war.warEnded) return false;
+  if (!chain || typeof chain !== "object") return false;
+  // serverTimestamp on chain (epoch seconds) — if older than what we have,
+  // ignore. Avoids a stale-cached client overwriting a fresh server poll.
+  const incomingTs  = Number(chain.serverTimestamp) || 0;
+  const existingTs  = Number(war.chainData?.serverTimestamp) || 0;
+  if (incomingTs && existingTs && incomingTs < existingTs) return false;
+  await _processChain(warId, war, chain, /*io*/ null, "client");
+  return true;
+}
 
 /**
  * Start chain monitoring for a war room.
@@ -73,82 +147,33 @@ export function startChainMonitor(io, warId) {
     const war = store.getWar(warId);
     if (!war || !war.factionId) { scheduleNext(nextChain(war)); return; }
 
-    // Round-robin across pool keys. Previously purpose-hashed to a fixed
-    // slot, which meant "chain" polling burned a single key's 100/min
-    // budget forever. Per-war cursor rotates each call.
+    // Round-robin across pool keys. Needed up-front for both the
+    // chain fetch (when not gated) AND the war-score check.
     _chainPollCursor = (_chainPollCursor + 1) | 0;
     const apiKey = store.getPollingKey(war.factionId, "chain", _chainPollCursor);
     if (!apiKey) { scheduleNext(nextChain(war)); return; }
 
+    // GATE: if any client (FactionOps / iOS / Android) has pushed
+    // chain data within CLIENT_CHAIN_FRESH_MS, skip the Torn fetch.
+    // Alert evaluation already ran inside recordClientChainData when
+    // that push landed, so there's nothing else to do for the chain
+    // path on this tick. War-score check still runs.
+    const updatedAt = Number(war.chainDataUpdatedAt) || 0;
+    const ageMs = Date.now() - updatedAt;
+    const skipChainFetch = ageMs < CLIENT_CHAIN_FRESH_MS;
+
     try {
-      const chain = await fetchFactionChain(war.factionId, apiKey);
-
-      // Note: removed cache age compensation — it was over-correcting and
-      // causing false chain alerts (e.g. 128s timeout reported as 58s).
-      // Torn's chain.timeout is already the value at time of API response.
-
-      const prevChain = { ...war.chainData };
-      war.chainData = chain;
-      store.saveState();
-
-      // ── iOS chain Live Activity push fan-out ──
-      // Whenever chain count or timeout meaningfully changes, push the
-      // new state to every iOS Live Activity token registered against
-      // this warId so the lock-screen / Dynamic Island countdown stays
-      // fresh while the app is backgrounded. No-op if APNs isn't
-      // configured (the apns module checks env vars).
-      const countChanged = (prevChain.current || 0) !== (chain.current || 0);
-      const cooldownFlipped = ((prevChain.cooldown || 0) > 0) !== ((chain.cooldown || 0) > 0);
-      const broke = (prevChain.current || 0) > 0 && (chain.current || 0) === 0;
-      // Temporary diagnostic — log every poll so we can see whether the
-      // monitor is actually polling and detecting change. Drop once we
-      // confirm pushes are firing on real chain hits.
-      const tokenCount = liveActivityTokens.listForWar(warId).length;
-      console.log(`[chain/poll] war=${warId} prev=${prevChain.current||0} curr=${chain.current||0} cooldown=${chain.cooldown} timeout=${chain.timeout} tokens=${tokenCount} willPush=${countChanged || cooldownFlipped || broke}`);
-      if (countChanged || cooldownFlipped || broke) {
-        broadcastChainLiveActivity(warId, war, chain, broke).catch((e) =>
-          console.warn(`[chain] Live Activity broadcast failed: ${e.message}`)
-        );
+      if (skipChainFetch) {
+        console.log(`[chain/skip] war=${warId} client data is ${Math.round(ageMs / 1000)}s old (gate=${CLIENT_CHAIN_FRESH_MS / 1000}s)`);
+        backoffs.set(warId, POLL_INTERVAL_MS);
+      } else {
+        const chain = await fetchFactionChain(war.factionId, apiKey);
+        // Note: removed cache age compensation — it was over-correcting and
+        // causing false chain alerts (e.g. 128s timeout reported as 58s).
+        // Torn's chain.timeout is already the value at time of API response.
+        await _processChain(warId, war, chain, io, "poll");
+        backoffs.set(warId, POLL_INTERVAL_MS);
       }
-
-      // Reset backoff on success
-      backoffs.set(warId, POLL_INTERVAL_MS);
-
-      // Only evaluate chain alerts if the chain is active and NOT cooling down
-      const isCoolingDown = chain.cooldown > 0;
-
-      // ── Chain-break push alerts ──
-      if (!isCoolingDown && chain.timeout > 0 && chain.current >= CHAIN_MIN_HITS) {
-        // Panic alert at 30s
-        if (chain.timeout <= CHAIN_PANIC_THRESHOLD) {
-          const lastPanic = lastPanicSent.get(warId) || 0;
-          if (Date.now() - lastPanic > CHAIN_PANIC_COOLDOWN_MS) {
-            lastPanicSent.set(warId, Date.now());
-            const warPlayers = store.getOnlinePlayersForWar(warId);
-            push.notifyChainPanic(warPlayers, warId, chain.current, Math.round(chain.timeout));
-            console.log(`[chain] PANIC alert: chain ${chain.current}, ${Math.round(chain.timeout)}s remaining (server poll)`);
-          }
-        // Warning alert at 60s
-        } else if (chain.timeout <= CHAIN_ALERT_THRESHOLD) {
-          const lastAlert = lastAlertSent.get(warId) || 0;
-          if (Date.now() - lastAlert > CHAIN_ALERT_COOLDOWN_MS) {
-            lastAlertSent.set(warId, Date.now());
-            const warPlayers = store.getOnlinePlayersForWar(warId);
-            push.notifyChainAlert(warPlayers, warId, chain.current, chain.timeout, Math.round(chain.timeout));
-            console.log(`[chain] Warning alert: chain ${chain.current}, ${Math.round(chain.timeout)}s remaining (server poll)`);
-          }
-        }
-      }
-
-      // ── Bonus-imminent push alert ──
-      if (!isCoolingDown && chain.current >= CHAIN_MIN_HITS) {
-        const nextBonus = BONUS_HITS.find((b) => b > chain.current);
-        if (nextBonus && nextBonus - chain.current <= 2 && (prevChain.current || 0) < chain.current) {
-          const warPlayers = store.getOnlinePlayersForWar(warId);
-          push.notifyBonusImminent(warPlayers, warId, chain.current, nextBonus);
-        }
-      }
-
 
       // ── War score check (every 60s) ──
       const lastCheck = lastScoreCheck.get(warId) || 0;

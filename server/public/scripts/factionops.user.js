@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.12
+// @version      5.0.13
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @license      MIT
@@ -53,7 +53,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.12';
+    const SCRIPT_VERSION = '5.0.13';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -5832,6 +5832,26 @@ body.wb-chain-active {
                             updateChainBar();
 
                             if (chain.current !== oldCurrent) {
+                            }
+
+                            // Forward to warboard so the server's chain
+                            // monitor can gate its own Torn fetch — saves
+                            // the pool budget. Best-effort, silent on
+                            // failure. Includes Torn's response timestamp
+                            // so the server can reject stale snapshots.
+                            const warId = deriveWarId();
+                            if (warId && state.jwtToken) {
+                                postAction('/api/chain-update', {
+                                    warId,
+                                    chainData: {
+                                        current:  chain.current || 0,
+                                        max:      chain.max || 0,
+                                        timeout:  chain.timeout || 0,
+                                        cooldown: chain.cooldown || 0,
+                                        modifier: chain.modifier || 1,
+                                        serverTimestamp: data.timestamp || Math.floor(Date.now() / 1000),
+                                    },
+                                }).catch(() => {});
                             }
                         }
                     } catch (e) {

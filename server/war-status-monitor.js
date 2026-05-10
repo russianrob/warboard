@@ -43,6 +43,12 @@ const nextEnemyProfile = (war) =>
 // returns duplicates and burns the 100/min rate-limit budget we share
 // with chain-monitor, war-status basic poll, WarScanner, and xanax-subs.
 const ATTACKS_FEED_INTERVAL_MS = 60_000;
+// If clients have refreshed enemyStatuses within this window, the
+// attacks-feed poll is skipped — clients posting status updates from
+// the war page already capture the hospital transitions we'd otherwise
+// learn from this feed. Loose threshold because the feed is a "nice
+// to have" enrichment (per-target basic poll runs every 15s anyway).
+const ATTACKS_FEED_CLIENT_FRESH_MS = 30_000;
 // How long an attacks-feed-derived hospital override suppresses a stale
 // "Okay" from the basic poll. Torn's cache tends to settle within 30s; we
 // allow a bit of margin.
@@ -366,6 +372,19 @@ function startAttacksFeedMonitor(io, warId) {
   const pollAttacks = async () => {
     const war = store.getWar(warId);
     if (!war || !war.enemyFactionId || war.warEnded) {
+      scheduleNext(nextAttacksFeed(war));
+      return;
+    }
+
+    // GATE: if any client has refreshed enemy status within the last
+    // ATTACKS_FEED_CLIENT_FRESH_MS, skip the Torn fetch. Clients on the
+    // war/attack pages already report hospital state via /api/status.
+    // The per-target basic poll (15s) is the safety net for missed pops.
+    const enemyUpdatedAt = Number(war.enemyStatusesUpdatedAt) || 0;
+    const ageMs = Date.now() - enemyUpdatedAt;
+    if (ageMs < ATTACKS_FEED_CLIENT_FRESH_MS) {
+      console.log(`[attacks-feed/skip] war=${warId} client status data is ${Math.round(ageMs / 1000)}s old (gate=${ATTACKS_FEED_CLIENT_FRESH_MS / 1000}s)`);
+      attacksFeedBackoffs.set(warId, ATTACKS_FEED_INTERVAL_MS);
       scheduleNext(nextAttacksFeed(war));
       return;
     }
