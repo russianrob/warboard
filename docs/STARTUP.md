@@ -85,7 +85,6 @@ The setting is in FactionOps ⚙ Settings → **Share my API key with faction po
 | "No active war" right after a war ends | Server's 12h cutoff filtered the war | Should auto-fall-back within 30s; refresh War tab |
 | Member bars empty for some members | Those members haven't opened FactionOps / app | Bars are self-reported by each client; nothing to fix server-side |
 | "Outdated script" 426 error | Tampermonkey hasn't pulled the latest version | Tampermonkey dashboard → Check for userscript updates |
-| Chain panic alert post-war | Was a known bug, fixed in v5.0.10 | Update FactionOps |
 
 ---
 
