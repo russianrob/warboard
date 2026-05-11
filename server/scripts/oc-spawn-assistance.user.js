@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.95
+// @version      3.1.96
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -266,7 +266,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.95';
+    const SCRIPT_VERSION = '3.1.96';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -3290,7 +3290,14 @@
                     const rate = total > 0 ? e.rate : 0;
                     const bg = rate >= 80 ? '#1b4332' : rate >= 60 ? '#3d3010' : '#3d1010';
                     const fg = rate >= 80 ? '#74c69d' : rate >= 60 ? '#f4a261' : '#ef4444';
-                    return `<td style="text-align:center;background:${bg};color:${fg};font-size:10px;padding:1px 4px;" title="C${n}: ${e.pass}/${total} pass">${rate}%</td>`;
+                    // v3.1.96: render the pass/total inline beneath the
+                    // rate% — `title="..."` only surfaces on hover and
+                    // mobile users can't see it. Slightly taller cells
+                    // but legible everywhere.
+                    return `<td style="text-align:center;background:${bg};color:${fg};font-size:10px;padding:1px 5px;line-height:1.2;">
+                        <div style="font-weight:600;">${rate}%</div>
+                        <div style="font-size:8px;opacity:0.75;">${e.pass}/${total}</div>
+                    </td>`;
                 }).join('');
                 return `<tr><td style="font-size:10px;padding-right:6px;">${oc} <span style="color:#6b7280">${role}</span></td>${cells}</tr>`;
             }).join('');
@@ -5169,6 +5176,42 @@
         return avgs;
     }
 
+    /**
+     * Pattern-based "likely cause" classifier — Phase 3, no new data
+     * sources. Uses only what's already in cprCache to characterize
+     * WHY a member underperforms at a checkpoint. Returns one of:
+     *
+     *   - oc-difficult     — faction-wide rate at this checkpoint is
+     *                        also low (< 60%); not really a member
+     *                        problem, the OC mechanic is hard
+     *   - level-overreach  — member's highestLevel is well below this
+     *                        OC's required difficulty (we don't have
+     *                        diff per scenario stored, but their
+     *                        cpr.highestLevel hints this)
+     *   - role-specific    — member's overall CPR is solid (≥ MINCPR)
+     *                        but they fail this specific checkpoint;
+     *                        likely a stat / item / role-fit gap
+     *   - general          — member's overall CPR is also low; they
+     *                        need general OC practice, not coaching
+     *                        on this specific checkpoint
+     *   - small-sample     — only 3-4 attempts; not enough signal to
+     *                        diagnose; flagged so admin doesn't act
+     *                        on noise
+     */
+    function _classifyCause(memberCpr, ocName, memberHighestLevel, memberSamples, factionAvgRate, factionAvgSamples) {
+        if (memberSamples < 5) return { code: 'small-sample', icon: '⚠️', label: 'Small sample', detail: `Only ${memberSamples} attempts — let more crimes pile up before coaching on this.` };
+        if (factionAvgRate < 60 && factionAvgSamples >= 5) {
+            return { code: 'oc-difficult', icon: '⚙️', label: 'OC mechanic', detail: `Faction-wide pass rate at this checkpoint is ${factionAvgRate}% — the OC itself is hard, not just this member.` };
+        }
+        if (memberCpr >= 70) {
+            return { code: 'role-specific', icon: '🎯', label: 'Role-specific', detail: `Member's overall CPR is ${memberCpr}% (solid) but they fail this checkpoint specifically — likely stat / gear / role-fit mismatch at this stage.` };
+        }
+        if (memberCpr < 50) {
+            return { code: 'general', icon: '📈', label: 'General weakness', detail: `Member's overall CPR is ${memberCpr}% (low) across all OCs — they need general practice, not stage-specific coaching.` };
+        }
+        return { code: 'mixed', icon: '🔄', label: 'Mixed signal', detail: `Member's overall CPR is ${memberCpr}% — somewhere between general weakness and role-specific. Compare with their other checkpoints in this OC.` };
+    }
+
     function _buildCoachingRows(snapshot) {
         const cprCache = snapshot?.cprCache || {};
         const members = snapshot?.members || [];
@@ -5177,9 +5220,12 @@
         const factionAvgs = _computeFactionCheckpointAvgs(cprCache);
         const rows = [];
         for (const uid in cprCache) {
-            const cps = cprCache[uid]?.byCheckpoint;
+            const member = cprCache[uid];
+            const cps = member?.byCheckpoint;
             if (!cps) continue;
             const memberName = memberById.get(uid)?.name || `Player ${uid}`;
+            const memberCpr = Number(member.cpr) || 0;
+            const memberHighestLevel = Number(member.highestLevel) || 0;
             for (const k in cps) {
                 const e = cps[k];
                 const total = (e.pass || 0) + (e.fail || 0);
@@ -5189,6 +5235,14 @@
                 const gap = fAvg.rate - e.rate;
                 if (gap <= 0) continue; // member is at or above faction avg — no coaching needed
                 const parts = k.split('::');
+                const cause = _classifyCause(
+                    memberCpr,
+                    parts[0] || '?',
+                    memberHighestLevel,
+                    total,
+                    fAvg.rate,
+                    fAvg.samples,
+                );
                 rows.push({
                     uid, memberName,
                     oc: parts[0] || '?',
@@ -5199,6 +5253,7 @@
                     gap: Math.round(gap * 10) / 10,
                     samples: total,
                     factionSamples: fAvg.samples,
+                    cause,
                 });
             }
         }
@@ -5260,7 +5315,7 @@
                 meaningfully below the faction's average at that same checkpoint.
             </div>
             <div style="overflow-x:auto;">
-            <table class="oc-table" style="width:100%;font-size:11px;">
+            <table class="oc-table oc-coach-table" style="width:100%;font-size:11px;">
                 <thead><tr>
                     <th class="oc-coach-sort" data-col="member"  style="cursor:pointer;">Member ${indicator('member')}</th>
                     <th class="oc-coach-sort" data-col="oc"      style="cursor:pointer;">OC ${indicator('oc')}</th>
@@ -5270,12 +5325,14 @@
                     <th style="text-align:right;">Faction %</th>
                     <th class="oc-coach-sort" data-col="gap"     style="cursor:pointer;text-align:right;">Gap ${indicator('gap')}</th>
                     <th class="oc-coach-sort" data-col="samples" style="cursor:pointer;text-align:right;">Samples ${indicator('samples')}</th>
+                    <th>Likely cause</th>
                 </tr></thead>
                 <tbody>`;
-        for (const r of rows) {
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
             const rateColor = r.rate >= 80 ? '#74c69d' : r.rate >= 60 ? '#f4a261' : '#ef4444';
             const gapColor  = r.gap >= 30 ? '#ef4444' : r.gap >= 15 ? '#f4a261' : '#9ca3af';
-            html += `<tr>
+            html += `<tr class="oc-coach-row" data-row-idx="${i}" style="cursor:pointer;">
                 <td><span class="oc-member-name">${escapeHtml(r.memberName)}</span> <span class="oc-member-id">[${escapeHtml(r.uid)}]</span></td>
                 <td>${escapeHtml(r.oc)}</td>
                 <td style="color:#9ca3af;">${escapeHtml(r.role)}</td>
@@ -5284,12 +5341,21 @@
                 <td style="text-align:right;color:#9ca3af;">${r.factionRate}%</td>
                 <td style="text-align:right;color:${gapColor};font-weight:700;">−${r.gap}%</td>
                 <td style="text-align:right;color:#6b7280;font-size:10px;">${r.samples}/${r.factionSamples}</td>
+                <td style="white-space:nowrap;"><span style="font-size:11px;">${r.cause.icon}</span> <span style="color:#d1d5db;">${escapeHtml(r.cause.label)}</span></td>
+            </tr>
+            <tr class="oc-coach-detail" data-detail-idx="${i}" style="display:none;">
+                <td colspan="9" style="padding:6px 12px;background:rgba(255,255,255,0.02);color:#9ca3af;font-size:11px;line-height:1.5;border-bottom:1px solid #1a2e20;">
+                    <b style="color:#d1d5db;">${r.cause.icon} ${escapeHtml(r.cause.label)}:</b> ${escapeHtml(r.cause.detail)}
+                </td>
             </tr>`;
         }
         html += '</tbody></table></div>';
         html += `<div style="padding:8px 12px;color:#6b7280;font-size:10px;line-height:1.5;border-top:1px solid #1a2e20;">
             Color: ≥30% gap = red (priority), 15–29% = amber, &lt;15% = grey.
             Samples shows (member's count / faction-wide count). Min ${COACHING_MIN_SAMPLES} of each.
+            Tap any row to expand the "likely cause" detail.
+            <br>Causes: 🎯 role-specific · 📈 general weakness · ⚙️ OC mechanic (faction also struggles)
+            · ⛰️ level overreach · 🔄 mixed signal · ⚠️ small sample.
             <br>Data populates as members open the Completed tab — see the CPR tooltip heatmap on the
             Admin tab for per-member detail.
         </div>`;
@@ -5305,6 +5371,16 @@
                     _coachingSort.dir = (c === 'rate' || c === 'samples') ? 'asc' : 'desc';
                 }
                 loadCoachingTab(); // re-render with new sort
+            });
+        });
+        // Tap-to-expand for the "likely cause" detail row. Mobile-friendly
+        // (click also fires on tap); each row toggles independently.
+        container.querySelectorAll('.oc-coach-row').forEach(tr => {
+            tr.addEventListener('click', (e) => {
+                if (e.target.closest('a')) return;
+                const idx = tr.dataset.rowIdx;
+                const detail = container.querySelector(`tr.oc-coach-detail[data-detail-idx="${idx}"]`);
+                if (detail) detail.style.display = (detail.style.display === 'none' || !detail.style.display) ? 'table-row' : 'none';
             });
         });
     }
