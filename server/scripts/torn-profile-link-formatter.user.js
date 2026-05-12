@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.32
+// @version      3.6.33
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -552,19 +552,19 @@
      * catches text-injected pills without our class signature.
      */
     function getCleanLinkText(linkEl) {
+        // v3.6.33: pure v3.6.23 behavior — raw link.textContent — plus a
+        // single regex strip of the trailing FFS estimate. Earlier
+        // versions cloned the link and removed children whose class
+        // contained "ff-scouter" / "ffscouter", but FFS started tagging
+        // the name span itself with those classes, so the strip wiped
+        // the player name and we got User_<id> for everyone.
         if (!linkEl) return '';
-        try {
-            const clone = linkEl.cloneNode(true);
-            clone.querySelectorAll('[class*="ff-scouter"], .ffs-mini-countdown, [class*="ffscouter"]').forEach(n => n.remove());
-            let txt = (clone.textContent || '').trim();
-            // Trailing stats suffix (decimal required to avoid clobbering
-            // usernames ending in digits like "Choco180").
-            txt = txt.replace(/\s*\d+\.\d+\s*[KMBTQkmbtq]\s*$/, '').trim();
-            return txt;
-        } catch (e) {
-            if (debug) console.error('GNSC getCleanLinkText error:', e);
-            return (linkEl.textContent || '').trim();
-        }
+        let txt = (linkEl.textContent || '').trim();
+        // Trailing FFS estimate suffix (e.g. "5.08b", "1.2M", "500K").
+        // Decimal optional. Anchored to end so usernames ending in
+        // digits are safe.
+        txt = txt.replace(/\s*\d+(?:\.\d+)?\s*[KMBTQkmbtq]\s*$/, '').trim();
+        return txt;
     }
 
     // --- BSP cache readers ---
