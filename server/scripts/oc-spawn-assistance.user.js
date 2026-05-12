@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.97
+// @version      3.1.98
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -266,7 +266,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.97';
+    const SCRIPT_VERSION = '3.1.98';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1045,6 +1045,28 @@
                         if (typeof s === 'number') handleDetectedScope(s, 'AJAX (XHR)');
                     } catch (e) {}
                 }
+                // v3.1.98: same checkpoint capture as the fetch branch.
+                // Torn may use XHR for the page.php POSTs that carry the
+                // animation / crimeList payload — the fetch-only matcher
+                // in v3.1.97 missed these and the user saw no telemetry.
+                try {
+                    const url = this.responseURL || '';
+                    if (url.includes('sid=organizedCrimesData') &&
+                        (url.includes('step=animation') || url.includes('step=crimeList'))) {
+                        const data = JSON.parse(this.responseText);
+                        if (data?.success) {
+                            const scenarios = Array.isArray(data.data) ? data.data
+                                            : (data.data && typeof data.data === 'object') ? [data.data]
+                                            : null;
+                            if (scenarios) {
+                                console.log('[OC Spawn][checkpoints] intercepted (XHR)',
+                                            url.includes('step=animation') ? 'animation' : 'crimeList',
+                                            scenarios.length, 'scenario(s)');
+                                captureCompletedScenarios(scenarios);
+                            }
+                        }
+                    }
+                } catch (_) {}
             });
             return oldOpen.apply(this, arguments);
         };
