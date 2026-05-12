@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.1
+// @version      3.2.2
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.1';
+    const SCRIPT_VERSION = '3.2.2';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -2522,13 +2522,20 @@
         .oc-cpr-click, .oc-proj-click { cursor: pointer; border-bottom: 1px dotted currentColor; }
         .oc-cpr-click:hover, .oc-proj-click:hover { opacity: 0.75; }
         /* Tooltips */
-        #oc-cpr-tooltip, #oc-scope-tooltip { position: fixed; z-index: 10001; background: #131f18; border: 1px solid #2d4a3e; border-radius: 8px; padding: 10px 12px; font-size: 11px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #d1d5db; box-shadow: 0 4px 20px rgba(0,0,0,.7); min-width: 220px; max-width: 300px; display: none; pointer-events: none; }
-        #oc-cpr-tooltip .oc-tt-title, #oc-scope-tooltip .oc-tt-title { font-weight: 600; color: #f3f4f6; margin-bottom: 5px; font-size: 12px; }
-        #oc-cpr-tooltip .oc-tt-avg, #oc-scope-tooltip .oc-tt-avg   { color: #9ca3af; font-size: 10px; margin-bottom: 7px; }
+        #oc-cpr-tooltip, #oc-scope-tooltip { position: fixed; z-index: 10001; background: #131f18; border: 1px solid #2d4a3e; border-radius: 6px; padding: 6px 8px; font-size: 10px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #d1d5db; box-shadow: 0 4px 20px rgba(0,0,0,.7); min-width: 200px; max-width: 280px; display: none; pointer-events: none; }
+        #oc-cpr-tooltip .oc-tt-title, #oc-scope-tooltip .oc-tt-title { font-weight: 600; color: #f3f4f6; margin-bottom: 2px; font-size: 11px; }
+        #oc-cpr-tooltip .oc-tt-avg, #oc-scope-tooltip .oc-tt-avg   { color: #9ca3af; font-size: 9px; margin-bottom: 4px; }
         #oc-cpr-tooltip table, #oc-scope-tooltip table { width: 100%; border-collapse: collapse; }
-        #oc-cpr-tooltip th, #oc-scope-tooltip th { color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; padding: 2px 4px; border-bottom: 1px solid #1a2e20; text-align: left; }
-        #oc-cpr-tooltip td, #oc-scope-tooltip td { padding: 3px 4px; font-size: 11px; color: #f3f4f6; }
-        #oc-cpr-tooltip .oc-tt-note, #oc-scope-tooltip .oc-tt-note { color: #6b7280; font-size: 10px; margin-top: 7px; border-top: 1px solid #1a2e20; padding-top: 5px; }
+        #oc-cpr-tooltip th, #oc-scope-tooltip th { color: #6b7280; font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px; padding: 1px 3px; border-bottom: 1px solid #1a2e20; text-align: left; }
+        #oc-cpr-tooltip td, #oc-scope-tooltip td { padding: 1px 3px; font-size: 10px; color: #f3f4f6; }
+        #oc-cpr-tooltip .oc-tt-note, #oc-scope-tooltip .oc-tt-note { color: #6b7280; font-size: 9px; margin-top: 4px; border-top: 1px solid #1a2e20; padding-top: 3px; }
+        #oc-cpr-tooltip .oc-tt-heat-wrap { margin-top: 3px; max-width: 100%; overflow-x: auto; }
+        #oc-cpr-tooltip .oc-tt-heat { border-collapse: collapse; }
+        #oc-cpr-tooltip .oc-tt-heat td.oc-tt-heat-cell { text-align: center; padding: 0 3px; line-height: 1.05; }
+        #oc-cpr-tooltip .oc-tt-heat td.oc-tt-heat-cell .r { font-weight: 600; font-size: 9px; }
+        #oc-cpr-tooltip .oc-tt-heat td.oc-tt-heat-cell .s { font-size: 7px; opacity: 0.7; }
+        #oc-cpr-tooltip .oc-tt-heat td.oc-tt-heat-label { font-size: 9px; padding-right: 4px; white-space: nowrap; color: #d1d5db; }
+        #oc-cpr-tooltip .oc-tt-heat td.oc-tt-heat-label .r { color: #6b7280; font-size: 8px; }
         /* v3.1.34: click-to-toggle tooltip for Outcome EV column headers */
         #oc-ev-tooltip { position: fixed; z-index: 10002; background: #131f18; border: 1px solid #2d4a3e; border-radius: 8px; padding: 10px 12px; font-size: 11px; color: #d1d5db; box-shadow: 0 4px 20px rgba(0,0,0,.7); max-width: 300px; display: none; line-height: 1.4; }
         #oc-ev-tooltip .oc-tt-title { font-weight: 600; color: #f3f4f6; margin-bottom: 5px; font-size: 12px; }
@@ -3362,19 +3369,17 @@
                     const rate = total > 0 ? e.rate : 0;
                     const bg = rate >= 80 ? '#1b4332' : rate >= 60 ? '#3d3010' : '#3d1010';
                     const fg = rate >= 80 ? '#74c69d' : rate >= 60 ? '#f4a261' : '#ef4444';
-                    // v3.1.96: render the pass/total inline beneath the
-                    // rate% — `title="..."` only surfaces on hover and
-                    // mobile users can't see it. Slightly taller cells
-                    // but legible everywhere.
-                    return `<td style="text-align:center;background:${bg};color:${fg};font-size:10px;padding:1px 5px;line-height:1.2;">
-                        <div style="font-weight:600;">${rate}%</div>
-                        <div style="font-size:8px;opacity:0.75;">${e.pass}/${total}</div>
-                    </td>`;
+                    return `<td class="oc-tt-heat-cell" style="background:${bg};color:${fg};">`
+                         + `<div class="r">${rate}%</div><div class="s">${e.pass}/${total}</div></td>`;
                 }).join('');
-                return `<tr><td style="font-size:10px;padding-right:6px;">${oc} <span style="color:#6b7280">${role}</span></td>${cells}</tr>`;
+                return `<tr><td class="oc-tt-heat-label">${oc} <span class="r">${role}</span></td>${cells}</tr>`;
             }).join('');
-            checkpointHtml = `<div class="oc-tt-note" style="margin-top:7px;border-top:1px solid #1a2e20;padding-top:5px;font-weight:600;color:#d1d5db;">Per-checkpoint pass rate</div>
-                <table style="margin-top:3px;"><tbody>${groupRows}</tbody></table>`;
+            // v3.2.2: heatmap wrapped in a horizontal-scroll container so
+            // OCs with many checkpoints (e.g. 12-cp scenarios) don't
+            // explode the tooltip width. Cell + label classes carry the
+            // sizing — see #oc-cpr-tooltip .oc-tt-heat* in the CSS block.
+            checkpointHtml = `<div class="oc-tt-note" style="font-weight:600;color:#d1d5db;">Per-checkpoint pass rate</div>
+                <div class="oc-tt-heat-wrap"><table class="oc-tt-heat"><tbody>${groupRows}</tbody></table></div>`;
         }
 
         cprTooltipEl.innerHTML = `
