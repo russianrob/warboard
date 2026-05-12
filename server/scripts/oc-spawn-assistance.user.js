@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.4
+// @version      3.2.5
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.4';
+    const SCRIPT_VERSION = '3.2.5';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1274,6 +1274,59 @@
         };
     }
 
+    // v3.2.5: coalescing toast for checkpoint uploads. Page load
+    // often fires crimeList 3-4 times in rapid succession (one per
+    // Torn re-render), so we accumulate the new-scenario/new-
+    // checkpoint counts and flush a single toast 800ms after the
+    // last upload settles. Toast itself fades after 4s and is
+    // tap-to-dismiss.
+    let _toastState = { scenarios: 0, checkpoints: 0, total: 0, timer: null, el: null };
+    function _showCheckpointToast(newScenarios, newCheckpoints, factionTotal) {
+        _toastState.scenarios += newScenarios;
+        _toastState.checkpoints += newCheckpoints;
+        _toastState.total = factionTotal;
+        if (_toastState.timer) clearTimeout(_toastState.timer);
+        _toastState.timer = setTimeout(_flushCheckpointToast, 800);
+    }
+    function _flushCheckpointToast() {
+        const { scenarios, checkpoints, total } = _toastState;
+        _toastState.scenarios = 0;
+        _toastState.checkpoints = 0;
+        _toastState.timer = null;
+        if (scenarios === 0) return;
+        // Remove any existing toast (avoid stacking).
+        if (_toastState.el && _toastState.el.parentNode) {
+            _toastState.el.parentNode.removeChild(_toastState.el);
+        }
+        const el = document.createElement('div');
+        el.id = 'oc-checkpoint-toast';
+        el.style.cssText = [
+            'position:fixed', 'bottom:24px', 'right:24px', 'z-index:999999',
+            'background:#131f18', 'border:1px solid #2d4a3e', 'border-left:3px solid #74c69d',
+            'border-radius:6px', 'padding:10px 14px', 'font-size:12px',
+            'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+            'color:#d1d5db', 'box-shadow:0 4px 20px rgba(0,0,0,0.7)',
+            'cursor:pointer', 'opacity:0', 'transition:opacity 200ms ease-out',
+            'max-width:300px', 'line-height:1.4',
+        ].join(';');
+        const ocLabel = scenarios === 1 ? 'crime' : 'crimes';
+        const cpLabel = checkpoints === 1 ? 'checkpoint' : 'checkpoints';
+        el.innerHTML = `
+            <div style="font-weight:600;color:#74c69d;font-size:11px;letter-spacing:0.3px;text-transform:uppercase;margin-bottom:3px;">Coaching data updated</div>
+            <div><b style="color:#f3f4f6;">${scenarios}</b> new ${ocLabel} · <b style="color:#f3f4f6;">${checkpoints}</b> ${cpLabel}</div>
+            <div style="color:#6b7280;font-size:10px;margin-top:3px;">Faction total: ${total.toLocaleString()} records</div>`;
+        document.body.appendChild(el);
+        _toastState.el = el;
+        requestAnimationFrame(() => { el.style.opacity = '1'; });
+        const hide = () => {
+            el.style.opacity = '0';
+            setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 220);
+            if (_toastState.el === el) _toastState.el = null;
+        };
+        el.addEventListener('click', hide);
+        setTimeout(hide, 4000);
+    }
+
     function captureCompletedScenarios(rawScenarios) {
         const apiKey = getApiKey();
         if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
@@ -1299,6 +1352,7 @@
                             const r = JSON.parse(resp.responseText);
                             if (r.scenariosNew > 0) {
                                 console.log(`[OC Spawn][checkpoints] uploaded ${r.scenariosNew} new scenarios (${r.checkpointsNew} checkpoints), faction total: ${r.total}`);
+                                _showCheckpointToast(r.scenariosNew, r.checkpointsNew, r.total);
                             }
                         } catch (_) {}
                     }
