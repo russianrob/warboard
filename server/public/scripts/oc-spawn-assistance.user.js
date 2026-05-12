@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.99
+// @version      3.2.0
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -12,6 +12,7 @@
 // @grant        GM_getValue
 // @grant        GM_xmlhttpRequest
 // @grant        GM_openInTab
+// @grant        unsafeWindow
 // @connect      tornwar.com
 // @connect      api.torn.com
 // @downloadURL  https://tornwar.com/scripts/oc-spawn-assistance.user.js
@@ -266,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.99';
+    const SCRIPT_VERSION = '3.2.0';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1034,9 +1035,23 @@
     //  AJAX INTERCEPTOR  — Catches internal Torn data (ASAP detection)
     // ═══════════════════════════════════════════════════════════════════════
     function setupAjaxInterceptor() {
+        // v3.2.0: patch via unsafeWindow when available. Tampermonkey
+        // runs the script in an isolated sandbox; patching the
+        // sandbox's XMLHttpRequest.prototype has no effect on the
+        // page's actual XHR — which is why every diag log on
+        // organizedCrimes traffic was empty even though the wrapper
+        // was being installed correctly. unsafeWindow gives us a
+        // reference to the page's real window.
+        const _W = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+        try {
+            console.log('[OC Spawn][interceptor] using',
+                        _W === window ? 'sandbox window (will likely miss page traffic)'
+                                      : 'unsafeWindow (page traffic visible)');
+        } catch {}
+
         // Intercept XMLHttpRequest
-        const oldOpen = XMLHttpRequest.prototype.open;
-        XMLHttpRequest.prototype.open = function() {
+        const oldOpen = _W.XMLHttpRequest.prototype.open;
+        _W.XMLHttpRequest.prototype.open = function() {
             this.addEventListener('load', function() {
                 if (this.responseURL.includes('step=getCrimesData')) {
                     try {
@@ -1074,8 +1089,8 @@
         };
 
         // Intercept Fetch
-        const oldFetch = window.fetch;
-        window.fetch = function() {
+        const oldFetch = _W.fetch;
+        _W.fetch = function() {
             const args = arguments;
             const p = oldFetch.apply(this, args);
             p.then(res => {
