@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.3
+// @version      3.2.4
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.3';
+    const SCRIPT_VERSION = '3.2.4';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1073,10 +1073,23 @@
                                             : (data.data && typeof data.data === 'object') ? [data.data]
                                             : null;
                             if (scenarios) {
+                                // v3.2.4: filter out Planning/in-flight
+                                // scenarios. The crimeList endpoint
+                                // returns whatever tab Torn is rendering,
+                                // so Planning view payloads dump 17+
+                                // in-flight scenarios that would parse
+                                // to zero records. Skipping at intercept
+                                // keeps the console quiet and saves the
+                                // parser walk.
+                                const completed = scenarios.filter(s => {
+                                    const st = String(s?.status || '');
+                                    return st === 'Successful' || st === 'Failed';
+                                });
+                                if (completed.length === 0) return;
                                 console.log('[OC Spawn][checkpoints] intercepted (XHR)',
                                             url.includes('step=animation') ? 'animation' : 'crimeList',
-                                            scenarios.length, 'scenario(s)');
-                                captureCompletedScenarios(scenarios);
+                                            completed.length, 'completed');
+                                captureCompletedScenarios(completed);
                             }
                         }
                     }
@@ -1123,12 +1136,22 @@
                                             : (data.data && typeof data.data === 'object') ? [data.data]
                                             : null;
                             if (!scenarios) return;
+                            // v3.2.4: see XHR branch — filter out
+                            // Planning/in-flight scenarios so we don't
+                            // walk 17 no-op scenarios and log a
+                            // misleading "17 scenario(s)" line on
+                            // Planning navigation.
+                            const completed = scenarios.filter(s => {
+                                const st = String(s?.status || '');
+                                return st === 'Successful' || st === 'Failed';
+                            });
+                            if (completed.length === 0) return;
                             try {
                                 console.log('[OC Spawn][checkpoints] intercepted (fetch)',
                                             url.includes('step=animation') ? 'animation' : 'crimeList',
-                                            scenarios.length, 'scenario(s)');
+                                            completed.length, 'completed');
                             } catch {}
-                            captureCompletedScenarios(scenarios);
+                            captureCompletedScenarios(completed);
                         }).catch(() => {});
                     }
                 } catch (e) {}
