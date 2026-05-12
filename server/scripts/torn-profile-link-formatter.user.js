@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.31
+// @version      3.6.32
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -912,6 +912,26 @@
             const memberRows = sideRoot.querySelectorAll(
                 'li.member, li.enemy, li.your, li.table-row, li[class*="memberRow"], li[class*="member-row"]'
             );
+
+            // v3.6.32: diagnostic when row count is 0. Tells us whether
+            // the side selector or the row selector is the problem so we
+            // can update the literal classes (or pivot to a walker) without
+            // guessing.
+            if (!memberRows.length) {
+                try {
+                    // eslint-disable-next-line no-console
+                    console.warn('[GNSC] copy: 0 member rows. sideSelector=', sideSelector,
+                                 'sideRoot=', sideRoot && sideRoot.tagName, sideRoot && sideRoot.className,
+                                 'allXidLinks=', sideRoot ? sideRoot.querySelectorAll('a[href*="profiles.php"][href*="XID="]').length : 'no-side-root');
+                    if (sideRoot) {
+                        // Sample the first <li> classes so we can see what
+                        // Torn is actually rendering.
+                        const _lis = sideRoot.querySelectorAll('li');
+                        const _classes = Array.from(_lis).slice(0, 10).map(li => li.className || '(no-class)');
+                        console.warn('[GNSC] copy: first 10 <li> classes in side root:', _classes);
+                    }
+                } catch (_e) {}
+            }
 
             const settings = loadSettings();
             const lines = [];
