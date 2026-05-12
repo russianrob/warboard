@@ -14,8 +14,32 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join as pathJoin } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import * as push from './push-notifications.js';
 import { fetchFactionBasic } from './torn-api.js';
+
+// In-process pub/sub for vault state changes. Lets the SSE stream
+// endpoint push updates to admin clients in real time so they don't
+// have to poll /api/oc/vault-requests every 15s. Faction-scoped: each
+// listener is keyed by `vault:<factionId>` so a faction never sees
+// another faction's events.
+const _vaultEvents = new EventEmitter();
+// Cap raised 200 → 500 because the user runs multi-device (desktop +
+// PWA + iOS app + faction-shared) and each tab opens its own SSE
+// stream. The 200 cap was tripping a MaxListenersExceededWarning
+// during heavy reload sessions.
+_vaultEvents.setMaxListeners(500);
+
+export function subscribeVaultEvents(factionId, listener) {
+    const key = `vault:${String(factionId)}`;
+    _vaultEvents.on(key, listener);
+    return () => _vaultEvents.off(key, listener);
+}
+
+function emitVaultEvent(factionId, payload) {
+    try { _vaultEvents.emit(`vault:${String(factionId)}`, payload); }
+    catch (e) { console.warn('[vault-requests] emit failed:', e.message); }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -24,7 +48,23 @@ const DATA_DIR = process.env.DATA_DIR || pathJoin(__dirname, 'data');
 // How often to poll faction fundsnews for money-send events.
 // 20s — fast enough that auto-removal feels live; well within Torn's
 // rate limits (3 calls/min, plenty of owner-key headroom).
-const FULFILL_POLL_MS = 20_000;
+// 20-minute cadence — used to be 20s, but Torn's fundsnews selection
+// has a daily quota of ~100 calls/key/day. 20s polling burned through
+// it in 30 min and spammed the error log for the rest of the day.
+// Apps now optimistically report fulfillment via
+// /api/oc/vault-fulfillment-report on Send-button tap, so this poll
+// is the slow safety net for off-app bankers + missed reports.
+const FULFILL_POLL_MS = 20 * 60 * 1000;
+
+// Per-faction back-off when Torn returns "Daily read limit reached".
+// Suspends polling for that faction until the next midnight UTC reset.
+const drainedUntil = new Map();   // factionId → timestamp ms
+
+function nextMidnightUtcMs() {
+  const t = new Date();
+  t.setUTCHours(24, 0, 0, 0);
+  return t.getTime();
+}
 // Banker-claim TTL: when a banker hits Send the request is hidden from
 // every client immediately, but if the matching news event hasn't shown
 // up within this window the claim expires and the request reappears.
@@ -144,6 +184,7 @@ export function createRequest(factionId, {
     };
     f.requests.push(req);
     persist(factionId);
+    emitVaultEvent(factionId, { action: 'create', id: req.id });
     return req;
 }
 
@@ -173,6 +214,7 @@ export function claimRequest(factionId, requestId, claimerId, claimerName) {
     r.claimedAt       = now;
     r.claimExpiresAt  = now + CLAIM_TTL_MS;
     persist(fid);
+    emitVaultEvent(fid, { action: 'claim', id: r.id });
     console.log(`[vault-requests] req ${r.id} claimed by ${r.claimedByName} for $${r.amount} — TTL ${CLAIM_TTL_MS / 1000}s`);
     return r;
 }
@@ -190,6 +232,7 @@ export function removeRequest(factionId, requestId, removerId, isAdmin = false) 
     if (!isAdmin && String(r.requesterId) !== String(removerId)) return null;
     f.requests.splice(idx, 1);
     persist(factionId);
+    emitVaultEvent(factionId, { action: 'remove', id: r.id });
     return r;
 }
 
@@ -262,7 +305,7 @@ export async function pollFactionWithKey(factionId, apiKey) {
 }
 
 async function pollOneFaction(factionId, apiKey) {
-    const url = `https://api.torn.com/faction/${factionId}?selections=fundsnews&key=${encodeURIComponent(apiKey)}`;
+    const url = `https://api.torn.com/faction/${factionId}?selections=fundsnews&key=${encodeURIComponent(apiKey)}&comment=wb-vault`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -297,6 +340,7 @@ async function pollOneFaction(factionId, apiKey) {
         if (f.requests.length < before) {
             fulfilledAny = true;
             console.log(`[vault-requests] fulfilled ${before - f.requests.length} request(s) for ${recipientId} on $${amount}`);
+            emitVaultEvent(factionId, { action: 'fulfill', recipientId: String(recipientId), amount });
         }
     }
 
@@ -328,14 +372,58 @@ async function runPoll() {
     for (const fid of factionIds) {
         const f = load(String(fid));
         if (f.requests.length === 0) continue;
+        // Skip factions whose key has already exhausted today's quota —
+        // back-off automatically lifts at next midnight UTC.
+        const drained = drainedUntil.get(String(fid)) || 0;
+        if (Date.now() < drained) continue;
         try {
             const apiKey = await getKey(fid);
             if (!apiKey) continue;
             await pollOneFaction(fid, apiKey);
         } catch (e) {
-            console.warn(`[vault-requests] poll ${fid}:`, e.message);
+            // Daily-limit detection — Torn says "Daily read limit reached"
+            // (or sometimes wraps it in "API error"). Suspend polling for
+            // this faction until midnight UTC instead of re-erroring every
+            // 20 minutes for the rest of the day.
+            if (/Daily read limit/i.test(e.message)) {
+                const until = nextMidnightUtcMs();
+                drainedUntil.set(String(fid), until);
+                console.warn(`[vault-requests] daily limit on ${fid} — backing off until ${new Date(until).toISOString()}`);
+            } else {
+                console.warn(`[vault-requests] poll ${fid}:`, e.message);
+            }
         }
     }
+}
+
+/**
+ * App / userscript-driven fulfillment report. Lets clients tell us
+ * "this transfer happened" so we don't have to detect it via polling
+ * fundsnews. Bankers' apps fire this when they tap Send (optimistic);
+ * the factionops userscript will later fire it from a DOM scrape of
+ * the news page. Idempotent — safe to call repeatedly.
+ *
+ * Returns the count of pending requests that matched + were cleared.
+ */
+export function reportFulfillment(factionId, recipientId, amount) {
+    const fid = String(factionId);
+    const f = load(fid);
+    const before = f.requests.length;
+    const amt = Number(amount) || 0;
+    f.requests = f.requests.filter(r => {
+        if (String(r.requesterId) !== String(recipientId)) return true;
+        // Same matching rule as pollOneFaction: clear if requested amount
+        // is <= reported amount (banker may have sent more, that's fine).
+        if (r.amount > amt) return true;
+        return false;
+    });
+    const cleared = before - f.requests.length;
+    if (cleared > 0) {
+        persist(fid);
+        emitVaultEvent(fid, { action: 'fulfill', recipientId: String(recipientId), amount: amt });
+        console.log(`[vault-requests] reported fulfilled ${cleared} request(s) for ${recipientId} on $${amt}`);
+    }
+    return cleared;
 }
 
 export function stopPoller() {
@@ -346,7 +434,7 @@ export function stopPoller() {
 // Returns the requester's personal faction vault balance in dollars.
 // Uses `faction?selections=donations` which returns per-member balance.
 export async function fetchVaultBalance(factionId, memberId, apiKey) {
-    const url = `https://api.torn.com/faction/${factionId}?selections=donations&key=${encodeURIComponent(apiKey)}`;
+    const url = `https://api.torn.com/faction/${factionId}?selections=donations&key=${encodeURIComponent(apiKey)}&comment=wb-vault`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();

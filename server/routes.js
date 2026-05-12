@@ -7800,10 +7800,22 @@ router.get("/api/oc/stream/vault", async (req, res) => {
     } catch (_) { /* close handler will clean up */ }
   }, 15000);
 
-  req.on("close", () => {
+  // Idempotent cleanup. req.on('close') alone misses scenarios where
+  // the connection drops abnormally (browser tab killed mid-flight,
+  // network flap, mobile-app suspend) — listeners accumulated until
+  // we hit the 200-cap MaxListeners warning during a heavy debugging
+  // session. Wire close/error on BOTH req and res; first one wins.
+  let _cleaned = false;
+  const cleanup = () => {
+    if (_cleaned) return;
+    _cleaned = true;
     clearInterval(ka);
     unsubscribe();
-  });
+  };
+  req.on("close", cleanup);
+  req.on("error", cleanup);
+  res.on("close", cleanup);
+  res.on("error", cleanup);
 });
 
 // List pending requests for the caller's faction.
