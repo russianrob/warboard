@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.0
+// @version      3.2.1
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.0';
+    const SCRIPT_VERSION = '3.2.1';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1060,14 +1060,11 @@
                         if (typeof s === 'number') handleDetectedScope(s, 'AJAX (XHR)');
                     } catch (e) {}
                 }
-                // v3.1.99: broad XHR diagnostic + checkpoint capture.
-                // Logs every organizedCrimes URL the wrapper sees so we
-                // can confirm whether the wrapper is reached at all.
+                // v3.1.98+: checkpoint capture via XHR. Mirrors the
+                // fetch-branch logic; either path may fire depending on
+                // how Torn dispatches a given page.php POST.
                 try {
                     const url = this.responseURL || '';
-                    if (url.includes('organizedCrimes') || url.includes('sid=organizedCrimesData')) {
-                        console.log('[OC Spawn][diag] XHR seen:', url.split('?')[1] || url);
-                    }
                     if (url.includes('sid=organizedCrimesData') &&
                         (url.includes('step=animation') || url.includes('step=crimeList'))) {
                         const data = JSON.parse(this.responseText);
@@ -1118,9 +1115,6 @@
                     // `group=Completed` check never matched what Torn
                     // actually sends, which is why the data dir stayed
                     // empty for two weeks.
-                    if (url && (url.includes('organizedCrimes') || url.includes('sid=organizedCrimesData'))) {
-                        try { console.log('[OC Spawn][diag] fetch seen:', url.split('?')[1] || url); } catch {}
-                    }
                     if (url && url.includes('sid=organizedCrimesData') &&
                         (url.includes('step=animation') || url.includes('step=crimeList'))) {
                         res.clone().json().then(data => {
