@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.0-wb51
+// @version      2.73.1-wb53
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2137,9 +2137,34 @@ if (!singleton) {
     }
   }
 
+  // wb52: shared status-host finder for mini-profile injection.
+  // Returns the deepest element whose visible text starts with
+  // "Traveling" or "Returning" so both the FFS estimate banner and
+  // the travel countdown chip dock right next to the status line in
+  // the header instead of getting dumped at the bottom in
+  // `.description`. wb37's walker only matched DIRECT-child text
+  // nodes; if Torn re-wraps the status string in another span the
+  // walker silently fails. This version walks all descendants and
+  // picks the deepest matching element (avoiding the bloated
+  // container that wraps everything).
+  function _ffs_findMiniStatusHost(mini) {
+    let best = null;
+    let bestDepth = -1;
+    const all = mini.querySelectorAll('*');
+    for (const el of all) {
+      const text = (el.textContent || '').trim();
+      if (!/^(Traveling|Returning)/i.test(text)) continue;
+      // Skip bloated containers — pick something close to a leaf.
+      if (el.children.length > 6) continue;
+      let depth = 0;
+      for (let p = el; p && p !== mini; p = p.parentElement) depth++;
+      if (depth > bestDepth) { best = el; bestDepth = depth; }
+    }
+    return best;
+  }
+
   async function apply_to_mini_profile(mini) {
     // Get the user id, and the details
-    // Then in profile-container.description append a new span with the text. Win
     const player_id = get_player_id_in_element(mini);
     if (player_id) {
       const response = await get_cached_value(player_id);
@@ -2171,14 +2196,33 @@ if (!singleton) {
           const agePart = ageStr ? ` (${ageStr})` : "";
           distLine = ` | Dist: ${response.distribution_human}${agePart}`;
         }
-        const message = `FF ${ff_string} (${difficulty}) ${fresh}${distLine}`;
+        // wb52: short header form when docked next to "Traveling to X" —
+        // a full "FF X.XX (Easy) (3 days old) | Dist: ..." string would
+        // overflow the header strip. Long form is kept for the
+        // .description fallback (no space pressure there).
+        const message_short = `· FF ${ff_string} (${difficulty})`;
+        const message_long  = `FF ${ff_string} (${difficulty}) ${fresh}${distLine}`;
 
-        const description = $(mini).find(".description");
-        const desc = $("<span></span>", {
-          class: "ff-scouter-mini-ff",
-        });
-        desc.text(message);
-        $(description).append(desc);
+        const desc_span = document.createElement('span');
+        desc_span.className = 'ff-scouter-mini-ff';
+
+        const statusHost = _ffs_findMiniStatusHost(mini);
+        if (statusHost) {
+          desc_span.textContent = message_short;
+          desc_span.style.cssText =
+            'display:inline-block;margin-left:8px;color:inherit;'
+            + 'font-weight:600;font-size:11px;line-height:1.4;'
+            + 'vertical-align:middle;white-space:nowrap;opacity:0.95;';
+          desc_span.title = message_long; // hover/long-press shows full string
+          statusHost.appendChild(desc_span);
+        } else {
+          // Non-traveling player: no status header to dock to. Fall
+          // back to the original .description placement so the banner
+          // is still visible.
+          desc_span.textContent = message_long;
+          const description = $(mini).find(".description");
+          $(description).append(desc_span);
+        }
       }
     }
   }
@@ -3048,22 +3092,14 @@ if (!singleton) {
         const remaining = until * 1000 - Date.now();
         const countdownText = ffs_formatCountdown(remaining);
         if (!chip) {
-          // Walk subtree once on first paint to find the status line
-          // that contains "Traveling to X" or "Returning to Torn from X".
-          // Falls back to .description if no match.
-          let host = null;
-          const walker = mini.querySelectorAll("*");
-          for (const el of walker) {
-            for (const child of el.childNodes) {
-              if (child.nodeType === 3
-                  && /^\s*(Traveling|Returning)/i.test(child.textContent)) {
-                host = el;
-                break;
-              }
-            }
-            if (host) break;
-          }
-          if (!host) host = mini.querySelector(".description") || mini;
+          // wb52: use the shared _ffs_findMiniStatusHost helper. The
+          // old walker only matched DIRECT-child text nodes and broke
+          // when Torn re-wrapped the status string, dropping the chip
+          // into .description (the bottom of the card). The new helper
+          // walks all descendants and picks the deepest match.
+          const host = _ffs_findMiniStatusHost(mini)
+                    || mini.querySelector(".description")
+                    || mini;
           chip = document.createElement("span");
           chip.className = "ffs-mini-countdown";
           // color:inherit so the chip picks up the surrounding "Traveling
