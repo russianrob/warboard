@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.1-wb55
+// @version      2.73.1-wb56
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2218,33 +2218,15 @@ if (!singleton) {
           const agePart = ageStr ? ` (${ageStr})` : "";
           distLine = ` | Dist: ${response.distribution_human}${agePart}`;
         }
-        // wb52: short header form when docked next to "Traveling to X" —
-        // a full "FF X.XX (Easy) (3 days old) | Dist: ..." string would
-        // overflow the header strip. Long form is kept for the
-        // .description fallback (no space pressure there).
-        const message_short = `· FF ${ff_string} (${difficulty})`;
-        const message_long  = `FF ${ff_string} (${difficulty}) ${fresh}${distLine}`;
-
-        const desc_span = document.createElement('span');
-        desc_span.className = 'ff-scouter-mini-ff';
-
-        const statusHost = _ffs_findMiniStatusHost(mini);
-        if (statusHost) {
-          desc_span.textContent = message_short;
-          desc_span.style.cssText =
-            'display:inline-block;margin-left:8px;color:inherit;'
-            + 'font-weight:600;font-size:11px;line-height:1.4;'
-            + 'vertical-align:middle;white-space:nowrap;opacity:0.95;';
-          desc_span.title = message_long; // hover/long-press shows full string
-          statusHost.appendChild(desc_span);
-        } else {
-          // Non-traveling player: no status header to dock to. Fall
-          // back to the original .description placement so the banner
-          // is still visible.
-          desc_span.textContent = message_long;
-          const description = $(mini).find(".description");
-          $(description).append(desc_span);
-        }
+        // wb56: FF score banner stays in .description (bottom of card,
+        // its original home). User confirmed only the FLIGHT TIMER
+        // belongs in the header next to "Traveling to X". The wb52-54
+        // attempt to dock the FF score in the header was a misread.
+        const message = `FF ${ff_string} (${difficulty}) ${fresh}${distLine}`;
+        const description = $(mini).find(".description");
+        const desc = $("<span></span>", { class: "ff-scouter-mini-ff" });
+        desc.text(message);
+        $(description).append(desc);
       }
     }
   }
