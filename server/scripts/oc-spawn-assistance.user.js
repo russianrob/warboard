@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.96
+// @version      3.1.97
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -266,7 +266,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.96';
+    const SCRIPT_VERSION = '3.1.97';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1063,30 +1063,37 @@
                             if (typeof s === 'number') handleDetectedScope(s, 'AJAX (Fetch)');
                         }).catch(() => {});
                     }
-                    // v3.1.94: per-checkpoint attribution. Torn's page-
-                    // level POST to organizedCrimesData includes the
-                    // scenario dialogue with [C\d+-P/F] markers — the
-                    // ONLY place per-checkpoint outcomes are exposed
-                    // (public /v2/faction API only returns aggregate
-                    // checkpoint_pass_rate per slot). When the user
-                    // opens the Completed tab, intercept + parse +
-                    // upload to warboard so the byCheckpoint heatmap
-                    // populates in Member Projector + Reliability cards.
-                    if (url && url.includes('sid=organizedCrimesData') && url.includes('step=crimeList')) {
-                        const config = args[1];
-                        let isCompleted = false;
-                        if (config?.body instanceof FormData) {
-                            isCompleted = config.body.get('group') === 'Completed';
-                        } else if (config?.body) {
-                            isCompleted = String(config.body).includes('group=Completed');
-                        }
-                        if (isCompleted) {
-                            res.clone().json().then(data => {
-                                if (data?.success && Array.isArray(data.data)) {
-                                    captureCompletedScenarios(data.data);
-                                }
-                            }).catch(() => {});
-                        }
+                    // v3.1.97: per-checkpoint attribution. Two Torn
+                    // endpoints carry the data we need:
+                    //   step=animation — fired when the user opens a
+                    //     specific completed crime; response carries the
+                    //     full scenario.scenes[].dialogues[] with
+                    //     `[A<n>-C<m>P|F]` slugs and `userId-<id>`
+                    //     placeholders in descriptions (most reliable
+                    //     attribution source — exact IDs, not name match).
+                    //   step=crimeList — list view; sometimes carries
+                    //     scenario detail too. Match it loosely; parser
+                    //     no-ops on entries that lack dialogue data.
+                    //
+                    // We don't filter on body fields any more — the old
+                    // `group=Completed` check never matched what Torn
+                    // actually sends, which is why the data dir stayed
+                    // empty for two weeks.
+                    if (url && url.includes('sid=organizedCrimesData') &&
+                        (url.includes('step=animation') || url.includes('step=crimeList'))) {
+                        res.clone().json().then(data => {
+                            if (!data?.success) return;
+                            const scenarios = Array.isArray(data.data) ? data.data
+                                            : (data.data && typeof data.data === 'object') ? [data.data]
+                                            : null;
+                            if (!scenarios) return;
+                            try {
+                                console.log('[OC Spawn][checkpoints] intercepted',
+                                            url.includes('step=animation') ? 'animation' : 'crimeList',
+                                            scenarios.length, 'scenario(s)');
+                            } catch {}
+                            captureCompletedScenarios(scenarios);
+                        }).catch(() => {});
                     }
                 } catch (e) {}
             }).catch(() => {}); // never swallow the original rejection
@@ -1125,49 +1132,78 @@
     /**
      * Parse one Torn page-level scenario object into the structured
      * shape the warboard server expects. Returns null if the scenario
-     * has no parseable checkpoint markers.
+     * has no parseable checkpoint outcomes.
      *
-     * Attribution strategy: each dialogue's `description` text is
-     * scanned for any player name appearing in the scenario's
-     * playerSlots. First match wins. If no match (e.g. dialogue
-     * doesn't name the responsible player), the checkpoint is dropped
-     * — better to record nothing than mis-attribute.
+     * Real-world response shape (verified 2026-05-12 from animation
+     * endpoint):
+     *   { ID, status, playerSlots: [{key, name (role), player: {ID, name}}],
+     *     scenario: { name, scenes: [{ slug, dialogues: [{ id, description }] }] } }
+     *
+     * Dialogue id format: `[A<act>-C<cp>]` (setup/event), `[A<act>-C<cp>P]`
+     * (pass), `[A<act>-C<cp>F]` (fail). Descriptions reference players
+     * via `userId-<numericID>` placeholders — exact ID, no name parsing.
+     *
+     * Attribution: outcome dialogue's first userId, fallback to the
+     * setup dialogue's first userId for the same checkpoint. If a
+     * checkpoint references a player not in this OC's slots, skip
+     * them. If multiple userIds appear in one dialogue, ALL of them
+     * get a record so collaborative checkpoints credit/blame each
+     * actor.
+     *
+     * Checkpoint numbering is chronological across acts (server-side
+     * key format is `C${n}` and the Coaching tab displays C1/C2/C3...
+     * — preserves the existing schema).
      */
     function parseScenario(scenario) {
         if (!scenario || !scenario.ID) return null;
         const slots = Array.isArray(scenario.playerSlots) ? scenario.playerSlots : [];
-        const playersByName = new Map();
+        const roleByPlayerId = new Map();
         for (const s of slots) {
             const pid = s?.player?.ID;
-            const name = s?.player?.name;
-            if (!pid || !name) continue;
-            playersByName.set(String(name).toLowerCase(), {
-                playerId: String(pid),
-                role: String(s.name || s.key || ''),
-            });
+            if (!pid) continue;
+            roleByPlayerId.set(String(pid), String(s.name || s.key || ''));
         }
-        if (playersByName.size === 0) return null;
+        if (roleByPlayerId.size === 0) return null;
 
         const checkpoints = [];
+        let cpCounter = 0;
+        const setupActorsBySlug = new Map();
+
         const scenes = Array.isArray(scenario?.scenario?.scenes) ? scenario.scenario.scenes : [];
         for (const scene of scenes) {
             const dialogues = Array.isArray(scene?.dialogues) ? scene.dialogues : [];
             for (const d of dialogues) {
-                const m = String(d?.id || '').match(/^\[C(\d+)-([PF])\]$/);
-                if (!m) continue;
-                const checkpoint = parseInt(m[1], 10);
-                const outcome = m[2];
-                const desc = String(d?.description || '').toLowerCase();
-                let attributed = null;
-                for (const [nameLower, who] of playersByName) {
-                    if (desc.includes(nameLower)) { attributed = who; break; }
+                const slug = String(d?.id || d?.slug || '').replace(/^\[|\]$/g, '');
+                const desc = String(d?.description || '');
+                const ids = [...desc.matchAll(/userId-(\d+)/g)].map(m => m[1]);
+
+                const setupMatch = slug.match(/^A\d+-C\d+$/);
+                const outcomeMatch = slug.match(/^(A\d+-C\d+)([PF])$/);
+
+                if (setupMatch) {
+                    if (ids.length) setupActorsBySlug.set(slug, ids);
+                    continue;
                 }
-                if (!attributed) continue;
-                checkpoints.push({
-                    checkpoint, outcome,
-                    playerId: attributed.playerId,
-                    role: attributed.role,
-                });
+                if (!outcomeMatch) continue;
+
+                const baseSlug = outcomeMatch[1];
+                const outcome = outcomeMatch[2];
+                cpCounter += 1;
+
+                let actors = ids;
+                if (!actors.length) actors = setupActorsBySlug.get(baseSlug) || [];
+                if (!actors.length) continue;
+
+                for (const pid of actors) {
+                    const role = roleByPlayerId.get(pid);
+                    if (!role) continue;
+                    checkpoints.push({
+                        checkpoint: cpCounter,
+                        outcome,
+                        playerId: pid,
+                        role,
+                    });
+                }
             }
         }
         if (checkpoints.length === 0) return null;
