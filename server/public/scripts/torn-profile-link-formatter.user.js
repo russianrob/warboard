@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.26
+// @version      3.6.27
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -977,12 +977,14 @@
             // ----------------------------------------------------------------
 
             for (const { row, link, id } of validRows) {
-                // v3.6.26: rows often contain an icon-only profile link
-                // (empty textContent) before the name-bearing link. Trying
-                // only the first link drops every member → 92/92 ❓. Fall
-                // back to scanning all XID-links in the row for one with
-                // non-empty cleaned text.
+                // v3.6.27: chained name extraction. Torn's React-mangled DOM
+                // can put the name as an icon-link's empty text, in a sibling
+                // span/div, or as a text node — try every shape before giving
+                // up. Final fallback uses User_<id> so the copy ALWAYS yields
+                // output (degraded but recoverable from the IDs).
                 let name = getCleanLinkText(link);
+
+                // A: alt XID links in the row.
                 if (!name) {
                     const _altLinks = row.querySelectorAll('a[href*="profiles.php"][href*="XID="]');
                     for (const _alt of _altLinks) {
@@ -991,17 +993,55 @@
                         if (_altName) { name = _altName; break; }
                     }
                 }
+
+                // B: name-shaped element in the row (Torn often uses
+                // class*="name"/"nick"/"player").
                 if (!name) {
-                    // Last-ditch: scrape the row text minus the FFS pill.
+                    const _nameEl = row.querySelector('[class*="name" i]:not(a):not(img):not(svg), [class*="nick" i]:not(a):not(img):not(svg), [class*="player" i]:not(a):not(img):not(svg)');
+                    if (_nameEl) {
+                        const _t = (_nameEl.textContent || '').trim().replace(/\s*\d+\.\d+\s*[KMBTQkmbtq]\s*$/, '').trim();
+                        if (_t && !/^\d+$/.test(_t)) name = _t;
+                    }
+                }
+
+                // C: img alt attribute (Torn avatars often `alt="PlayerName"`).
+                if (!name) {
+                    const _img = row.querySelector('img[alt]');
+                    if (_img) {
+                        const _alt = (_img.getAttribute('alt') || '').trim();
+                        if (_alt && _alt.length > 1 && !/^https?:/.test(_alt)) name = _alt;
+                    }
+                }
+
+                // D: scrape row text minus known noise; pick first
+                // wordy token that isn't a common status keyword.
+                if (!name) {
                     try {
                         const _rc = row.cloneNode(true);
                         _rc.querySelectorAll('[class*="ff-scouter"], .ffs-mini-countdown, [class*="ffscouter"], svg, img').forEach(n => n.remove());
-                        const _rt = (_rc.textContent || '').trim().replace(/\s*\d+\.\d+\s*[KMBTQkmbtq]\s*$/, '').trim();
-                        // First word-ish token that isn't pure digits (avoid level/xanax counts).
-                        const _m = _rt.match(/[A-Za-z][\w-]*/);
-                        if (_m) name = _m[0];
+                        const _rt = (_rc.textContent || '').replace(/\s*\d+\.\d+\s*[KMBTQkmbtq]\s*/gi, ' ').trim();
+                        const _tokens = _rt.match(/[A-Za-z][\w-]{2,}/g) || [];
+                        const _skip = new Set(['Online','Offline','Idle','Active','Okay','Hospital','Jail','Federal','Lvl','Level','Status','Last','Action','Min','Hour','Day','Ago','Traveling','Abroad']);
+                        for (const _t of _tokens) {
+                            if (!_skip.has(_t)) { name = _t; break; }
+                        }
                     } catch (_e) {}
                 }
+
+                // E: ID-stub fallback. Also dump the FIRST failing row to
+                // console so we can write a real selector if this fires.
+                if (!name) {
+                    try {
+                        if (!window._gnscDumpedRow) {
+                            window._gnscDumpedRow = true;
+                            // eslint-disable-next-line no-console
+                            console.warn('[GNSC] name extraction failed; row HTML follows. Paste this to RussianRob to fix.');
+                            console.warn(row.outerHTML.slice(0, 1500));
+                        }
+                    } catch (_e) {}
+                    name = `User_${id}`;
+                }
+
                 name = stripBspPrefix(name);
 
                 if (!name) {
