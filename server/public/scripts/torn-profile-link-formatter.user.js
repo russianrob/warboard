@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.25
+// @version      3.6.26
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -977,9 +977,33 @@
             // ----------------------------------------------------------------
 
             for (const { row, link, id } of validRows) {
+                // v3.6.26: rows often contain an icon-only profile link
+                // (empty textContent) before the name-bearing link. Trying
+                // only the first link drops every member → 92/92 ❓. Fall
+                // back to scanning all XID-links in the row for one with
+                // non-empty cleaned text.
                 let name = getCleanLinkText(link);
+                if (!name) {
+                    const _altLinks = row.querySelectorAll('a[href*="profiles.php"][href*="XID="]');
+                    for (const _alt of _altLinks) {
+                        if (_alt === link) continue;
+                        const _altName = getCleanLinkText(_alt);
+                        if (_altName) { name = _altName; break; }
+                    }
+                }
+                if (!name) {
+                    // Last-ditch: scrape the row text minus the FFS pill.
+                    try {
+                        const _rc = row.cloneNode(true);
+                        _rc.querySelectorAll('[class*="ff-scouter"], .ffs-mini-countdown, [class*="ffscouter"], svg, img').forEach(n => n.remove());
+                        const _rt = (_rc.textContent || '').trim().replace(/\s*\d+\.\d+\s*[KMBTQkmbtq]\s*$/, '').trim();
+                        // First word-ish token that isn't pure digits (avoid level/xanax counts).
+                        const _m = _rt.match(/[A-Za-z][\w-]*/);
+                        if (_m) name = _m[0];
+                    } catch (_e) {}
+                }
                 name = stripBspPrefix(name);
-                
+
                 if (!name) {
                     processed++;
                     if (button.isConnected) button.textContent = `${processed}/${totalMembers}`;
