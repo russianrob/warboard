@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.27
+// @version      3.6.28
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -977,12 +977,28 @@
             // ----------------------------------------------------------------
 
             for (const { row, link, id } of validRows) {
-                // v3.6.27: chained name extraction. Torn's React-mangled DOM
-                // can put the name as an icon-link's empty text, in a sibling
-                // span/div, or as a text node — try every shape before giving
-                // up. Final fallback uses User_<id> so the copy ALWAYS yields
-                // output (degraded but recoverable from the IDs).
+                // v3.6.28: chained extraction with shared case-insensitive
+                // status skiplist. v3.6.27's fallback C picked up status
+                // <img alt="offline">; v3.6.28 routes every candidate
+                // through _isBadName so status icons / labels can't slip
+                // through any fallback.
+                const _statusSkip = new Set([
+                    'online','offline','idle','active','okay','hospital','jail',
+                    'federal','traveling','abroad','status','away','busy',
+                    'lvl','level','min','hour','hours','day','days','ago','mins',
+                    'min.','hr','hrs','sec','secs',
+                ]);
+                const _isBadName = (s) => {
+                    if (!s) return true;
+                    const t = String(s).trim();
+                    if (!t || t.length < 2) return true;
+                    if (/^\d+$/.test(t)) return true;
+                    if (_statusSkip.has(t.toLowerCase())) return true;
+                    return false;
+                };
+
                 let name = getCleanLinkText(link);
+                if (_isBadName(name)) name = '';
 
                 // A: alt XID links in the row.
                 if (!name) {
@@ -990,53 +1006,45 @@
                     for (const _alt of _altLinks) {
                         if (_alt === link) continue;
                         const _altName = getCleanLinkText(_alt);
-                        if (_altName) { name = _altName; break; }
+                        if (!_isBadName(_altName)) { name = _altName; break; }
                     }
                 }
 
                 // B: name-shaped element in the row (Torn often uses
-                // class*="name"/"nick"/"player").
+                // class containing "name"/"nick"/"player").
                 if (!name) {
-                    const _nameEl = row.querySelector('[class*="name" i]:not(a):not(img):not(svg), [class*="nick" i]:not(a):not(img):not(svg), [class*="player" i]:not(a):not(img):not(svg)');
-                    if (_nameEl) {
-                        const _t = (_nameEl.textContent || '').trim().replace(/\s*\d+\.\d+\s*[KMBTQkmbtq]\s*$/, '').trim();
-                        if (_t && !/^\d+$/.test(_t)) name = _t;
+                    const _candidates = row.querySelectorAll('[class*="name" i]:not(a):not(img):not(svg), [class*="nick" i]:not(a):not(img):not(svg), [class*="player" i]:not(a):not(img):not(svg)');
+                    for (const _c of _candidates) {
+                        const _t = (_c.textContent || '').trim().replace(/\s*\d+\.\d+\s*[KMBTQkmbtq]\s*$/, '').trim();
+                        if (!_isBadName(_t)) { name = _t; break; }
                     }
                 }
 
-                // C: img alt attribute (Torn avatars often `alt="PlayerName"`).
-                if (!name) {
-                    const _img = row.querySelector('img[alt]');
-                    if (_img) {
-                        const _alt = (_img.getAttribute('alt') || '').trim();
-                        if (_alt && _alt.length > 1 && !/^https?:/.test(_alt)) name = _alt;
-                    }
-                }
-
-                // D: scrape row text minus known noise; pick first
-                // wordy token that isn't a common status keyword.
+                // C: scrape row text minus known noise; pick first
+                // wordy token that isn't a status keyword. Status icons
+                // get stripped before tokenising so their alt text can't
+                // leak through.
                 if (!name) {
                     try {
                         const _rc = row.cloneNode(true);
-                        _rc.querySelectorAll('[class*="ff-scouter"], .ffs-mini-countdown, [class*="ffscouter"], svg, img').forEach(n => n.remove());
+                        _rc.querySelectorAll('[class*="ff-scouter"], .ffs-mini-countdown, [class*="ffscouter"], svg, img, [class*="status" i], [class*="icon" i]').forEach(n => n.remove());
                         const _rt = (_rc.textContent || '').replace(/\s*\d+\.\d+\s*[KMBTQkmbtq]\s*/gi, ' ').trim();
                         const _tokens = _rt.match(/[A-Za-z][\w-]{2,}/g) || [];
-                        const _skip = new Set(['Online','Offline','Idle','Active','Okay','Hospital','Jail','Federal','Lvl','Level','Status','Last','Action','Min','Hour','Day','Ago','Traveling','Abroad']);
                         for (const _t of _tokens) {
-                            if (!_skip.has(_t)) { name = _t; break; }
+                            if (!_isBadName(_t)) { name = _t; break; }
                         }
                     } catch (_e) {}
                 }
 
-                // E: ID-stub fallback. Also dump the FIRST failing row to
-                // console so we can write a real selector if this fires.
+                // D: ID-stub fallback. Dump the FIRST failing row so we
+                // can target the real selector in the next bump.
                 if (!name) {
                     try {
                         if (!window._gnscDumpedRow) {
                             window._gnscDumpedRow = true;
                             // eslint-disable-next-line no-console
-                            console.warn('[GNSC] name extraction failed; row HTML follows. Paste this to RussianRob to fix.');
-                            console.warn(row.outerHTML.slice(0, 1500));
+                            console.warn('[GNSC] name extraction failed for XID=' + id + '; row HTML follows. Paste this to RussianRob to fix.');
+                            console.warn(row.outerHTML.slice(0, 2000));
                         }
                     } catch (_e) {}
                     name = `User_${id}`;
