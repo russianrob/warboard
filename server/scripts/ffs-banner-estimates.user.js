@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.1-wb53
+// @version      2.73.1-wb54
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2137,24 +2137,39 @@ if (!singleton) {
     }
   }
 
-  // wb52: shared status-host finder for mini-profile injection.
-  // Returns the deepest element whose visible text starts with
-  // "Traveling" or "Returning" so both the FFS estimate banner and
-  // the travel countdown chip dock right next to the status line in
-  // the header instead of getting dumped at the bottom in
-  // `.description`. wb37's walker only matched DIRECT-child text
-  // nodes; if Torn re-wraps the status string in another span the
-  // walker silently fails. This version walks all descendants and
-  // picks the deepest matching element (avoiding the bloated
-  // container that wraps everything).
+  // wb53: shared status-host finder for mini-profile injection.
+  // Returns the element next to which the FFS estimate banner and
+  // the travel countdown chip should dock. wb52's text-content
+  // walker missed everything because the visible string is just
+  // "Switzerland to Torn" — the word "Traveling" only appears in the
+  // .main-desc element's aria-label. Verified DOM (2026-05-12):
+  //   <div class="profile-container travelling from switzerland airstrip">
+  //     <div class="description">
+  //       <div class="desc-wrap">
+  //         <span class="main-desc" aria-label="Traveling from ...">
+  //           <span aria-hidden="true">Switzerland to Torn ...</span>
+  //         </span>
+  //       </div>
+  //     </div>
+  //   </div>
   function _ffs_findMiniStatusHost(mini) {
-    let best = null;
-    let bestDepth = -1;
-    const all = mini.querySelectorAll('*');
-    for (const el of all) {
+    // 1. Direct hit: the .main-desc span inside a travelling container.
+    let host = mini.querySelector('.profile-container.travelling .main-desc')
+            || mini.querySelector('.profile-container.returning .main-desc');
+    if (host) return host;
+    // 2. Looser: any element whose aria-label starts with Traveling /
+    //    Returning. Covers DOM variants where the wrapper class drops.
+    const labelled = mini.querySelectorAll('[aria-label]');
+    for (const el of labelled) {
+      const lbl = (el.getAttribute('aria-label') || '').trim();
+      if (/^(Traveling|Returning)/i.test(lbl)) return el;
+    }
+    // 3. Last resort: visible-text walker (legacy wb52 path) for any
+    //    future variant that puts the text directly in the DOM.
+    let best = null, bestDepth = -1;
+    for (const el of mini.querySelectorAll('*')) {
       const text = (el.textContent || '').trim();
       if (!/^(Traveling|Returning)/i.test(text)) continue;
-      // Skip bloated containers — pick something close to a leaf.
       if (el.children.length > 6) continue;
       let depth = 0;
       for (let p = el; p && p !== mini; p = p.parentElement) depth++;
