@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.1.98
+// @version      3.1.99
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -266,7 +266,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.1.98';
+    const SCRIPT_VERSION = '3.1.99';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1045,12 +1045,14 @@
                         if (typeof s === 'number') handleDetectedScope(s, 'AJAX (XHR)');
                     } catch (e) {}
                 }
-                // v3.1.98: same checkpoint capture as the fetch branch.
-                // Torn may use XHR for the page.php POSTs that carry the
-                // animation / crimeList payload — the fetch-only matcher
-                // in v3.1.97 missed these and the user saw no telemetry.
+                // v3.1.99: broad XHR diagnostic + checkpoint capture.
+                // Logs every organizedCrimes URL the wrapper sees so we
+                // can confirm whether the wrapper is reached at all.
                 try {
                     const url = this.responseURL || '';
+                    if (url.includes('organizedCrimes') || url.includes('sid=organizedCrimesData')) {
+                        console.log('[OC Spawn][diag] XHR seen:', url.split('?')[1] || url);
+                    }
                     if (url.includes('sid=organizedCrimesData') &&
                         (url.includes('step=animation') || url.includes('step=crimeList'))) {
                         const data = JSON.parse(this.responseText);
@@ -1101,6 +1103,9 @@
                     // `group=Completed` check never matched what Torn
                     // actually sends, which is why the data dir stayed
                     // empty for two weeks.
+                    if (url && (url.includes('organizedCrimes') || url.includes('sid=organizedCrimesData'))) {
+                        try { console.log('[OC Spawn][diag] fetch seen:', url.split('?')[1] || url); } catch {}
+                    }
                     if (url && url.includes('sid=organizedCrimesData') &&
                         (url.includes('step=animation') || url.includes('step=crimeList'))) {
                         res.clone().json().then(data => {
@@ -1110,7 +1115,7 @@
                                             : null;
                             if (!scenarios) return;
                             try {
-                                console.log('[OC Spawn][checkpoints] intercepted',
+                                console.log('[OC Spawn][checkpoints] intercepted (fetch)',
                                             url.includes('step=animation') ? 'animation' : 'crimeList',
                                             scenarios.length, 'scenario(s)');
                             } catch {}
@@ -5391,19 +5396,19 @@
             const rateColor = r.rate >= 80 ? '#74c69d' : r.rate >= 60 ? '#f4a261' : '#ef4444';
             const gapColor  = r.gap >= 30 ? '#ef4444' : r.gap >= 15 ? '#f4a261' : '#9ca3af';
             html += `<tr class="oc-coach-row" data-row-idx="${i}" style="cursor:pointer;">
-                <td><span class="oc-member-name">${escapeHtml(r.memberName)}</span> <span class="oc-member-id">[${escapeHtml(r.uid)}]</span></td>
-                <td>${escapeHtml(r.oc)}</td>
-                <td style="color:#9ca3af;">${escapeHtml(r.role)}</td>
-                <td style="text-align:center;color:#d1d5db;">${escapeHtml(r.checkpoint)}</td>
+                <td><span class="oc-member-name">${met_escapeHtml(r.memberName)}</span> <span class="oc-member-id">[${met_escapeHtml(r.uid)}]</span></td>
+                <td>${met_escapeHtml(r.oc)}</td>
+                <td style="color:#9ca3af;">${met_escapeHtml(r.role)}</td>
+                <td style="text-align:center;color:#d1d5db;">${met_escapeHtml(r.checkpoint)}</td>
                 <td style="text-align:right;color:${rateColor};font-weight:600;">${r.rate}%</td>
                 <td style="text-align:right;color:#9ca3af;">${r.factionRate}%</td>
                 <td style="text-align:right;color:${gapColor};font-weight:700;">−${r.gap}%</td>
                 <td style="text-align:right;color:#6b7280;font-size:10px;">${r.samples}/${r.factionSamples}</td>
-                <td style="white-space:nowrap;"><span style="font-size:11px;">${r.cause.icon}</span> <span style="color:#d1d5db;">${escapeHtml(r.cause.label)}</span></td>
+                <td style="white-space:nowrap;"><span style="font-size:11px;">${r.cause.icon}</span> <span style="color:#d1d5db;">${met_escapeHtml(r.cause.label)}</span></td>
             </tr>
             <tr class="oc-coach-detail" data-detail-idx="${i}" style="display:none;">
                 <td colspan="9" style="padding:6px 12px;background:rgba(255,255,255,0.02);color:#9ca3af;font-size:11px;line-height:1.5;border-bottom:1px solid #1a2e20;">
-                    <b style="color:#d1d5db;">${r.cause.icon} ${escapeHtml(r.cause.label)}:</b> ${escapeHtml(r.cause.detail)}
+                    <b style="color:#d1d5db;">${r.cause.icon} ${met_escapeHtml(r.cause.label)}:</b> ${met_escapeHtml(r.cause.detail)}
                 </td>
             </tr>`;
         }
