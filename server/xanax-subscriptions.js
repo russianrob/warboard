@@ -71,6 +71,11 @@ function parserSelfTest() {
         { text: "<a href='profiles.php?XID=12345'>Bob</a> sent you 2 x Xanax.",              expectXid: '12345', expectQty: 2 },
         { text: "You were sent 2x Xanax from <a href='profiles.php?XID=2194491'>Ikouze</a>.", expectXid: '2194491', expectQty: 2 },
         { text: "<a href='profiles.php?XID=999'>Alice</a> sent you 20 x Xanax.",              expectXid: '999', expectQty: 20 },
+        // Fuzzy-quantity form (Torn omits count). qty=0 → silently skipped
+        // by the tier check, no WARN. Doubled-URL is a Torn-side rendering
+        // bug; the loose XID=(\d+) regex grabs the right ID anyway.
+        { text: "You were sent some Xanax from <a href = http://www.torn.com/http://www.torn.com/profiles.php?XID=2221019>RacistPigeon</a>", expectXid: '2221019', expectQty: 0 },
+        { text: "You were sent a few Xanax from <a href='profiles.php?XID=555'>Foo</a>.", expectXid: '555', expectQty: 0 },
     ];
     let failed = 0;
     for (const f of fixtures) {
@@ -99,7 +104,7 @@ function saveState() {
 // ── Torn API ──────────────────────────────────────────────────────────────
 
 async function fetchEvents() {
-    const url  = `https://api.torn.com/user/?selections=events&key=${OWNER_API_KEY}`;
+    const url  = `https://api.torn.com/user/?selections=events&key=${OWNER_API_KEY}&comment=wb-xanax`;
     try { (await import('./key-usage-log.js')).logCall(OWNER_API_KEY, 'user?selections=events', 'xanax-subs:poll'); } catch (_) {}
     const res  = await fetch(url);
     if (!res.ok) throw new Error(`Torn API HTTP ${res.status}`);
@@ -112,7 +117,7 @@ async function fetchPlayerFaction(playerId) {
     // Use selections=profile — `basic` does not return faction data for other
     // users, which caused legitimate senders (long-standing faction members)
     // to be reported as factionless and have their payment skipped.
-    const url  = `https://api.torn.com/user/${playerId}?selections=profile&key=${OWNER_API_KEY}`;
+    const url  = `https://api.torn.com/user/${playerId}?selections=profile&key=${OWNER_API_KEY}&comment=wb-xanax`;
     try { (await import('./key-usage-log.js')).logCall(OWNER_API_KEY, `user/${playerId}?selections=profile`, 'xanax-subs:lookup'); } catch (_) {}
     const res  = await fetch(url);
     if (!res.ok) throw new Error(`Torn API HTTP ${res.status}`);
@@ -130,22 +135,35 @@ async function fetchPlayerFaction(playerId) {
 
 // ── Event parsing ─────────────────────────────────────────────────────────
 //
-// Torn event HTML can take either of two forms depending on send type:
+// Torn event HTML can take three forms:
 //   "<a href='profiles.php?XID=12345'>PlayerName</a> sent you 2 x Xanax."
 //   "You were sent 2x Xanax from <a href='profiles.php?XID=12345'>PlayerName</a>."
-// The old regex only matched the first form, silently dropping the second
-// (which is the form Torn actually uses for item-give sends). Fix matches both.
+//   "You were sent some Xanax from <a href='profiles.php?XID=12345'>PlayerName</a>."
+//   (also seen with a doubled href, http://www.torn.com/http://www.torn.com/...
+//   — looks like a Torn-side bug; the loose XID=(\d+) regex handles it fine)
+//
+// Numeric forms parse to qty = parseInt. The fuzzy "some/few/several/many"
+// form parses to qty = 0 so the downstream tier check (qty >= XANAX_TRIAL_QTY)
+// silently skips it instead of tripping the unparsed-event WARN. Returning a
+// null qty would defeat the WARN guard's purpose, which is to alert ONLY on
+// truly novel formats Torn introduces.
 
 function parseXanaxSend(eventText) {
-    const idMatch    = eventText.match(/XID=(\d+)/i);
+    const idMatch = eventText.match(/XID=(\d+)/i);
     if (!idMatch) return null;
-    const senderId   = idMatch[1];
+    const senderId = idMatch[1];
 
-    const xanaxMatch = eventText.match(/(?:sent you|you were sent)\s+(\d+)\s*(?:x\s*)?Xanax/i);
-    if (!xanaxMatch) return null;
+    const numericMatch = eventText.match(/(?:sent you|you were sent)\s+(\d+)\s*(?:x\s*)?Xanax/i);
+    if (numericMatch) {
+        return { senderId, qty: parseInt(numericMatch[1], 10) };
+    }
 
-    const qty = parseInt(xanaxMatch[1], 10);
-    return { senderId, qty };
+    // Fuzzy quantity — Torn occasionally hides the count.
+    if (/(?:sent you|you were sent)\s+(?:some|a\s+few|several|many|lots\s+of)\s+(?:x\s*)?Xanax/i.test(eventText)) {
+        return { senderId, qty: 0 };
+    }
+
+    return null;
 }
 
 // ── Poll ──────────────────────────────────────────────────────────────────
