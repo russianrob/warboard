@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.28
+// @version      3.6.29
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -904,22 +904,14 @@
 
             const sideRoot = warRoot.querySelector(sideSelector) || warRoot;
 
-            // v3.6.25: React-immune row collection. Torn ships hashed CSS-
-            // module class names (li.memberRow___ABCD) that change between
-            // deploys, so any literal-class match is fragile and silently
-            // falls to zero rows → 0/0 progress + ❓ failure. Instead:
-            // find every profile-XID link in the side root, walk up to its
-            // closest <li> (or other row container), dedupe. Works
-            // regardless of how Torn names the wrapping element.
-            const _memberLinks = sideRoot.querySelectorAll('a[href*="profiles.php"][href*="XID="]');
-            const _seenRows = new Set();
-            const memberRows = [];
-            for (const _link of _memberLinks) {
-                const _row = _link.closest('li, tr, [class*="row" i], [class*="member" i]') || _link.parentElement;
-                if (!_row || _seenRows.has(_row)) continue;
-                _seenRows.add(_row);
-                memberRows.push(_row);
-            }
+            // v3.6.29: revert to v3.6.22's row selector — it worked. The
+            // v3.6.25 link-walker rewrite was overcomplicated and the
+            // chained fallbacks in v3.6.26-28 kept misclassifying status
+            // icons / labels as names. Only behavioral change vs v3.6.22:
+            // getCleanLinkText() strips the FFS-injected stat pill.
+            const memberRows = sideRoot.querySelectorAll(
+                'li.member, li.enemy, li.your, li.table-row, li[class*="memberRow"], li[class*="member-row"]'
+            );
 
             const settings = loadSettings();
             const lines = [];
@@ -977,79 +969,10 @@
             // ----------------------------------------------------------------
 
             for (const { row, link, id } of validRows) {
-                // v3.6.28: chained extraction with shared case-insensitive
-                // status skiplist. v3.6.27's fallback C picked up status
-                // <img alt="offline">; v3.6.28 routes every candidate
-                // through _isBadName so status icons / labels can't slip
-                // through any fallback.
-                const _statusSkip = new Set([
-                    'online','offline','idle','active','okay','hospital','jail',
-                    'federal','traveling','abroad','status','away','busy',
-                    'lvl','level','min','hour','hours','day','days','ago','mins',
-                    'min.','hr','hrs','sec','secs',
-                ]);
-                const _isBadName = (s) => {
-                    if (!s) return true;
-                    const t = String(s).trim();
-                    if (!t || t.length < 2) return true;
-                    if (/^\d+$/.test(t)) return true;
-                    if (_statusSkip.has(t.toLowerCase())) return true;
-                    return false;
-                };
-
+                // v3.6.29: v3.6.22's simple link.textContent extraction,
+                // wrapped in getCleanLinkText() to strip the FFS pill (the
+                // only known issue that motivated the v3.6.24 change).
                 let name = getCleanLinkText(link);
-                if (_isBadName(name)) name = '';
-
-                // A: alt XID links in the row.
-                if (!name) {
-                    const _altLinks = row.querySelectorAll('a[href*="profiles.php"][href*="XID="]');
-                    for (const _alt of _altLinks) {
-                        if (_alt === link) continue;
-                        const _altName = getCleanLinkText(_alt);
-                        if (!_isBadName(_altName)) { name = _altName; break; }
-                    }
-                }
-
-                // B: name-shaped element in the row (Torn often uses
-                // class containing "name"/"nick"/"player").
-                if (!name) {
-                    const _candidates = row.querySelectorAll('[class*="name" i]:not(a):not(img):not(svg), [class*="nick" i]:not(a):not(img):not(svg), [class*="player" i]:not(a):not(img):not(svg)');
-                    for (const _c of _candidates) {
-                        const _t = (_c.textContent || '').trim().replace(/\s*\d+\.\d+\s*[KMBTQkmbtq]\s*$/, '').trim();
-                        if (!_isBadName(_t)) { name = _t; break; }
-                    }
-                }
-
-                // C: scrape row text minus known noise; pick first
-                // wordy token that isn't a status keyword. Status icons
-                // get stripped before tokenising so their alt text can't
-                // leak through.
-                if (!name) {
-                    try {
-                        const _rc = row.cloneNode(true);
-                        _rc.querySelectorAll('[class*="ff-scouter"], .ffs-mini-countdown, [class*="ffscouter"], svg, img, [class*="status" i], [class*="icon" i]').forEach(n => n.remove());
-                        const _rt = (_rc.textContent || '').replace(/\s*\d+\.\d+\s*[KMBTQkmbtq]\s*/gi, ' ').trim();
-                        const _tokens = _rt.match(/[A-Za-z][\w-]{2,}/g) || [];
-                        for (const _t of _tokens) {
-                            if (!_isBadName(_t)) { name = _t; break; }
-                        }
-                    } catch (_e) {}
-                }
-
-                // D: ID-stub fallback. Dump the FIRST failing row so we
-                // can target the real selector in the next bump.
-                if (!name) {
-                    try {
-                        if (!window._gnscDumpedRow) {
-                            window._gnscDumpedRow = true;
-                            // eslint-disable-next-line no-console
-                            console.warn('[GNSC] name extraction failed for XID=' + id + '; row HTML follows. Paste this to RussianRob to fix.');
-                            console.warn(row.outerHTML.slice(0, 2000));
-                        }
-                    } catch (_e) {}
-                    name = `User_${id}`;
-                }
-
                 name = stripBspPrefix(name);
 
                 if (!name) {
