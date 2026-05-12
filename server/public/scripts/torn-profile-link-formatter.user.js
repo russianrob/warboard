@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.30
+// @version      3.6.31
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -979,19 +979,15 @@
             // ----------------------------------------------------------------
 
             for (const { row, link, id } of validRows) {
-                // v3.6.29: v3.6.22's simple link.textContent extraction,
-                // wrapped in getCleanLinkText() to strip the FFS pill (the
-                // only known issue that motivated the v3.6.24 change).
+                // v3.6.31: v3.6.23's clean link.textContent extraction
+                // (getCleanLinkText strips the FFS pill) PLUS v3.6.28's
+                // User_<id> safety net so the copy never ends in ❓.
+                // No other fallbacks — earlier versions tried name-class
+                // / img-alt / row-text scrapes and kept misclassifying
+                // status icons/labels as names.
                 let name = getCleanLinkText(link);
                 name = stripBspPrefix(name);
-
-                if (!name) {
-                    processed++;
-                    if (button.isConnected) button.textContent = `${processed}/${totalMembers}`;
-                    progressBar.style.width = `${(processed / totalMembers) * 100}%`;
-                    progressLabel.textContent = `Copying: ${processed}/${totalMembers}`;
-                    continue;
-                }
+                if (!name) name = `User_${id}`;
 
                 const profileLabel = name;
                 let statsString = "(Stats: N/A)";
