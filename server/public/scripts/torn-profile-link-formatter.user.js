@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.24
+// @version      3.6.25
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -904,9 +904,22 @@
 
             const sideRoot = warRoot.querySelector(sideSelector) || warRoot;
 
-            const memberRows = sideRoot.querySelectorAll(
-                'li.member, li.enemy, li.your, li.table-row, li[class*="memberRow"], li[class*="member-row"]'
-            );
+            // v3.6.25: React-immune row collection. Torn ships hashed CSS-
+            // module class names (li.memberRow___ABCD) that change between
+            // deploys, so any literal-class match is fragile and silently
+            // falls to zero rows → 0/0 progress + ❓ failure. Instead:
+            // find every profile-XID link in the side root, walk up to its
+            // closest <li> (or other row container), dedupe. Works
+            // regardless of how Torn names the wrapping element.
+            const _memberLinks = sideRoot.querySelectorAll('a[href*="profiles.php"][href*="XID="]');
+            const _seenRows = new Set();
+            const memberRows = [];
+            for (const _link of _memberLinks) {
+                const _row = _link.closest('li, tr, [class*="row" i], [class*="member" i]') || _link.parentElement;
+                if (!_row || _seenRows.has(_row)) continue;
+                _seenRows.add(_row);
+                memberRows.push(_row);
+            }
 
             const settings = loadSettings();
             const lines = [];
