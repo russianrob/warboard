@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.2
+// @version      3.2.3
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.2';
+    const SCRIPT_VERSION = '3.2.3';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1356,7 +1356,19 @@
             }
         }
 
-        // Strategy 2: text matching "Scope … NN" (visible, leaf-ish only).
+        // Strategy 2: text matching a strict scope label. v3.2.3
+        // tightened after a false positive on a Completed-tab chip
+        // whose concatenated textContent (`Best of the Lot 2/4 ...
+        // scope ... 1`) matched the old lax regex
+        // `/scope[\s\w:]*?(\d+)/i` and pushed scope=1 over the real
+        // value of 33. Three new guards:
+        //   1. text length ≤ 40 chars (chip text with crime names is
+        //      always longer)
+        //   2. text has at most one number group (chips have a
+        //      reward count AND a success ratio)
+        //   3. regex requires the digit IMMEDIATELY adjacent to the
+        //      "scope" / "scope balance" / "current scope" label with
+        //      ≤3 chars of separator
         const candidates = document.querySelectorAll('span, div, p, li');
         for (const el of candidates) {
             if (el.closest('#oc-spawn-panel')) continue;
@@ -1364,14 +1376,16 @@
             if (!visible(el)) continue;
             if (insideCompletedContext(el)) continue;
             const text = el.textContent.trim();
-            const m = text.match(/scope[\s\w:]*?(\d+)/i);
-            if (m) {
-                const val = parseInt(m[1]);
-                if (val >= 0 && val <= SCOPE_MAX) {
-                    console.debug('[OC Spawn][scope] strategy 2 (text):', val, '·', text.slice(0, 60));
-                    _lastScopeDetectSource = 'text:' + text.slice(0, 24);
-                    return val;
-                }
+            if (text.length > 40) continue;
+            const digitGroups = (text.match(/\d+/g) || []).length;
+            if (digitGroups > 1) continue;
+            const m = text.match(/\b(?:current\s+)?(?:scope\s*balance|scope)\s*[:\s]\s*(\d+)\b/i);
+            if (!m) continue;
+            const val = parseInt(m[1]);
+            if (val >= 0 && val <= SCOPE_MAX) {
+                console.debug('[OC Spawn][scope] strategy 2 (text):', val, '·', text.slice(0, 60));
+                _lastScopeDetectSource = 'text:' + text.slice(0, 24);
+                return val;
             }
         }
         return null;
