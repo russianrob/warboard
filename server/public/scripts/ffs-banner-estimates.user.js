@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.1-wb54
+// @version      2.73.1-wb55
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -670,21 +670,28 @@ if (!singleton) {
     constructor(db_name) {
       this.db_name = db_name;
       this.db = null;
-      this.db_version = 1;
+      // wb55: bumped 1 → 2 to force onupgradeneeded for users whose
+      // ffscouter-cache DB was already at v1 but missing the "cache"
+      // store — happens when upstream FF Scouter (or another fork)
+      // created the same-named DB first with a different schema.
+      // Migration 2 self-heals by creating the store if absent.
+      this.db_version = 2;
 
       this.store_name = "cache";
 
+      // wb55: idempotent migrations. Both migrations check
+      // objectStoreNames.contains before createObjectStore so a
+      // partial schema state from any prior install gets repaired.
+      const ensureStore = (db) => {
+        if (db.objectStoreNames.contains(this.store_name)) return;
+        const store = db.createObjectStore(this.store_name, {
+          keyPath: "player_id",
+        });
+        store.createIndex("expiry", ["expiry"], { unique: false });
+      };
       this.migrations = {
-        1: (db, _) => {
-          ffdebug("Starting 1");
-          const store = db.createObjectStore(this.store_name, {
-            keyPath: "player_id",
-          });
-          store.createIndex("expiry", ["expiry"], {
-            unique: false,
-          });
-          ffdebug("Ending 1");
-        },
+        1: (db, _) => { ffdebug("migration 1"); ensureStore(db); },
+        2: (db, _) => { ffdebug("migration 2 (heal)"); ensureStore(db); },
       };
     }
 
