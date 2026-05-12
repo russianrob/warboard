@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.22
+// @version      3.6.24
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -203,7 +203,7 @@
         const userId = urlParams.get('XID');
         if (!userId) return;
 
-        let cleanedName = nameElement.textContent.replace("'s Profile", "").split(' [')[0].trim();
+        let cleanedName = getCleanLinkText(nameElement).replace("'s Profile", "").split(' [')[0].trim();
         
         // If we hit the fallback, try to extract the real name from the document title
         if (cleanedName === 'Skip to content' || nameElement.id === 'skip-to-content') {
@@ -541,6 +541,32 @@
         }
     }
 
+    /**
+     * v3.6.24 — get a link's clean display text WITHOUT any FFScouter-
+     * injected stat pill. FFS banner script adds spans like
+     * .ff-scouter-est-visible / .ff-scouter-ff-visible inside or as
+     * siblings of name <a> elements; reading nameLink.textContent
+     * picks them up and produces output like "Choco1805.08b" instead of
+     * "Choco180". Clone the link, strip any ff-scouter-* descendants,
+     * then return clean text. Belt-and-suspenders trailing-suffix regex
+     * catches text-injected pills without our class signature.
+     */
+    function getCleanLinkText(linkEl) {
+        if (!linkEl) return '';
+        try {
+            const clone = linkEl.cloneNode(true);
+            clone.querySelectorAll('[class*="ff-scouter"], .ffs-mini-countdown, [class*="ffscouter"]').forEach(n => n.remove());
+            let txt = (clone.textContent || '').trim();
+            // Trailing stats suffix (decimal required to avoid clobbering
+            // usernames ending in digits like "Choco180").
+            txt = txt.replace(/\s*\d+\.\d+\s*[KMBTQkmbtq]\s*$/, '').trim();
+            return txt;
+        } catch (e) {
+            if (debug) console.error('GNSC getCleanLinkText error:', e);
+            return (linkEl.textContent || '').trim();
+        }
+    }
+
     // --- BSP cache readers ---
 
     function fetchBspSpyFromLocalCache(userId) {
@@ -737,7 +763,7 @@
         const nameLink = memberElement.querySelector('a[href*="profiles.php"]');
         if (!nameLink) return;
 
-        let name = (nameLink.textContent || '').trim();
+        let name = getCleanLinkText(nameLink);
         name = stripBspPrefix(name);
 
         const idMatch = nameLink.href.match(/XID=(\d+)/);
@@ -938,7 +964,7 @@
             // ----------------------------------------------------------------
 
             for (const { row, link, id } of validRows) {
-                let name = (link.textContent || '').trim();
+                let name = getCleanLinkText(link);
                 name = stripBspPrefix(name);
                 
                 if (!name) {
