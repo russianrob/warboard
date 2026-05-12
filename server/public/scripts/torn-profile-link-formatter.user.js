@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.29
+// @version      3.6.30
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -920,8 +920,18 @@
             // First pass: collect valid members to get total count
             const validRows = [];
             for (const row of memberRows) {
-                const link = row.querySelector('a[href*="profiles.php"][href*="XID="]');
-                if (!link) continue;
+                const xidLinks = row.querySelectorAll('a[href*="profiles.php"][href*="XID="]');
+                if (!xidLinks.length) continue;
+                // v3.6.30: Torn added a leading icon-only XID link in
+                // each row at some point after v3.6.22 was last tested.
+                // Prefer the link with usable cleaned text so the main
+                // loop's link.textContent extraction sees the player
+                // name, not an empty icon link.
+                let link = null;
+                for (const _c of xidLinks) {
+                    if (getCleanLinkText(_c)) { link = _c; break; }
+                }
+                if (!link) link = xidLinks[0];
                 const href = link.getAttribute('href') || '';
                 const idMatch = href.match(/XID=(\d+)/);
                 if (!idMatch) continue;
