@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.39
+// @version      5.0.40
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.39';
+    const SCRIPT_VERSION = '5.0.40';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -9519,11 +9519,54 @@ body.wb-chain-active {
                 return;
             }
 
-            // Try to extract target name from page DOM
+            // v5.0.40: extract target name. Profile pages (profiles.php)
+            // don't have any of the attack-page selectors, so retal
+            // notifications were falling back to "Player [<id>]" / bare
+            // user ID. Try a wider net plus document.title and the
+            // FactionOps state lookup before falling back.
             let targetName = null;
-            const defenderEl = document.querySelector('.defender .username, [class*="defender"] [class*="userName"], .playersModelWrap .right .username, [class*="user-information"] [class*="username"], h4[class*="title"]');
-            if (defenderEl) {
-                targetName = defenderEl.textContent.trim();
+            const nameSelectors = [
+                // Attack page (defender side)
+                '.defender .username',
+                '[class*="defender"] [class*="userName"]',
+                '.playersModelWrap .right .username',
+                '[class*="user-information"] [class*="username"]',
+                // Profile page (top header — multiple Torn variants)
+                '[class*="profile-_username"]',
+                '[class*="user-information-name"]',
+                '.user-info-name',
+                'h4[class*="title"]',
+            ];
+            for (const sel of nameSelectors) {
+                try {
+                    const el = document.querySelector(sel);
+                    const txt = el && (el.textContent || '').trim();
+                    if (txt && !/^\s*\[?\d+\]?\s*$/.test(txt) && txt.length < 40) {
+                        targetName = txt;
+                        break;
+                    }
+                } catch (_) { /* invalid selector — keep going */ }
+            }
+            // document.title fallback — Torn profile pages set it to
+            // something like "PlayerName | TORN" or "PlayerName [123456] - TORN".
+            if (!targetName && isProfilePage) {
+                const title = (document.title || '').trim();
+                const m = title.match(/^([^|\-\[]+?)(?:\s*[\[|-]|\s*$)/);
+                const candidate = m && m[1] && m[1].trim();
+                if (candidate && !/^\s*\[?\d+\]?\s*$/.test(candidate) && candidate.length < 40) {
+                    targetName = candidate;
+                }
+            }
+            // FactionOps state lookup (war enemies / our faction members).
+            if (!targetName && targetId) {
+                const id = String(targetId);
+                if (Array.isArray(state.onlinePlayers)) {
+                    const m = state.onlinePlayers.find(p => String(p.id) === id);
+                    if (m && m.name) targetName = m.name;
+                }
+                if (!targetName && state.memberBars && state.memberBars[id] && state.memberBars[id].name) {
+                    targetName = state.memberBars[id].name;
+                }
             }
 
             try {
