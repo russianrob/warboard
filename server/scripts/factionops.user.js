@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.25
+// @version      5.0.26
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.25';
+    const SCRIPT_VERSION = '5.0.26';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -66,8 +66,13 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
         PDA_NOTIFICATIONS: GM_getValue('factionops_pda_notif', IS_PDA),
         ENEMY_ATTACK_NOTIF: GM_getValue('factionops_enemy_attack_notif', false),
         KEEP_ALIVE: GM_getValue('factionops_keep_alive', false),
-        CALL_TIMEOUT: 5 * 60 * 1000,       // 5 minute call expiry
-        DEAL_TIMEOUT: 15 * 60 * 1000,      // 15 minute deal call expiry
+        // v5.0.26: bumped per user request — was 5 min / 15 min.
+        // Regular calls: 15 min auto-expire (auto-uncall-on-attack
+        // is a separate server-side change, see backlog).
+        // Deal/locked calls: 2 hours so cross-faction agreements
+        // don't lapse mid-negotiation.
+        CALL_TIMEOUT: 15 * 60 * 1000,        // 15 minute call expiry
+        DEAL_TIMEOUT: 2 * 60 * 60 * 1000,    // 2 hour deal/locked call expiry
         REFRESH_INTERVAL: 30 * 1000,        // 30 second status refresh
         IS_PDA: IS_PDA,
     };
