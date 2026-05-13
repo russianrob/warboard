@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.37
+// @version      5.0.38
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.37';
+    const SCRIPT_VERSION = '5.0.38';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -4880,6 +4880,53 @@ body.wb-chain-active {
     }
 
     /**
+     * v5.0.37: pull a real player name out of the mini-profile card.
+     * The first <a href*="profiles.php?XID="> in the card is often an
+     * icon-only link with empty textContent — using it directly was
+     * sending "Player [<id>]" to the server, which surfaced as the
+     * bare user ID in push notifications. Try named selectors first,
+     * then scan profile links for non-numeric text, then fall back to
+     * FactionOps state (enemy onlinePlayers / our memberBars).
+     */
+    function extractMiniProfileName(card, targetId) {
+        const candidates = [
+            '[class*="profile-mini-_username"]',
+            '[class*="profile-mini-_name"]',
+            '[class*="mini-profile-name"]',
+            '.profile-mini-name',
+            '.honor-text-wrap .honor-text',
+            '.honor-text',
+        ];
+        for (const sel of candidates) {
+            try {
+                const el = card.querySelector(sel);
+                const txt = el && (el.textContent || '').trim();
+                if (txt && !/^\s*\[?\d+\]?\s*$/.test(txt) && txt.length < 40) {
+                    return txt;
+                }
+            } catch (_) { /* invalid selector — keep going */ }
+        }
+        const links = card.querySelectorAll('a[href*="profiles.php?XID="]');
+        for (const link of links) {
+            const txt = (link.textContent || '').trim();
+            if (txt && !/^\s*\[?\d+\]?\s*$/.test(txt) && txt.length < 40) {
+                return txt;
+            }
+        }
+        if (targetId) {
+            const id = String(targetId);
+            if (Array.isArray(state.onlinePlayers)) {
+                const m = state.onlinePlayers.find(p => String(p.id) === id);
+                if (m && m.name) return m.name;
+            }
+            if (state.memberBars && state.memberBars[id] && state.memberBars[id].name) {
+                return state.memberBars[id].name;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Find an un-injected mini profile card and add our Retal button.
      * The `.buttons-list` inside the card is populated a beat after the
      * wrapper appears, so we poll briefly until it shows up.
@@ -4910,10 +4957,8 @@ body.wb-chain-active {
             const m = (nameLink.getAttribute('href') || '').match(/XID=(\d+)/i);
             if (!m) { clearInterval(timer); return; }
             const targetId = m[1];
-            const rawName = (nameLink.textContent || '').trim();
-            const targetName = rawName && !/^\s*\[?\d+\]?\s*$/.test(rawName)
-                ? rawName
-                : `Player [${targetId}]`;
+            const realName = extractMiniProfileName(card, targetId);
+            const targetName = realName || `Player [${targetId}]`;
 
             const btn = document.createElement('button');
             btn.type = 'button';
