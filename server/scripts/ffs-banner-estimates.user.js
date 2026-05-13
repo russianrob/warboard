@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.1-wb56
+// @version      2.73.1-wb57
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2218,11 +2218,22 @@ if (!singleton) {
           const agePart = ageStr ? ` (${ageStr})` : "";
           distLine = ` | Dist: ${response.distribution_human}${agePart}`;
         }
-        // wb56: FF score banner stays in .description (bottom of card,
-        // its original home). User confirmed only the FLIGHT TIMER
-        // belongs in the header next to "Traveling to X". The wb52-54
-        // attempt to dock the FF score in the header was a misread.
-        const message = `FF ${ff_string} (${difficulty}) ${fresh}${distLine}`;
+        // wb57: include the estimated stats value in the mini-profile
+        // banner. Prefer bs_estimate_human (premium-tier formatted
+        // string like "5.08b"); fall back to formatting bs_estimate
+        // ourselves via ffs_format_number_short. Either way the stats
+        // appear inline next to the FF score so members can see the
+        // raw stat estimate without hovering or opening a profile.
+        let statsLine = "";
+        if (response.bs_estimate_human) {
+          statsLine = ` Stats: ${response.bs_estimate_human}`;
+        } else if (response.bs_estimate != null) {
+          const formatted = ffs_format_number_short(Number(response.bs_estimate));
+          if (formatted) statsLine = ` Stats: ${formatted}`;
+        }
+        // wb56: FF score banner stays in .description (bottom of card).
+        // wb57: stats appended inline.
+        const message = `FF ${ff_string} (${difficulty})${statsLine} ${fresh}${distLine}`;
         const description = $(mini).find(".description");
         const desc = $("<span></span>", { class: "ff-scouter-mini-ff" });
         desc.text(message);
