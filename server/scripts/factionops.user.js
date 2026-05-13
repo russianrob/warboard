@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.13
+// @version      5.0.14
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.13';
+    const SCRIPT_VERSION = '5.0.14';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1307,10 +1307,26 @@ body.wb-chain-active {
     font-size: 12px; line-height: 1;
 }
 
-/* ── Column labels ── */
+/* ── Sort bar (above col headers) ── v5.0.14 ── */
+.fo-sort-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 16px; background: var(--wb-accent-20);
+    border-bottom: 1px solid var(--wb-border);
+    font-size: 11px;
+}
+.fo-sort-label { color: #636e72; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; }
+.fo-sort-select {
+    background: var(--wb-bg-secondary); color: var(--wb-text);
+    border: 1px solid var(--wb-border); border-radius: 4px;
+    padding: 3px 6px; font: inherit; font-size: 11px; cursor: pointer;
+}
+.fo-sort-select:hover { border-color: rgba(99,110,114,0.6); }
+.fo-sort-select option { background: var(--wb-bg-secondary); color: var(--wb-text); }
+
+/* ── Column labels ── v5.0.14: 8 → 7 cols (Prior. dropped) ── */
 .fo-col-headers {
     display: grid;
-    grid-template-columns: 58px 1fr 52px 82px 130px 44px 180px 72px;
+    grid-template-columns: 1fr 52px 82px 130px 44px 180px 72px;
     gap: 0; padding: 7px 16px;
     background: var(--wb-accent-20);
     border-bottom: 1px solid var(--wb-border);
@@ -1328,7 +1344,7 @@ body.wb-chain-active {
 
 .fo-row {
     display: grid;
-    grid-template-columns: 58px 1fr 52px 82px 130px 44px 180px 72px;
+    grid-template-columns: 1fr 52px 82px 130px 44px 180px 72px;
     gap: 0; align-items: center;
     padding: 8px 16px;
     border-bottom: 1px solid rgba(45,52,54,0.5);
@@ -1638,20 +1654,21 @@ body.wb-chain-active {
     .fo-overlay { border-radius: 6px; margin: 4px 0; }
     .fo-header { gap: 4px 8px; padding: 6px 10px; }
     .fo-col-headers, .fo-row {
-        /* Prior | Target | (Lvl hidden) | (BSP hidden) | Status | On | Call | Action
+        /* v5.0.14: 7 cols — Target | (Lvl hidden) | (BSP hidden) | Status | On | Call | Action
            v4.9.92: status column bumped 40 to 108px so the travel /
            hospital pill fits without being clipped by the cell
            boundary. Name column absorbs the delta (still 1fr). */
-        grid-template-columns: 28px 1fr 0px 0px 108px 16px 52px 48px;
+        grid-template-columns: 1fr 0px 0px 108px 16px 52px 48px;
         padding: 7px 8px;
         column-gap: 6px;
         font-size: 11px;
     }
-    /* Hide level and BSP columns on mobile (keep in grid flow) */
+    /* Hide level and BSP columns on mobile (keep in grid flow).
+       v5.0.14: Prior column dropped, so Lvl is now nth-child(2), BSP nth-child(3). */
+    .fo-col-headers > :nth-child(2),
+    .fo-row > :nth-child(2),
     .fo-col-headers > :nth-child(3),
-    .fo-row > :nth-child(3),
-    .fo-col-headers > :nth-child(4),
-    .fo-row > :nth-child(4) { visibility: hidden; overflow: hidden; padding: 0 !important; margin: 0; min-width: 0; max-width: 0; font-size: 0; }
+    .fo-row > :nth-child(3) { visibility: hidden; overflow: hidden; padding: 0 !important; margin: 0; min-width: 0; max-width: 0; font-size: 0; }
     .fo-footer { padding: 6px 12px; flex-wrap: wrap; gap: 4px; }
     .fo-footer-stats { gap: 10px; flex-wrap: wrap; }
     .fo-attack-btn { padding: 3px 8px; font-size: 9px; }
@@ -2581,6 +2598,67 @@ body.wb-chain-active {
     // SECTION 4: STATE MANAGEMENT
     // =========================================================================
 
+    /** v5.0.14: Per-user sort-mode state for the target list dropdown.
+     *  Persisted via GM so the choice survives page reloads. Modes:
+     *    smart       → existing priority/timer sort (default)
+     *    level-asc   → lowest level first
+     *    level-desc  → highest level first
+     *    stats-asc   → weakest FFS estimate first (no estimate → bottom)
+     *    stats-desc  → strongest FFS estimate first (no estimate → bottom) */
+    const SORT_MODE_KEY = 'factionops_sortmode';
+    let _sortMode = (() => {
+        const v = GM_getValue(SORT_MODE_KEY, 'smart');
+        return ['smart','level-asc','level-desc','stats-asc','stats-desc'].includes(v) ? v : 'smart';
+    })();
+    function setSortMode(mode) {
+        if (!['smart','level-asc','level-desc','stats-asc','stats-desc'].includes(mode)) return;
+        _sortMode = mode;
+        try { GM_setValue(SORT_MODE_KEY, mode); } catch (_) {}
+    }
+    /** Cache of FFS estimates keyed by uid. Populated as targets render
+     *  (renderBspCell already triggers getFfScouterEstimate); we just
+     *  observe the resolved values here. Stats-mode sort reads this
+     *  cache synchronously — uids without a cached estimate sort to
+     *  the bottom of stats mode. */
+    const _ffsStatsCache = new Map();
+    /** Sort the supplied target objects {targetId, ...} in place by the
+     *  current _sortMode. For 'smart', preserves caller-supplied order
+     *  (caller has already applied sortPriority/sortTimerValue). */
+    function applyManualSort(items) {
+        if (_sortMode === 'smart') return items;
+        const getLevel = (it) => {
+            const s = state.statuses[it.targetId];
+            return (s && Number(s.level)) || 0;
+        };
+        const getStats = (it) => {
+            const v = _ffsStatsCache.get(String(it.targetId));
+            return (typeof v === 'number') ? v : -1; // -1 → no data → bottom
+        };
+        switch (_sortMode) {
+            case 'level-asc':  items.sort((a,b) => getLevel(a) - getLevel(b)); break;
+            case 'level-desc': items.sort((a,b) => getLevel(b) - getLevel(a)); break;
+            case 'stats-asc':
+                items.sort((a,b) => {
+                    const av = getStats(a), bv = getStats(b);
+                    if (av === -1 && bv === -1) return 0;
+                    if (av === -1) return 1;
+                    if (bv === -1) return -1;
+                    return av - bv;
+                });
+                break;
+            case 'stats-desc':
+                items.sort((a,b) => {
+                    const av = getStats(a), bv = getStats(b);
+                    if (av === -1 && bv === -1) return 0;
+                    if (av === -1) return 1;
+                    if (bv === -1) return -1;
+                    return bv - av;
+                });
+                break;
+        }
+        return items;
+    }
+
     /** Centralised reactive state for the entire extension. */
     const state = {
         connected: false,
@@ -3081,6 +3159,9 @@ body.wb-chain-active {
                             if (!r || r.no_data || typeof r.bs_estimate === 'undefined') {
                                 resolve(null);
                             } else {
+                                // v5.0.14: populate the stats-sort cache so the
+                                // sort dropdown can sort by stats synchronously.
+                                try { _ffsStatsCache.set(String(userId), Number(r.bs_estimate) || 0); } catch (_) {}
                                 resolve({
                                     total: r.bs_estimate,
                                     human: r.bs_estimate_human || null,
@@ -4416,31 +4497,14 @@ body.wb-chain-active {
             });
     }
 
-    /** Set or clear a priority tag on a target (leader/co-leader only). */
-    function emitSetPriority(targetId, priority) {
-        if (!state.connected) return;
-        const warId = deriveWarId();
-        if (!warId) return;
-        postAction('/api/priority', { warId, targetId: String(targetId), priority })
-            .then(() => {
-                // Optimistic update
-                if (priority === null) {
-                    delete state.priorities[targetId];
-                } else {
-                    state.priorities[targetId] = {
-                        level: priority,
-                        setBy: { id: state.myPlayerId, name: state.myPlayerName },
-                        timestamp: Date.now(),
-                    };
-                }
-                updateTargetRow(String(targetId));
-                broadcastStateChange({ type: 'state_update', priorities: state.priorities });
-            })
-            .catch(e => {
-                warn('Set priority failed:', e.message);
-                showToast(e.message || 'Failed to set priority', 'error');
-            });
-    }
+    /** v5.0.14: priority feature retired per user request. emitSetPriority
+     *  is a no-op so any orphan callers don't error; renderPriorityCell
+     *  is a no-op so the cell stays empty if it ends up in the DOM
+     *  somehow; the priority column has been removed from grids and
+     *  the smart-sort no longer floats high-priority targets to the
+     *  top. State.priorities + server /api/priority left alone (dormant
+     *  but harmless). */
+    function emitSetPriority(_targetId, _priority) { /* no-op (retired) */ }
 
     /** Check if current user has an elevated faction role (leader, co-leader, war leader, banker). */
     /**
@@ -6755,11 +6819,7 @@ body.wb-chain-active {
         callCell.id = `wb-call-${targetId}`;
         renderCallCell(callCell, targetId);
 
-        // --- Priority cell ---
-        const priorityCell = document.createElement('span');
-        priorityCell.className = 'wb-cell';
-        priorityCell.id = `wb-priority-${targetId}`;
-        renderPriorityCell(priorityCell, targetId);
+        // v5.0.14: priority cell retired.
 
         // --- BSP / FFS estimated stats cell ---
         const bspCell = document.createElement('span');
@@ -6773,7 +6833,6 @@ body.wb-chain-active {
         viewersCell.id = `wb-viewers-${targetId}`;
         renderViewersBadge(viewersCell, targetId);
 
-        wbContainer.appendChild(priorityCell);
         wbContainer.appendChild(viewersCell);
         wbContainer.appendChild(bspCell);
         wbContainer.appendChild(statusCell);
@@ -6890,8 +6949,9 @@ body.wb-chain-active {
      * Render the priority cell for a target.
      * Leaders/co-leaders see a dropdown; others see a read-only badge (or nothing).
      */
-    function renderPriorityCell(container, targetId) {
-        container.innerHTML = '';
+    function renderPriorityCell(container, _targetId) {
+        if (container) container.innerHTML = '';
+        return; // v5.0.14: priority retired
         const prioData = state.priorities[targetId];
         const level = prioData ? prioData.level : null;
 
@@ -7779,8 +7839,17 @@ body.wb-chain-active {
                 <div class="fo-bars-list" id="fo-bars-list" style="display:none;"></div>
             </div>
             ` : ''}
+            <div class="fo-sort-bar" id="fo-sort-bar">
+                <span class="fo-sort-label">Sort:</span>
+                <select class="fo-sort-select" id="fo-sort-select">
+                    <option value="smart">Smart (default)</option>
+                    <option value="level-asc">Level &uarr; (low first)</option>
+                    <option value="level-desc">Level &darr; (high first)</option>
+                    <option value="stats-asc">Stats &uarr; (weak first)</option>
+                    <option value="stats-desc">Stats &darr; (strong first)</option>
+                </select>
+            </div>
             <div class="fo-col-headers">
-                <div class="fo-col-header">Prior.</div>
                 <div class="fo-col-header">Target</div>
                 <div class="fo-col-header center">Lvl</div>
                 <div class="fo-col-header center">BSP</div>
@@ -7820,6 +7889,18 @@ body.wb-chain-active {
         const logoEl = overlay.querySelector('.fo-logo-mark');
         if (logoEl) logoEl.title = 'Click to minimize FactionOps';
         setupLogoMinimizeDelegation();
+
+        // v5.0.14: wire the sort dropdown — restore saved mode and
+        // re-render on change. Listener is direct (not delegated)
+        // because the dropdown is rebuilt with the overlay.
+        const sortSel = overlay.querySelector('#fo-sort-select');
+        if (sortSel) {
+            sortSel.value = _sortMode;
+            sortSel.addEventListener('change', () => {
+                setSortMode(sortSel.value);
+                renderOverlay();
+            });
+        }
 
         renderOverlay();
 
@@ -8045,6 +8126,26 @@ body.wb-chain-active {
             if (a.priority !== b.priority) return a.priority - b.priority;
             return a.timer - b.timer;
         });
+
+        // v5.0.14: apply user-chosen manual sort (no-op when mode='smart').
+        // Stats modes need FFS estimates pre-populated in _ffsStatsCache;
+        // those land via getFfScouterEstimate's success callback when
+        // renderBspCell fires for each visible row. Call-me-first / called-
+        // by-others pinning is intentionally NOT preserved in manual modes
+        // (the user picked the sort, so their pick wins).
+        if (_sortMode !== 'smart') {
+            // For stats modes, kick off a pre-fetch cycle for any uid
+            // whose estimate hasn't landed yet — non-blocking; the next
+            // tick of the render loop catches up once data arrives.
+            if (_sortMode === 'stats-asc' || _sortMode === 'stats-desc') {
+                for (const it of sorted) {
+                    if (!_ffsStatsCache.has(String(it.targetId))) {
+                        try { getFfScouterEstimate(it.targetId); } catch (_) {}
+                    }
+                }
+            }
+            applyManualSort(sorted);
+        }
 
         // Build a map of existing rows for O(1) lookup instead of O(n) querySelectorAll
         const existingMap = new Map();
@@ -8767,8 +8868,6 @@ body.wb-chain-active {
         const status = normalizeStatus(s ? s.status : 'ok');
         const callData = state.calls[targetId];
         const isCalled = !!callData;
-        const prio = state.priorities[targetId];
-        const isHighPriority = prio && prio.level === 'high';
         const isOnline = s && s.activity === 'online';
 
         // Called by ME → pin to top
@@ -8776,8 +8875,7 @@ body.wb-chain-active {
         // Called by others → sink to bottom
         if (isCalled) return 5;
 
-        // High priority + OK status floats above everything
-        if (isHighPriority && status === 'ok') return 0;
+        // v5.0.14: high-priority float-to-top retired with priority feature.
 
         switch (status) {
             case 'ok':
