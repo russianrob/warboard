@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.24
+// @version      5.0.25
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.24';
+    const SCRIPT_VERSION = '5.0.25';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -5976,6 +5976,17 @@ body.wb-chain-active {
             // Immediately refresh war stats and poll server when tab becomes visible
             if (typeof updateWarTimer === 'function') updateWarTimer();
             if (typeof updateWarTimerDisplay === 'function') updateWarTimerDisplay();
+            // v5.0.25: PDA WebView pauses JS when backgrounded. On resume,
+            // any accumulated pollErrorCount from missed/timed-out polls
+            // would falsely trip the disconnect threshold. Reset the
+            // error counter and the grace timer here so a fresh poll
+            // starts from a clean slate. The next pollOnce() below sets
+            // state.connected=true on success.
+            pollErrorCount = 0;
+            if (_disconnectGraceTimer) {
+                clearTimeout(_disconnectGraceTimer);
+                _disconnectGraceTimer = null;
+            }
             pollOnce();
         }
     });
