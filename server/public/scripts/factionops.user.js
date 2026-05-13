@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.17
+// @version      5.0.18
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.17';
+    const SCRIPT_VERSION = '5.0.18';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -7905,15 +7905,26 @@ body.wb-chain-active {
         if (logoEl) logoEl.title = 'Click to minimize FactionOps';
         setupLogoMinimizeDelegation();
 
-        // v5.0.14: wire the sort dropdown — restore saved mode and
-        // re-render on change. Listener is direct (not delegated)
-        // because the dropdown is rebuilt with the overlay.
+        // v5.0.14 / v5.0.18: wire the sort dropdown. Listener is direct
+        // (not delegated) since the dropdown is rebuilt with the overlay.
+        // For stats modes, we schedule ONE delayed re-render 1.5s after
+        // the dropdown change so the user sees the sort apply once the
+        // background pre-fetch has had time to populate the FFS cache.
+        // The setTimeout is single-shot — no recursion possible.
         const sortSel = overlay.querySelector('#fo-sort-select');
         if (sortSel) {
             sortSel.value = _sortMode;
             sortSel.addEventListener('change', () => {
-                setSortMode(sortSel.value);
+                const newMode = sortSel.value;
+                setSortMode(newMode);
                 renderOverlay();
+                if (newMode === 'stats-asc' || newMode === 'stats-desc') {
+                    setTimeout(() => {
+                        // Only re-render if still on stats mode (user may
+                        // have flipped back to smart already).
+                        if (_sortMode === newMode) renderOverlay();
+                    }, 1500);
+                }
             });
         }
 
@@ -8142,26 +8153,25 @@ body.wb-chain-active {
             return a.timer - b.timer;
         });
 
-        // v5.0.14 / v5.0.16: apply user-chosen manual sort (no-op when
-        // mode='smart'). Stats modes pre-fetch missing FFS estimates
-        // and trigger ONE re-render after they all settle, so the sort
-        // visibly applies once data lands instead of silently stalling
-        // with everything pinned to the bottom (the v5.0.15 bug).
+        // v5.0.18: apply user-chosen manual sort (no-op when mode='smart').
+        // Stats sort kicks off a fire-and-forget pre-fetch ONLY (no
+        // Promise.all chain, no .then(renderOverlay)). Cache populates
+        // in the background; the next natural render tick (from the
+        // existing 5s interval or any state update) picks up the new
+        // data. v5.0.16/17 attempted to chain a renderOverlay after
+        // Promise.all settled — but in failure modes that chain became
+        // a tight loop that froze the entire page. This version cannot
+        // recurse: it only ever sets up async work, never awaits it,
+        // never triggers a re-render from inside the chain.
         if (_sortMode !== 'smart') {
             if (_sortMode === 'stats-asc' || _sortMode === 'stats-desc') {
-                const missing = sorted.filter(it => !_ffsStatsCache.has(String(it.targetId)));
-                if (missing.length > 0 && !_ffsRefreshInFlight) {
-                    _ffsRefreshInFlight = true;
-                    Promise.all(missing.map(it =>
-                        getFfScouterEstimate(it.targetId).catch(() => null)
-                    )).then(() => {
-                        _ffsRefreshInFlight = false;
-                        // Only re-render if user is still on a stats mode —
-                        // they may have flipped back to smart while we waited.
-                        if (_sortMode === 'stats-asc' || _sortMode === 'stats-desc') {
-                            renderOverlay();
-                        }
-                    });
+                for (const it of sorted) {
+                    const k = String(it.targetId);
+                    if (!_ffsStatsCache.has(k)) {
+                        // Fire and forget. getFfScouterEstimate populates
+                        // _ffsStatsCache in its onsuccess/onerror branches.
+                        try { getFfScouterEstimate(it.targetId); } catch (_) {}
+                    }
                 }
             }
             applyManualSort(sorted);
