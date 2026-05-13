@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.38
+// @version      5.0.39
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.38';
+    const SCRIPT_VERSION = '5.0.39';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1908,7 +1908,10 @@ body.wb-chain-active {
     box-shadow: 0 8px 32px rgba(0,0,0,0.5);
     color: var(--wb-text);
     font-family: monospace;
-    min-width: 420px;
+    /* v5.0.39: dropped min-width 420 → 360 and shrunk cell/label sizes
+       below so 7×24 + day labels actually fit on a 360-wide phone
+       without the left-side day labels getting clipped. */
+    min-width: 360px;
     max-width: 95vw;
 }
 .wb-heatmap-header {
@@ -1936,9 +1939,12 @@ body.wb-chain-active {
 
 .wb-heatmap-grid {
     display: grid;
-    grid-template-columns: 36px repeat(24, 16px);
-    gap: 2px;
-    padding: 10px 14px;
+    /* v5.0.39: 36+24*16+gaps was ~494px wide and clipped on phones —
+       shrunk to ~328px (28+24*12+gaps) so the panel actually fits in
+       a 360vw viewport with the day labels staying visible. */
+    grid-template-columns: 28px repeat(24, 12px);
+    gap: 1px;
+    padding: 8px 10px;
     justify-content: center;
 }
 .wb-heatmap-label {
@@ -1950,11 +1956,12 @@ body.wb-chain-active {
 }
 .wb-heatmap-day {
     justify-content: flex-end;
-    padding-right: 4px;
+    padding-right: 3px;
 }
 .wb-heatmap-cell {
-    width: 16px;
-    height: 16px;
+    /* v5.0.39: 16→12px to fit the panel on narrow viewports. */
+    width: 12px;
+    height: 12px;
     border-radius: 2px;
     cursor: default;
 }
