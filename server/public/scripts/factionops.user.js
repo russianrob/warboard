@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.29
+// @version      5.0.30
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.29';
+    const SCRIPT_VERSION = '5.0.30';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1736,6 +1736,40 @@ body.wb-chain-active {
     transform: scale(1.1);
     background: var(--wb-call-green);
 }
+
+/* ────────── Combined Heatmap modal tabs — v5.0.30 ────────── */
+.wb-htm-tabs {
+    display: flex; gap: 2px; padding: 0 16px;
+    border-bottom: 1px solid #2d4a3e;
+    background: rgba(0,0,0,0.2);
+}
+.wb-htm-tab {
+    background: transparent; color: #9ca3af; border: 0;
+    padding: 9px 16px; font-size: 12px; font-weight: 600;
+    cursor: pointer; border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+.wb-htm-tab:hover { color: #d1d5db; }
+.wb-htm-tab.active { color: #74c69d; border-bottom-color: #74c69d; }
+.wb-htm-pane { display: none; }
+.wb-htm-pane.active { display: block; }
+.wb-htm-activity-grid {
+    display: grid;
+    grid-template-columns: 30px repeat(24, minmax(14px, 1fr));
+    gap: 1px;
+    padding: 8px;
+    background: #0f1a14; border: 1px solid #1a2e20; border-radius: 6px;
+}
+.wb-htm-activity-cell {
+    aspect-ratio: 1 / 1;
+    border-radius: 2px;
+    min-height: 14px;
+}
+.wb-htm-activity-label {
+    font-size: 9px; color: #9ca3af; text-align: center;
+    align-self: center;
+}
+.wb-htm-activity-day { font-weight: 600; color: #d1d5db; }
 
 /* ────────── War Payouts modal — v5.0.28 ────────── */
 .wb-payouts-backdrop {
@@ -8086,8 +8120,7 @@ body.wb-chain-active {
                     </div>
                     <div class="fo-status-dot${state.connected ? '' : ' disconnected'}" id="fo-conn-dot" title="${state.connected ? 'Connected' : 'Disconnected'}"></div>
                     <span class="fo-rt-badge" id="fo-rt-badge"></span>
-                    <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
-                    <button class="fo-settings-btn" id="fo-payouts-btn" title="War Payouts" style="display:none;">&#x1F4B0;</button>
+                    <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Heatmaps (Activity + Payouts)">&#x1F4CA;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                     <div class="fo-energy-display" id="fo-energy-display" title="Energy">
                         <span class="fo-energy-label">E</span>
@@ -8231,33 +8264,17 @@ body.wb-chain-active {
         fetchFairFightBatch();
         setInterval(fetchFairFightBatch, 5 * 60 * 1000); // refresh every 5 min
 
-        // Wire up heatmap button in overlay header
+        // v5.0.30: combined heatmap modal — single 📊 button opens a
+        // tabbed modal with Activity + Payouts heatmaps. Was two separate
+        // buttons (📊 + 💰) before; user requested one combined entry
+        // point matching the APK pattern.
         const heatmapHeaderBtn = document.getElementById('fo-heatmap-header-btn');
         if (heatmapHeaderBtn) {
             heatmapHeaderBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                toggleHeatmapPanel(state.myFactionId, state.myFactionName);
+                openCombinedHeatmapModal();
             });
         }
-
-        // v5.0.28: Wire up Payouts button (admin-only). Reveal happens
-        // in updateConnectionUI / refresh once we know the user's role
-        // — initial render keeps it hidden to avoid flashing for non-
-        // admins on first paint.
-        const payoutsBtn = document.getElementById('fo-payouts-btn');
-        if (payoutsBtn) {
-            payoutsBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                openPayoutsModal();
-            });
-        }
-        // Defer the role check until factionPosition is loaded (set by
-        // /api/auth response). Periodic check is cheap.
-        setInterval(() => {
-            const btn = document.getElementById('fo-payouts-btn');
-            if (!btn) return;
-            btn.style.display = isLeader() ? '' : 'none';
-        }, 2000);
 
         // Wire up enemy heatmap button in overlay header
         const enemyHeatmapBtn = document.getElementById('fo-enemy-heatmap-btn');
@@ -11641,7 +11658,184 @@ body.wb-chain-active {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  WAR PAYOUTS — v5.0.28
+    //  COMBINED HEATMAP MODAL — v5.0.30
+    //
+    //  Single 📊 button opens this modal. Two tabs: Activity (day×hour
+    //  grid of online %) and Payouts (member×war contribution heatmap).
+    //  Replaces the previous split where 📊 opened a draggable activity
+    //  panel and a separate 💰 button opened the payouts modal — user
+    //  asked for one combined entry point.
+    // ═══════════════════════════════════════════════════════════════════════
+    let _htmModalState = {
+        activeTab: GM_getValue('factionops_htm_tab', 'activity'),
+        activityData: null,
+        activityFetchedAt: 0,
+    };
+
+    function openCombinedHeatmapModal() {
+        const existing = document.getElementById('wb-payouts-backdrop');
+        if (existing) { existing.remove(); return; }
+        const isAdmin = isLeader();
+        const backdrop = document.createElement('div');
+        backdrop.id = 'wb-payouts-backdrop';
+        backdrop.className = 'wb-payouts-backdrop';
+        backdrop.innerHTML = `
+            <div class="wb-payouts-modal" id="wb-payouts-modal">
+                <div class="wb-payouts-header">
+                    <h2>📊 Heatmaps</h2>
+                    <span class="wb-payouts-meta" id="wb-htm-meta"></span>
+                    <button class="wb-payouts-close" id="wb-payouts-close" title="Close">✕</button>
+                </div>
+                <div class="wb-htm-tabs">
+                    <button class="wb-htm-tab" data-tab="activity">Activity</button>
+                    ${isAdmin ? '<button class="wb-htm-tab" data-tab="payouts">Payouts</button>' : ''}
+                </div>
+                <div class="wb-payouts-body" id="wb-payouts-body">
+                    <div class="wb-htm-pane" id="wb-htm-pane-activity"></div>
+                    <div class="wb-htm-pane" id="wb-htm-pane-payouts"></div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        const close = () => { backdrop.remove(); document.removeEventListener('keydown', escClose); };
+        const escClose = (e) => { if (e.key === 'Escape') close(); };
+        document.addEventListener('keydown', escClose);
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+        document.getElementById('wb-payouts-close').addEventListener('click', close);
+
+        // Tab wiring
+        const tabs = backdrop.querySelectorAll('.wb-htm-tab');
+        const switchHtmTab = (name) => {
+            _htmModalState.activeTab = name;
+            try { GM_setValue('factionops_htm_tab', name); } catch (_) {}
+            tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+            document.getElementById('wb-htm-pane-activity').classList.toggle('active', name === 'activity');
+            const payPane = document.getElementById('wb-htm-pane-payouts');
+            if (payPane) payPane.classList.toggle('active', name === 'payouts');
+            if (name === 'activity') loadHtmActivity();
+            else if (name === 'payouts') loadHtmPayouts();
+        };
+        tabs.forEach(t => t.addEventListener('click', () => switchHtmTab(t.dataset.tab)));
+
+        // Restore last tab (fall back to activity if user lost admin)
+        const initialTab = (!isAdmin && _htmModalState.activeTab === 'payouts') ? 'activity' : _htmModalState.activeTab;
+        switchHtmTab(initialTab);
+    }
+
+    async function loadHtmActivity() {
+        const pane = document.getElementById('wb-htm-pane-activity');
+        const meta = document.getElementById('wb-htm-meta');
+        if (!pane) return;
+        pane.innerHTML = '<div style="padding:24px;color:#9ca3af;font-size:13px;text-align:center;">Loading activity heatmap…</div>';
+        if (meta) meta.textContent = 'activity · loading';
+        try {
+            // Reuse cached data within 60s — heatmap aggregates slowly so
+            // a fresh fetch on every tab-switch is wasteful.
+            let raw;
+            if (_htmModalState.activityData && (Date.now() - _htmModalState.activityFetchedAt) < 60_000) {
+                raw = _htmModalState.activityData;
+            } else {
+                raw = await fetchHeatmapData(state.myFactionId);
+                _htmModalState.activityData = raw;
+                _htmModalState.activityFetchedAt = Date.now();
+            }
+            const data = utcHeatmapToLocal(raw); // shift to local TZ
+            renderHtmActivity(pane, data);
+            if (meta) meta.textContent = `activity · ${state.myFactionName || ''}`;
+        } catch (e) {
+            pane.innerHTML = `<div style="padding:24px;color:#ef4444;font-size:13px;text-align:center;">Activity heatmap failed: ${escapeHtml(e.message)}</div>`;
+            if (meta) meta.textContent = 'activity · failed';
+        }
+    }
+
+    function renderHtmActivity(pane, data) {
+        let totalSamples = 0, maxPct = 0;
+        for (let d = 0; d < 7; d++) {
+            for (let h = 0; h < 24; h++) {
+                const b = (data[d] && data[d][h]) || { total: 0, samples: 0, membersTotal: 0 };
+                totalSamples += b.samples;
+                if (b.samples > 0) {
+                    if (b.membersTotal > 0) {
+                        const pct = (b.total / b.membersTotal) * 100;
+                        if (pct > maxPct) maxPct = pct;
+                    } else {
+                        const avg = b.total / b.samples;
+                        if (avg > maxPct) maxPct = avg;
+                    }
+                }
+            }
+        }
+        if (totalSamples === 0) {
+            pane.innerHTML = '<div style="padding:24px;color:#9ca3af;font-size:13px;text-align:center;">No activity data yet — server collects it as members are seen online.</div>';
+            return;
+        }
+        let html = `<div class="wb-payouts-section-label">Hour-of-week activity (your local time) — based on ${totalSamples.toLocaleString()} samples</div>`;
+        html += '<div class="wb-htm-activity-grid">';
+        // Corner spacer + hour labels row
+        html += '<div></div>';
+        for (let h = 0; h < 24; h++) {
+            html += `<div class="wb-htm-activity-label">${h % 3 === 0 ? h : ''}</div>`;
+        }
+        // Day rows
+        const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+        for (let d = 0; d < 7; d++) {
+            html += `<div class="wb-htm-activity-label wb-htm-activity-day">${DAYS[d]}</div>`;
+            for (let h = 0; h < 24; h++) {
+                const b = (data[d] && data[d][h]) || { total: 0, samples: 0, membersTotal: 0 };
+                if (b.samples === 0) {
+                    html += '<div class="wb-htm-activity-cell" style="background:rgba(255,255,255,0.04);"></div>';
+                    continue;
+                }
+                const avg = b.total / b.samples;
+                const avgMembers = b.membersTotal > 0 ? b.membersTotal / b.samples : 0;
+                const pct = avgMembers > 0 ? (avg / avgMembers) * 100 : avg;
+                const intensity = maxPct > 0 ? pct / maxPct : 0;
+                let bg;
+                if (intensity >= 0.95) bg = `rgba(255,118,117,${(intensity*0.9+0.1).toFixed(2)})`;
+                else if (intensity >= 0.8) bg = `rgba(253,203,110,${(intensity*0.9+0.1).toFixed(2)})`;
+                else bg = `rgba(0,184,148,${(intensity*0.9+0.1).toFixed(2)})`;
+                const tip = `${DAYS[d]} ${String(h).padStart(2,'0')}:00 — avg ${avg.toFixed(1)}${avgMembers>0?` of ${Math.round(avgMembers)} (${pct.toFixed(0)}%)`:''} · ${b.samples} samples`;
+                html += `<div class="wb-htm-activity-cell" style="background:${bg};" title="${escapeHtml(tip)}"></div>`;
+            }
+        }
+        html += '</div>';
+        html += `<div style="font-size:10px;color:#6b7280;margin-top:6px;text-align:center;">Green → orange → red as activity climbs. Hover any cell for the exact %.</div>`;
+        pane.innerHTML = html;
+    }
+
+    async function loadHtmPayouts() {
+        const pane = document.getElementById('wb-htm-pane-payouts');
+        if (!pane) return;
+        // Reuse the payouts render — it expects the body container.
+        // Inject the existing controls (mode + refresh) inline.
+        if (!pane.dataset.initialised) {
+            pane.dataset.initialised = '1';
+            pane.innerHTML = `
+                <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;font-size:11px;">
+                    <span style="color:#9ca3af;">Mode:</span>
+                    <select id="wb-htm-payouts-mode" style="background:#0f1a14;color:#d1d5db;border:1px solid #2d4a3e;border-radius:4px;padding:3px 7px;font-size:11px;">
+                        <option value="dynamic"${_payoutsModalState.mode === 'dynamic' ? ' selected' : ''}>Dynamic FF</option>
+                        <option value="static"${_payoutsModalState.mode === 'static' ? ' selected' : ''}>Static Tier</option>
+                    </select>
+                    <button id="wb-htm-payouts-refresh" style="background:#2d4a3e;color:#d1d5db;border:0;border-radius:3px;padding:3px 9px;font-size:11px;cursor:pointer;">Refresh</button>
+                    <span id="wb-htm-payouts-meta" style="color:#6b7280;margin-left:auto;"></span>
+                </div>
+                <div id="wb-payouts-body-inner"></div>
+            `;
+            pane.querySelector('#wb-htm-payouts-mode').addEventListener('change', async (e) => {
+                _payoutsModalState.mode = e.target.value;
+                try { GM_setValue('factionops_payouts_mode', e.target.value); } catch (_) {}
+                await fetchAndRenderPayoutsHeatmap();
+            });
+            pane.querySelector('#wb-htm-payouts-refresh').addEventListener('click', async () => {
+                await fetchAndRenderPayoutsHeatmap(true);
+            });
+        }
+        await fetchAndRenderPayoutsHeatmap();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  WAR PAYOUTS — v5.0.28 (rendering reused by the combined modal)
     //
     //  Member × War heatmap (APK-inspired) showing each faction member's
     //  payout score across all ended wars. Click a war column to drill
@@ -11703,8 +11897,13 @@ body.wb-chain-active {
     }
 
     async function fetchAndRenderPayoutsHeatmap(forceFresh = false) {
-        const body = document.getElementById('wb-payouts-body');
-        const meta = document.getElementById('wb-payouts-meta');
+        // v5.0.30: render into the combined modal's payouts pane inner
+        // container if present; fall back to the old wb-payouts-body
+        // for any callers that still target the standalone modal.
+        const body = document.getElementById('wb-payouts-body-inner')
+                  || document.getElementById('wb-payouts-body');
+        const meta = document.getElementById('wb-htm-payouts-meta')
+                  || document.getElementById('wb-payouts-meta');
         if (!body) return;
         body.innerHTML = '<div style="padding:24px;color:#9ca3af;font-size:13px;text-align:center;">Crunching numbers — pulling every war attack and weighting them. Can take a few seconds…</div>';
         if (meta) meta.textContent = '…';
