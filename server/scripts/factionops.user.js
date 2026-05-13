@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.21
+// @version      5.0.22
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.21';
+    const SCRIPT_VERSION = '5.0.22';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1435,6 +1435,20 @@ body.wb-chain-active {
 
 /* Player Name */
 .fo-player-name { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+
+.fo-name-level {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--wb-text-muted, #b2bec3);
+    vertical-align: middle;
+    line-height: 1.4;
+    white-space: nowrap;
+}
 
 .fo-player-name .fo-name-row {
     display: flex; align-items: center; gap: 6px;
@@ -8418,6 +8432,15 @@ body.wb-chain-active {
         const nameSpan = buildNameAnchor(targetId, s.name);
         nameRow.appendChild(nameSpan);
 
+        // v5.0.22: inline level badge next to the name. Quick-glance
+        // info so members don't need to scan across to the dedicated
+        // Lvl column. Updates handled in updateOverlayRow via the
+        // .fo-name-level class.
+        const lvlInline = document.createElement('span');
+        lvlInline.className = 'fo-name-level';
+        lvlInline.textContent = s.level != null ? `Lv${s.level}` : '';
+        nameRow.appendChild(lvlInline);
+
         // Eye badge for viewers
         if (viewers && viewers.length > 0) {
             const eye = document.createElement('span');
@@ -8833,9 +8856,11 @@ body.wb-chain-active {
             nameEl.dataset.placeholder = `${s.name} [${targetId}]`;
         }
 
-        // Update level
+        // Update level (column cell + v5.0.22 inline badge next to name)
         const lvlEl = row.querySelector('.fo-level');
         if (lvlEl) lvlEl.textContent = s.level != null ? String(s.level) : '\u2014';
+        const lvlInlineEl = row.querySelector('.fo-name-level');
+        if (lvlInlineEl) lvlInlineEl.textContent = s.level != null ? `Lv${s.level}` : '';
 
         // Update online dot
         const onlineCell = document.getElementById(`fo-online-${targetId}`);
