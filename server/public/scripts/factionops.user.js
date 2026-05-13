@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.23
+// @version      5.0.24
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.23';
+    const SCRIPT_VERSION = '5.0.24';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3489,6 +3489,13 @@ body.wb-chain-active {
 
     let pollTimer = null;
     let pollErrorCount = 0;
+    /** v5.0.24: grace timer that delays the "disconnected" UI by 15s.
+     *  Mobile data on PDA has frequent sub-second blips that recover
+     *  quickly; without this debounce the connection dot flickers
+     *  every time. Only the visual indicator is delayed — internal
+     *  state.connected flips immediately so call/uncall behavior is
+     *  honest. */
+    let _disconnectGraceTimer = null;
     const MAX_POLL_BACKOFF = 30000;
 
     /** Check if a war is actively running (enemy statuses present = war data flowing). */
@@ -3724,6 +3731,13 @@ body.wb-chain-active {
                 state.connected = true;
                 state.connecting = false;
                 pollErrorCount = 0;
+                // v5.0.24: cancel pending disconnect-grace UI update so
+                // we don't flash "disconnected" after we've already
+                // recovered.
+                if (_disconnectGraceTimer) {
+                    clearTimeout(_disconnectGraceTimer);
+                    _disconnectGraceTimer = null;
+                }
                 updateConnectionUI();
                 log('Polling connected');
             }
@@ -3732,13 +3746,20 @@ body.wb-chain-active {
 
         } catch (err) {
             pollErrorCount++;
-            // Only flip to Offline after 3 consecutive failures to avoid flicker on PDA
-            if (state.connected && pollErrorCount >= 3) {
+            // v5.0.24: raised threshold 3 → 5 (mobile data blips are
+            // frequent and short; 5 fails ≈ 1 min of real downtime).
+            // Plus a 15s grace before the UI shows "disconnected" so
+            // brief blips don't flicker the indicator.
+            if (state.connected && pollErrorCount >= 5) {
                 state.connected = false;
-                updateConnectionUI();
-                warn('Poll failed (3+ consecutive):', err.message);
+                if (_disconnectGraceTimer) clearTimeout(_disconnectGraceTimer);
+                _disconnectGraceTimer = setTimeout(() => {
+                    _disconnectGraceTimer = null;
+                    if (!state.connected) updateConnectionUI();
+                }, 15000);
+                warn('Poll failed (5+ consecutive):', err.message);
             } else if (state.connected) {
-                log('Poll hiccup (' + pollErrorCount + '/3):', err.message);
+                log('Poll hiccup (' + pollErrorCount + '/5):', err.message);
             }
 
             // Re-authenticate on 401
