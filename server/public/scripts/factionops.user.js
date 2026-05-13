@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.20
+// @version      5.0.21
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.20';
+    const SCRIPT_VERSION = '5.0.21';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2634,20 +2634,46 @@ body.wb-chain-active {
             const s = state.statuses[it.targetId];
             return (s && Number(s.level)) || 0;
         };
-        const getStats = (it) => {
-            // v5.0.19: prefer BSP (sync, per-user prediction), fall back
-            // to cached FFS estimate. Returns -1 if neither source has
-            // data — those uids sort to the bottom of stats mode.
+        // v5.0.21: detect once per sort whether the user has any
+        // stats-scale data (BSP TBS or FFS bs_estimate). If not, the
+        // stats sort can't work — silently fall back to using FFS
+        // rating (FF score) instead. Per-user detection avoids mixing
+        // stats-scale values (millions/billions) with rating-scale
+        // values (0-10) within a single sort.
+        const _bspInstalled = (() => {
             try {
-                const bsp = fetchBspPrediction(it.targetId);
-                if (bsp && bsp.TBS != null) {
-                    const n = Number(bsp.TBS);
-                    if (Number.isFinite(n)) return n;
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (k && k.indexOf('tdup.battleStatsPredictor.cache.prediction.') === 0) return true;
                 }
             } catch (_) {}
-            const ffs = _ffsStatsCache.get(String(it.targetId));
-            return (typeof ffs === 'number') ? ffs : -1;
-        };
+            return false;
+        })();
+        const _ffsHasAnyEstimate = (() => {
+            for (const v of _ffsStatsCache.values()) {
+                if (typeof v === 'number') return true;
+            }
+            return false;
+        })();
+        const _useStats = _bspInstalled || _ffsHasAnyEstimate;
+        const getStats = _useStats
+            ? (it) => {
+                // Stats-scale path: BSP first, FFS estimate fallback.
+                try {
+                    const bsp = fetchBspPrediction(it.targetId);
+                    if (bsp && bsp.TBS != null) {
+                        const n = Number(bsp.TBS);
+                        if (Number.isFinite(n)) return n;
+                    }
+                } catch (_) {}
+                const ffs = _ffsStatsCache.get(String(it.targetId));
+                return (typeof ffs === 'number') ? ffs : -1;
+            }
+            : (it) => {
+                // No stats data anywhere — sort by FFS rating instead.
+                const c = (typeof ffCache !== 'undefined') ? ffCache[it.targetId] : null;
+                return (c && typeof c.value === 'number') ? c.value : -1;
+            };
         switch (_sortMode) {
             case 'level-asc':  items.sort((a,b) => getLevel(a) - getLevel(b)); break;
             case 'level-desc': items.sort((a,b) => getLevel(b) - getLevel(a)); break;
