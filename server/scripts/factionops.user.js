@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.30
+// @version      5.0.31
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.30';
+    const SCRIPT_VERSION = '5.0.31';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -8120,7 +8120,7 @@ body.wb-chain-active {
                     </div>
                     <div class="fo-status-dot${state.connected ? '' : ' disconnected'}" id="fo-conn-dot" title="${state.connected ? 'Connected' : 'Disconnected'}"></div>
                     <span class="fo-rt-badge" id="fo-rt-badge"></span>
-                    <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Heatmaps (Activity + Payouts)">&#x1F4CA;</button>
+                    <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Heatmaps (Activity + Payouts)">&#x1F4B0;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                     <div class="fo-energy-display" id="fo-energy-display" title="Energy">
                         <span class="fo-energy-label">E</span>
@@ -11682,7 +11682,7 @@ body.wb-chain-active {
         backdrop.innerHTML = `
             <div class="wb-payouts-modal" id="wb-payouts-modal">
                 <div class="wb-payouts-header">
-                    <h2>📊 Heatmaps</h2>
+                    <h2>💰 Heatmaps</h2>
                     <span class="wb-payouts-meta" id="wb-htm-meta"></span>
                     <button class="wb-payouts-close" id="wb-payouts-close" title="Close">✕</button>
                 </div>
