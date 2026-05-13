@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.14
+// @version      5.0.15
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.14';
+    const SCRIPT_VERSION = '5.0.15';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -8322,21 +8322,15 @@ body.wb-chain-active {
         li.dataset.foId = targetId;
 
         const s = state.statuses[targetId] || {};
-        const prio = state.priorities[targetId];
         const callData = state.calls[targetId];
         const viewers = state.viewers[targetId];
 
         // Row status classes
         applyOverlayRowClasses(li, targetId);
 
-        // 1. Priority cell
-        const prioCell = document.createElement('div');
-        prioCell.className = 'fo-cell';
-        prioCell.id = `fo-priority-${targetId}`;
-        renderOverlayPriorityCell(prioCell, targetId);
-        li.appendChild(prioCell);
+        // v5.0.14: priority cell retired (grid is now 7 cols).
 
-        // 2. Target cell (name + id + eye badge)
+        // 1. Target cell (name + id + eye badge)
         const targetCell = document.createElement('div');
         targetCell.className = 'fo-cell';
         const playerName = document.createElement('div');
@@ -8780,7 +8774,9 @@ body.wb-chain-active {
         }
 
         // Update viewers badge
-        const targetCell = row.children[1]; // second cell is target
+        // v5.0.14: target cell is now the FIRST cell (was [1] before
+        // the priority column was removed in this version).
+        const targetCell = row.children[0];
         if (targetCell) {
             const existingEye = targetCell.querySelector('.fo-eye-badge');
             const viewers = state.viewers[targetId];
