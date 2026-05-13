@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.7
+// @version      3.2.8
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.7';
+    const SCRIPT_VERSION = '3.2.8';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -5465,20 +5465,23 @@
         const members = snapshot?.members || [];
         const memberById = new Map();
         for (const m of members) memberById.set(String(m.id), m);
-        // v3.2.7: ex-member name fallback. Faction roster doesn't include
-        // members who left, so memberById misses them; fall back to the
-        // local stash of names seen in past scenario intercepts. Final
-        // fallback stays "Player <id>" so the row never disappears.
-        const namesCache = _getPlayerNames();
+        // v3.2.8: faction-average baseline still consumes ALL uids in
+        // cprCache (ex-members included — their history makes the
+        // average more accurate). Displayed rows skip ex-members
+        // because we can't coach them anymore; only current roster
+        // members are actionable.
         const factionAvgs = _computeFactionCheckpointAvgs(cprCache);
         const rows = [];
         for (const uid in cprCache) {
+            // v3.2.8: skip ex-members entirely — no row, no "Player <id>"
+            // placeholder. Per user request: "don't include members that
+            // aren't in the faction anymore".
+            const memberRecord = memberById.get(uid);
+            if (!memberRecord) continue;
             const member = cprCache[uid];
             const cps = member?.byCheckpoint;
             if (!cps) continue;
-            const memberName = memberById.get(uid)?.name
-                || namesCache[uid]
-                || `Player ${uid}`;
+            const memberName = memberRecord.name || `Player ${uid}`;
             const memberCpr = Number(member.cpr) || 0;
             const memberHighestLevel = Number(member.highestLevel) || 0;
             for (const k in cps) {
