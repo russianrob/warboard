@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.32
+// @version      5.0.33
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.32';
+    const SCRIPT_VERSION = '5.0.33';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -8149,7 +8149,7 @@ body.wb-chain-active {
                         <span class="fo-war-timer-value" id="fo-war-timer-value">--:--</span>
                         <div class="fo-war-timer-detail" id="fo-war-timer-detail"></div>
                     </div>
-                    <button class="fo-settings-btn" id="fo-enemy-heatmap-btn" title="Enemy Activity Heatmap">&#x1F4C8;</button>
+                    <button class="fo-settings-btn" id="fo-enemy-heatmap-btn" title="Activity Heatmap (us vs enemy, divergent)">&#x1F4C8;</button>
                     <button class="fo-settings-btn" id="fo-scout-btn" title="War Analysis">&#x1F50D;</button>
                     <button class="fo-settings-btn" id="fo-postwar-btn" title="Post-War Report">&#x1F4CB;</button>
                     <div class="fo-online-badge"><span class="fo-dot"></span><span id="fo-online-count">${state.ourFactionOnline ? state.ourFactionOnline.online : state.onlinePlayers.length} us</span> · <span id="fo-enemy-online-count">0 enemy</span></div>
@@ -8276,12 +8276,23 @@ body.wb-chain-active {
             });
         }
 
-        // Wire up enemy heatmap button in overlay header
+        // v5.0.33: 📈 button now opens a COMBINED activity heatmap
+        // (our faction + enemy, APK-style divergent green/red), not the
+        // enemy-only view it had before. Falls back to single-faction
+        // render if there's no current war / no enemy faction known.
         const enemyHeatmapBtn = document.getElementById('fo-enemy-heatmap-btn');
         if (enemyHeatmapBtn) {
             enemyHeatmapBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                toggleHeatmapPanel(state.enemyFactionId, state.enemyFactionName);
+                if (state.enemyFactionId) {
+                    toggleCombinedHeatmapPanel(
+                        state.myFactionId, state.myFactionName,
+                        state.enemyFactionId, state.enemyFactionName,
+                    );
+                } else {
+                    // No active war — just show our own heatmap.
+                    toggleHeatmapPanel(state.myFactionId, state.myFactionName);
+                }
             });
         }
 
