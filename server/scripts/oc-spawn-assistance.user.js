@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.6
+// @version      3.2.7
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.6';
+    const SCRIPT_VERSION = '3.2.7';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1358,9 +1358,45 @@
         setTimeout(hide, hasNew ? 4000 : 2000);
     }
 
+    // v3.2.7: per-user localStorage cache of player ID → name. Lets the
+    // Coaching tab show real names for ex-faction-members whose checkpoint
+    // history is still in the server data but who aren't in the current
+    // member roster. Populated as a side effect of every intercept (we have
+    // the names in scenario.playerSlots; just stash them).
+    const _PLAYER_NAMES_KEY = 'oc_player_names';
+    function _getPlayerNames() {
+        try { return JSON.parse(GM_getValue(_PLAYER_NAMES_KEY, '{}')) || {}; }
+        catch { return {}; }
+    }
+    function _stashPlayerNamesFromScenarios(rawScenarios) {
+        try {
+            const map = _getPlayerNames();
+            let added = 0;
+            for (const raw of rawScenarios) {
+                const slots = Array.isArray(raw?.playerSlots) ? raw.playerSlots : [];
+                for (const s of slots) {
+                    const id = s?.player?.ID;
+                    const name = s?.player?.name;
+                    if (id == null || !name) continue;
+                    const key = String(id);
+                    if (map[key] !== name) {
+                        map[key] = String(name).slice(0, 40);
+                        added++;
+                    }
+                }
+            }
+            if (added > 0) {
+                GM_setValue(_PLAYER_NAMES_KEY, JSON.stringify(map));
+            }
+        } catch (_) {}
+    }
+
     function captureCompletedScenarios(rawScenarios) {
         const apiKey = getApiKey();
         if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') return;
+        // v3.2.7: stash player names regardless of upload outcome — even
+        // already-known scenarios are useful for filling in ex-member names.
+        _stashPlayerNamesFromScenarios(rawScenarios);
         const uploaded = _getUploadedSet();
         const fresh = [];
         for (const raw of rawScenarios) {
@@ -5429,13 +5465,20 @@
         const members = snapshot?.members || [];
         const memberById = new Map();
         for (const m of members) memberById.set(String(m.id), m);
+        // v3.2.7: ex-member name fallback. Faction roster doesn't include
+        // members who left, so memberById misses them; fall back to the
+        // local stash of names seen in past scenario intercepts. Final
+        // fallback stays "Player <id>" so the row never disappears.
+        const namesCache = _getPlayerNames();
         const factionAvgs = _computeFactionCheckpointAvgs(cprCache);
         const rows = [];
         for (const uid in cprCache) {
             const member = cprCache[uid];
             const cps = member?.byCheckpoint;
             if (!cps) continue;
-            const memberName = memberById.get(uid)?.name || `Player ${uid}`;
+            const memberName = memberById.get(uid)?.name
+                || namesCache[uid]
+                || `Player ${uid}`;
             const memberCpr = Number(member.cpr) || 0;
             const memberHighestLevel = Number(member.highestLevel) || 0;
             for (const k in cps) {
