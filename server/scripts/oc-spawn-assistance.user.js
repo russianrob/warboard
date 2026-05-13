@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.5
+// @version      3.2.6
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.5';
+    const SCRIPT_VERSION = '3.2.6';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1280,41 +1280,72 @@
     // checkpoint counts and flush a single toast 800ms after the
     // last upload settles. Toast itself fades after 4s and is
     // tap-to-dismiss.
-    let _toastState = { scenarios: 0, checkpoints: 0, total: 0, timer: null, el: null };
-    function _showCheckpointToast(newScenarios, newCheckpoints, factionTotal) {
-        _toastState.scenarios += newScenarios;
-        _toastState.checkpoints += newCheckpoints;
-        _toastState.total = factionTotal;
+    // v3.2.6: toast fires on EVERY successful intercept of completed
+    // crimes — even when no new data was uploaded — so the user has
+    // visible confirmation the system is alive. Two visual variants:
+    //   - new data > 0   → bold green toast, 4s
+    //   - new data === 0 → small grey "checked, no new" toast, 2s
+    // Coalesces multiple intercepts within 800ms into one toast.
+    let _toastState = {
+        scenarios: 0, checkpoints: 0, total: 0,
+        checked: 0,                  // running tally of "intercepted but already-known" crimes
+        lastKnownTotal: 0,           // last total reported by server, for "no new" displays
+        timer: null, el: null,
+    };
+    function _showCheckpointToast(newScenarios, newCheckpoints, factionTotal, checkedCount) {
+        _toastState.scenarios += (newScenarios || 0);
+        _toastState.checkpoints += (newCheckpoints || 0);
+        _toastState.checked += (checkedCount || 0);
+        if (factionTotal != null) {
+            _toastState.total = factionTotal;
+            _toastState.lastKnownTotal = factionTotal;
+        }
         if (_toastState.timer) clearTimeout(_toastState.timer);
         _toastState.timer = setTimeout(_flushCheckpointToast, 800);
     }
     function _flushCheckpointToast() {
-        const { scenarios, checkpoints, total } = _toastState;
+        const { scenarios, checkpoints, checked, total, lastKnownTotal } = _toastState;
         _toastState.scenarios = 0;
         _toastState.checkpoints = 0;
+        _toastState.checked = 0;
         _toastState.timer = null;
-        if (scenarios === 0) return;
+        if (scenarios === 0 && checked === 0) return;
         // Remove any existing toast (avoid stacking).
         if (_toastState.el && _toastState.el.parentNode) {
             _toastState.el.parentNode.removeChild(_toastState.el);
         }
+        const hasNew = scenarios > 0;
         const el = document.createElement('div');
         el.id = 'oc-checkpoint-toast';
+        const accent = hasNew ? '#74c69d' : '#6b7280';
+        const padding = hasNew ? '10px 14px' : '7px 12px';
+        const maxW = hasNew ? '300px' : '240px';
+        const fontSize = hasNew ? '12px' : '11px';
         el.style.cssText = [
             'position:fixed', 'bottom:24px', 'right:24px', 'z-index:999999',
-            'background:#131f18', 'border:1px solid #2d4a3e', 'border-left:3px solid #74c69d',
-            'border-radius:6px', 'padding:10px 14px', 'font-size:12px',
+            'background:#131f18', 'border:1px solid #2d4a3e', `border-left:3px solid ${accent}`,
+            'border-radius:6px', `padding:${padding}`, `font-size:${fontSize}`,
             'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
             'color:#d1d5db', 'box-shadow:0 4px 20px rgba(0,0,0,0.7)',
             'cursor:pointer', 'opacity:0', 'transition:opacity 200ms ease-out',
-            'max-width:300px', 'line-height:1.4',
+            `max-width:${maxW}`, 'line-height:1.4',
         ].join(';');
-        const ocLabel = scenarios === 1 ? 'crime' : 'crimes';
-        const cpLabel = checkpoints === 1 ? 'checkpoint' : 'checkpoints';
-        el.innerHTML = `
-            <div style="font-weight:600;color:#74c69d;font-size:11px;letter-spacing:0.3px;text-transform:uppercase;margin-bottom:3px;">Coaching data updated</div>
-            <div><b style="color:#f3f4f6;">${scenarios}</b> new ${ocLabel} · <b style="color:#f3f4f6;">${checkpoints}</b> ${cpLabel}</div>
-            <div style="color:#6b7280;font-size:10px;margin-top:3px;">Faction total: ${total.toLocaleString()} records</div>`;
+        if (hasNew) {
+            const ocLabel = scenarios === 1 ? 'crime' : 'crimes';
+            const cpLabel = checkpoints === 1 ? 'checkpoint' : 'checkpoints';
+            el.innerHTML =
+                `<div style="font-weight:600;color:${accent};font-size:11px;letter-spacing:0.3px;text-transform:uppercase;margin-bottom:3px;">Coaching data updated</div>` +
+                `<div><b style="color:#f3f4f6;">${scenarios}</b> new ${ocLabel} · <b style="color:#f3f4f6;">${checkpoints}</b> ${cpLabel}</div>` +
+                `<div style="color:#6b7280;font-size:10px;margin-top:3px;">Faction total: ${(total || 0).toLocaleString()} records</div>`;
+        } else {
+            // No-new variant — short, dim, auto-fades faster.
+            const ocLabel = checked === 1 ? 'crime' : 'crimes';
+            const totalLine = lastKnownTotal > 0
+                ? ` · Total: ${lastKnownTotal.toLocaleString()}`
+                : '';
+            el.innerHTML =
+                `<div style="color:#9ca3af;">Coaching: checked <b style="color:#d1d5db;">${checked}</b> ${ocLabel}, no new data${totalLine}</div>`;
+        }
         document.body.appendChild(el);
         _toastState.el = el;
         requestAnimationFrame(() => { el.style.opacity = '1'; });
@@ -1324,7 +1355,7 @@
             if (_toastState.el === el) _toastState.el = null;
         };
         el.addEventListener('click', hide);
-        setTimeout(hide, 4000);
+        setTimeout(hide, hasNew ? 4000 : 2000);
     }
 
     function captureCompletedScenarios(rawScenarios) {
@@ -1338,7 +1369,14 @@
             const parsed = parseScenario(raw);
             if (parsed) fresh.push(parsed);
         }
-        if (fresh.length === 0) return;
+        // v3.2.6: if nothing fresh, surface a "no new data" toast so the
+        // user gets visible confirmation the intercept happened. Use the
+        // count of completed scenarios in the payload so the user sees
+        // "checked N crimes" rather than 0.
+        if (fresh.length === 0) {
+            _showCheckpointToast(0, 0, null, rawScenarios.length || 0);
+            return;
+        }
         const url = SERVER + '/api/oc/checkpoint-history?key=' + encodeURIComponent(apiKey);
         const body = JSON.stringify({ scenarios: fresh });
         if (typeof GM_xmlhttpRequest === 'function') {
@@ -1350,10 +1388,16 @@
                         for (const s of fresh) _markUploaded(s.id);
                         try {
                             const r = JSON.parse(resp.responseText);
-                            if (r.scenariosNew > 0) {
-                                console.log(`[OC Spawn][checkpoints] uploaded ${r.scenariosNew} new scenarios (${r.checkpointsNew} checkpoints), faction total: ${r.total}`);
-                                _showCheckpointToast(r.scenariosNew, r.checkpointsNew, r.total);
+                            const newCount = r.scenariosNew || 0;
+                            const newCps = r.checkpointsNew || 0;
+                            // Always toast — green when new, grey when none.
+                            // "Checked" count = total scenarios in this
+                            // intercept's payload (matches user mental model).
+                            const checked = (rawScenarios.length || 0) - newCount;
+                            if (newCount > 0) {
+                                console.log(`[OC Spawn][checkpoints] uploaded ${newCount} new scenarios (${newCps} checkpoints), faction total: ${r.total}`);
                             }
+                            _showCheckpointToast(newCount, newCps, r.total, Math.max(0, checked));
                         } catch (_) {}
                     }
                 },
