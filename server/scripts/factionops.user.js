@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.26';
+    const SCRIPT_VERSION = '5.0.27';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3449,7 +3449,17 @@ body.wb-chain-active {
         for (const [d, m] of Object.entries(TRAVEL_ESTIMATES)) {
             if (desc.includes(d)) { dest = d; mins = m; break; }
         }
-        if (!dest) return null;
+        if (!dest) {
+            // v5.0.27: canary for Torn API change announced 2026-05-13
+            // ("Traveling statuses always reference both origin and
+            // destination"). If a description CLEARLY refers to travel
+            // but our destination table doesn't match anymore, log it
+            // once so we notice. Skip non-travel strings entirely.
+            if (/travel|return|abroad|airstrip/i.test(desc)) {
+                _warnTravelParseFailureOnce(description);
+            }
+            return null;
+        }
 
         let estimate;
         if (desc.includes('returning')) {
@@ -3474,6 +3484,19 @@ body.wb-chain-active {
         const h = Math.floor(mins / 60);
         const m = mins % 60;
         return h > 0 ? `~${h}h ${m}m` : `~${m}m`;
+    }
+
+    // v5.0.27: dedupe travel-parse-failure warnings so we don't spam
+    // the console. Each unique normalized desc only logs once per
+    // page session.
+    const _travelParseFailureSeen = new Set();
+    function _warnTravelParseFailureOnce(description) {
+        try {
+            const key = String(description).slice(0, 96);
+            if (_travelParseFailureSeen.has(key)) return;
+            _travelParseFailureSeen.add(key);
+            console.warn('[FactionOps] travel description did not match any known destination — Torn may have changed the format. Verbatim:', description);
+        } catch (_) {}
     }
 
     // =========================================================================

@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.1-wb57
+// @version      2.73.1-wb58
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -2182,7 +2182,35 @@ if (!singleton) {
       for (let p = el; p && p !== mini; p = p.parentElement) depth++;
       if (depth > bestDepth) { best = el; bestDepth = depth; }
     }
+    // wb58: canary for the Torn API change announced 2026-05-13
+    // ("Traveling statuses always reference both origin and
+    // destination"). If a mini-profile contains the words travel/
+    // return/airstrip but NO selector / aria-label / text match
+    // landed, Torn has likely changed the wording — log once with
+    // the offending HTML snippet so we notice.
+    if (!best) {
+      try {
+        const fullText = (mini.textContent || '').toLowerCase();
+        if (/travel|return|airstrip|abroad/.test(fullText)) {
+          _ffs_warnTravelHostMissOnce(mini);
+        }
+      } catch (_) {}
+    }
     return best;
+  }
+  // wb58: dedupe travel-host warnings so we only log once per unique
+  // text snippet per session.
+  const _ffs_travelHostMissSeen = new Set();
+  function _ffs_warnTravelHostMissOnce(mini) {
+    try {
+      const key = (mini.textContent || '').trim().slice(0, 120);
+      if (_ffs_travelHostMissSeen.has(key)) return;
+      _ffs_travelHostMissSeen.add(key);
+      console.warn(
+        '[FFS Banner] mini-profile travel host not found — Torn may have changed the format. textContent:',
+        key,
+      );
+    } catch (_) {}
   }
 
   async function apply_to_mini_profile(mini) {
