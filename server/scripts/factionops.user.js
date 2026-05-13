@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.18
+// @version      5.0.19
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.18';
+    const SCRIPT_VERSION = '5.0.19';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2635,10 +2635,18 @@ body.wb-chain-active {
             return (s && Number(s.level)) || 0;
         };
         const getStats = (it) => {
-            // v5.0.17: cache stores NUMBER (real estimate) or NULL ("tried,
-            // no data"). `has()` returns true for both → no re-fetch loop.
-            const v = _ffsStatsCache.get(String(it.targetId));
-            return (typeof v === 'number') ? v : -1; // -1 → bottom
+            // v5.0.19: prefer BSP (sync, per-user prediction), fall back
+            // to cached FFS estimate. Returns -1 if neither source has
+            // data — those uids sort to the bottom of stats mode.
+            try {
+                const bsp = fetchBspPrediction(it.targetId);
+                if (bsp && bsp.TBS != null) {
+                    const n = Number(bsp.TBS);
+                    if (Number.isFinite(n)) return n;
+                }
+            } catch (_) {}
+            const ffs = _ffsStatsCache.get(String(it.targetId));
+            return (typeof ffs === 'number') ? ffs : -1;
         };
         switch (_sortMode) {
             case 'level-asc':  items.sort((a,b) => getLevel(a) - getLevel(b)); break;
@@ -8153,23 +8161,28 @@ body.wb-chain-active {
             return a.timer - b.timer;
         });
 
-        // v5.0.18: apply user-chosen manual sort (no-op when mode='smart').
-        // Stats sort kicks off a fire-and-forget pre-fetch ONLY (no
-        // Promise.all chain, no .then(renderOverlay)). Cache populates
-        // in the background; the next natural render tick (from the
-        // existing 5s interval or any state update) picks up the new
-        // data. v5.0.16/17 attempted to chain a renderOverlay after
-        // Promise.all settled — but in failure modes that chain became
-        // a tight loop that froze the entire page. This version cannot
-        // recurse: it only ever sets up async work, never awaits it,
-        // never triggers a re-render from inside the chain.
+        // v5.0.19: apply user-chosen manual sort. Stats sort consults
+        // BSP (sync, in localStorage) first, then falls back to the
+        // FFS cache. We still kick off a fire-and-forget FFS pre-fetch
+        // for uids missing from both sources — cache populates in the
+        // background and the dropdown change handler triggers ONE
+        // delayed re-render to pick it up. No Promise chain, no
+        // recursion, cannot freeze the UI thread.
         if (_sortMode !== 'smart') {
             if (_sortMode === 'stats-asc' || _sortMode === 'stats-desc') {
                 for (const it of sorted) {
                     const k = String(it.targetId);
-                    if (!_ffsStatsCache.has(k)) {
-                        // Fire and forget. getFfScouterEstimate populates
-                        // _ffsStatsCache in its onsuccess/onerror branches.
+                    if (_ffsStatsCache.has(k)) continue;
+                    // Skip the FFS hit if BSP already has this uid — no
+                    // need to fetch what we already have a sync source
+                    // for. (The sort itself prefers BSP over FFS, so
+                    // pre-fetching FFS for BSP-known uids is wasted I/O.)
+                    let bspKnown = false;
+                    try {
+                        const p = fetchBspPrediction(it.targetId);
+                        if (p && p.TBS != null) bspKnown = true;
+                    } catch (_) {}
+                    if (!bspKnown) {
                         try { getFfScouterEstimate(it.targetId); } catch (_) {}
                     }
                 }
