@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.19
+// @version      5.0.20
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.19';
+    const SCRIPT_VERSION = '5.0.20';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3338,17 +3338,24 @@ body.wb-chain-active {
         const now = Date.now() / 1000;
         const age = now - cached.lastUpdated;
         const stale = age > 14 * 24 * 60 * 60; // >14 days
-        const key = `ff_${ff.toFixed(2)}_${stale}`;
+        // v5.0.20: include the FFS stat estimate inline next to the FF
+        // score when available. bsHuman is the formatted string like
+        // "5.08b" (premium-tier FFS feature). Free-tier users won't have
+        // it — those badges stay FF-only as before.
+        const stats = cached.bsHuman || null;
+        const key = `ff_${ff.toFixed(2)}_${stale}_${stats || ''}`;
         if (el.dataset.foCache === key) return; // no change
         el.dataset.foCache = key;
-        const label = `FF:${ff.toFixed(2)}${stale ? '?' : ''}`;
+        const label = stats
+            ? `FF:${ff.toFixed(2)}${stale ? '?' : ''} · ${stats}`
+            : `FF:${ff.toFixed(2)}${stale ? '?' : ''}`;
         el.className = 'fo-ff-inline';
         el.textContent = label;
         el.style.color = ffColor(ff);
         el.style.background = 'rgba(255,255,255,0.06)';
         el.title = stale
-            ? `Fair Fight ${ff.toFixed(2)} (stale data)`
-            : `Fair Fight ${ff.toFixed(2)}`;
+            ? `Fair Fight ${ff.toFixed(2)}${stats ? ' • Est. stats: ' + stats : ''} (stale data)`
+            : `Fair Fight ${ff.toFixed(2)}${stats ? ' • Est. stats: ' + stats : ''}`;
     }
 
     /** Update all rendered FF badges from cache. */
