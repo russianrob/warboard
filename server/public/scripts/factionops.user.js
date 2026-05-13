@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.31
+// @version      5.0.32
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.31';
+    const SCRIPT_VERSION = '5.0.32';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -11676,23 +11676,26 @@ body.wb-chain-active {
         const existing = document.getElementById('wb-payouts-backdrop');
         if (existing) { existing.remove(); return; }
         const isAdmin = isLeader();
+        if (!isAdmin) {
+            // Non-admins shouldn't see the modal at all (admin-gated data).
+            return;
+        }
         const backdrop = document.createElement('div');
         backdrop.id = 'wb-payouts-backdrop';
         backdrop.className = 'wb-payouts-backdrop';
+        // v5.0.32: stripped the Activity tab — modal is payouts-only
+        // per user request ('remove activity from payouts'). The combined-
+        // activity heatmap can come back as a separate feature later if
+        // wanted; for now the 💰 button strictly opens payouts.
         backdrop.innerHTML = `
             <div class="wb-payouts-modal" id="wb-payouts-modal">
                 <div class="wb-payouts-header">
-                    <h2>💰 Heatmaps</h2>
+                    <h2>💰 War Payouts</h2>
                     <span class="wb-payouts-meta" id="wb-htm-meta"></span>
                     <button class="wb-payouts-close" id="wb-payouts-close" title="Close">✕</button>
                 </div>
-                <div class="wb-htm-tabs">
-                    <button class="wb-htm-tab" data-tab="activity">Activity</button>
-                    ${isAdmin ? '<button class="wb-htm-tab" data-tab="payouts">Payouts</button>' : ''}
-                </div>
                 <div class="wb-payouts-body" id="wb-payouts-body">
-                    <div class="wb-htm-pane" id="wb-htm-pane-activity"></div>
-                    <div class="wb-htm-pane" id="wb-htm-pane-payouts"></div>
+                    <div class="wb-htm-pane active" id="wb-htm-pane-payouts"></div>
                 </div>
             </div>
         `;
@@ -11702,24 +11705,8 @@ body.wb-chain-active {
         document.addEventListener('keydown', escClose);
         backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
         document.getElementById('wb-payouts-close').addEventListener('click', close);
-
-        // Tab wiring
-        const tabs = backdrop.querySelectorAll('.wb-htm-tab');
-        const switchHtmTab = (name) => {
-            _htmModalState.activeTab = name;
-            try { GM_setValue('factionops_htm_tab', name); } catch (_) {}
-            tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-            document.getElementById('wb-htm-pane-activity').classList.toggle('active', name === 'activity');
-            const payPane = document.getElementById('wb-htm-pane-payouts');
-            if (payPane) payPane.classList.toggle('active', name === 'payouts');
-            if (name === 'activity') loadHtmActivity();
-            else if (name === 'payouts') loadHtmPayouts();
-        };
-        tabs.forEach(t => t.addEventListener('click', () => switchHtmTab(t.dataset.tab)));
-
-        // Restore last tab (fall back to activity if user lost admin)
-        const initialTab = (!isAdmin && _htmModalState.activeTab === 'payouts') ? 'activity' : _htmModalState.activeTab;
-        switchHtmTab(initialTab);
+        // Straight to payouts.
+        loadHtmPayouts();
     }
 
     async function loadHtmActivity() {
