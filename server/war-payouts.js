@@ -222,21 +222,110 @@ export async function computePayouts(warId, options = {}) {
   return { ...result, cached: false };
 }
 
+/**
+ * Build a combined member×war matrix for the heatmap view. Each member
+ * row carries their score per war + total. Wars are returned in
+ * chronological order so the UI can render columns left→right oldest→
+ * newest. Reuses computePayouts (and its 5-min cache) for each war —
+ * subsequent calls within the cache window are cheap.
+ *
+ * Loot is read from the per-war auto-detect; explicit overrides aren't
+ * supported here (keeps the matrix one-shot computable; per-war manual
+ * loot is still available via the per-war drilldown UI).
+ */
+export async function computePayoutsHeatmap(factionId, options = {}) {
+  const mode = options.mode === "static" ? "static" : "dynamic";
+  const wars = listEligibleWars(factionId);
+  const perWar = [];
+  // Sequential to avoid hammering Torn's attack endpoint when the
+  // cache is cold; cached calls return instantly anyway.
+  for (const w of wars) {
+    try {
+      const r = await computePayouts(w.warId, { mode });
+      perWar.push({
+        warId: w.warId,
+        enemyFactionName: w.enemyFactionName,
+        warResult: w.warResult,
+        warEndedAt: w.warEndedAt,
+        lootTotal: r.lootTotal,
+        totalScore: r.totalScore,
+        members: r.members,
+      });
+    } catch (e) {
+      perWar.push({
+        warId: w.warId,
+        enemyFactionName: w.enemyFactionName,
+        warResult: w.warResult,
+        warEndedAt: w.warEndedAt,
+        error: e.message,
+      });
+    }
+  }
+
+  // Build the member matrix. Key by playerId; track most-recent name
+  // (later-war scores overwrite if a player changed their display name).
+  const memberMap = {};
+  for (const w of perWar) {
+    if (!Array.isArray(w.members)) continue;
+    for (const m of w.members) {
+      if (!memberMap[m.playerId]) {
+        memberMap[m.playerId] = {
+          playerId: m.playerId,
+          name: m.name,
+          scoresByWar: {},
+          payoutsByWar: {},
+          totalScore: 0,
+          totalPayout: 0,
+          warsParticipated: 0,
+        };
+      }
+      memberMap[m.playerId].name = m.name;
+      memberMap[m.playerId].scoresByWar[w.warId] = m.score;
+      memberMap[m.playerId].payoutsByWar[w.warId] = m.dollarPayout;
+      memberMap[m.playerId].totalScore += m.score;
+      memberMap[m.playerId].totalPayout += m.dollarPayout;
+      memberMap[m.playerId].warsParticipated++;
+    }
+  }
+  const members = Object.values(memberMap)
+    .map(m => ({
+      ...m,
+      totalScore: Math.round(m.totalScore * 10) / 10,
+    }))
+    .sort((a, b) => b.totalScore - a.totalScore);
+
+  return {
+    factionId: String(factionId),
+    mode,
+    wars: perWar.map(w => ({
+      warId: w.warId,
+      enemyFactionName: w.enemyFactionName,
+      warResult: w.warResult,
+      warEndedAt: w.warEndedAt,
+      lootTotal: w.lootTotal || 0,
+      totalScore: w.totalScore || 0,
+      error: w.error || null,
+    })),
+    members,
+    generatedAt: Date.now(),
+  };
+}
+
 /** List wars eligible for payouts (ended, has data) for a faction. */
 export function listEligibleWars(factionId) {
   const fid = String(factionId);
   const out = [];
-  // store.getAllWars or similar — fall back to enumerating wars.json
-  // shape if the helper isn't exported.
-  const all = (typeof store.getAllWars === "function")
-    ? store.getAllWars()
-    : (store.getState && store.getState().wars) || {};
-  for (const wid in all) {
-    const w = all[wid];
-    if (String(w.factionId) !== fid) continue;
+  // getAllWars() returns a Map — iterate via .entries() not for...in
+  // (the latter only works for plain objects).
+  const all = store.getAllWars();
+  const entries = (all instanceof Map)
+    ? Array.from(all.entries())
+    : Object.entries(all || {});
+  for (const [wid, w] of entries) {
+    if (!w || String(w.factionId) !== fid) continue;
     if (!w.warEnded) continue; // only ended wars eligible
     out.push({
-      warId: wid,
+      warId: String(wid),
       enemyFactionName: w.enemyFactionName || `Faction ${w.enemyFactionId}`,
       warResult: w.warResult || "unknown",
       warEndedAt: w.warEndedAt || 0,

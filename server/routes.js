@@ -7720,6 +7720,26 @@ router.get("/api/war/:warId/payouts", async (req, res) => {
   }
 });
 
+// Combined member × war heatmap matrix.
+router.get("/api/war/payouts/heatmap", async (req, res) => {
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info } = ctx;
+  const adminRoles = store.getAdminRoles(info.factionId).map(r => String(r).toLowerCase());
+  const isDev = String(info.playerId) === '137558';
+  const myPos = String(info.factionPosition || '').toLowerCase();
+  if (!isDev && !adminRoles.includes(myPos)) {
+    return res.status(403).json({ error: "Admin role required" });
+  }
+  const mode = req.query.mode === 'static' ? 'static' : 'dynamic';
+  try {
+    const result = await warPayouts.computePayoutsHeatmap(info.factionId, { mode });
+    return res.json(result);
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // List wars eligible for payout calc (ended, this faction's).
 router.get("/api/war/payouts/list", async (req, res) => {
   const ctx = await resolveVaultCaller(req, res);

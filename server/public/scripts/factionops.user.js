@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.26
+// @version      5.0.28
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.27';
+    const SCRIPT_VERSION = '5.0.28';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1735,6 +1735,130 @@ body.wb-chain-active {
 .wb-heatmap-btn:hover {
     transform: scale(1.1);
     background: var(--wb-call-green);
+}
+
+/* ────────── War Payouts modal — v5.0.28 ────────── */
+.wb-payouts-backdrop {
+    position: fixed; inset: 0; z-index: 99998;
+    background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center;
+}
+.wb-payouts-modal {
+    background: #131a14; color: #d1d5db;
+    border: 1px solid #2d4a3e; border-radius: 8px;
+    width: 95vw; max-width: 1100px; max-height: 90vh;
+    display: flex; flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+    overflow: hidden;
+}
+.wb-payouts-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px; border-bottom: 1px solid #2d4a3e;
+    background: rgba(255,255,255,0.02);
+}
+.wb-payouts-header h2 {
+    margin: 0; font-size: 15px; font-weight: 700; color: #f3f4f6;
+    letter-spacing: 0.3px;
+}
+.wb-payouts-header .wb-payouts-meta {
+    color: #6b7280; font-size: 11px; margin-left: auto;
+    margin-right: 8px;
+}
+.wb-payouts-header select {
+    background: #0f1a14; color: #d1d5db; border: 1px solid #2d4a3e;
+    border-radius: 4px; padding: 4px 7px; font-size: 11px; cursor: pointer;
+}
+.wb-payouts-close {
+    background: transparent; color: #d1d5db; border: 0;
+    font-size: 18px; line-height: 1; cursor: pointer; padding: 4px 8px;
+    border-radius: 4px;
+}
+.wb-payouts-close:hover { background: rgba(255,255,255,0.08); }
+.wb-payouts-body {
+    overflow: auto; padding: 14px 16px; flex: 1 1 auto;
+    display: flex; flex-direction: column; gap: 14px;
+}
+.wb-payouts-section-label {
+    font-size: 10px; color: #6b7280; text-transform: uppercase;
+    letter-spacing: 0.4px; font-weight: 600;
+}
+
+/* Heatmap grid (member × war) — APK-inspired diverging cells */
+.wb-payouts-heatmap {
+    border: 1px solid #1a2e20; border-radius: 6px;
+    background: #0f1a14; padding: 8px;
+    overflow-x: auto;
+}
+.wb-payouts-heat-row {
+    display: grid; align-items: center;
+    gap: 2px; padding: 2px 0;
+}
+.wb-payouts-heat-row.header {
+    border-bottom: 1px solid #2d4a3e; padding-bottom: 6px;
+    margin-bottom: 4px; font-size: 10px;
+    color: #9ca3af; text-transform: uppercase; letter-spacing: 0.4px;
+}
+.wb-payouts-heat-namecol {
+    font-size: 11px; color: #d1d5db; padding: 0 8px 0 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: default;
+}
+.wb-payouts-heat-namecol .pid {
+    color: #6b7280; font-size: 9px; margin-left: 4px;
+}
+.wb-payouts-heat-cell {
+    height: 26px; border-radius: 3px;
+    cursor: pointer; transition: outline 100ms;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9.5px; font-weight: 600; color: #f3f4f6;
+    text-shadow: 0 1px 1px rgba(0,0,0,0.4);
+    overflow: hidden;
+}
+.wb-payouts-heat-cell:hover { outline: 1px solid rgba(255,255,255,0.3); }
+.wb-payouts-heat-cell.empty { background: rgba(255,255,255,0.04); cursor: default; color: #4b5563; }
+.wb-payouts-heat-cell.selected { outline: 2px solid #74c69d; }
+.wb-payouts-heat-warhead {
+    font-size: 10px; color: #9ca3af; text-align: center;
+    padding: 4px 2px; line-height: 1.25; cursor: pointer;
+    border-radius: 3px;
+}
+.wb-payouts-heat-warhead:hover { background: rgba(255,255,255,0.05); color: #d1d5db; }
+.wb-payouts-heat-warhead.selected { background: rgba(116,198,141,0.15); color: #74c69d; }
+.wb-payouts-heat-warhead .warhead-result {
+    display: inline-block; margin-left: 3px; font-size: 9px;
+}
+.wb-payouts-heat-totalcol {
+    font-size: 10.5px; color: #74c69d; font-weight: 600;
+    text-align: right; padding-right: 6px;
+}
+
+/* Drilldown table */
+.wb-payouts-drilldown {
+    border: 1px solid #1a2e20; border-radius: 6px;
+    background: #0f1a14; padding: 10px 12px;
+}
+.wb-payouts-drilldown table {
+    width: 100%; border-collapse: collapse; font-size: 11px;
+}
+.wb-payouts-drilldown th {
+    text-align: left; padding: 4px 6px; font-size: 9.5px;
+    color: #9ca3af; text-transform: uppercase; letter-spacing: 0.3px;
+    border-bottom: 1px solid #2d4a3e;
+}
+.wb-payouts-drilldown td {
+    padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.wb-payouts-drilldown td.right { text-align: right; }
+.wb-payouts-drilldown a.send-btn {
+    background: #2d6a4f; color: white; padding: 2px 8px;
+    font-size: 10px; border-radius: 3px; text-decoration: none;
+}
+.wb-payouts-drilldown a.send-btn:hover { background: #3d8a6f; }
+.wb-payouts-drilldown .loot-input {
+    background: #0f1a14; color: #d1d5db; border: 1px solid #2d4a3e;
+    border-radius: 3px; padding: 3px 6px; font-size: 11px; width: 140px;
+    margin-left: 6px;
 }
 
 /* ----- Heatmap floating panel ----- */
@@ -7949,6 +8073,7 @@ body.wb-chain-active {
                     <div class="fo-status-dot${state.connected ? '' : ' disconnected'}" id="fo-conn-dot" title="${state.connected ? 'Connected' : 'Disconnected'}"></div>
                     <span class="fo-rt-badge" id="fo-rt-badge"></span>
                     <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Activity Heatmap">&#x1F4CA;</button>
+                    <button class="fo-settings-btn" id="fo-payouts-btn" title="War Payouts" style="display:none;">&#x1F4B0;</button>
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                     <div class="fo-energy-display" id="fo-energy-display" title="Energy">
                         <span class="fo-energy-label">E</span>
@@ -8100,6 +8225,25 @@ body.wb-chain-active {
                 toggleHeatmapPanel(state.myFactionId, state.myFactionName);
             });
         }
+
+        // v5.0.28: Wire up Payouts button (admin-only). Reveal happens
+        // in updateConnectionUI / refresh once we know the user's role
+        // — initial render keeps it hidden to avoid flashing for non-
+        // admins on first paint.
+        const payoutsBtn = document.getElementById('fo-payouts-btn');
+        if (payoutsBtn) {
+            payoutsBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openPayoutsModal();
+            });
+        }
+        // Defer the role check until factionPosition is loaded (set by
+        // /api/auth response). Periodic check is cheap.
+        setInterval(() => {
+            const btn = document.getElementById('fo-payouts-btn');
+            if (!btn) return;
+            btn.style.display = isLeader() ? '' : 'none';
+        }, 2000);
 
         // Wire up enemy heatmap button in overlay header
         const enemyHeatmapBtn = document.getElementById('fo-enemy-heatmap-btn');
@@ -11480,6 +11624,245 @@ body.wb-chain-active {
         btn.style.display = 'block';
         btn.addEventListener('click', () => toggleHeatmapPanel());
         document.body.appendChild(btn);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  WAR PAYOUTS — v5.0.28
+    //
+    //  Member × War heatmap (APK-inspired) showing each faction member's
+    //  payout score across all ended wars. Click a war column to drill
+    //  down to the per-member breakdown for that war (with Send buttons
+    //  that copy the dollar amount + open Torn's Controls tab).
+    //
+    //  Auth uses CONFIG.API_KEY against the resolveVaultCaller-gated
+    //  /api/war/payouts/* endpoints (admin role required server-side).
+    // ═══════════════════════════════════════════════════════════════════════
+    let _payoutsModalState = {
+        mode: GM_getValue('factionops_payouts_mode', 'dynamic'),
+        selectedWarId: null,
+        data: null,
+    };
+
+    async function openPayoutsModal() {
+        // Toggle: if already open, close.
+        const existing = document.getElementById('wb-payouts-backdrop');
+        if (existing) { existing.remove(); return; }
+        const backdrop = document.createElement('div');
+        backdrop.id = 'wb-payouts-backdrop';
+        backdrop.className = 'wb-payouts-backdrop';
+        backdrop.innerHTML = `
+            <div class="wb-payouts-modal" id="wb-payouts-modal">
+                <div class="wb-payouts-header">
+                    <h2>💰 War Payouts</h2>
+                    <select id="wb-payouts-mode">
+                        <option value="dynamic"${_payoutsModalState.mode === 'dynamic' ? ' selected' : ''}>Dynamic FF</option>
+                        <option value="static"${_payoutsModalState.mode === 'static' ? ' selected' : ''}>Static Tier</option>
+                    </select>
+                    <button id="wb-payouts-refresh" style="background:#2d4a3e;color:#d1d5db;border:0;border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer;">Refresh</button>
+                    <span class="wb-payouts-meta" id="wb-payouts-meta">Loading…</span>
+                    <button class="wb-payouts-close" id="wb-payouts-close" title="Close">✕</button>
+                </div>
+                <div class="wb-payouts-body" id="wb-payouts-body">
+                    <div style="padding:24px;color:#9ca3af;font-size:13px;text-align:center;">
+                        Loading heatmap…
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        // Close handlers
+        const close = () => { backdrop.remove(); document.removeEventListener('keydown', escClose); };
+        const escClose = (e) => { if (e.key === 'Escape') close(); };
+        document.addEventListener('keydown', escClose);
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+        document.getElementById('wb-payouts-close').addEventListener('click', close);
+        // Mode change
+        document.getElementById('wb-payouts-mode').addEventListener('change', async (e) => {
+            _payoutsModalState.mode = e.target.value;
+            try { GM_setValue('factionops_payouts_mode', e.target.value); } catch (_) {}
+            await fetchAndRenderPayoutsHeatmap();
+        });
+        document.getElementById('wb-payouts-refresh').addEventListener('click', async () => {
+            await fetchAndRenderPayoutsHeatmap(true);
+        });
+        await fetchAndRenderPayoutsHeatmap();
+    }
+
+    async function fetchAndRenderPayoutsHeatmap(forceFresh = false) {
+        const body = document.getElementById('wb-payouts-body');
+        const meta = document.getElementById('wb-payouts-meta');
+        if (!body) return;
+        body.innerHTML = '<div style="padding:24px;color:#9ca3af;font-size:13px;text-align:center;">Crunching numbers — pulling every war attack and weighting them. Can take a few seconds…</div>';
+        if (meta) meta.textContent = '…';
+        const apiKey = CONFIG.API_KEY;
+        if (!apiKey) {
+            body.innerHTML = '<div style="padding:24px;color:#ef4444;font-size:13px;text-align:center;">No API key configured — open Settings ⚙ and paste your Torn API key.</div>';
+            return;
+        }
+        const params = new URLSearchParams({ key: apiKey, mode: _payoutsModalState.mode });
+        if (forceFresh) params.set('fresh', '1');
+        try {
+            const data = await new Promise((resolve, reject) => {
+                httpRequest({
+                    method: 'GET',
+                    url: `${CONFIG.SERVER_URL}/api/war/payouts/heatmap?${params.toString()}`,
+                    onload(res) {
+                        const d = safeParse(res.responseText);
+                        if (res.status >= 200 && res.status < 300) resolve(d);
+                        else reject(new Error((d && d.error) || `HTTP ${res.status}`));
+                    },
+                    onerror() { reject(new Error('Network error')); },
+                    timeout: 60_000, // big calc; allow 60s
+                    ontimeout() { reject(new Error('Request timed out')); },
+                });
+            });
+            _payoutsModalState.data = data;
+            renderPayoutsHeatmap(body, data);
+            if (meta) meta.textContent = `${data.wars.length} wars · ${data.members.length} members · ${new Date(data.generatedAt).toLocaleTimeString()}`;
+        } catch (e) {
+            body.innerHTML = `<div style="padding:24px;color:#ef4444;font-size:13px;text-align:center;">Failed to load: ${escapeHtml(e.message)}</div>`;
+            if (meta) meta.textContent = 'failed';
+        }
+    }
+
+    function renderPayoutsHeatmap(container, data) {
+        const wars = Array.isArray(data.wars) ? data.wars : [];
+        const members = Array.isArray(data.members) ? data.members : [];
+        if (members.length === 0 || wars.length === 0) {
+            container.innerHTML = '<div style="padding:24px;color:#9ca3af;font-size:13px;text-align:center;">No payout data yet — finish a ranked war and check back here.</div>';
+            return;
+        }
+
+        // Per-war max score (column normalization) so the heatmap shows
+        // each war's top-contributor at full intensity. APK uses single
+        // "max across matrix" normalization which would over-discount
+        // smaller wars; per-column reads better at-a-glance.
+        const colMax = {};
+        for (const w of wars) colMax[w.warId] = 0;
+        for (const m of members) {
+            for (const w of wars) {
+                const s = m.scoresByWar[w.warId] || 0;
+                if (s > colMax[w.warId]) colMax[w.warId] = s;
+            }
+        }
+
+        // Grid template: name col (140px) + war cols (auto) + total col (60px).
+        const cols = `140px repeat(${wars.length}, minmax(58px, 1fr)) 60px`;
+
+        // Header row: name | war heads | total
+        let html = `<div class="wb-payouts-section-label">Member × War heatmap (click a war to drill down)</div>`;
+        html += `<div class="wb-payouts-heatmap">`;
+        html += `<div class="wb-payouts-heat-row header" style="grid-template-columns:${cols};">`;
+        html += `<div class="wb-payouts-heat-namecol">Member</div>`;
+        for (const w of wars) {
+            const date = w.warEndedAt ? new Date(w.warEndedAt).toISOString().slice(5, 10) : '—';
+            const result = w.warResult === 'victory' ? '<span class="warhead-result" style="color:#74c69d">✓</span>'
+                : w.warResult === 'defeat' ? '<span class="warhead-result" style="color:#ef4444">✗</span>'
+                : '<span class="warhead-result" style="color:#9ca3af">=</span>';
+            const sel = String(w.warId) === String(_payoutsModalState.selectedWarId) ? ' selected' : '';
+            html += `<div class="wb-payouts-heat-warhead${sel}" data-war="${escapeHtml(w.warId)}" title="vs ${escapeHtml(w.enemyFactionName)} — ${escapeHtml(w.warResult||'?')}">`;
+            html += `<div>${escapeHtml((w.enemyFactionName||'?').slice(0,12))}</div>`;
+            html += `<div>${date} ${result}</div>`;
+            html += `</div>`;
+        }
+        html += `<div class="wb-payouts-heat-namecol" style="text-align:right;">Total</div>`;
+        html += `</div>`;
+
+        // Member rows
+        for (const m of members) {
+            html += `<div class="wb-payouts-heat-row" style="grid-template-columns:${cols};">`;
+            html += `<div class="wb-payouts-heat-namecol" title="${escapeHtml(m.name)} [${m.playerId}] — ${m.warsParticipated} wars · $${(m.totalPayout||0).toLocaleString()} total">${escapeHtml(m.name)}<span class="pid">[${m.playerId}]</span></div>`;
+            for (const w of wars) {
+                const score = m.scoresByWar[w.warId];
+                const max = colMax[w.warId] || 1;
+                if (score == null || score <= 0) {
+                    html += `<div class="wb-payouts-heat-cell empty">—</div>`;
+                } else {
+                    // Intensity scaled within column (matches APK's
+                    // normalize-against-max idea, just per-column).
+                    const intensity = Math.min(1, score / max);
+                    const alpha = 0.18 + intensity * 0.72;
+                    const sel = String(w.warId) === String(_payoutsModalState.selectedWarId) ? ' selected' : '';
+                    const payout = m.payoutsByWar[w.warId] || 0;
+                    const tooltip = `${m.name} in ${w.enemyFactionName||'?'}: ${score} pts · $${payout.toLocaleString()}`;
+                    html += `<div class="wb-payouts-heat-cell${sel}" style="background:rgba(116,198,141,${alpha.toFixed(3)});" data-war="${escapeHtml(w.warId)}" data-uid="${escapeHtml(m.playerId)}" title="${escapeHtml(tooltip)}">${score >= 1 ? Math.round(score) : score.toFixed(1)}</div>`;
+                }
+            }
+            html += `<div class="wb-payouts-heat-totalcol">${m.totalScore}</div>`;
+            html += `</div>`;
+        }
+        html += `</div>`;
+
+        // Drilldown placeholder
+        html += `<div id="wb-payouts-drill"></div>`;
+
+        container.innerHTML = html;
+
+        // Wire war-column click → drilldown
+        container.querySelectorAll('[data-war]').forEach(el => {
+            el.addEventListener('click', () => {
+                const warId = el.dataset.war;
+                _payoutsModalState.selectedWarId = warId;
+                renderPayoutsHeatmap(container, data);
+                renderPayoutsDrilldown(warId);
+            });
+        });
+
+        if (_payoutsModalState.selectedWarId) {
+            renderPayoutsDrilldown(_payoutsModalState.selectedWarId);
+        }
+    }
+
+    function renderPayoutsDrilldown(warId) {
+        const drill = document.getElementById('wb-payouts-drill');
+        if (!drill || !_payoutsModalState.data) return;
+        const data = _payoutsModalState.data;
+        const war = data.wars.find(w => String(w.warId) === String(warId));
+        if (!war) { drill.innerHTML = ''; return; }
+        if (war.error) {
+            drill.innerHTML = `<div class="wb-payouts-drilldown" style="color:#ef4444;">War ${escapeHtml(warId)} failed to load: ${escapeHtml(war.error)}</div>`;
+            return;
+        }
+        // Pull this war's members from the matrix (each member has scoresByWar[warId])
+        const rows = data.members
+            .filter(m => m.scoresByWar[warId] != null && m.scoresByWar[warId] > 0)
+            .map(m => ({
+                playerId: m.playerId,
+                name: m.name,
+                score: m.scoresByWar[warId],
+                payout: m.payoutsByWar[warId] || 0,
+            }))
+            .sort((a, b) => b.score - a.score);
+        const totalScore = rows.reduce((s, m) => s + m.score, 0);
+        const fmt$ = n => '$' + (n || 0).toLocaleString();
+
+        let html = `<div class="wb-payouts-section-label">Drilldown — vs ${escapeHtml(war.enemyFactionName||'?')} · ${escapeHtml(war.warResult||'?')} · loot ${fmt$(war.lootTotal)} · total score ${war.totalScore}</div>`;
+        html += `<div class="wb-payouts-drilldown"><table>`;
+        html += `<thead><tr><th>Member</th><th class="right">Score</th><th class="right">Share %</th><th class="right">Payout</th><th class="right"></th></tr></thead><tbody>`;
+        for (const r of rows) {
+            const share = totalScore > 0 ? (r.score / totalScore) * 100 : 0;
+            html += `<tr>`;
+            html += `<td><a href="/profiles.php?XID=${escapeHtml(r.playerId)}" target="_blank" rel="noopener" style="color:#d1d5db;text-decoration:none;">${escapeHtml(r.name)}</a> <span style="color:#6b7280;font-size:9px;">[${r.playerId}]</span></td>`;
+            html += `<td class="right">${r.score}</td>`;
+            html += `<td class="right" style="color:#9ca3af;">${share.toFixed(1)}%</td>`;
+            html += `<td class="right" style="color:#74c69d;font-weight:600;">${fmt$(r.payout)}</td>`;
+            html += `<td class="right">`;
+            if (r.payout > 0) {
+                html += `<a class="send-btn" href="/factions.php?step=your&type=1#/tab=controls" target="_blank" rel="noopener" data-amount="${r.payout}" data-name="${escapeHtml(r.name)}">Send</a>`;
+            }
+            html += `</td></tr>`;
+        }
+        html += `</tbody></table></div>`;
+        drill.innerHTML = html;
+        drill.querySelectorAll('a.send-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const amt = btn.dataset.amount || '0';
+                try { navigator.clipboard.writeText(amt); } catch (_) {}
+                const orig = btn.textContent;
+                btn.textContent = 'Copied!';
+                setTimeout(() => { btn.textContent = orig; }, 1200);
+            });
+        });
     }
 
     function toggleHeatmapPanel(factionId = null, factionName = null) {

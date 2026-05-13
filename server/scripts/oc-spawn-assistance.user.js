@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.9
+// @version      3.2.10
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.9';
+    const SCRIPT_VERSION = '3.2.10';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -3082,7 +3082,7 @@
             <button class="oc-tab" data-tab="admin" id="oc-admin-tab" style="display:none;">Admin</button>
             <button class="oc-tab" data-tab="manager" id="oc-manager-tab" style="display:none;">Manager</button>
             <button class="oc-tab" data-tab="coaching" id="oc-coaching-tab" style="display:none;">Coaching</button>
-            <button class="oc-tab" data-tab="payouts" id="oc-payouts-tab" style="display:none;">Payouts</button>
+            <!-- v3.2.10: Payouts moved to FactionOps overlay (💰 button in header). -->
             <button class="oc-tab" data-tab="metrics" id="oc-metrics-tab" style="display:none;">Metrics</button>
             <button class="oc-tab" data-tab="engines" id="oc-engines-tab" style="display:none;">Engines</button>
         </div>
@@ -3091,7 +3091,6 @@
         <div id="oc-tab-admin" style="display:none;"></div>
         <div id="oc-tab-manager" style="display:none;"></div>
         <div id="oc-tab-coaching" style="display:none;"></div>
-        <div id="oc-tab-payouts" style="display:none;"></div>
         <div id="oc-tab-metrics" style="display:none;"></div>
         <div id="oc-tab-engines" style="display:none;"></div>
     `;
@@ -3254,14 +3253,13 @@
         document.getElementById('oc-tab-engines').style.display  = name === 'engines'  ? '' : 'none';
         document.getElementById('oc-tab-manager').style.display  = name === 'manager'  ? '' : 'none';
         document.getElementById('oc-tab-coaching').style.display = name === 'coaching' ? '' : 'none';
-        document.getElementById('oc-tab-payouts').style.display  = name === 'payouts'  ? '' : 'none';
         document.getElementById('oc-tab-metrics').style.display  = name === 'metrics'  ? '' : 'none';
         // Close settings panel when switching away from admin
         if (name !== 'admin') document.getElementById('oc-settings-panel').style.display = 'none';
         // Load manager content when switching to it
         if (name === 'manager')  loadManagerTab();
         if (name === 'coaching') loadCoachingTab();
-        if (name === 'payouts')  loadPayoutsTab();
+        // v3.2.10: payouts tab removed (moved to FactionOps).
         // Init metrics tab when switching to it
         if (name === 'metrics') met_initTab();
     }
@@ -6606,7 +6604,6 @@
             const adminTab    = document.getElementById('oc-admin-tab');
             const managerTab  = document.getElementById('oc-manager-tab');
             const coachingTab = document.getElementById('oc-coaching-tab');
-            const payoutsTab  = document.getElementById('oc-payouts-tab');
             const metricsTab  = document.getElementById('oc-metrics-tab');
             const enginesTab  = document.getElementById('oc-engines-tab');
             const canAdmin    = canViewAdmin(viewer);
@@ -6614,7 +6611,6 @@
             adminTab.style.display    = canAdmin ? '' : 'none';
             managerTab.style.display  = canAdmin ? '' : 'none';
             if (coachingTab) coachingTab.style.display = canAdmin ? '' : 'none';
-            if (payoutsTab)  payoutsTab.style.display  = canAdmin ? '' : 'none';
             if (metricsTab)  metricsTab.style.display  = canAdmin ? '' : 'none';
             if (enginesTab)  enginesTab.style.display  = canAdmin ? '' : 'none';
 
@@ -6657,7 +6653,7 @@
             if (cfgSection) cfgSection.style.display = (isDev(viewer) || canViewAdmin(viewer)) ? '' : 'none';
             if (canAdmin) {
                 const lastTab = GM_getValue('oc_last_tab', 'admin');
-                const validTabs = ['profile', 'admin', 'manager', 'coaching', 'payouts', 'metrics', 'engines'];
+                const validTabs = ['profile', 'admin', 'manager', 'coaching', 'metrics', 'engines'];
                 switchTab(validTabs.includes(lastTab) ? lastTab : 'admin');
             } else {
                 switchTab('profile');
