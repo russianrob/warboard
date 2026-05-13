@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.8
+// @version      3.2.9
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.8';
+    const SCRIPT_VERSION = '3.2.9';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -3082,6 +3082,7 @@
             <button class="oc-tab" data-tab="admin" id="oc-admin-tab" style="display:none;">Admin</button>
             <button class="oc-tab" data-tab="manager" id="oc-manager-tab" style="display:none;">Manager</button>
             <button class="oc-tab" data-tab="coaching" id="oc-coaching-tab" style="display:none;">Coaching</button>
+            <button class="oc-tab" data-tab="payouts" id="oc-payouts-tab" style="display:none;">Payouts</button>
             <button class="oc-tab" data-tab="metrics" id="oc-metrics-tab" style="display:none;">Metrics</button>
             <button class="oc-tab" data-tab="engines" id="oc-engines-tab" style="display:none;">Engines</button>
         </div>
@@ -3090,6 +3091,7 @@
         <div id="oc-tab-admin" style="display:none;"></div>
         <div id="oc-tab-manager" style="display:none;"></div>
         <div id="oc-tab-coaching" style="display:none;"></div>
+        <div id="oc-tab-payouts" style="display:none;"></div>
         <div id="oc-tab-metrics" style="display:none;"></div>
         <div id="oc-tab-engines" style="display:none;"></div>
     `;
@@ -3252,12 +3254,14 @@
         document.getElementById('oc-tab-engines').style.display  = name === 'engines'  ? '' : 'none';
         document.getElementById('oc-tab-manager').style.display  = name === 'manager'  ? '' : 'none';
         document.getElementById('oc-tab-coaching').style.display = name === 'coaching' ? '' : 'none';
+        document.getElementById('oc-tab-payouts').style.display  = name === 'payouts'  ? '' : 'none';
         document.getElementById('oc-tab-metrics').style.display  = name === 'metrics'  ? '' : 'none';
         // Close settings panel when switching away from admin
         if (name !== 'admin') document.getElementById('oc-settings-panel').style.display = 'none';
         // Load manager content when switching to it
         if (name === 'manager')  loadManagerTab();
         if (name === 'coaching') loadCoachingTab();
+        if (name === 'payouts')  loadPayoutsTab();
         // Init metrics tab when switching to it
         if (name === 'metrics') met_initTab();
     }
@@ -5539,6 +5543,222 @@
         });
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  PAYOUTS TAB — v3.2.9
+    //
+    //  Pulls all ranked-war attacks for a chosen ended war, classifies +
+    //  weights them, splits a configurable loot total proportionally
+    //  across attackers. Admin-gated. Server endpoints:
+    //    GET /api/war/payouts/list        → eligible wars (ended, ours)
+    //    GET /api/war/:warId/payouts      → computed payouts
+    //  Mode toggle (Dynamic FF / Static Tier) and loot override propagate
+    //  to the server endpoint via query params. The "Send" buttons reuse
+    //  the existing vault-payout flow: copy amount to clipboard + open
+    //  Torn's Controls tab so the user can paste into give-to-user.
+    // ═══════════════════════════════════════════════════════════════════════
+    let _payoutsState = {
+        wars: null,        // cached wars list
+        selectedWarId: null,
+        mode: 'dynamic',
+        lootOverride: '',
+        lastResult: null,
+    };
+
+    async function loadPayoutsTab() {
+        const container = document.getElementById('oc-tab-payouts');
+        if (!container) return;
+        const apiKey = getApiKey();
+        if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
+            container.innerHTML = '<div style="padding:24px;color:#9ca3af;font-size:13px;text-align:center;">API key required — open Settings ⚙ and re-enter.</div>';
+            return;
+        }
+
+        // First load: fetch eligible wars list.
+        if (!_payoutsState.wars) {
+            container.innerHTML = '<div style="padding:24px;color:#9ca3af;font-size:13px;text-align:center;">Loading war list…</div>';
+            try {
+                const r = await gmRequest(`${SERVER}/api/war/payouts/list?key=${encodeURIComponent(apiKey)}`);
+                _payoutsState.wars = Array.isArray(r?.wars) ? r.wars : [];
+                if (_payoutsState.wars.length > 0 && !_payoutsState.selectedWarId) {
+                    _payoutsState.selectedWarId = _payoutsState.wars[0].warId;
+                }
+            } catch (e) {
+                container.innerHTML = `<div style="padding:24px;color:#ef4444;font-size:13px;text-align:center;">Failed to load wars: ${met_escapeHtml(e.message)}</div>`;
+                return;
+            }
+        }
+
+        if (_payoutsState.wars.length === 0) {
+            container.innerHTML = '<div style="padding:24px;color:#9ca3af;font-size:13px;text-align:center;">No ended wars available for payout calc yet.</div>';
+            return;
+        }
+
+        renderPayoutsShell(container);
+        renderPayoutsBody();
+    }
+
+    function renderPayoutsShell(container) {
+        const wars = _payoutsState.wars || [];
+        const selectedWarId = _payoutsState.selectedWarId;
+        const mode = _payoutsState.mode;
+        const warOptions = wars.map(w => {
+            const when = w.warEndedAt ? new Date(w.warEndedAt).toISOString().slice(0, 10) : '?';
+            const result = w.warResult === 'victory' ? '✓ Win'
+                : w.warResult === 'defeat' ? '✗ Loss'
+                : w.warResult === 'draw' ? '= Draw' : '?';
+            const sel = String(w.warId) === String(selectedWarId) ? ' selected' : '';
+            return `<option value="${met_escapeHtml(w.warId)}"${sel}>vs ${met_escapeHtml(w.enemyFactionName)} · ${when} · ${result}</option>`;
+        }).join('');
+        container.innerHTML = `
+            <div style="padding:14px 16px;border-bottom:1px solid #1a2e20;">
+                <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+                    <label style="flex:1;min-width:220px;">
+                        <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px;">War</div>
+                        <select id="payouts-war-sel" style="width:100%;padding:5px 7px;background:#0f1a14;color:#d1d5db;border:1px solid #2d4a3e;border-radius:4px;font-size:12px;">${warOptions}</select>
+                    </label>
+                    <label>
+                        <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px;">Mode</div>
+                        <select id="payouts-mode-sel" style="padding:5px 7px;background:#0f1a14;color:#d1d5db;border:1px solid #2d4a3e;border-radius:4px;font-size:12px;">
+                            <option value="dynamic"${mode === 'dynamic' ? ' selected' : ''}>Dynamic FF</option>
+                            <option value="static"${mode === 'static' ? ' selected' : ''}>Static Tiered</option>
+                        </select>
+                    </label>
+                    <label>
+                        <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px;">Loot total ($)</div>
+                        <input type="text" id="payouts-loot" placeholder="auto-detect" value="${met_escapeHtml(_payoutsState.lootOverride)}" style="width:140px;padding:5px 7px;background:#0f1a14;color:#d1d5db;border:1px solid #2d4a3e;border-radius:4px;font-size:12px;">
+                    </label>
+                    <button id="payouts-recalc" style="background:#2d6a4f;color:white;border:0;border-radius:4px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">Recalculate</button>
+                </div>
+                <div style="font-size:10px;color:#6b7280;margin-top:8px;line-height:1.4;">
+                    Dynamic FF: war hit = exact FF × 1.0, retal × 1.25, overseas × 1.5, assist 0.75, chain 0.6.
+                    Static Tier: war hit = 1 pt flat (rest same as dynamic).
+                    Loot blank = auto-detect from war report (winning side only). Override with any number.
+                </div>
+            </div>
+            <div id="payouts-body" style="padding:8px 0;"></div>
+        `;
+        // Event wiring
+        document.getElementById('payouts-war-sel').addEventListener('change', e => {
+            _payoutsState.selectedWarId = e.target.value;
+            _payoutsState.lastResult = null;
+            renderPayoutsBody();
+        });
+        document.getElementById('payouts-mode-sel').addEventListener('change', e => {
+            _payoutsState.mode = e.target.value;
+            _payoutsState.lastResult = null;
+            renderPayoutsBody();
+        });
+        document.getElementById('payouts-loot').addEventListener('change', e => {
+            _payoutsState.lootOverride = (e.target.value || '').trim();
+            _payoutsState.lastResult = null;
+            renderPayoutsBody();
+        });
+        document.getElementById('payouts-recalc').addEventListener('click', () => {
+            _payoutsState.lastResult = null;
+            renderPayoutsBody({ forceFresh: true });
+        });
+    }
+
+    async function renderPayoutsBody(opts = {}) {
+        const body = document.getElementById('payouts-body');
+        if (!body) return;
+        body.innerHTML = '<div style="padding:24px;color:#9ca3af;font-size:13px;text-align:center;">Calculating payouts (this can take a few seconds for large wars)…</div>';
+        const apiKey = getApiKey();
+        const warId = _payoutsState.selectedWarId;
+        if (!warId) {
+            body.innerHTML = '<div style="padding:24px;color:#9ca3af;font-size:13px;text-align:center;">Pick a war above to see payouts.</div>';
+            return;
+        }
+        const params = new URLSearchParams({ key: apiKey, mode: _payoutsState.mode });
+        const lootStr = (_payoutsState.lootOverride || '').replace(/[^0-9]/g, '');
+        if (lootStr) params.set('loot', lootStr);
+        if (opts.forceFresh) params.set('fresh', '1');
+        try {
+            const result = await gmRequest(`${SERVER}/api/war/${encodeURIComponent(warId)}/payouts?${params.toString()}`);
+            _payoutsState.lastResult = result;
+            renderPayoutsTable(body, result);
+        } catch (e) {
+            body.innerHTML = `<div style="padding:24px;color:#ef4444;font-size:13px;text-align:center;">Payout calc failed: ${met_escapeHtml(e.message)}</div>`;
+        }
+    }
+
+    function renderPayoutsTable(container, result) {
+        const members = Array.isArray(result.members) ? result.members : [];
+        const fmt$ = n => '$' + (n || 0).toLocaleString();
+        const lootLabel = result.lootAutoDetected
+            ? `${fmt$(result.lootTotal)} (auto-detected from war report)`
+            : (result.lootTotal > 0 ? fmt$(result.lootTotal) : 'not set');
+        let html = `
+            <div style="padding:8px 16px;background:rgba(255,255,255,0.03);border-bottom:1px solid #1a2e20;font-size:11px;color:#9ca3af;display:flex;flex-wrap:wrap;gap:14px;">
+                <span><b style="color:#d1d5db;">${result.attackCount.toLocaleString()}</b> war attacks</span>
+                <span><b style="color:#d1d5db;">${members.length}</b> attackers</span>
+                <span>Total score: <b style="color:#d1d5db;">${result.totalScore}</b></span>
+                <span>Loot: <b style="color:#d1d5db;">${lootLabel}</b></span>
+                <span style="margin-left:auto;color:#6b7280;">${result.cached ? 'cached' : 'fresh'} · ${new Date(result.generatedAt).toLocaleTimeString()}</span>
+            </div>
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                <thead>
+                    <tr style="background:rgba(255,255,255,0.04);color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;font-size:9.5px;">
+                        <th style="padding:6px 8px;text-align:left;">Member</th>
+                        <th style="padding:6px 8px;text-align:right;">Score</th>
+                        <th style="padding:6px 8px;text-align:right;">Share %</th>
+                        <th style="padding:6px 8px;text-align:right;">Payout</th>
+                        <th style="padding:6px 8px;text-align:left;">Breakdown</th>
+                        <th style="padding:6px 8px;text-align:center;"></th>
+                    </tr>
+                </thead>
+                <tbody>`;
+        for (const m of members) {
+            const bdParts = [];
+            const bd = m.breakdown || {};
+            const order = ['war_hit', 'retal', 'overseas_war', 'assist', 'chain_hit', 'os_chain'];
+            const labels = {
+                war_hit: 'war', retal: 'retal', overseas_war: 'os',
+                assist: 'assist', chain_hit: 'chain', os_chain: 'os-chain',
+            };
+            for (const k of order) {
+                if (bd[k]) bdParts.push(`${labels[k]}:${bd[k]}`);
+            }
+            const breakdownStr = bdParts.join(' · ') || '—';
+            html += `<tr style="border-bottom:1px solid #1a2e20;">
+                <td style="padding:5px 8px;">
+                    <a href="/profiles.php?XID=${met_escapeHtml(m.playerId)}" target="_blank" rel="noopener" style="color:#d1d5db;text-decoration:none;">${met_escapeHtml(m.name)}</a>
+                    <span style="color:#6b7280;font-size:10px;">[${m.playerId}]</span>
+                </td>
+                <td style="padding:5px 8px;text-align:right;color:#d1d5db;">${m.score}</td>
+                <td style="padding:5px 8px;text-align:right;color:#9ca3af;">${m.sharePct}%</td>
+                <td style="padding:5px 8px;text-align:right;color:#74c69d;font-weight:600;">${fmt$(m.dollarPayout)}</td>
+                <td style="padding:5px 8px;color:#9ca3af;font-size:10px;">${met_escapeHtml(breakdownStr)}</td>
+                <td style="padding:5px 8px;text-align:center;">
+                    <a href="/factions.php?step=your&type=1#/tab=controls"
+                       target="_blank" rel="noopener"
+                       class="payouts-send-btn"
+                       data-amount="${m.dollarPayout}"
+                       data-name="${met_escapeHtml(m.name)}"
+                       data-id="${met_escapeHtml(m.playerId)}"
+                       style="background:#2d6a4f;color:white;border:0;border-radius:3px;padding:3px 9px;font-size:10px;text-decoration:none;cursor:pointer;${m.dollarPayout <= 0 ? 'opacity:0.4;pointer-events:none;' : ''}">
+                        Send
+                    </a>
+                </td>
+            </tr>`;
+        }
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+        // Wire Send buttons → copy amount to clipboard, then let the
+        // <a> default navigate to the Controls tab.
+        container.querySelectorAll('.payouts-send-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const amt = btn.dataset.amount || '0';
+                try { navigator.clipboard.writeText(amt); } catch (_) {}
+                // Tiny inline ack so user knows the copy happened.
+                const orig = btn.textContent;
+                btn.textContent = 'Copied!';
+                setTimeout(() => { btn.textContent = orig; }, 1200);
+            });
+        });
+    }
+
     function loadCoachingTab() {
         const container = document.getElementById('oc-tab-coaching');
         if (!_coachingSnapshot) {
@@ -6386,6 +6606,7 @@
             const adminTab    = document.getElementById('oc-admin-tab');
             const managerTab  = document.getElementById('oc-manager-tab');
             const coachingTab = document.getElementById('oc-coaching-tab');
+            const payoutsTab  = document.getElementById('oc-payouts-tab');
             const metricsTab  = document.getElementById('oc-metrics-tab');
             const enginesTab  = document.getElementById('oc-engines-tab');
             const canAdmin    = canViewAdmin(viewer);
@@ -6393,6 +6614,7 @@
             adminTab.style.display    = canAdmin ? '' : 'none';
             managerTab.style.display  = canAdmin ? '' : 'none';
             if (coachingTab) coachingTab.style.display = canAdmin ? '' : 'none';
+            if (payoutsTab)  payoutsTab.style.display  = canAdmin ? '' : 'none';
             if (metricsTab)  metricsTab.style.display  = canAdmin ? '' : 'none';
             if (enginesTab)  enginesTab.style.display  = canAdmin ? '' : 'none';
 
@@ -6435,7 +6657,7 @@
             if (cfgSection) cfgSection.style.display = (isDev(viewer) || canViewAdmin(viewer)) ? '' : 'none';
             if (canAdmin) {
                 const lastTab = GM_getValue('oc_last_tab', 'admin');
-                const validTabs = ['profile', 'admin', 'manager', 'metrics', 'engines'];
+                const validTabs = ['profile', 'admin', 'manager', 'coaching', 'payouts', 'metrics', 'engines'];
                 switchTab(validTabs.includes(lastTab) ? lastTab : 'admin');
             } else {
                 switchTab('profile');

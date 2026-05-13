@@ -81,6 +81,7 @@ import { encrypt as encryptKey, decrypt as decryptKey, isEncrypted as isEncrypte
 import * as pendingBroadcasts from "./pending-broadcasts.js";
 import * as missingOverrides from "./missing-overrides.js";
 import * as ocCheckpointHistory from "./oc-checkpoint-history.js";
+import * as warPayouts from "./war-payouts.js";
 import * as attackLedger from "./attack-ledger.js";
 import * as webauthn from "./webauthn.js";
 import busboy from "busboy";
@@ -7678,6 +7679,63 @@ router.post("/api/oc/checkpoint-history", express.json({ limit: '256kb' }), asyn
     console.log(`[oc-checkpoints] ${info.playerName} ingested ${scenariosNew} new scenarios (${totalNew} checkpoints) for faction ${info.factionId}`);
   }
   return res.json({ ok: true, scenariosNew, checkpointsNew: totalNew, total: ocCheckpointHistory.scenarioCount(info.factionId) });
+});
+
+// ── War payouts ─────────────────────────────────────────────────────────
+// Admin-only. Pulls every ranked-war attack in the war window, classifies
+// each (war / retal / overseas / chain / assist), weights via dynamic-FF
+// or static-tier, and splits a loot total across attackers proportional
+// to their score. See server/war-payouts.js for the math.
+router.get("/api/war/:warId/payouts", async (req, res) => {
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info } = ctx;
+  const adminRoles = store.getAdminRoles(info.factionId).map(r => String(r).toLowerCase());
+  const isDev = String(info.playerId) === '137558';
+  const myPos = String(info.factionPosition || '').toLowerCase();
+  if (!isDev && !adminRoles.includes(myPos)) {
+    return res.status(403).json({ error: "Admin role required" });
+  }
+  const warId = String(req.params.warId);
+  const mode = req.query.mode === 'static' ? 'static' : 'dynamic';
+  const lootTotal = req.query.loot != null && req.query.loot !== ''
+    ? Number(req.query.loot)
+    : null;
+  const forceFresh = req.query.fresh === '1';
+  try {
+    const result = await warPayouts.computePayouts(warId, {
+      mode,
+      lootTotal,
+      forceFresh,
+    });
+    // Confirm caller's faction owns the war (defence-in-depth — the
+    // admin-role check above is per-faction so this should be redundant
+    // but cheap to verify).
+    if (String(result.factionId) !== String(info.factionId)) {
+      return res.status(403).json({ error: "War belongs to a different faction" });
+    }
+    return res.json(result);
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// List wars eligible for payout calc (ended, this faction's).
+router.get("/api/war/payouts/list", async (req, res) => {
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info } = ctx;
+  const adminRoles = store.getAdminRoles(info.factionId).map(r => String(r).toLowerCase());
+  const isDev = String(info.playerId) === '137558';
+  const myPos = String(info.factionPosition || '').toLowerCase();
+  if (!isDev && !adminRoles.includes(myPos)) {
+    return res.status(403).json({ error: "Admin role required" });
+  }
+  try {
+    return res.json({ wars: warPayouts.listEligibleWars(info.factionId) });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
 });
 
 router.post("/api/oc/missing-override", express.json({ limit: '4kb' }), async (req, res) => {
