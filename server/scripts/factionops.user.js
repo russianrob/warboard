@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.15
+// @version      5.0.16
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.15';
+    const SCRIPT_VERSION = '5.0.16';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2621,6 +2621,10 @@ body.wb-chain-active {
      *  cache synchronously — uids without a cached estimate sort to
      *  the bottom of stats mode. */
     const _ffsStatsCache = new Map();
+    /** Single-flight guard for the stats-sort pre-fetch loop. Prevents
+     *  N concurrent renderOverlay calls from each kicking off the same
+     *  Promise.all when FFS data is still landing. */
+    let _ffsRefreshInFlight = false;
     /** Sort the supplied target objects {targetId, ...} in place by the
      *  current _sortMode. For 'smart', preserves caller-supplied order
      *  (caller has already applied sortPriority/sortTimerValue). */
@@ -8127,21 +8131,26 @@ body.wb-chain-active {
             return a.timer - b.timer;
         });
 
-        // v5.0.14: apply user-chosen manual sort (no-op when mode='smart').
-        // Stats modes need FFS estimates pre-populated in _ffsStatsCache;
-        // those land via getFfScouterEstimate's success callback when
-        // renderBspCell fires for each visible row. Call-me-first / called-
-        // by-others pinning is intentionally NOT preserved in manual modes
-        // (the user picked the sort, so their pick wins).
+        // v5.0.14 / v5.0.16: apply user-chosen manual sort (no-op when
+        // mode='smart'). Stats modes pre-fetch missing FFS estimates
+        // and trigger ONE re-render after they all settle, so the sort
+        // visibly applies once data lands instead of silently stalling
+        // with everything pinned to the bottom (the v5.0.15 bug).
         if (_sortMode !== 'smart') {
-            // For stats modes, kick off a pre-fetch cycle for any uid
-            // whose estimate hasn't landed yet — non-blocking; the next
-            // tick of the render loop catches up once data arrives.
             if (_sortMode === 'stats-asc' || _sortMode === 'stats-desc') {
-                for (const it of sorted) {
-                    if (!_ffsStatsCache.has(String(it.targetId))) {
-                        try { getFfScouterEstimate(it.targetId); } catch (_) {}
-                    }
+                const missing = sorted.filter(it => !_ffsStatsCache.has(String(it.targetId)));
+                if (missing.length > 0 && !_ffsRefreshInFlight) {
+                    _ffsRefreshInFlight = true;
+                    Promise.all(missing.map(it =>
+                        getFfScouterEstimate(it.targetId).catch(() => null)
+                    )).then(() => {
+                        _ffsRefreshInFlight = false;
+                        // Only re-render if user is still on a stats mode —
+                        // they may have flipped back to smart while we waited.
+                        if (_sortMode === 'stats-asc' || _sortMode === 'stats-desc') {
+                            renderOverlay();
+                        }
+                    });
                 }
             }
             applyManualSort(sorted);
