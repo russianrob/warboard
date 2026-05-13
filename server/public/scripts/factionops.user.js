@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.22
+// @version      5.0.23
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.22';
+    const SCRIPT_VERSION = '5.0.23';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -4525,9 +4525,27 @@ body.wb-chain-active {
     // =========================================================================
 
     function emitCallTarget(targetId, isDeal) {
-        if (!state.connected) return;
+        // v5.0.23: removed the silent `if (!state.connected) return;` —
+        // PDA users on flaky mobile data flip state.connected=false after
+        // just 3 failed polls, then the Call button silently does nothing
+        // with zero feedback (Bloodyrein report). postAction has its own
+        // auth/network error handling and surfaces real errors via toast,
+        // which is what the user actually wants. Also kick polling so
+        // state.connected refreshes faster on the next tick.
         const warId = deriveWarId();
-        if (!warId) return;
+        if (!warId) {
+            showToast('No active war detected', 'error');
+            return;
+        }
+        if (!state.jwtToken) {
+            showToast('Not signed in — open Settings ⚙ and re-enter your API key', 'error');
+            return;
+        }
+        if (!state.connected && typeof startPolling === 'function') {
+            // Best-effort: poke polling so the connection state recovers
+            // promptly. Doesn't block the call attempt.
+            try { startPolling(); } catch (_) {}
+        }
         // Optimistic update
         const tid = String(targetId);
         state.calls[tid] = {
@@ -4550,9 +4568,19 @@ body.wb-chain-active {
     }
 
     function emitUncallTarget(targetId) {
-        if (!state.connected) return;
+        // v5.0.23: see emitCallTarget — same silent-no-op fix.
         const warId = deriveWarId();
-        if (!warId) return;
+        if (!warId) {
+            showToast('No active war detected', 'error');
+            return;
+        }
+        if (!state.jwtToken) {
+            showToast('Not signed in — open Settings ⚙ and re-enter your API key', 'error');
+            return;
+        }
+        if (!state.connected && typeof startPolling === 'function') {
+            try { startPolling(); } catch (_) {}
+        }
         // Optimistic update
         const tid = String(targetId);
         const prev = state.calls[tid];
@@ -4564,6 +4592,7 @@ body.wb-chain-active {
                 warn('Uncall failed:', e.message);
                 if (prev) state.calls[tid] = prev;
                 updateTargetRow(tid);
+                showToast(e.message || 'Uncall failed', 'error');
             });
     }
 
