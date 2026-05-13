@@ -406,12 +406,50 @@ function startAttacksFeedMonitor(io, warId) {
       attacksFeedBackoffs.set(warId, ATTACKS_FEED_INTERVAL_MS);
 
       const enemyFid = String(war.enemyFactionId);
+      const ourFid = String(war.factionId);
       const updates = {};
       let newCursor = cursor;
+      // Successful attack outcomes that should auto-clear a call. We
+      // skip Lost/Stalemate/Escape per user request: a failed swing
+      // means the caller didn't actually neutralise the target, so
+      // they may want to keep the lock and try again.
+      const SUCCESS_RESULTS = new Set([
+        'Attacked', 'Hospitalized', 'Mugged', 'Looted', 'Special', 'Assist',
+      ]);
+      let callsCleared = 0;
 
       for (const atk of attacks) {
         const ts = atk.timestamp_ended || atk.timestamp_started || 0;
         if (ts > newCursor) newCursor = ts;
+
+        // ─── Auto-uncall on successful attack by the caller ────────────
+        // Independent of the hospital-update path below — we want to
+        // clear the call even if the result is Mugged/Looted/Attacked
+        // (target didn't go to hospital but the caller landed a hit).
+        const attackerId = String(atk.attacker_id ?? '');
+        const attackerFid = String(atk.attacker_faction ?? atk.attacker_faction_id ?? '');
+        const dId = String(atk.defender_id ?? atk.defenderID ?? '');
+        if (
+          attackerFid === ourFid &&
+          attackerId &&
+          dId &&
+          war.calls && war.calls[dId] &&
+          SUCCESS_RESULTS.has(atk.result)
+        ) {
+          const callerId = String(war.calls[dId].calledBy?.id ?? '');
+          if (callerId === attackerId) {
+            delete war.calls[dId];
+            callsCleared++;
+            try {
+              io.to(`war_${warId}`).emit('target_uncalled', {
+                targetId: dId,
+                reason: 'attacked',
+              });
+              broadcastSSE(warId, { calls: war.calls });
+            } catch (e) { /* broadcast best-effort */ }
+            console.log(`[attacks-feed] auto-uncalled ${dId} — ${atk.result} by caller ${attackerId} (war ${warId})`);
+          }
+        }
 
         // Only care about attacks where our faction attacked a member of
         // the enemy faction and the result was a hospitalization.
@@ -456,6 +494,11 @@ function startAttacksFeedMonitor(io, warId) {
       if (Object.keys(updates).length > 0) {
         console.log(`[attacks-feed] war ${warId}: ${Object.keys(updates).length} enemy hospitalization(s) detected`);
         io.to(`war_${warId}`).emit('status_update', updates);
+        store.saveState();
+      } else if (callsCleared > 0) {
+        // Hospitalization branch above already saves; only persist the
+        // call-clearing pass when there were no hospitalizations to
+        // share the save.
         store.saveState();
       }
 
