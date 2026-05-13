@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.28
+// @version      5.0.29
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.28';
+    const SCRIPT_VERSION = '5.0.29';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2585,24 +2585,38 @@ body.wb-chain-active {
     border-top: 1px solid rgba(255,255,255,0.08);
 }
 .fo-card-retal-btn {
+    /* v5.0.29: was attached to the bottom .buttons-list which put the
+       button down by the chat box. Relocated to the upper-left of the
+       mini-profile card via absolute positioning so it's a thumb-reach
+       away from the player's name. The wrapper card needs position to
+       be a containing block for absolute children — handled by
+       fo-retal-injected setting position:relative below. */
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 5;
     display: inline-flex;
     align-items: center;
     gap: 3px;
     background: linear-gradient(135deg, #ff6b52, #e03a3a);
     color: #fff;
     border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 2px;
-    padding: 1px 5px;
-    font: 700 8px/1 Arial, "Open Sans", sans-serif;
+    border-radius: 3px;
+    padding: 2px 7px;
+    font: 700 9px/1 Arial, "Open Sans", sans-serif;
     letter-spacing: 0.3px;
     text-transform: uppercase;
     cursor: pointer;
     transition: transform 0.12s ease, box-shadow 0.12s ease;
-    box-shadow: 0 1px 2px rgba(214,48,49,0.3);
+    box-shadow: 0 1px 4px rgba(214,48,49,0.4);
     pointer-events: auto !important;
     touch-action: manipulation;
     user-select: none;
 }
+/* Make sure the mini-profile card serves as the containing block for
+   the absolutely-positioned retal button — otherwise it'd anchor to
+   the page body and float far from the card. */
+.fo-retal-injected { position: relative !important; }
 .fo-card-retal-btn:hover { transform: translateY(-1px); box-shadow: 0 1px 4px rgba(214,48,49,0.45); }
 .fo-card-retal-btn:active { transform: translateY(0); }
 .fo-card-retal-btn:disabled { background: #636e72; color: #b0b8bc; cursor: not-allowed; transform: none; }
