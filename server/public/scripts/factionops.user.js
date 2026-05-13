@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.35
+// @version      5.0.36
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.35';
+    const SCRIPT_VERSION = '5.0.36';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12133,7 +12133,10 @@ body.wb-chain-active {
         panel.className = 'wb-heatmap-panel';
         panel.dataset.combinedSig = `${ourId}-vs-${enemyId}`;
 
-        // Restore saved position
+        // Restore saved position. Match renderHeatmapPanel exactly:
+        // set left/top WITHOUT touching transform — the CSS keeps
+        // translateX(-50%) so offsetLeft / saved-left stays consistent
+        // with how the single-faction panel persists position.
         const savedPos = GM_getValue('factionops_heatmap_pos', null);
         if (savedPos) {
             try {
@@ -12141,7 +12144,6 @@ body.wb-chain-active {
                 if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
                     panel.style.left = pos.left + 'px';
                     panel.style.top = pos.top + 'px';
-                    panel.style.transform = 'none';
                 }
             } catch (_) {}
         }
@@ -12162,15 +12164,16 @@ body.wb-chain-active {
         panel.appendChild(header);
         header.querySelector('.wb-heatmap-close').addEventListener('click', () => panel.remove());
 
-        // Drag handlers
+        // Drag handlers — mirror the single-faction panel exactly so
+        // both panels round-trip position the same way (offsetLeft/Top
+        // is the un-translated value; CSS translateX(-50%) handles the
+        // visual centering offset).
         let isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
         header.addEventListener('mousedown', (e) => {
             if (e.target.closest('.wb-heatmap-close')) return;
             isDragging = true;
-            const rect = panel.getBoundingClientRect();
-            dragOffsetX = e.clientX - rect.left;
-            dragOffsetY = e.clientY - rect.top;
-            panel.style.transform = 'none';
+            dragOffsetX = e.clientX - panel.offsetLeft;
+            dragOffsetY = e.clientY - panel.offsetTop;
             e.preventDefault();
         });
         document.addEventListener('mousemove', (e) => {

@@ -1034,7 +1034,10 @@ router.post("/api/assist-request", requireAuth, (req, res) => {
     const warPlayers = store.getOnlinePlayersForWar(broadcastWarId);
     pushTargets = warPlayers.map(p => p.playerId || p.id).filter(id => id !== playerId);
   }
-  push.notifyAssistRequest(pushTargets, broadcastWarId, playerName, targetName || targetId, targetId, kind);
+  // v5.0.36: don't fall back to the bare numeric ID — push notifications
+  // were surfacing things like "Bob wants retal on 123456". Match the
+  // socket payload's fallback so the worst case is "Player [123456]".
+  push.notifyAssistRequest(pushTargets, broadcastWarId, playerName, targetName || `Player [${targetId}]`, targetId, kind);
 
   console.log(`[api] ${playerName} requested ${kind} on ${targetId} in war ${broadcastWarId}`);
   return res.json({ ok: true });
