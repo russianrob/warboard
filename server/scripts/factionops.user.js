@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.16
+// @version      5.0.17
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.16';
+    const SCRIPT_VERSION = '5.0.17';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2635,8 +2635,10 @@ body.wb-chain-active {
             return (s && Number(s.level)) || 0;
         };
         const getStats = (it) => {
+            // v5.0.17: cache stores NUMBER (real estimate) or NULL ("tried,
+            // no data"). `has()` returns true for both → no re-fetch loop.
             const v = _ffsStatsCache.get(String(it.targetId));
-            return (typeof v === 'number') ? v : -1; // -1 → no data → bottom
+            return (typeof v === 'number') ? v : -1; // -1 → bottom
         };
         switch (_sortMode) {
             case 'level-asc':  items.sort((a,b) => getLevel(a) - getLevel(b)); break;
@@ -3157,15 +3159,24 @@ body.wb-chain-active {
                         const tx = db.transaction('cache', 'readonly');
                         const store = tx.objectStore('cache');
                         const get = store.get(parseInt(userId, 10));
-                        get.onerror = () => resolve(null);
+                        // v5.0.17: ALWAYS populate _ffsStatsCache (with a
+                        // value OR null) so missing-data uids don't trigger
+                        // an infinite stats-sort re-fetch loop. The freeze
+                        // in v5.0.16 happened because uids with no FFS data
+                        // never got cached, so every renderOverlay() saw
+                        // them as "still missing" and kicked off another
+                        // Promise.all → re-render → repeat.
+                        const _markCache = (val) => {
+                            try { _ffsStatsCache.set(String(userId), val); } catch (_) {}
+                        };
+                        get.onerror = () => { _markCache(null); resolve(null); };
                         get.onsuccess = () => {
                             const r = get.result;
                             if (!r || r.no_data || typeof r.bs_estimate === 'undefined') {
+                                _markCache(null);
                                 resolve(null);
                             } else {
-                                // v5.0.14: populate the stats-sort cache so the
-                                // sort dropdown can sort by stats synchronously.
-                                try { _ffsStatsCache.set(String(userId), Number(r.bs_estimate) || 0); } catch (_) {}
+                                _markCache(Number(r.bs_estimate) || 0);
                                 resolve({
                                     total: r.bs_estimate,
                                     human: r.bs_estimate_human || null,
