@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.65
+// @version      5.0.68
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.65';
+    const SCRIPT_VERSION = '5.0.68';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1873,6 +1873,64 @@ body.wb-chain-active {
     background: #0f1a14; padding: 10px 12px;
     overflow-x: auto;
 }
+/* v5.0.68: per-war settings overlay (gear icon in modal header). */
+.wb-payouts-settings-overlay {
+    position: fixed; inset: 0; z-index: 1000002;
+    background: rgba(0,0,0,0.65);
+    display: flex; align-items: center; justify-content: center;
+}
+.wb-payouts-settings-panel {
+    background: #0f1a14; border: 1px solid #2d4a3e; border-radius: 8px;
+    width: 92vw; max-width: 480px; max-height: 88vh;
+    display: flex; flex-direction: column;
+    color: #d1d5db; font-size: 12px;
+}
+.wb-payouts-settings-header {
+    padding: 12px 14px; border-bottom: 1px solid #2d4a3e;
+    display: flex; align-items: center; justify-content: space-between;
+}
+.wb-payouts-settings-header h3 { margin: 0; font-size: 14px; color: #74c69d; }
+.wb-payouts-settings-close {
+    background: none; border: 0; color: #d1d5db;
+    font-size: 18px; cursor: pointer;
+}
+.wb-payouts-settings-body {
+    padding: 12px 14px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 14px;
+}
+.wb-payouts-settings-body label {
+    display: flex; flex-direction: column; gap: 4px;
+}
+.wb-payouts-settings-body label span {
+    font-size: 11px; color: #74c69d; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+}
+.wb-payouts-settings-body input {
+    background: #16261d; color: #d1d5db; border: 1px solid #2d4a3e;
+    border-radius: 4px; padding: 6px 8px; font-size: 12px;
+    font-family: "SF Mono", "Menlo", monospace;
+}
+.wb-payouts-settings-body input::placeholder { color: #6b7280; }
+.wb-payouts-settings-body small {
+    font-size: 10px; color: #9ca3af; line-height: 1.4;
+}
+.wb-payouts-settings-footer {
+    padding: 10px 14px; border-top: 1px solid #2d4a3e;
+    display: flex; gap: 8px; align-items: center;
+}
+.wb-payouts-settings-footer button {
+    background: #2d4a3e; color: #d1d5db; border: 0;
+    border-radius: 4px; padding: 6px 14px; font-size: 11px;
+    cursor: pointer; font-weight: 600;
+}
+.wb-payouts-settings-footer .wb-payouts-settings-save {
+    background: #2d6a4f; color: #fff;
+}
+.wb-payouts-settings-footer .wb-payouts-settings-save:hover { background: #3d8a6f; }
+.wb-payouts-settings-footer .wb-payouts-settings-clear {
+    background: transparent; color: #ef4444; border: 1px solid #4a1a1a;
+}
+
 /* v5.0.61: war-selector pill row at top of payouts modal. */
 .wb-payouts-warpicker {
     display: flex; flex-wrap: wrap; gap: 6px;
@@ -12040,6 +12098,7 @@ body.wb-chain-active {
                         <option value="static"${_payoutsModalState.mode === 'static' ? ' selected' : ''}>Termed Mode</option>
                     </select>
                     <button id="wb-payouts-refresh" style="background:#2d4a3e;color:#d1d5db;border:0;border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer;">Refresh</button>
+                    <button id="wb-payouts-gear" title="Per-war payout settings" style="background:none;border:0;color:#d1d5db;font-size:18px;cursor:pointer;padding:2px 6px;">⚙</button>
                     <span class="wb-payouts-meta" id="wb-payouts-meta">Loading…</span>
                     <button class="wb-payouts-close" id="wb-payouts-close" title="Close">✕</button>
                 </div>
@@ -12066,7 +12125,117 @@ body.wb-chain-active {
         document.getElementById('wb-payouts-refresh').addEventListener('click', async () => {
             await fetchAndRenderPayoutsHeatmap(true);
         });
+        // v5.0.68: gear button → settings panel for the currently
+        // selected war. Only meaningful after data is loaded (so we
+        // know which warId is selected).
+        document.getElementById('wb-payouts-gear').addEventListener('click', () => {
+            openPayoutsSettingsPanel();
+        });
         await fetchAndRenderPayoutsHeatmap();
+    }
+
+    // ── v5.0.68: per-war payout-calc settings panel ─────────────────────
+    function openPayoutsSettingsPanel() {
+        const data = _payoutsModalState.data;
+        const warId = _payoutsModalState.selectedWarId;
+        if (!data || !warId) return;
+        const war = (data.wars || []).find(w => String(w.warId) === String(warId));
+        if (!war) return;
+        const existing = document.getElementById('wb-payouts-settings-overlay');
+        if (existing) { existing.remove(); return; }
+
+        const cur = war.settings || {};
+        const overlay = document.createElement('div');
+        overlay.id = 'wb-payouts-settings-overlay';
+        overlay.className = 'wb-payouts-settings-overlay';
+        overlay.innerHTML = `
+            <div class="wb-payouts-settings-panel">
+                <div class="wb-payouts-settings-header">
+                    <h3>Settings — vs ${escapeHtml(war.enemyFactionName || '?')}</h3>
+                    <button class="wb-payouts-settings-close" title="Close">✕</button>
+                </div>
+                <div class="wb-payouts-settings-body">
+                    <label>
+                        <span>Loot total ($)</span>
+                        <input type="number" id="wb-set-loot" min="0" step="1" placeholder="auto: ${(war.lootTotal || 0).toLocaleString()}" value="${cur.lootOverride != null ? cur.lootOverride : ''}">
+                        <small>Auto-detected from cache market values. Override here with the actual amount you got from selling caches + treasury.</small>
+                    </label>
+                    <label>
+                        <span>Payout pool %</span>
+                        <input type="number" id="wb-set-payoutpct" min="0" max="100" step="1" placeholder="80" value="${cur.payoutPct != null ? Math.round(cur.payoutPct * 100) : ''}">
+                        <small>Percent of loot distributed to members; rest goes to faction. Default 80.</small>
+                    </label>
+                    <label>
+                        <span>Assist weight</span>
+                        <input type="number" id="wb-set-assist" min="0" step="0.05" placeholder="default: 1.0 in FF Mode, 0.3 in Termed Mode" value="${cur.assistWeight != null ? cur.assistWeight : ''}">
+                        <small>Multiplier applied to assist score. 1 = no change; 0.5 = half credit; 0 = no payout for assists.</small>
+                    </label>
+                    <label>
+                        <span>Non-war hit weight</span>
+                        <input type="number" id="wb-set-nonwar" min="0" step="0.05" placeholder="0.3" value="${cur.nonWarWeight != null ? cur.nonWarWeight : ''}">
+                        <small>Multiplier for hits during the war that weren't ranked-war attacks. Default 0.3 (assist-level).</small>
+                    </label>
+                </div>
+                <div class="wb-payouts-settings-footer">
+                    <button class="wb-payouts-settings-clear" type="button">Clear overrides</button>
+                    <div style="flex:1"></div>
+                    <button class="wb-payouts-settings-cancel" type="button">Cancel</button>
+                    <button class="wb-payouts-settings-save" type="button">Save & recompute</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        const closeOverlay = () => overlay.remove();
+        overlay.querySelector('.wb-payouts-settings-close').addEventListener('click', closeOverlay);
+        overlay.querySelector('.wb-payouts-settings-cancel').addEventListener('click', closeOverlay);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) closeOverlay(); });
+
+        const apiKey = CONFIG.API_KEY;
+        const post = (settings) => new Promise((resolve, reject) => {
+            httpRequest({
+                method: 'POST',
+                url: `${CONFIG.SERVER_URL}/api/war/${encodeURIComponent(warId)}/payout-settings?key=${apiKey}`,
+                headers: { 'Content-Type': 'application/json' },
+                data: JSON.stringify(settings),
+                onload(res) {
+                    const d = safeParse(res.responseText);
+                    if (res.status >= 200 && res.status < 300) resolve(d);
+                    else reject(new Error((d && d.error) || `HTTP ${res.status}`));
+                },
+                onerror() { reject(new Error('Network error')); },
+            });
+        });
+
+        overlay.querySelector('.wb-payouts-settings-save').addEventListener('click', async () => {
+            const settings = {};
+            const loot = overlay.querySelector('#wb-set-loot').value.trim();
+            const pct = overlay.querySelector('#wb-set-payoutpct').value.trim();
+            const asw = overlay.querySelector('#wb-set-assist').value.trim();
+            const nw = overlay.querySelector('#wb-set-nonwar').value.trim();
+            if (loot !== '') settings.lootOverride = Number(loot);
+            if (pct !== '') settings.payoutPct = Number(pct) / 100;
+            if (asw !== '') settings.assistWeight = Number(asw);
+            if (nw !== '') settings.nonWarWeight = Number(nw);
+            try {
+                await post(settings);
+                closeOverlay();
+                showToast('Settings saved — recomputing…', 'info');
+                await fetchAndRenderPayoutsHeatmap(true);
+            } catch (e) {
+                showToast(`Save failed: ${e.message}`, 'error');
+            }
+        });
+        overlay.querySelector('.wb-payouts-settings-clear').addEventListener('click', async () => {
+            try {
+                await post({}); // empty body → all defaults restored
+                closeOverlay();
+                showToast('Overrides cleared — recomputing…', 'info');
+                await fetchAndRenderPayoutsHeatmap(true);
+            } catch (e) {
+                showToast(`Clear failed: ${e.message}`, 'error');
+            }
+        });
     }
 
     async function fetchAndRenderPayoutsHeatmap(forceFresh = false) {

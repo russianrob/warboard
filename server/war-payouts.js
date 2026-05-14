@@ -210,10 +210,26 @@ async function tryFetchLoot(factionId, apiKey, rwId) {
  *   attackCount, generatedAt,
  * }
  */
+/** Drop the disk + memory cache for a war (all modes) — called when
+ *  per-war settings change so the next request recomputes. */
+export function invalidateCache(warId) {
+  const prefix = String(warId) + ':';
+  for (const k of [..._cache.keys()]) {
+    if (k.startsWith(prefix)) _cache.delete(k);
+  }
+  persistDiskCache();
+}
+
 export async function computePayouts(warId, options = {}) {
   loadDiskCache(); // lazy: first call hydrates persisted ended-war results
   const mode = options.mode === "static" ? "static" : "dynamic";
-  const cacheKey = `${warId}:${mode}`;
+  // v5.0.68: per-war settings overlay. The cache key includes a hash
+  // of the active settings so different setting combinations cache
+  // separately (and the gear panel's 'save' invalidates whichever
+  // entry was current).
+  const settings = store.getPayoutSettings(warId) || {};
+  const settingsKey = `L${settings.lootOverride ?? '_'}|A${settings.assistWeight ?? '_'}|N${settings.nonWarWeight ?? '_'}|P${settings.payoutPct ?? '_'}`;
+  const cacheKey = `${warId}:${mode}:${settingsKey}`;
   const cached = _cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now() && !options.forceFresh) {
     return { ...cached.result, cached: true };
@@ -320,7 +336,11 @@ export async function computePayouts(warId, options = {}) {
     //             counts the same — matches the egalitarian static
     //             policy where war hits are also flat 1.0)
     if (atk.ranked_war !== 1) {
-      const NON_WAR_WEIGHT = 0.3;
+      // v5.0.68: non-war weight is overridable per-war via the gear
+      // panel. Default 0.3 matches the typical assist:full-hit ratio.
+      const NON_WAR_WEIGHT = Number.isFinite(settings.nonWarWeight)
+        ? Math.max(0, Number(settings.nonWarWeight))
+        : 0.3;
       let nwScore;
       if (mode === 'static') {
         nwScore = NON_WAR_WEIGHT;
@@ -366,11 +386,18 @@ export async function computePayouts(warId, options = {}) {
     //   static  — 1.0 per successful war hit, 0.3 per assist
     //             (every direct hit pays equally regardless of FF or
     //             defender level — egalitarian payout policy)
+    // v5.0.68: assist weight is overridable per-war via the gear
+    // panel. Defaults: 0.3 in static (per-hit), 1.0× the natural
+    // fair_score in dynamic (no boost since respect_gain is already
+    // proportional). Setting >1.0 in dynamic boosts assists; <1.0
+    // penalizes them further.
+    const ASSIST_WEIGHT = Number.isFinite(settings.assistWeight)
+      ? Math.max(0, Number(settings.assistWeight))
+      : (mode === 'static' ? 0.3 : 1.0);
     if (mode === 'static') {
-      const STATIC_ASSIST_WEIGHT = 0.3;
-      byAttacker[aid].fairScoreSum += (cat === 'assist') ? STATIC_ASSIST_WEIGHT : 1.0;
+      byAttacker[aid].fairScoreSum += (cat === 'assist') ? ASSIST_WEIGHT : 1.0;
     } else {
-      byAttacker[aid].fairScoreSum += fairScore;
+      byAttacker[aid].fairScoreSum += (cat === 'assist') ? (fairScore * ASSIST_WEIGHT) : fairScore;
     }
     if (ff > 0) {
       byAttacker[aid].ffSum += ff;
@@ -411,9 +438,19 @@ export async function computePayouts(warId, options = {}) {
   let lootTotal = 0;
   let lootBreakdown = null;
   let lootSource = "none";
+  // v5.0.68: per-war loot override from settings takes precedence
+  // over the auto-detected cache value. Caller can also pass
+  // options.lootTotal to bypass everything.
+  const settingsLoot = Number.isFinite(settings.lootOverride)
+    ? Math.max(0, Number(settings.lootOverride))
+    : null;
   if (options.lootTotal != null) {
     lootTotal = Math.max(0, Number(options.lootTotal) || 0);
     lootSource = "override";
+  } else if (settingsLoot != null) {
+    lootTotal = settingsLoot;
+    lootSource = "admin override";
+    lootBreakdown = await tryFetchLoot(war.factionId, apiKey, warId).catch(() => null);
   } else {
     const detected = await tryFetchLoot(war.factionId, apiKey, warId);
     lootTotal = detected.total;
@@ -421,16 +458,12 @@ export async function computePayouts(warId, options = {}) {
     lootSource = detected.source;
   }
 
-  // v5.0.60: 80/20 split — 80% of loot is distributed to members
-  // (payoutPool), 20% stays with the faction. Per user policy:
-  // 'the payment ratio is 80% payouts and 20% faction keeps'.
-  // Configurable via options.payoutPct so a future faction settings
-  // UI can override per-faction (e.g., 70/30 or 100/0). Hard floor
-  // at 0, ceiling at 1.
-  const payoutPct = Number.isFinite(options.payoutPct)
-    ? Math.max(0, Math.min(1, Number(options.payoutPct)))
+  // v5.0.60+68: 80/20 default split, overridable per-war.
+  const payoutPct = Number.isFinite(options.payoutPct) ? options.payoutPct
+    : Number.isFinite(settings.payoutPct) ? settings.payoutPct
     : 0.80;
-  const payoutPool = Math.round(lootTotal * payoutPct);
+  const clampedPct = Math.max(0, Math.min(1, Number(payoutPct)));
+  const payoutPool = Math.round(lootTotal * clampedPct);
   const factionShare = lootTotal - payoutPool;
 
   // ── Build merged member list ─────────────────────────────────────────
@@ -529,9 +562,10 @@ export async function computePayouts(warId, options = {}) {
     lootBreakdown,
     lootSource,
     lootAutoDetected: options.lootTotal == null && lootTotal > 0,
-    payoutPct,    // e.g., 0.8 = 80% to members
-    payoutPool,   // dollars distributed to members
-    factionShare, // dollars retained by faction
+    payoutPct: clampedPct, // e.g., 0.8 = 80% to members
+    payoutPool,            // dollars distributed to members
+    factionShare,          // dollars retained by faction
+    settings,              // active per-war overrides (for the gear panel)
     totalScore: Math.round(totalScore * 10) / 10,
     members,
     // Total attacks shown in heatmap header. Sum from our merged member
@@ -579,14 +613,12 @@ export async function computePayoutsHeatmap(factionId, options = {}) {
         warResult: w.warResult,
         warEndedAt: w.warEndedAt,
         lootTotal: r.lootTotal,
-        // Pass-through so the drilldown UI can show 'how was the
-        // loot total computed' (Armor Cache x1 = $324M, etc.) —
-        // user explicitly asked for this estimate breakdown.
         lootBreakdown: r.lootBreakdown,
         lootSource: r.lootSource,
         payoutPct: r.payoutPct,
         payoutPool: r.payoutPool,
         factionShare: r.factionShare,
+        settings: r.settings, // pass through for the gear panel
         totalScore: r.totalScore,
         members: r.members,
       });
@@ -674,6 +706,7 @@ export async function computePayoutsHeatmap(factionId, options = {}) {
       payoutPct: w.payoutPct ?? 0.80,
       payoutPool: w.payoutPool || 0,
       factionShare: w.factionShare || 0,
+      settings: w.settings || {},
       totalScore: w.totalScore || 0,
       error: w.error || null,
     })),

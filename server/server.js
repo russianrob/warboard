@@ -523,6 +523,7 @@ store.loadFactionSettings();
 store.loadKeyPoolingOpt();
 store.loadPlayerFactions();
 store.loadMemberBars();
+store.loadPayoutSettings();
 loadHeatmaps();
 loadSubscriptions();
 

@@ -17,6 +17,36 @@ const FACTION_SETTINGS_FILE = path.join(DATA_DIR, "faction-settings.json");
 const KEY_POOL_FILE = path.join(DATA_DIR, "key-pool.json");
 const PLAYER_FACTIONS_FILE = path.join(DATA_DIR, "player-factions.json");
 const MEMBER_BARS_FILE = path.join(DATA_DIR, "member-bars.json");
+const PAYOUT_SETTINGS_FILE = path.join(DATA_DIR, "payout-settings.json");
+
+// v5.0.68: per-war payout-calc overrides (loot total, assist weight,
+// non-war weight, payout %). Set via the gear panel in the Payouts
+// modal; persisted across restarts. Map key = warId, value = sparse
+// object — only the fields the admin overrode are present.
+const payoutSettings = new Map();
+export function loadPayoutSettings() {
+  try {
+    const raw = fs.readFileSync(PAYOUT_SETTINGS_FILE, "utf-8");
+    const data = JSON.parse(raw);
+    for (const [k, v] of Object.entries(data)) payoutSettings.set(String(k), v);
+    if (payoutSettings.size > 0) console.log(`[store] Loaded ${payoutSettings.size} payout-setting(s)`);
+  } catch (_) { /* file missing or corrupted — proceed empty */ }
+}
+function savePayoutSettings() {
+  try {
+    const obj = Object.fromEntries(payoutSettings);
+    fs.writeFileSync(PAYOUT_SETTINGS_FILE, JSON.stringify(obj, null, 2));
+  } catch (e) {
+    console.error(`[store] Failed to persist payout-settings: ${e.message}`);
+  }
+}
+export function getPayoutSettings(warId) {
+  return payoutSettings.get(String(warId)) || null;
+}
+export function setPayoutSettings(warId, settings) {
+  payoutSettings.set(String(warId), { ...settings, updatedAt: Date.now() });
+  savePayoutSettings();
+}
 
 const factionSettings = new Map();
 

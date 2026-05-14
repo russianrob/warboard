@@ -7761,6 +7761,53 @@ router.get("/api/war/payouts/list", async (req, res) => {
   }
 });
 
+// v5.0.68: per-war payout-calc settings (admin-only). GET returns
+// the current overrides; POST stores new ones + invalidates the
+// payouts cache for that war so the next compute uses them.
+router.get("/api/war/:warId/payout-settings", async (req, res) => {
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info } = ctx;
+  const adminRoles = store.getAdminRoles(info.factionId).map(r => String(r).toLowerCase());
+  const isDev = String(info.playerId) === '137558';
+  if (!isDev && !adminRoles.includes(String(info.factionPosition || '').toLowerCase())) {
+    return res.status(403).json({ error: "Admin role required" });
+  }
+  return res.json(store.getPayoutSettings(req.params.warId) || {});
+});
+router.post("/api/war/:warId/payout-settings", express.json({ limit: '4kb' }), async (req, res) => {
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info } = ctx;
+  const adminRoles = store.getAdminRoles(info.factionId).map(r => String(r).toLowerCase());
+  const isDev = String(info.playerId) === '137558';
+  if (!isDev && !adminRoles.includes(String(info.factionPosition || '').toLowerCase())) {
+    return res.status(403).json({ error: "Admin role required" });
+  }
+  const body = req.body || {};
+  // Sparse object — only persist fields the admin actually set.
+  const settings = {};
+  if (body.lootOverride != null && body.lootOverride !== '') {
+    const n = Number(body.lootOverride);
+    if (Number.isFinite(n) && n >= 0) settings.lootOverride = n;
+  }
+  if (body.assistWeight != null && body.assistWeight !== '') {
+    const n = Number(body.assistWeight);
+    if (Number.isFinite(n) && n >= 0) settings.assistWeight = n;
+  }
+  if (body.nonWarWeight != null && body.nonWarWeight !== '') {
+    const n = Number(body.nonWarWeight);
+    if (Number.isFinite(n) && n >= 0) settings.nonWarWeight = n;
+  }
+  if (body.payoutPct != null && body.payoutPct !== '') {
+    const n = Number(body.payoutPct);
+    if (Number.isFinite(n) && n >= 0 && n <= 1) settings.payoutPct = n;
+  }
+  store.setPayoutSettings(req.params.warId, settings);
+  warPayouts.invalidateCache(req.params.warId);
+  return res.json({ ok: true, settings });
+});
+
 router.post("/api/oc/missing-override", express.json({ limit: '4kb' }), async (req, res) => {
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
