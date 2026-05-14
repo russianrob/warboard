@@ -302,9 +302,20 @@ export async function fetchFactionAttacks(factionId, apiKey, fromTs, toTs) {
   for (let page = 0; page < MAX_PAGES; page++) {
     const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=attacks&from=${currentFrom}&to=${toTs}&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
     const res = await fetch(url);
-    if (!res.ok) break;
+    if (!res.ok) {
+      const e = new Error(`Torn HTTP ${res.status}`);
+      e.httpStatus = res.status;
+      throw e;
+    }
     const data = await res.json();
-    if (data.error) break;
+    if (data.error) {
+      // Surface Torn errors to the caller (esp. code 7 for "key owner
+      // is no longer in this faction" — caller can quarantine + retry
+      // with a different pool key instead of silently returning []).
+      const e = new Error(`Torn API: ${data.error.error} (code ${data.error.code})`);
+      e.code = data.error.code;
+      throw e;
+    }
 
     const attacks = Object.values(data.attacks || {});
     if (attacks.length === 0) break;

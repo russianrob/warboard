@@ -141,12 +141,46 @@ export async function computePayouts(warId, options = {}) {
     throw new Error(`War ${warId} has invalid time range (${fromTs} → ${toTs})`);
   }
 
-  const apiKey = store.getPollingKey(war.factionId, "war-payouts", 0);
-  if (!apiKey) throw new Error("No API key available in pool");
-
-  const attacks = await fetchFactionAttacks(
-    war.factionId, apiKey, fromTs, toTs,
-  );
+  // Pool keys can return Torn error code 7 ("Incorrect ID-entity
+  // relation") when the key's owner left the faction or lost access.
+  // Rotate through up to POOL_RETRY_LIMIT pool keys, quarantining any
+  // that fail with code 7 so future calls skip them. Without this
+  // rotation a single dead key in the pool silently returns [] and
+  // the Payouts UI shows "no wars available" even with valid wars.
+  const POOL_RETRY_LIMIT = 8;
+  const triedKeys = new Set();
+  let attacks = null;
+  let lastErr = null;
+  let apiKey = null; // hoisted — downstream (tryFetchLoot) reuses the working key.
+  for (let attempt = 0; attempt < POOL_RETRY_LIMIT; attempt++) {
+    const candidate = store.getPollingKey(war.factionId, "war-payouts", attempt);
+    if (!candidate) break;
+    if (triedKeys.has(candidate)) continue;
+    triedKeys.add(candidate);
+    try {
+      attacks = await fetchFactionAttacks(war.factionId, candidate, fromTs, toTs);
+      apiKey = candidate;
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      if (err.code === 7) {
+        // Permanent key issue for THIS faction — quarantine + try the next.
+        store.quarantinePoolKey(candidate, war.factionId, `war-payouts: code 7 (${err.message})`);
+        continue;
+      }
+      // Any other error (rate limit, network, etc.) — bail immediately
+      // rather than burn through every key in the pool.
+      throw err;
+    }
+  }
+  if (attacks == null) {
+    throw new Error(
+      lastErr
+        ? `All pool keys failed (last: ${lastErr.message})`
+        : "No API key available in pool"
+    );
+  }
 
   const ourFid = String(war.factionId);
   const byAttacker = {}; // playerId → { name, score, breakdown }
