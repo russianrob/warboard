@@ -12173,8 +12173,8 @@ body.wb-chain-active {
                     </label>
                     <label>
                         <span>Assist weight</span>
-                        <input type="number" id="wb-set-assist" min="0" step="0.05" placeholder="default: 1.0 in FF Mode, 0.3 in Termed Mode" value="${cur.assistWeight != null ? cur.assistWeight : ''}">
-                        <small>Multiplier applied to assist score. 1 = no change; 0.5 = half credit; 0 = no payout for assists.</small>
+                        <input type="number" id="wb-set-assist" min="0" step="0.05" placeholder="0.3" value="${cur.assistWeight != null ? cur.assistWeight : ''}">
+                        <small>Multiplier on assist contribution. Default 0.3 = group-hit participants pay ~30% of a solo war hit. Set 0 to pay assists nothing; 1 to count them as full war hits.</small>
                     </label>
                     <label>
                         <span>Non-war hit weight</span>

@@ -399,17 +399,20 @@ export async function computePayouts(warId, options = {}) {
     //   static  — 1.0 per successful war hit, 0.3 per assist
     //             (every direct hit pays equally regardless of FF or
     //             defender level — egalitarian payout policy)
-    // v5.0.68: assist weight is overridable per-war via the gear
-    // panel. Defaults: 0.3 in static (per-hit), 1.0× the natural
-    // fair_score in dynamic (no boost since respect_gain is already
-    // proportional). Setting >1.0 in dynamic boosts assists; <1.0
-    // penalizes them further.
+    // v5.0.68/70: assist weight is overridable per-war via the gear
+    // panel. Default 0.3 for BOTH modes per user request — matches
+    // the typical assist:full-hit respect ratio Torn applies, and
+    // means a group hit pays ~30% of a solo war hit regardless of
+    // mode. Setting >0.3 boosts assists; <0.3 penalizes them more.
     const ASSIST_WEIGHT = Number.isFinite(settings.assistWeight)
       ? Math.max(0, Number(settings.assistWeight))
-      : (mode === 'static' ? 0.3 : 1.0);
+      : 0.3;
     if (mode === 'static') {
       byAttacker[aid].fairScoreSum += (cat === 'assist') ? ASSIST_WEIGHT : 1.0;
     } else {
+      // FF Mode: assist contributes (fair_score × ASSIST_WEIGHT). With
+      // default 0.3 this scales the assist's natural respect down to
+      // ~30% — same effective rate as Termed Mode.
       byAttacker[aid].fairScoreSum += (cat === 'assist') ? (fairScore * ASSIST_WEIGHT) : fairScore;
     }
     if (ff > 0) {
