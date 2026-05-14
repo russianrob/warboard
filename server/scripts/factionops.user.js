@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.44
+// @version      5.0.45
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.44';
+    const SCRIPT_VERSION = '5.0.45';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12187,28 +12187,36 @@ body.wb-chain-active {
         let html = `<div class="wb-payouts-section-label">Drilldown — vs ${escapeHtml(war.enemyFactionName||'?')} · ${escapeHtml(war.warResult||'?')} · loot ${fmt$(war.lootTotal)} <span style="opacity:0.6;font-size:10px;">(${escapeHtml(sourceLabel)})</span> · total score ${war.totalScore}</div>`;
         html += lootDetail;
         html += `<div class="wb-payouts-drilldown"><table>`;
-        html += `<thead><tr><th>Member</th>`
-              + `<th class="right" title="Total ranked-war attacks">Atk</th>`
-              + `<th class="right" title="Average fair-fight multiplier across all attacks">FF</th>`
-              + `<th class="right" title="War hits (count)">War</th>`
-              + `<th class="right" title="Retals (count)">Retal</th>`
-              + `<th class="right" title="Assists (count)">Asst</th>`
-              + `<th class="right" title="Overseas attacks (count)">OS</th>`
-              + `<th class="right" title="Fair score = respect ÷ war ÷ chain_bonus ÷ warlord_bonus, then × FF and other effort modifiers. Used for payout shares.">Fair</th>`
-              + `<th class="right" title="Torn's official ranked-war score (includes chain/war/warlord bonuses) — for comparison only">Torn</th>`
-              + `<th class="right">Share %</th><th class="right">Payout</th></tr></thead><tbody>`;
+        // v5.0.45: simplified to 5 columns. Earlier 11-column layout
+        // (Atk · FF · War · Retal · Asst · OS · Fair · Torn · Share · Payout)
+        // crammed too much in — admins couldn't read what the numbers
+        // meant. The breakdown (war/retal/assist/OS counts), FF, and
+        // Torn-score comparison still live in the row tooltip for any
+        // admin who wants the detail.
+        html += `<thead><tr>`
+              + `<th>Member</th>`
+              + `<th class="right">Attacks</th>`
+              + `<th class="right" title="Fair score — respect ÷ war ÷ chain_bonus ÷ warlord_bonus. Drives payout shares.">Score</th>`
+              + `<th class="right">Share</th>`
+              + `<th class="right">Payout</th>`
+              + `</tr></thead><tbody>`;
         for (const r of rows) {
             const share = totalScore > 0 ? (r.score / totalScore) * 100 : 0;
-            html += `<tr>`;
-            html += `<td><a href="/profiles.php?XID=${escapeHtml(r.playerId)}" target="_blank" rel="noopener" style="color:#d1d5db;text-decoration:none;">${escapeHtml(r.name)}</a> <span style="color:#6b7280;font-size:9px;">[${r.playerId}]</span></td>`;
-            html += `<td class="right" title="${escapeHtml(bdTooltip(r))}">${r.attacks || '—'}</td>`;
-            html += `<td class="right" style="color:#9ca3af;">${r.avgFf ? r.avgFf.toFixed(2) : '—'}</td>`;
-            html += `<td class="right" style="color:#9ca3af;">${r.bd_war || '—'}</td>`;
-            html += `<td class="right" style="color:#9ca3af;">${r.bd_retal || '—'}</td>`;
-            html += `<td class="right" style="color:#9ca3af;">${r.bd_assist || '—'}</td>`;
-            html += `<td class="right" style="color:#9ca3af;">${r.bd_overseas || '—'}</td>`;
+            // Rich row tooltip with everything-you-might-want-to-know
+            const detailParts = [];
+            if (r.avgFf) detailParts.push(`Avg FF: ${r.avgFf.toFixed(2)}`);
+            if (r.tornScore) detailParts.push(`Torn score: ${r.tornScore}`);
+            const bdParts = [];
+            if (r.bd_war) bdParts.push(`War ${r.bd_war}`);
+            if (r.bd_retal) bdParts.push(`Retal ${r.bd_retal}`);
+            if (r.bd_assist) bdParts.push(`Asst ${r.bd_assist}`);
+            if (r.bd_overseas) bdParts.push(`OS ${r.bd_overseas}`);
+            if (bdParts.length) detailParts.push(`Breakdown: ${bdParts.join(' · ')}`);
+            const rowTip = `${r.name} [${r.playerId}]\n${detailParts.join('\n')}`;
+            html += `<tr title="${escapeHtml(rowTip)}">`;
+            html += `<td><a href="/profiles.php?XID=${escapeHtml(r.playerId)}" target="_blank" rel="noopener" style="color:#d1d5db;text-decoration:none;">${escapeHtml(r.name)}</a></td>`;
+            html += `<td class="right">${r.attacks || '—'}</td>`;
             html += `<td class="right" style="font-weight:600;">${r.score}</td>`;
-            html += `<td class="right" style="color:#6b7280;">${r.tornScore || '—'}</td>`;
             html += `<td class="right" style="color:#9ca3af;">${share.toFixed(1)}%</td>`;
             html += `<td class="right" style="color:#74c69d;font-weight:600;">${fmt$(r.payout)}</td>`;
             html += `</tr>`;
