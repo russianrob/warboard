@@ -124,7 +124,35 @@ export function getOrCreateWar(warId, factionId, enemyFactionId = null) {
     const war = wars.get(warId);
     if (enemyFactionId && war.enemyFactionId !== enemyFactionId) {
       console.log(`[store] New enemy detected (${enemyFactionId}). Resetting stale war data.`);
-      
+
+      // ── Archive ended wars before we wipe them ──────────────────────
+      // Prior bug: when a new opponent appeared, the placeholder entry
+      // (key = `war_<factionId>`) was mutated in place — warEnded /
+      // warEndedAt / warResult / warStart all got cleared, destroying
+      // the previous war's finalized record forever. War-Payouts then
+      // saw "no eligible wars" because the archive was empty.
+      // Now: if the existing entry is ENDED, deep-clone it to a stable
+      // archival key (real Torn war ID if we captured it; otherwise a
+      // synthetic key) BEFORE we mutate. Active-war resets still wipe
+      // (no historical record to preserve in that case).
+      if (war.warEnded) {
+        const archiveKey = pickArchiveKey(war, warId);
+        if (archiveKey && archiveKey !== warId && !wars.has(archiveKey)) {
+          // Deep clone — JSON is fine here; war data is plain values
+          // (no Maps/Sets/Dates as values, just numbers/strings/objects).
+          const archived = JSON.parse(JSON.stringify(war));
+          archived.warId = archiveKey;
+          archived.archivedAt = Date.now();
+          archived.archivedFrom = warId;
+          wars.set(archiveKey, archived);
+          console.log(`[store] Archived ended war ${warId} → ${archiveKey} (vs ${war.enemyFactionName || war.enemyFactionId})`);
+        } else if (archiveKey === warId) {
+          console.log(`[store] Skipping archive — placeholder key already matches archive key (${warId})`);
+        } else if (wars.has(archiveKey)) {
+          console.log(`[store] Skipping archive — entry already exists at ${archiveKey}`);
+        }
+      }
+
       // Attempt to clear previous enemy's heatmap to prevent ghost data
       if (war.enemyFactionId) {
           import('./activity-heatmap.js').then(hm => hm.resetHeatmap(war.enemyFactionId)).catch(() => {});
@@ -147,6 +175,10 @@ export function getOrCreateWar(warId, factionId, enemyFactionId = null) {
       delete war.warEnded;
       delete war.warEndedAt;
       delete war.warEta;
+      delete war.realWarId;       // belongs to the previous opponent
+      delete war.warStart;        // belongs to the previous opponent
+      delete war.warScores;       // ditto
+      delete war.enemyFactionName; // caller will overwrite with new name
       saveState();
     }
     return war;
@@ -172,6 +204,38 @@ export function getOrCreateWar(warId, factionId, enemyFactionId = null) {
 
 export function getAllWars() {
   return wars;
+}
+
+/**
+ * Archive-key picker for ended-war preservation. Prefers the real
+ * Torn ranked-war ID (war.realWarId, captured by the war detector
+ * when it sees rw.warId from the API). Falls back to a synthetic key
+ * keyed by participants + end timestamp so each opponent gets its own
+ * slot even if we never captured a real war ID.
+ */
+function pickArchiveKey(war, currentKey) {
+  if (war.realWarId) return String(war.realWarId);
+  if (war.warId && war.warId !== currentKey && !/^war_\d+$/.test(war.warId)) {
+    return String(war.warId);
+  }
+  if (war.factionId && war.enemyFactionId && war.warEndedAt) {
+    return `archived_${war.factionId}_${war.enemyFactionId}_${war.warEndedAt}`;
+  }
+  return null;
+}
+
+/**
+ * Stamp the real Torn ranked-war ID onto an existing war entry so a
+ * future enemy-change archive can use it as the archival key. Called
+ * by the war detector after fetchRankedWar gives us rw.warId.
+ */
+export function recordRealWarId(warId, realWarId) {
+  const war = wars.get(warId);
+  if (!war || !realWarId) return false;
+  if (String(war.realWarId) === String(realWarId)) return false;
+  war.realWarId = String(realWarId);
+  saveState();
+  return true;
 }
 
 // ── Player tracking ─────────────────────────────────────────────────────

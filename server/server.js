@@ -536,6 +536,38 @@ for (const [warId, war] of store.getAllWars()) {
 // Schedule weekly membership verification (every Tuesday)
 startMembershipSchedule();
   startXanaxSubscriptions();
+  // Resume chain-monitor polling for any war that has an iOS Live
+  // Activity push token registered. The /api/poll handler also starts
+  // these on demand, but if the iOS app has been backgrounded since
+  // last server reload, /api/poll never gets hit and the monitor stays
+  // dead — meaning chain hits land server-side but no APNs push fires.
+  // Iterating the persisted token store on boot covers that gap.
+  (async () => {
+    try {
+      const lat = await import("./live-activity-tokens.js");
+      const seen = new Set();
+      // listForWar takes a single warId, but we want all distinct warIds.
+      // Cheapest path: load the JSON ourselves.
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+      const file = path.join(path.dirname(new URL(import.meta.url).pathname), "data", "live-activity-tokens.json");
+      if (fs.existsSync(file)) {
+        const rows = JSON.parse(fs.readFileSync(file, "utf-8"));
+        for (const row of rows) {
+          if (row && row.warId && !seen.has(row.warId)) {
+            seen.add(row.warId);
+            const w = store.getWar(row.warId);
+            if (w && !w.warEnded) {
+              startChainMonitor(null, row.warId);
+              console.log(`[live-activity] resumed chain monitor for ${row.warId}`);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[live-activity] resume hook failed: ${err.message}`);
+    }
+  })();
   // Background poller handles OWNER faction only (uses OWNER_API_KEY).
   // Other factions get "piggy-back" cleanup — /api/oc/vault-requests
   // opportunistically triggers a fundsnews poll using the caller's OWN
@@ -623,6 +655,10 @@ async function detectNewWars() {
           // Store war start time from API
           if (rw.warStart) war.warStart = rw.warStart;
           if (rw.warTarget) war.warOrigTarget = rw.warTarget;
+          // Stamp the real Torn ranked-war ID so when this war ends and
+          // the placeholder gets reused for the next opponent, the archival
+          // helper has a stable key to preserve history under.
+          if (rw.warId) store.recordRealWarId(warId, rw.warId);
           store.saveState();
           startWarStatusMonitor(io, warId);
           console.log(`[war-detect] Detected war: ${factionId} vs ${rw.enemyFactionName} (${rw.enemyFactionId}), starts: ${new Date(rw.warStart * 1000).toISOString()}`);
