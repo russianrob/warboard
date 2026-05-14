@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.45
+// @version      5.0.46
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.45';
+    const SCRIPT_VERSION = '5.0.46';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1883,7 +1883,8 @@ body.wb-chain-active {
 .wb-payouts-drilldown td {
     padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.04);
 }
-.wb-payouts-drilldown td.right { text-align: right; }
+.wb-payouts-drilldown td.right,
+.wb-payouts-drilldown th.right { text-align: right; }
 .wb-payouts-drilldown a.send-btn {
     background: #2d6a4f; color: white; padding: 2px 8px;
     font-size: 10px; border-radius: 3px; text-decoration: none;
