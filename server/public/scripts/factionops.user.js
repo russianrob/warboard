@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.60
+// @version      5.0.61
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.60';
+    const SCRIPT_VERSION = '5.0.61';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1873,6 +1873,25 @@ body.wb-chain-active {
     background: #0f1a14; padding: 10px 12px;
     overflow-x: auto;
 }
+/* v5.0.61: war-selector pill row at top of payouts modal. */
+.wb-payouts-warpicker {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin: 4px 4px 12px;
+}
+.wb-payouts-warpill {
+    background: #0f1a14; color: #d1d5db;
+    border: 1px solid #2d4a3e; border-radius: 6px;
+    padding: 6px 10px; font-size: 11px; cursor: pointer;
+    display: flex; flex-direction: column; gap: 2px; line-height: 1.2;
+    transition: background 0.12s, border-color 0.12s;
+}
+.wb-payouts-warpill:hover { background: #16261d; border-color: #3a5d4d; }
+.wb-payouts-warpill.selected {
+    background: #1f3a2c; border-color: #74c69d; color: #ffffff;
+}
+.wb-payouts-warpill .warpill-name { font-weight: 600; }
+.wb-payouts-warpill .warpill-meta { font-size: 9.5px; color: #9ca3af; }
+.wb-payouts-warpill.selected .warpill-meta { color: #c8e6d2; }
 .wb-payouts-drilldown table {
     /* v5.0.51: was width:100% — that forced auto-layout to squeeze
        every column to its min content width, and the long
@@ -12093,6 +12112,10 @@ body.wb-chain-active {
     }
 
     function renderPayoutsHeatmap(container, data) {
+        // v5.0.61: dropped the member×war heatmap matrix entirely per
+        // user request — only the per-war drilldown is rendered now.
+        // Wars list goes into a small selector pill row at the top so
+        // admins can switch between wars without the matrix overhead.
         const wars = Array.isArray(data.wars) ? data.wars : [];
         const members = Array.isArray(data.members) ? data.members : [];
         if (members.length === 0 || wars.length === 0) {
@@ -12100,80 +12123,40 @@ body.wb-chain-active {
             return;
         }
 
-        // Per-war max score (column normalization) so the heatmap shows
-        // each war's top-contributor at full intensity. APK uses single
-        // "max across matrix" normalization which would over-discount
-        // smaller wars; per-column reads better at-a-glance.
-        const colMax = {};
-        for (const w of wars) colMax[w.warId] = 0;
-        for (const m of members) {
-            for (const w of wars) {
-                const s = m.scoresByWar[w.warId] || 0;
-                if (s > colMax[w.warId]) colMax[w.warId] = s;
-            }
+        // Default to the most recent war if no selection or selection
+        // points to a war no longer in the data.
+        const knownWarIds = new Set(wars.map(w => String(w.warId)));
+        if (!_payoutsModalState.selectedWarId || !knownWarIds.has(String(_payoutsModalState.selectedWarId))) {
+            // Wars come back most-recent first from listEligibleWars sort.
+            _payoutsModalState.selectedWarId = String(wars[0].warId);
         }
 
-        // Grid template: name col (140px) + war cols (auto) + total col (60px).
-        const cols = `140px repeat(${wars.length}, minmax(58px, 1fr)) 60px`;
-
-        // Header row: name | war heads | total
-        let html = `<div class="wb-payouts-section-label">Member × War heatmap (click a war to drill down)</div>`;
-        html += `<div class="wb-payouts-heatmap">`;
-        html += `<div class="wb-payouts-heat-row header" style="grid-template-columns:${cols};">`;
-        html += `<div class="wb-payouts-heat-namecol">Member</div>`;
+        // War-selector pills. Each pill: enemy name + date + W/L badge.
+        let html = `<div class="wb-payouts-warpicker">`;
         for (const w of wars) {
             const date = w.warEndedAt ? new Date(w.warEndedAt).toISOString().slice(5, 10) : '—';
-            const result = w.warResult === 'victory' ? '<span class="warhead-result" style="color:#74c69d">✓</span>'
-                : w.warResult === 'defeat' ? '<span class="warhead-result" style="color:#ef4444">✗</span>'
-                : '<span class="warhead-result" style="color:#9ca3af">=</span>';
+            const result = w.warResult === 'victory' ? '<span style="color:#74c69d">✓</span>'
+                : w.warResult === 'defeat' ? '<span style="color:#ef4444">✗</span>'
+                : '<span style="color:#9ca3af">=</span>';
             const sel = String(w.warId) === String(_payoutsModalState.selectedWarId) ? ' selected' : '';
-            html += `<div class="wb-payouts-heat-warhead${sel}" data-war="${escapeHtml(w.warId)}" title="vs ${escapeHtml(w.enemyFactionName)} — ${escapeHtml(w.warResult||'?')}">`;
-            html += `<div>${escapeHtml((w.enemyFactionName||'?').slice(0,12))}</div>`;
-            html += `<div>${date} ${result}</div>`;
-            html += `</div>`;
-        }
-        html += `<div class="wb-payouts-heat-namecol" style="text-align:right;">Total</div>`;
-        html += `</div>`;
-
-        // Member rows
-        for (const m of members) {
-            html += `<div class="wb-payouts-heat-row" style="grid-template-columns:${cols};">`;
-            const totalAtk = m.totalAttacks || 0;
-            html += `<div class="wb-payouts-heat-namecol" title="${escapeHtml(m.name)} [${m.playerId}] — ${m.warsParticipated} war(s) · ${totalAtk} attack(s) · $${(m.totalPayout||0).toLocaleString()} total">${escapeHtml(m.name)}<span class="pid">[${m.playerId}]</span></div>`;
-            for (const w of wars) {
-                const score = m.scoresByWar[w.warId];
-                const max = colMax[w.warId] || 1;
-                if (score == null || score <= 0) {
-                    html += `<div class="wb-payouts-heat-cell empty">—</div>`;
-                } else {
-                    // Intensity scaled within column (matches APK's
-                    // normalize-against-max idea, just per-column).
-                    const intensity = Math.min(1, score / max);
-                    const alpha = 0.18 + intensity * 0.72;
-                    const sel = String(w.warId) === String(_payoutsModalState.selectedWarId) ? ' selected' : '';
-                    const payout = m.payoutsByWar[w.warId] || 0;
-                    const atk = (m.attacksByWar && m.attacksByWar[w.warId]) || 0;
-                    const tooltip = `${m.name} in ${w.enemyFactionName||'?'}: ${score} pts · ${atk} atk · $${payout.toLocaleString()}`;
-                    html += `<div class="wb-payouts-heat-cell${sel}" style="background:rgba(116,198,141,${alpha.toFixed(3)});" data-war="${escapeHtml(w.warId)}" data-uid="${escapeHtml(m.playerId)}" title="${escapeHtml(tooltip)}">${score >= 1 ? Math.round(score) : score.toFixed(1)}</div>`;
-                }
-            }
-            html += `<div class="wb-payouts-heat-totalcol">${m.totalScore}</div>`;
-            html += `</div>`;
+            html += `<button class="wb-payouts-warpill${sel}" data-war="${escapeHtml(w.warId)}" type="button">`
+                  + `<span class="warpill-name">${escapeHtml((w.enemyFactionName||'?'))}</span>`
+                  + `<span class="warpill-meta">${date} ${result}</span>`
+                  + `</button>`;
         }
         html += `</div>`;
-
-        // Drilldown placeholder
+        // Drilldown lives below the picker.
         html += `<div id="wb-payouts-drill"></div>`;
 
         container.innerHTML = html;
 
-        // Wire war-column click → drilldown
-        container.querySelectorAll('[data-war]').forEach(el => {
+        // Wire pill clicks → re-render with new selection.
+        container.querySelectorAll('.wb-payouts-warpill').forEach(el => {
             el.addEventListener('click', () => {
                 const warId = el.dataset.war;
+                if (String(warId) === String(_payoutsModalState.selectedWarId)) return;
                 _payoutsModalState.selectedWarId = warId;
                 renderPayoutsHeatmap(container, data);
-                renderPayoutsDrilldown(warId);
             });
         });
 
