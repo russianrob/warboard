@@ -334,13 +334,18 @@ export async function fetchFactionAttacks(factionId, apiKey, fromTs, toTs, optio
       : attacks;
     allAttacks.push(...filtered);
 
-    // If we got fewer than 100, we've reached the end
-    if (attacks.length < 100) break;
-
-    // Paginate: move from to the latest timestamp + 1
+    // v5.0.63: paginate until we've definitively covered the requested
+    // window. Old logic broke on `attacks.length < 100` — but the v1
+    // attacks endpoint can return <100 in a partial sub-window even
+    // when far more attacks exist after the last batch's maxTs (the
+    // Ringside fetch was stopping at page 38 / 99 attacks, missing
+    // the next ~8 hours of the 19h war). Now we paginate until either
+    // (a) the API returns zero (true end), or (b) the next from would
+    // pass our requested toTs.
     const maxTs = Math.max(...attacks.map(a => a.timestamp_ended || a.timestamp_started || 0));
-    if (maxTs <= currentFrom) break; // no progress
+    if (maxTs <= currentFrom) break; // no progress (would infinite-loop)
     currentFrom = maxTs + 1;
+    if (currentFrom > toTs) break; // walked past the end of the requested window
 
     // v5.0.62: pace at ≤100 calls/minute (Torn rate limit per key) so
     // long busy wars (200+ pages) don't trip code 5. 700ms = ~85 RPM.
