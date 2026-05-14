@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.50
+// @version      5.0.51
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.50';
+    const SCRIPT_VERSION = '5.0.51';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1871,13 +1871,26 @@ body.wb-chain-active {
 .wb-payouts-drilldown {
     border: 1px solid #1a2e20; border-radius: 6px;
     background: #0f1a14; padding: 10px 12px;
-    /* v5.0.50: scroll horizontally on narrow viewports rather than
-       compressing columns into illegible overlap. */
     overflow-x: auto;
 }
 .wb-payouts-drilldown table {
-    width: 100%; border-collapse: collapse; font-size: 11px;
+    /* v5.0.51: was width:100% — that forced auto-layout to squeeze
+       every column to its min content width, and the long
+       \$151,849,807 in the Payout cell would overflow LEFTWARD past
+       its cell edge (text-align:right + content > cell width),
+       visually smashing through the Share/Score/Attacks columns to
+       its left. Letting the table size to content + horizontal scroll
+       on overflow keeps every column wide enough for its content. */
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
 }
+.wb-payouts-drilldown td,
+.wb-payouts-drilldown th { white-space: nowrap; }
+/* Generous separation between the right-side numeric columns. */
+.wb-payouts-drilldown td.right + td.right,
+.wb-payouts-drilldown th.right + th.right { padding-left: 18px; }
 .wb-payouts-drilldown th {
     text-align: left; padding: 4px 6px; font-size: 9.5px;
     color: #9ca3af; text-transform: uppercase; letter-spacing: 0.3px;
