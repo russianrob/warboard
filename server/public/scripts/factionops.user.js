@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.64
+// @version      5.0.65
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.64';
+    const SCRIPT_VERSION = '5.0.65';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -11987,8 +11987,8 @@ body.wb-chain-active {
                 <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;font-size:11px;">
                     <span style="color:#9ca3af;">Mode:</span>
                     <select id="wb-htm-payouts-mode" style="background:#0f1a14;color:#d1d5db;border:1px solid #2d4a3e;border-radius:4px;padding:3px 7px;font-size:11px;">
-                        <option value="dynamic"${_payoutsModalState.mode === 'dynamic' ? ' selected' : ''}>Dynamic FF</option>
-                        <option value="static"${_payoutsModalState.mode === 'static' ? ' selected' : ''}>Static Tier</option>
+                        <option value="dynamic"${_payoutsModalState.mode === 'dynamic' ? ' selected' : ''}>FF Mode</option>
+                        <option value="static"${_payoutsModalState.mode === 'static' ? ' selected' : ''}>Termed Mode</option>
                     </select>
                     <button id="wb-htm-payouts-refresh" style="background:#2d4a3e;color:#d1d5db;border:0;border-radius:3px;padding:3px 9px;font-size:11px;cursor:pointer;">Refresh</button>
                     <span id="wb-htm-payouts-meta" style="color:#6b7280;margin-left:auto;"></span>
@@ -12036,8 +12036,8 @@ body.wb-chain-active {
                 <div class="wb-payouts-header">
                     <h2>💰 War Payouts</h2>
                     <select id="wb-payouts-mode">
-                        <option value="dynamic"${_payoutsModalState.mode === 'dynamic' ? ' selected' : ''}>Dynamic FF</option>
-                        <option value="static"${_payoutsModalState.mode === 'static' ? ' selected' : ''}>Static Tier</option>
+                        <option value="dynamic"${_payoutsModalState.mode === 'dynamic' ? ' selected' : ''}>FF Mode</option>
+                        <option value="static"${_payoutsModalState.mode === 'static' ? ' selected' : ''}>Termed Mode</option>
                     </select>
                     <button id="wb-payouts-refresh" style="background:#2d4a3e;color:#d1d5db;border:0;border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer;">Refresh</button>
                     <span class="wb-payouts-meta" id="wb-payouts-meta">Loading…</span>
@@ -12258,7 +12258,7 @@ body.wb-chain-active {
               + `<th>Member</th>`
               + `<th class="right">Payout</th>`
               + `<th class="right">Share</th>`
-              + `<th class="right" title="Score driving payout shares. Dynamic FF: fair_score = respect ÷ war ÷ chain_bonus ÷ warlord_bonus (FF-aware). Static Tier: 1.0 per war hit, 0.3 per assist or non-war hit (every successful hit pays equally regardless of FF).">Score</th>`
+              + `<th class="right" title="Score driving payout shares. FF Mode: fair_score = respect ÷ war ÷ chain_bonus ÷ warlord_bonus (FF-aware). Termed Mode: 1.0 per war hit, 0.3 per assist or non-war hit (every successful hit pays equally regardless of FF).">Score</th>`
               + `<th class="right">Attacks</th>`
               + `</tr></thead><tbody>`;
         // v5.0.56: pre-format every row's numeric values, then compute
