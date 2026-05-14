@@ -616,7 +616,18 @@ export async function computePayouts(warId, options = {}) {
  */
 export async function computePayoutsHeatmap(factionId, options = {}) {
   const mode = options.mode === "static" ? "static" : "dynamic";
-  const wars = listEligibleWars(factionId);
+  // v5.0.71: only show the most-recent ended war by default. With
+  // disk-cache the second-load is instant, but a cold load (after
+  // pm2 restart, with multiple historical wars) was paginating
+  // every war back-to-back and burning ~2-4 minutes. Per user
+  // request, slice to the latest war only — older wars stay in
+  // storage and computePayouts(warId) is still callable directly
+  // if the UI ever wants to surface them.
+  const allWars = listEligibleWars(factionId);
+  const limit = Number.isFinite(options.warLimit) && options.warLimit > 0
+    ? Math.min(options.warLimit, allWars.length)
+    : 1;
+  const wars = allWars.slice(0, limit);
   const perWar = [];
   // Sequential to avoid hammering Torn's attack endpoint when the
   // cache is cold; cached calls return instantly anyway.
