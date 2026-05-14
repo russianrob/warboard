@@ -38,13 +38,26 @@ function loadDiskCache() {
   try {
     const raw = fs.readFileSync(PAYOUTS_CACHE_FILE, "utf-8");
     const data = JSON.parse(raw);
-    let count = 0;
+    let count = 0, migrated = 0;
     for (const [key, entry] of Object.entries(data)) {
-      // Persisted entries never expire (war is ended → data is frozen).
-      _cache.set(key, { result: entry, expiresAt: Infinity });
+      // v5.0.69: cache key format changed in v5.0.68 from
+      // `warId:mode` to `warId:mode:settingsHash`. Old entries
+      // (lacking the settings suffix) become orphans and force
+      // recompute every time. Migrate them to the new format
+      // assuming no overrides were active.
+      let migratedKey = key;
+      if (!key.includes(':L')) {
+        const settingsKey = `L${entry.settings?.lootOverride ?? '_'}|A${entry.settings?.assistWeight ?? '_'}|N${entry.settings?.nonWarWeight ?? '_'}|P${entry.settings?.payoutPct ?? '_'}`;
+        migratedKey = `${key}:${settingsKey}`;
+        migrated++;
+      }
+      _cache.set(migratedKey, { result: entry, expiresAt: Infinity });
       count++;
     }
-    if (count > 0) console.log(`[war-payouts] Loaded ${count} cached payout(s) from disk`);
+    if (count > 0) {
+      console.log(`[war-payouts] Loaded ${count} cached payout(s) from disk${migrated ? ` (${migrated} migrated to v5.0.68 key format)` : ''}`);
+      if (migrated > 0) persistDiskCache(); // rewrite the file with new keys
+    }
   } catch (_) { /* file missing or corrupted — proceed empty */ }
 }
 function persistDiskCache() {
