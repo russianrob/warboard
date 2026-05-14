@@ -236,14 +236,37 @@ export async function computePayouts(warId, options = {}) {
   }
 
   const ourFid = String(war.factionId);
-  const byAttacker = {}; // playerId → { name, computedScore, breakdown, attackCount }
+  const byAttacker = {}; // playerId → { name, computedScore, breakdown, attackCount, fairScoreSum, ffSum, ffSamples }
 
   for (const atk of attacks) {
     if (String(atk.attacker_faction || "") !== ourFid) continue;
     const aid = String(atk.attacker_id || "");
     if (!aid || aid === "0") continue; // stealth = 0; skip
 
-    const ff = Number(atk.modifiers?.fairFight) || 0;
+    // v5.0.44: filter to attacks that actually contributed respect.
+    // Without this, defended/stalemate/timeout attacks inflated counts
+    // and (when respect_gain=0) didn't change the score but did skew
+    // attack counts vs what Torn's official report shows.
+    const respectGain = Number(atk.respect_gain) || 0;
+    if (respectGain <= 0) continue;
+
+    // v5.0.44: 'fair payout score' — strip the bonuses the user
+    // doesn't want counted toward payouts. Per user direction:
+    //   - chain_bonus (varies by chain timing, not effort)
+    //   - war (×2 ranked-war respect tier — circumstantial)
+    //   - warlord_bonus (warlord/load extra respect)
+    // What stays: fair_fight (skill-of-fight), retaliation (you went
+    // out of your way to retal), group_attack (coordination effort),
+    // overseas (effort/inconvenience).
+    const m = atk.modifiers || {};
+    const warMod = Number(m.war) || 1;
+    const chainMod = Number(m.chain_bonus) || 1;
+    const warlordMod = Number(m.warlord_bonus) || 1;
+    // fair_score is what respect WOULD have been without the excluded
+    // bonuses — divide them out of the final respect_gain.
+    const fairScore = respectGain / (warMod * chainMod * warlordMod);
+
+    const ff = Number(m.fair_fight ?? m.fairFight) || 0;
     const cat = classify(atk, war.enemyFactionId);
     const w = weight(mode, cat, ff);
 
@@ -252,27 +275,29 @@ export async function computePayouts(warId, options = {}) {
         playerId: aid,
         name: String(atk.attacker_name || `Player ${aid}`),
         computedScore: 0,
+        fairScoreSum: 0,
+        ffSum: 0,
+        ffSamples: 0,
         breakdown: {},
         attackCount: 0,
       };
     }
     byAttacker[aid].computedScore += w;
+    byAttacker[aid].fairScoreSum += fairScore;
+    if (ff > 0) {
+      byAttacker[aid].ffSum += ff;
+      byAttacker[aid].ffSamples += 1;
+    }
     byAttacker[aid].breakdown[cat] = (byAttacker[aid].breakdown[cat] || 0) + 1;
     byAttacker[aid].attackCount += 1;
   }
 
-  // ── Authoritative scores: pull Torn's official ranked-war report ─────
-  // Prior bug: my weighted-attack score (war_hit=ff*1, retal=ff*1.25, …)
-  // is a rough approximation that doesn't match what Torn actually
-  // shows in war.php?step=rankreport. Torn's score factors in defender
-  // level, fair fight, group bonuses, overseas penalties — all the
-  // respect-formula nuance that's not in the attack-modifiers field.
-  // When the official report exists, use its per-member scores 1:1 so
-  // the Payouts tab matches Torn's own ranking. Fall back to weighted
-  // computation only when the report isn't available (war too recent
-  // for the report to be published, or API rejects it).
-  let reportMembers = null;
-  let scoreSource = "computed";
+  // ── Pull Torn's official report for cross-reference ──────────────────
+  // We use this as a SECONDARY display ('Torn score' column) so admins
+  // can see how the fair-payout score compares to Torn's authoritative
+  // respect — but payout shares are computed from fair_score (which
+  // excludes chain/war/warlord bonuses per user request).
+  let reportMembersById = null;
   let reportTotalScore = 0;
   let reportTotalAttacks = 0;
   try {
@@ -282,15 +307,15 @@ export async function computePayouts(warId, options = {}) {
       : Object.values(report.factions || {});
     const myFaction = factionsList.find(f => String(f.id) === ourFid);
     if (myFaction && Array.isArray(myFaction.members) && myFaction.members.length > 0) {
-      reportMembers = myFaction.members;
-      scoreSource = "report";
-      for (const m of reportMembers) {
+      reportMembersById = {};
+      for (const m of myFaction.members) {
+        reportMembersById[String(m.id)] = m;
         reportTotalScore += Number(m.score) || 0;
         reportTotalAttacks += Number(m.attacks) || 0;
       }
     }
   } catch (_) {
-    // Report unavailable — use computed weighted scores below.
+    // Report unavailable — fair_score from attacks is still computable.
   }
 
   // Loot — caller-supplied wins; fall back to auto-detect from the
@@ -308,58 +333,82 @@ export async function computePayouts(warId, options = {}) {
     lootSource = detected.source;
   }
 
-  let members;
-  let totalScore;
-
-  if (reportMembers) {
-    // Build the member list from the official report. Merge our
-    // attack-derived `breakdown` (war_hit / retal / overseas / chain /
-    // assist counts) for each member as additional context, but the
-    // score itself is the report's authoritative number.
-    totalScore = reportTotalScore;
-    members = reportMembers
-      .map(m => {
-        const aid = String(m.id);
-        const score = Number(m.score) || 0;
-        const sharePct = totalScore > 0 ? (score / totalScore) * 100 : 0;
-        const dollarPayout = totalScore > 0
-          ? Math.round((score / totalScore) * lootTotal)
-          : 0;
-        const local = byAttacker[aid] || {};
-        return {
-          playerId: aid,
-          name: String(m.name || local.name || `Player ${aid}`),
-          score: Math.round(score * 100) / 100,
-          sharePct: Math.round(sharePct * 10) / 10,
-          dollarPayout,
-          attackCount: Number(m.attacks) || local.attackCount || 0,
-          level: Number(m.level) || null,
-          breakdown: local.breakdown || {},
-        };
-      })
-      .sort((a, b) => b.score - a.score);
-  } else {
-    // Fall back to weighted-attack computation (mode-dependent).
-    totalScore = Object.values(byAttacker)
-      .reduce((s, m) => s + m.computedScore, 0);
-    members = Object.values(byAttacker)
-      .map(m => {
-        const sharePct = totalScore > 0 ? (m.computedScore / totalScore) * 100 : 0;
-        const dollarPayout = totalScore > 0
-          ? Math.round((m.computedScore / totalScore) * lootTotal)
-          : 0;
-        return {
-          playerId: m.playerId,
-          name: m.name,
-          score: Math.round(m.computedScore * 100) / 100,
-          sharePct: Math.round(sharePct * 10) / 10,
-          dollarPayout,
-          attackCount: m.attackCount,
-          breakdown: m.breakdown,
-        };
-      })
-      .sort((a, b) => b.score - a.score);
+  // ── Build merged member list ─────────────────────────────────────────
+  // Primary key: playerId (from attacks). For each, fair_score is the
+  // sum of (respect_gain / war / chain_bonus / warlord_bonus) over their
+  // contributing attacks. Torn report data is attached for comparison.
+  const mergedById = {};
+  for (const m of Object.values(byAttacker)) {
+    mergedById[m.playerId] = {
+      playerId: m.playerId,
+      name: m.name,
+      fairScore: m.fairScoreSum,
+      attackCount: m.attackCount,
+      breakdown: m.breakdown,
+      avgFf: m.ffSamples > 0 ? (m.ffSum / m.ffSamples) : 0,
+      tornScore: 0,
+      tornAttacks: 0,
+      level: null,
+    };
   }
+  if (reportMembersById) {
+    for (const [aid, rm] of Object.entries(reportMembersById)) {
+      if (!mergedById[aid]) {
+        mergedById[aid] = {
+          playerId: aid,
+          name: rm.name,
+          fairScore: 0,
+          attackCount: 0,
+          breakdown: {},
+          avgFf: 0,
+          tornScore: 0,
+          tornAttacks: 0,
+          level: null,
+        };
+      }
+      mergedById[aid].name = rm.name || mergedById[aid].name;
+      mergedById[aid].tornScore = Number(rm.score) || 0;
+      mergedById[aid].tornAttacks = Number(rm.attacks) || 0;
+      mergedById[aid].level = Number(rm.level) || null;
+    }
+  }
+
+  // Decide which score drives shares + payouts. Default = 'fair'
+  // (computed from raw attacks, excludes chain/war/warlord). If we
+  // have NO attacks for some reason but the report exists, fall back
+  // to report scores so payouts at least show *something*.
+  const baseMembers = Object.values(mergedById);
+  const fairTotal = baseMembers.reduce((s, m) => s + m.fairScore, 0);
+  const useFair = fairTotal > 0;
+  const totalScore = useFair ? fairTotal : reportTotalScore;
+  const scoreSource = useFair ? "fair" : (reportMembersById ? "report" : "computed");
+
+  const members = baseMembers
+    .map(m => {
+      const primary = useFair ? m.fairScore : m.tornScore;
+      const sharePct = totalScore > 0 ? (primary / totalScore) * 100 : 0;
+      const dollarPayout = totalScore > 0
+        ? Math.round((primary / totalScore) * lootTotal)
+        : 0;
+      return {
+        playerId: m.playerId,
+        name: m.name,
+        // 'score' is the value used for payout shares — fair_score by
+        // default. tornScore is provided alongside as a comparison
+        // column (Torn-authoritative respect including all bonuses).
+        score: Math.round(primary * 100) / 100,
+        sharePct: Math.round(sharePct * 10) / 10,
+        dollarPayout,
+        attackCount: m.attackCount || m.tornAttacks || 0,
+        avgFf: Math.round(m.avgFf * 100) / 100,
+        level: m.level,
+        breakdown: m.breakdown,
+        tornScore: Math.round(m.tornScore * 100) / 100,
+        tornAttacks: m.tornAttacks,
+      };
+    })
+    .filter(m => m.score > 0 || m.tornScore > 0) // drop zero-contribution noise
+    .sort((a, b) => b.score - a.score);
 
   const result = {
     warId,
@@ -368,7 +417,8 @@ export async function computePayouts(warId, options = {}) {
     enemyFactionName: war.enemyFactionName || null,
     warResult: war.warResult || null,
     mode,
-    scoreSource, // "report" (Torn-authoritative) or "computed" (our weighting)
+    scoreSource, // "fair" (excludes chain/war/warlord), "report" (fallback), "computed" (legacy)
+    reportTotalScore: Math.round(reportTotalScore * 10) / 10, // for UI comparison
     fromTs,
     toTs,
     lootTotal,
@@ -377,7 +427,10 @@ export async function computePayouts(warId, options = {}) {
     lootAutoDetected: options.lootTotal == null && lootTotal > 0,
     totalScore: Math.round(totalScore * 10) / 10,
     members,
-    attackCount: scoreSource === "report" ? reportTotalAttacks : attacks.length,
+    // Total attacks shown in heatmap header. Sum from our merged member
+    // list rather than raw attacks.length (which over-counts if Torn
+    // returns duplicates across paginated calls).
+    attackCount: members.reduce((s, m) => s + (m.attackCount || 0), 0),
     generatedAt: Date.now(),
   };
 
@@ -448,6 +501,11 @@ export async function computePayoutsHeatmap(factionId, options = {}) {
           // this score' — user only saw aggregate dollar payouts.
           attacksByWar: {},
           breakdownByWar: {},
+          // v5.0.44: include Torn-official score per war + avg FF for
+          // side-by-side comparison in the UI. tornScoresByWar is purely
+          // informational; fair score (in scoresByWar) drives payouts.
+          tornScoresByWar: {},
+          avgFfByWar: {},
           totalScore: 0,
           totalPayout: 0,
           totalAttacks: 0,
@@ -460,6 +518,8 @@ export async function computePayoutsHeatmap(factionId, options = {}) {
       memberMap[m.playerId].payoutsByWar[w.warId] = m.dollarPayout;
       memberMap[m.playerId].attacksByWar[w.warId] = m.attackCount || 0;
       memberMap[m.playerId].breakdownByWar[w.warId] = m.breakdown || {};
+      memberMap[m.playerId].tornScoresByWar[w.warId] = m.tornScore || 0;
+      memberMap[m.playerId].avgFfByWar[w.warId] = m.avgFf || 0;
       memberMap[m.playerId].totalScore += m.score;
       memberMap[m.playerId].totalPayout += m.dollarPayout;
       memberMap[m.playerId].totalAttacks += m.attackCount || 0;
