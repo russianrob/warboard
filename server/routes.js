@@ -7803,6 +7803,10 @@ router.post("/api/war/:warId/payout-settings", express.json({ limit: '4kb' }), a
     const n = Number(body.payoutPct);
     if (Number.isFinite(n) && n >= 0 && n <= 1) settings.payoutPct = n;
   }
+  if (body.failedWeight != null && body.failedWeight !== '') {
+    const n = Number(body.failedWeight);
+    if (Number.isFinite(n) && n >= 0) settings.failedWeight = n;
+  }
   store.setPayoutSettings(req.params.warId, settings);
   warPayouts.invalidateCache(req.params.warId);
   return res.json({ ok: true, settings });

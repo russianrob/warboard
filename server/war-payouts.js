@@ -241,7 +241,7 @@ export async function computePayouts(warId, options = {}) {
   // separately (and the gear panel's 'save' invalidates whichever
   // entry was current).
   const settings = store.getPayoutSettings(warId) || {};
-  const settingsKey = `L${settings.lootOverride ?? '_'}|A${settings.assistWeight ?? '_'}|N${settings.nonWarWeight ?? '_'}|P${settings.payoutPct ?? '_'}`;
+  const settingsKey = `L${settings.lootOverride ?? '_'}|A${settings.assistWeight ?? '_'}|N${settings.nonWarWeight ?? '_'}|P${settings.payoutPct ?? '_'}|F${settings.failedWeight ?? '_'}`;
   const cacheKey = `${warId}:${mode}:${settingsKey}`;
   const cached = _cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now() && !options.forceFresh) {
@@ -332,14 +332,20 @@ export async function computePayouts(warId, options = {}) {
     }
     byAttacker[aid].totalAttacks += 1;
 
-    // v5.0.44/72: failed attacks (defended, stalemate, lost, escaped,
-    // timeout, interrupted) have respect_gain = 0 and contribute
-    // nothing to the war score — skip scoring but record them in
-    // breakdown.failed so admins can see how many attempts each
-    // member made beyond the successful ones.
+    // v5.0.44/72/73: failed attacks (defended, stalemate, lost,
+    // escaped, timeout, interrupted) have respect_gain = 0 and
+    // earned no respect for the war. By default they don't pay
+    // (failedWeight = 0) but admins can opt in to effort-based
+    // payouts via the gear panel. Setting failedWeight = 0.1 means
+    // each failed attempt adds 0.1 to the member's score (flat,
+    // since respect_gain is 0 so a multiplier would also be 0).
     const respectGain = Number(atk.respect_gain) || 0;
     if (respectGain <= 0) {
       byAttacker[aid].breakdown.failed = (byAttacker[aid].breakdown.failed || 0) + 1;
+      const FAILED_WEIGHT = Number.isFinite(settings.failedWeight)
+        ? Math.max(0, Number(settings.failedWeight))
+        : 0;
+      if (FAILED_WEIGHT > 0) byAttacker[aid].fairScoreSum += FAILED_WEIGHT;
       continue;
     }
 

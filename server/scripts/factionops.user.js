@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.72
+// @version      5.0.73
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.72';
+    const SCRIPT_VERSION = '5.0.73';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12181,6 +12181,11 @@ body.wb-chain-active {
                         <input type="number" id="wb-set-nonwar" min="0" step="0.05" placeholder="0.3" value="${cur.nonWarWeight != null ? cur.nonWarWeight : ''}">
                         <small>Multiplier for hits during the war that weren't ranked-war attacks. Default 0.3 (assist-level).</small>
                     </label>
+                    <label>
+                        <span>Failed attack weight</span>
+                        <input type="number" id="wb-set-failed" min="0" step="0.05" placeholder="0" value="${cur.failedWeight != null ? cur.failedWeight : ''}">
+                        <small>Flat score per failed attempt (defended/stalemate/lost/escaped). Default 0 — no payout for failures. Set 0.1 to reward effort with ~10% of a war-hit's payout per attempt.</small>
+                    </label>
                 </div>
                 <div class="wb-payouts-settings-footer">
                     <button class="wb-payouts-settings-clear" type="button">Clear overrides</button>
@@ -12219,10 +12224,12 @@ body.wb-chain-active {
             const pct = overlay.querySelector('#wb-set-payoutpct').value.trim();
             const asw = overlay.querySelector('#wb-set-assist').value.trim();
             const nw = overlay.querySelector('#wb-set-nonwar').value.trim();
+            const fw = overlay.querySelector('#wb-set-failed').value.trim();
             if (loot !== '') settings.lootOverride = Number(loot);
             if (pct !== '') settings.payoutPct = Number(pct) / 100;
             if (asw !== '') settings.assistWeight = Number(asw);
             if (nw !== '') settings.nonWarWeight = Number(nw);
+            if (fw !== '') settings.failedWeight = Number(fw);
             try {
                 await post(settings);
                 closeOverlay();
@@ -12537,7 +12544,7 @@ body.wb-chain-active {
                 if (bd.overseas) rows.push(['Overseas', bd.overseas]);
                 if (bd.chain) rows.push(['Chain hits', bd.chain]);
                 if (bd.non_war) rows.push(['Non-war hits', `${bd.non_war} (×0.3 weight)`]);
-                if (bd.failed) rows.push(['Failed', `${bd.failed} (no payout)`]);
+                if (bd.failed) rows.push(['Failed', String(bd.failed)]);
                 if (bd.avgFf) rows.push(['Avg FF', bd.avgFf.toFixed(2)]);
                 if (bd.tornScore) rows.push(['Torn score', bd.tornScore]);
                 pop.innerHTML = `<div class="pop-title">${escapeHtml(bd.name || 'Attack breakdown')}</div>`
