@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.61
+// @version      5.0.64
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.61';
+    const SCRIPT_VERSION = '5.0.64';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12258,7 +12258,7 @@ body.wb-chain-active {
               + `<th>Member</th>`
               + `<th class="right">Payout</th>`
               + `<th class="right">Share</th>`
-              + `<th class="right" title="Fair score — respect ÷ war ÷ chain_bonus ÷ warlord_bonus. Drives payout shares.">Score</th>`
+              + `<th class="right" title="Score driving payout shares. Dynamic FF: fair_score = respect ÷ war ÷ chain_bonus ÷ warlord_bonus (FF-aware). Static Tier: 1.0 per war hit, 0.3 per assist or non-war hit (every successful hit pays equally regardless of FF).">Score</th>`
               + `<th class="right">Attacks</th>`
               + `</tr></thead><tbody>`;
         // v5.0.56: pre-format every row's numeric values, then compute

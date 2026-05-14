@@ -271,18 +271,27 @@ export async function computePayouts(warId, options = {}) {
     }
     byAttacker[aid].totalAttacks += 1;
 
-    // v5.0.58: non-war attacks DO contribute to fair_score, but at the
-    // assist multiplier (NON_WAR_WEIGHT) — they don't help the ranked
-    // war so they shouldn't pay like a war hit, but the member did
-    // still attack (effort), so they shouldn't be zero either. Per
-    // user policy: 'non war hits should get paid same as assists'.
+    // v5.0.58: non-war attacks DO contribute to score, but at a
+    // reduced 'assist-level' weight per user policy ('non war hits
+    // should get paid same as assists').
+    // v5.0.64: weighting now varies by mode:
+    //   dynamic — respect_gain × 0.3 ÷ chain ÷ warlord (FF-aware,
+    //             scales with how tough the target was)
+    //   static  — flat 0.3 per non-war attack (every non-war hit
+    //             counts the same — matches the egalitarian static
+    //             policy where war hits are also flat 1.0)
     if (atk.ranked_war !== 1) {
-      const NON_WAR_WEIGHT = 0.3; // typical assist:full-hit respect ratio
-      const m2 = atk.modifiers || {};
-      const chainMod2 = Number(m2.chain_bonus) || 1;
-      const warlordMod2 = Number(m2.warlord_bonus) || 1;
-      const nwFairScore = (respectGain * NON_WAR_WEIGHT) / (chainMod2 * warlordMod2);
-      byAttacker[aid].fairScoreSum += nwFairScore;
+      const NON_WAR_WEIGHT = 0.3;
+      let nwScore;
+      if (mode === 'static') {
+        nwScore = NON_WAR_WEIGHT;
+      } else {
+        const m2 = atk.modifiers || {};
+        const chainMod2 = Number(m2.chain_bonus) || 1;
+        const warlordMod2 = Number(m2.warlord_bonus) || 1;
+        nwScore = (respectGain * NON_WAR_WEIGHT) / (chainMod2 * warlordMod2);
+      }
+      byAttacker[aid].fairScoreSum += nwScore;
       byAttacker[aid].breakdown.non_war = (byAttacker[aid].breakdown.non_war || 0) + 1;
       // Non-war attacks don't bump attackCount (war-only) — only fair_score
       // and the non_war breakdown counter. attackCount stays the war-attack
@@ -312,7 +321,18 @@ export async function computePayouts(warId, options = {}) {
 
     // (member entry already created above; keep populating)
     byAttacker[aid].computedScore += w;
-    byAttacker[aid].fairScoreSum += fairScore;
+    // v5.0.64: scoring per mode for ranked-war attacks:
+    //   dynamic — fair_score (respect_gain ÷ war ÷ chain ÷ warlord),
+    //             FF-aware via Torn's respect formula
+    //   static  — 1.0 per successful war hit, 0.3 per assist
+    //             (every direct hit pays equally regardless of FF or
+    //             defender level — egalitarian payout policy)
+    if (mode === 'static') {
+      const STATIC_ASSIST_WEIGHT = 0.3;
+      byAttacker[aid].fairScoreSum += (cat === 'assist') ? STATIC_ASSIST_WEIGHT : 1.0;
+    } else {
+      byAttacker[aid].fairScoreSum += fairScore;
+    }
     if (ff > 0) {
       byAttacker[aid].ffSum += ff;
       byAttacker[aid].ffSamples += 1;
