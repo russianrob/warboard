@@ -4843,6 +4843,14 @@ function runFailureRisk(factionId, data) {
       if (!weight && s.position_info?.number) {
         weight = crimeWeights[posBase.replace(/\s/g, '') + s.position_info.number] || 0;
       }
+      // v3.2.12: data.weights is never populated by the spawn-key data
+      // builder (long-standing TODO — was meant to come from
+      // tornprobability.com but no fetch exists). Without a fallback
+      // every slot gets weight=0, riskScore=0, and the weakestLink
+      // picker silently picks nothing. Default to a flat 25 (~ even
+      // 4-slot OC) so riskScore is at least proportional to (1 -
+      // successProb) and admins can see who's dragging an OC down.
+      if (!weight) weight = 25;
 
       // Check historical failure rate for this member+crime+position
       const posKeyBase = `${crime.name}::${posBase}`;
