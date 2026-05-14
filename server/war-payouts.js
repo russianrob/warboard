@@ -16,6 +16,8 @@
 
 import * as store from "./store.js";
 import { fetchFactionAttacks, fetchRankedWarReport } from "./torn-api.js";
+import fs from "fs";
+import path from "path";
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const _cache = new Map(); // `${warId}:${mode}` → { result, expiresAt }
@@ -85,31 +87,82 @@ function weight(mode, cat, ff) {
   return Number.isFinite(v) && v > 0 ? v : 0;
 }
 
-/** Try to read the loot total from Torn's ranked war report. */
+// Cache the item-market-values.json read in-process — it's static-ish
+// and we don't want to hit the disk for every payout call.
+let _itemValuesCache = null;
+let _itemValuesLoadedAt = 0;
+function loadItemMarketValues() {
+  if (_itemValuesCache && Date.now() - _itemValuesLoadedAt < 600_000) {
+    return _itemValuesCache;
+  }
+  try {
+    const file = path.join(process.env.DATA_DIR || "./data", "item-market-values.json");
+    const raw = fs.readFileSync(file, "utf-8");
+    const parsed = JSON.parse(raw);
+    _itemValuesCache = parsed.values || parsed || {};
+    _itemValuesLoadedAt = Date.now();
+  } catch (_) {
+    _itemValuesCache = {};
+  }
+  return _itemValuesCache;
+}
+
+/**
+ * Auto-detect loot total from Torn's ranked war report rewards.
+ *
+ * Prior bug: this returned `respect × $1000`. Respect is a faction
+ * stat — not cash — so the auto-detected loot for war 40638 came back
+ * as ~$6.37M when the actual cache value was ~$1.73B.
+ *
+ * New approach: sum the market value of each item cache we received
+ * (Armor / Melee / Small / Medium / Heavy Arms), using the cached
+ * data/item-market-values.json the warboard already maintains. That
+ * gives the *theoretical* sale value at current market prices — the
+ * admin can still override per-war via /api/war/:warId/loot-override
+ * to reflect actual realized sale price + treasury contribution.
+ */
 async function tryFetchLoot(factionId, apiKey, rwId) {
+  // Returns { total, items: [{id, name, quantity, unitPrice, lineTotal}], cash, source }
+  // so the UI can show *how* the estimate was computed (per-cache market
+  // value × quantity), which is what admins actually need to verify the
+  // number — and to override it if they sold below market or added
+  // treasury cash.
+  const out = { total: 0, items: [], cash: 0, source: "none" };
   try {
     const report = await fetchRankedWarReport(factionId, apiKey, rwId);
-    // v2 rankedwarreport shape: { factions: [{id, ..., rewards: {points,
-    //   respect, items, ...}}], winner, ... }. The actual cash payout
-    //   to the winning faction comes from points × $X (currently $5,000).
-    //   We fall back to "points" as a relative score if that's all we
-    //   can find; UI lets the admin override.
     const factions = Array.isArray(report?.factions) ? report.factions : [];
     const ours = factions.find(f => String(f.id) === String(factionId));
-    if (ours?.rewards) {
-      const r = ours.rewards;
-      // Common reward shapes seen in the wild — best-effort field probe.
-      if (typeof r.points === "number" && r.points > 0) {
-        // Torn pays winners $5,000/point (subject to change). Use it
-        // as a rough auto-fill; admin can override in the UI.
-        return r.points * 5000;
-      }
-      if (typeof r.respect === "number" && r.respect > 0) {
-        return r.respect * 1000;
+    if (!ours?.rewards) return out;
+    const r = ours.rewards;
+    if (typeof r.cash === "number" && r.cash > 0) out.cash += r.cash;
+    if (typeof r.money === "number" && r.money > 0) out.cash += r.money;
+    out.total += out.cash;
+    if (Array.isArray(r.items) && r.items.length > 0) {
+      const values = loadItemMarketValues();
+      for (const it of r.items) {
+        const id = String(it.id);
+        const qty = Number(it.quantity) || 0;
+        const unit = Number(values[id]) || 0;
+        const lineTotal = qty * unit;
+        out.items.push({
+          id,
+          name: it.name || `Item ${id}`,
+          quantity: qty,
+          unitPrice: unit,
+          lineTotal,
+        });
+        out.total += lineTotal;
       }
     }
-  } catch (_) { /* ignore — admin will input manually */ }
-  return 0;
+    if (out.total > 0) {
+      out.source = out.items.length > 0 ? "caches+cash" : "cash";
+    } else if (typeof r.points === "number" && r.points > 0) {
+      // Last-resort fallback (Torn pays $5K/pt for some war tiers).
+      out.total = r.points * 5000;
+      out.source = "points";
+    }
+  } catch (_) { /* admin will input manually */ }
+  return out;
 }
 
 /**
@@ -243,10 +296,16 @@ export async function computePayouts(warId, options = {}) {
   // Loot — caller-supplied wins; fall back to auto-detect from the
   // ranked war report; final fallback = 0 (admin must fill in UI).
   let lootTotal = 0;
+  let lootBreakdown = null;
+  let lootSource = "none";
   if (options.lootTotal != null) {
     lootTotal = Math.max(0, Number(options.lootTotal) || 0);
+    lootSource = "override";
   } else {
-    lootTotal = await tryFetchLoot(war.factionId, apiKey, warId);
+    const detected = await tryFetchLoot(war.factionId, apiKey, warId);
+    lootTotal = detected.total;
+    lootBreakdown = detected;
+    lootSource = detected.source;
   }
 
   let members;
@@ -313,6 +372,8 @@ export async function computePayouts(warId, options = {}) {
     fromTs,
     toTs,
     lootTotal,
+    lootBreakdown,
+    lootSource,
     lootAutoDetected: options.lootTotal == null && lootTotal > 0,
     totalScore: Math.round(totalScore * 10) / 10,
     members,
