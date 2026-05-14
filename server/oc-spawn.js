@@ -289,6 +289,62 @@ export function getCachedCompletedCrimes(factionId) {
   return [];
 }
 
+// ── Role weights from tornprobability.com ────────────────────────────────
+// v3.2.12: previously the failure-risk + slot-optimizer engines looked up
+// data.weights but nothing ever populated it — every slot got weight=0.
+// tornprobability.com exposes per-crime role weights via the same endpoint
+// that 'Torn OC Weights Under Roles' (greasyfork 547973) uses. Fetch +
+// cache once every 12h; weights change only when Torn re-balances OCs.
+//
+// Returned shape: { [normalizedCrimeName]: { [normalizedRoleName]: pct } }
+// Names normalized to lowercase + alphanumeric so callers can do fuzzy
+// lookups without rebuilding the map.
+const ROLE_WEIGHTS_TTL_MS = 12 * 60 * 60 * 1000;
+let _roleWeightsCache = null;
+let _roleWeightsCachedAt = 0;
+let _roleWeightsInflight = null;
+function _normalizeOcName(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+export async function getRoleWeights() {
+  // Serve from cache if fresh
+  if (_roleWeightsCache && (Date.now() - _roleWeightsCachedAt) < ROLE_WEIGHTS_TTL_MS) {
+    return _roleWeightsCache;
+  }
+  // Coalesce concurrent calls — engines run in batches and we don't
+  // want to fetch in parallel.
+  if (_roleWeightsInflight) return _roleWeightsInflight;
+  _roleWeightsInflight = (async () => {
+    try {
+      const res = await fetch('https://tornprobability.com:3000/api/GetRoleWeights');
+      if (!res.ok) throw new Error('upstream HTTP ' + res.status);
+      const raw = await res.json();
+      const out = {};
+      for (const [crimeName, roles] of Object.entries(raw || {})) {
+        const cKey = _normalizeOcName(crimeName);
+        if (!cKey) continue;
+        out[cKey] = {};
+        for (const [roleName, pct] of Object.entries(roles || {})) {
+          const rKey = _normalizeOcName(roleName);
+          if (!rKey) continue;
+          out[cKey][rKey] = Number(pct) || 0;
+        }
+      }
+      _roleWeightsCache = out;
+      _roleWeightsCachedAt = Date.now();
+      console.log(`[oc-spawn] Fetched role weights for ${Object.keys(out).length} crime(s) from tornprobability.com`);
+      return out;
+    } catch (e) {
+      console.warn(`[oc-spawn] getRoleWeights failed: ${e.message}`);
+      return _roleWeightsCache || {}; // serve stale on failure
+    } finally {
+      _roleWeightsInflight = null;
+    }
+  })();
+  return _roleWeightsInflight;
+}
+export { _normalizeOcName as normalizeOcName };
+
 // Add synthetic cprCache entries for members with no completed-crime history
 // AND no current OC placement. Uses level-bucketed priors from established
 // members in the faction so a level-41 new member inherits the typical

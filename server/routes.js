@@ -94,7 +94,7 @@ import { fetchFactionMembers, fetchFactionChain, fetchRankedWar, fetchFactionBas
 /** Mask an API key for safe logging — shows only last 4 chars. */
 const maskKey = (key) => key ? `****${String(key).slice(-4)}` : '****';
 import { getHeatmap, resetHeatmap } from "./activity-heatmap.js";
-import { getOcSpawnData, getCachedCompletedCrimes, calculateOutcome } from "./oc-spawn.js";
+import { getOcSpawnData, getCachedCompletedCrimes, calculateOutcome, getRoleWeights, normalizeOcName } from "./oc-spawn.js";
 import { checkAndNotifyAsync as ocReadyCheck, startPoller as startOcReadyPoller } from "./oc-ready-notifier.js";
 import { getItemMarketValue, maybeRefreshItemValues } from "./item-values.js";
 import * as vaultRequests from "./vault-requests.js";
@@ -4811,7 +4811,14 @@ function runFailureRisk(factionId, data) {
     const slots = crime.slots || [];
     const slotRisks = [];
     let hasEmpty = false;
-    const crimeWeights = weights[toCamelKey(crime.name)] || {};
+    // v3.2.12: weights now keyed by normalized crime name
+    // (lowercase + alphanumeric only) — matches getRoleWeights output
+    // shape so a fuzzy lookup hits regardless of Torn's display
+    // capitalization or punctuation.
+    const crimeWeights = weights[normalizeOcName(crime.name)]
+                      || weights[toCamelKey(crime.name)]
+                      || weights[crime.name]
+                      || {};
 
     for (const s of slots) {
       const uid = String(s.user_id || s.user?.id || '');
@@ -4837,19 +4844,19 @@ function runFailureRisk(factionId, data) {
       // history estimate. Position lookup uses posBase lowercased
       // (matching what the client scrape stores).
       const liveSuc = getLiveSuccess(factionId, crime.id, uid, posBase);
-      // Try exact label first, then numbered variants
-      let weight = crimeWeights[posLabel] || crimeWeights[posBase] || crimeWeights[posLabel.replace(/\s/g, '')] || crimeWeights[posBase.replace(/\s/g, '')] || 0;
-      // Also try with number suffix: Looter1, Looter2 etc
+      // v3.2.12: try normalized lookup first (matches getRoleWeights
+      // output shape), then fall back to legacy variants.
+      let weight = crimeWeights[normalizeOcName(posLabel)]
+                || crimeWeights[normalizeOcName(posBase)]
+                || crimeWeights[posLabel]
+                || crimeWeights[posBase]
+                || 0;
+      // Numbered-variant fallback (Looter1, Looter2)
       if (!weight && s.position_info?.number) {
-        weight = crimeWeights[posBase.replace(/\s/g, '') + s.position_info.number] || 0;
+        weight = crimeWeights[normalizeOcName(posBase + s.position_info.number)] || 0;
       }
-      // v3.2.12: data.weights is never populated by the spawn-key data
-      // builder (long-standing TODO — was meant to come from
-      // tornprobability.com but no fetch exists). Without a fallback
-      // every slot gets weight=0, riskScore=0, and the weakestLink
-      // picker silently picks nothing. Default to a flat 25 (~ even
-      // 4-slot OC) so riskScore is at least proportional to (1 -
-      // successProb) and admins can see who's dragging an OC down.
+      // Last-resort flat fallback if tornprobability data is missing
+      // for a brand-new crime that hasn't been added upstream yet.
       if (!weight) weight = 25;
 
       // Check historical failure rate for this member+crime+position
@@ -6704,6 +6711,11 @@ router.get("/api/oc/spawn-key", async (req, res) => {
 
     // Run engines if enabled — cached per faction for 1 hour (same TTL as CPR cache)
     if (!_engineCache.has(fid) || (Date.now() - _engineCache.get(fid).ts) > 3600_000 || _engineCache.get(fid).settingsHash !== engineSettingsHash(fSettings)) {
+      // v3.2.12: hydrate role weights from tornprobability.com so the
+      // failure-risk + slot-optimizer engines can pick weakest links
+      // and rank danger slots properly. 12h cache inside getRoleWeights
+      // — first call per ~12h fetches, the rest are instant.
+      data.weights = await getRoleWeights();
       const engines = {};
       if (fSettings.engine_slot_optimizer) engines.slotOptimizer = runSlotOptimizer(fid, data);
       if (fSettings.engine_failure_risk) engines.failureRisk = runFailureRisk(fid, data);
@@ -6798,6 +6810,8 @@ router.get("/api/oc/spawn-key", async (req, res) => {
           // Run engines on fallback data too
           const fS2engines = {};
           if (!_engineCache.has(fid) || (Date.now() - _engineCache.get(fid).ts) > 3600_000) {
+            // v3.2.12: hydrate role weights here too (fallback path).
+            data.weights = await getRoleWeights();
             if (fS2.engine_slot_optimizer) fS2engines.slotOptimizer = runSlotOptimizer(fid, data);
             if (fS2.engine_failure_risk) fS2engines.failureRisk = runFailureRisk(fid, data);
             if (fS2.engine_cpr_forecaster) fS2engines.cprForecaster = runCprForecaster(fid, data);
