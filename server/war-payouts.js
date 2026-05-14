@@ -533,6 +533,7 @@ export async function computePayoutsHeatmap(factionId, options = {}) {
           // Without these the UI had no way to surface 'how did I earn
           // this score' — user only saw aggregate dollar payouts.
           attacksByWar: {},
+          totalAttacksByWar: {}, // v5.0.59: was missing — caused 'Cannot set property 40638 of undefined' on the per-war assignment below.
           breakdownByWar: {},
           // v5.0.44: include Torn-official score per war + avg FF for
           // side-by-side comparison in the UI. tornScoresByWar is purely
