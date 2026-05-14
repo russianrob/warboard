@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.56
+// @version      5.0.58
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.56';
+    const SCRIPT_VERSION = '5.0.58';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12209,11 +12209,13 @@ body.wb-chain-active {
                     avgFf: (m.avgFfByWar && m.avgFfByWar[warId]) || 0,
                     payout: m.payoutsByWar[warId] || 0,
                     attacks: (m.attacksByWar && m.attacksByWar[warId]) || 0,
+                    totalAttacks: (m.totalAttacksByWar && m.totalAttacksByWar[warId]) || (m.attacksByWar && m.attacksByWar[warId]) || 0,
                     bd_war: bd.war_hit || 0,
                     bd_retal: bd.retal || 0,
                     bd_overseas: (bd.overseas_war || 0) + (bd.os_chain || 0),
                     bd_chain: bd.chain_hit || 0,
                     bd_assist: bd.assist || 0,
+                    bd_non_war: bd.non_war || 0,
                 };
             })
             .sort((a, b) => b.score - a.score);
@@ -12318,7 +12320,9 @@ body.wb-chain-active {
             const bdJson = JSON.stringify({
                 war: r.bd_war, retal: r.bd_retal, assist: r.bd_assist,
                 overseas: r.bd_overseas, chain: r.bd_chain,
+                non_war: r.bd_non_war,
                 avgFf: r.avgFf, tornScore: r.tornScore,
+                warAttacks: r.attacks, totalAttacks: r.totalAttacks,
                 name: r.name,
             });
             html += `<tr title="${escapeHtml(rowTip)}">`;
@@ -12353,11 +12357,21 @@ body.wb-chain-active {
                 pop.className = 'wb-attack-popover';
                 pop.dataset.forCell = cell.dataset.breakdown;
                 const rows = [];
+                // v5.0.57: war-vs-total ratio at the top so admins can
+                // see how focused each member was on war attacks vs
+                // off-war chains. Only war attacks contribute to score.
+                if (bd.totalAttacks && bd.warAttacks != null) {
+                    const pct = bd.totalAttacks > 0
+                        ? Math.round((bd.warAttacks / bd.totalAttacks) * 100)
+                        : 0;
+                    rows.push(['War / Total', `${bd.warAttacks} / ${bd.totalAttacks} (${pct}%)`]);
+                }
                 if (bd.war) rows.push(['War hits', bd.war]);
                 if (bd.retal) rows.push(['Retals', bd.retal]);
                 if (bd.assist) rows.push(['Assists', bd.assist]);
                 if (bd.overseas) rows.push(['Overseas', bd.overseas]);
                 if (bd.chain) rows.push(['Chain hits', bd.chain]);
+                if (bd.non_war) rows.push(['Non-war hits', `${bd.non_war} (×0.3 weight)`]);
                 if (bd.avgFf) rows.push(['Avg FF', bd.avgFf.toFixed(2)]);
                 if (bd.tornScore) rows.push(['Torn score', bd.tornScore]);
                 pop.innerHTML = `<div class="pop-title">${escapeHtml(bd.name || 'Attack breakdown')}</div>`

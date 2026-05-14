@@ -294,7 +294,12 @@ export async function fetchRecentFactionAttacks(factionId, apiKey, fromTs) {
  * Fetch faction attack log for a time period, paginating through all results.
  * Returns array of attack objects. Filters to ranked_war attacks only.
  */
-export async function fetchFactionAttacks(factionId, apiKey, fromTs, toTs) {
+export async function fetchFactionAttacks(factionId, apiKey, fromTs, toTs, options = {}) {
+  // v5.0.57: opt-in to ALL attacks (not just ranked_war) so callers
+  // that want a war-vs-total split (war-payouts) can compute it.
+  // Default stays rankedWarOnly:true so existing callers (post-war
+  // bleed analysis, etc.) keep their previous behavior unchanged.
+  const rankedWarOnly = options.rankedWarOnly !== false;
   const allAttacks = [];
   let currentFrom = fromTs;
   const MAX_PAGES = 30; // safety limit
@@ -320,9 +325,10 @@ export async function fetchFactionAttacks(factionId, apiKey, fromTs, toTs) {
     const attacks = Object.values(data.attacks || {});
     if (attacks.length === 0) break;
 
-    // Only keep ranked war attacks
-    const rwAttacks = attacks.filter(a => a.ranked_war === 1);
-    allAttacks.push(...rwAttacks);
+    const filtered = rankedWarOnly
+      ? attacks.filter(a => a.ranked_war === 1)
+      : attacks;
+    allAttacks.push(...filtered);
 
     // If we got fewer than 100, we've reached the end
     if (attacks.length < 100) break;

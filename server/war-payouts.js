@@ -211,7 +211,10 @@ export async function computePayouts(warId, options = {}) {
     if (triedKeys.has(candidate)) continue;
     triedKeys.add(candidate);
     try {
-      attacks = await fetchFactionAttacks(war.factionId, candidate, fromTs, toTs);
+      // v5.0.57: pass rankedWarOnly:false so we can count war-attacks vs
+      // total-attacks per member. Only ranked-war attacks contribute to
+      // fair_score; the total count is shown in the breakdown popover.
+      attacks = await fetchFactionAttacks(war.factionId, candidate, fromTs, toTs, { rankedWarOnly: false });
       apiKey = candidate;
       lastErr = null;
       break;
@@ -236,7 +239,7 @@ export async function computePayouts(warId, options = {}) {
   }
 
   const ourFid = String(war.factionId);
-  const byAttacker = {}; // playerId → { name, computedScore, breakdown, attackCount, fairScoreSum, ffSum, ffSamples }
+  const byAttacker = {}; // playerId → { name, computedScore, breakdown, attackCount, fairScoreSum, ffSum, ffSamples, totalAttacks }
 
   for (const atk of attacks) {
     if (String(atk.attacker_faction || "") !== ourFid) continue;
@@ -249,6 +252,43 @@ export async function computePayouts(warId, options = {}) {
     // attack counts vs what Torn's official report shows.
     const respectGain = Number(atk.respect_gain) || 0;
     if (respectGain <= 0) continue;
+
+    // v5.0.57: track TOTAL attacks (war + non-war) per member for the
+    // war-vs-total breakdown ratio. Only ranked-war attacks contribute
+    // to scoring; non-war attacks just bump the total counter.
+    if (!byAttacker[aid]) {
+      byAttacker[aid] = {
+        playerId: aid,
+        name: String(atk.attacker_name || `Player ${aid}`),
+        computedScore: 0,
+        fairScoreSum: 0,
+        ffSum: 0,
+        ffSamples: 0,
+        breakdown: {},
+        attackCount: 0,    // war-only count (drives the score)
+        totalAttacks: 0,   // war + non-war
+      };
+    }
+    byAttacker[aid].totalAttacks += 1;
+
+    // v5.0.58: non-war attacks DO contribute to fair_score, but at the
+    // assist multiplier (NON_WAR_WEIGHT) — they don't help the ranked
+    // war so they shouldn't pay like a war hit, but the member did
+    // still attack (effort), so they shouldn't be zero either. Per
+    // user policy: 'non war hits should get paid same as assists'.
+    if (atk.ranked_war !== 1) {
+      const NON_WAR_WEIGHT = 0.3; // typical assist:full-hit respect ratio
+      const m2 = atk.modifiers || {};
+      const chainMod2 = Number(m2.chain_bonus) || 1;
+      const warlordMod2 = Number(m2.warlord_bonus) || 1;
+      const nwFairScore = (respectGain * NON_WAR_WEIGHT) / (chainMod2 * warlordMod2);
+      byAttacker[aid].fairScoreSum += nwFairScore;
+      byAttacker[aid].breakdown.non_war = (byAttacker[aid].breakdown.non_war || 0) + 1;
+      // Non-war attacks don't bump attackCount (war-only) — only fair_score
+      // and the non_war breakdown counter. attackCount stays the war-attack
+      // count so the 'War / Total' ratio in the popover still works.
+      continue;
+    }
 
     // v5.0.44: 'fair payout score' — strip the bonuses the user
     // doesn't want counted toward payouts. Per user direction:
@@ -270,18 +310,7 @@ export async function computePayouts(warId, options = {}) {
     const cat = classify(atk, war.enemyFactionId);
     const w = weight(mode, cat, ff);
 
-    if (!byAttacker[aid]) {
-      byAttacker[aid] = {
-        playerId: aid,
-        name: String(atk.attacker_name || `Player ${aid}`),
-        computedScore: 0,
-        fairScoreSum: 0,
-        ffSum: 0,
-        ffSamples: 0,
-        breakdown: {},
-        attackCount: 0,
-      };
-    }
+    // (member entry already created above; keep populating)
     byAttacker[aid].computedScore += w;
     byAttacker[aid].fairScoreSum += fairScore;
     if (ff > 0) {
@@ -344,6 +373,7 @@ export async function computePayouts(warId, options = {}) {
       name: m.name,
       fairScore: m.fairScoreSum,
       attackCount: m.attackCount,
+      totalAttacks: m.totalAttacks, // war + non-war (display only)
       breakdown: m.breakdown,
       avgFf: m.ffSamples > 0 ? (m.ffSum / m.ffSamples) : 0,
       tornScore: 0,
@@ -400,6 +430,9 @@ export async function computePayouts(warId, options = {}) {
         sharePct: Math.round(sharePct * 10) / 10,
         dollarPayout,
         attackCount: m.attackCount || m.tornAttacks || 0,
+        // v5.0.57: total attacks (war + non-war) for the war-vs-total
+        // ratio in the breakdown popover.
+        totalAttacks: m.totalAttacks || m.attackCount || m.tornAttacks || 0,
         avgFf: Math.round(m.avgFf * 100) / 100,
         level: m.level,
         breakdown: m.breakdown,
@@ -517,6 +550,7 @@ export async function computePayoutsHeatmap(factionId, options = {}) {
       memberMap[m.playerId].scoresByWar[w.warId] = m.score;
       memberMap[m.playerId].payoutsByWar[w.warId] = m.dollarPayout;
       memberMap[m.playerId].attacksByWar[w.warId] = m.attackCount || 0;
+      memberMap[m.playerId].totalAttacksByWar[w.warId] = m.totalAttacks || m.attackCount || 0;
       memberMap[m.playerId].breakdownByWar[w.warId] = m.breakdown || {};
       memberMap[m.playerId].tornScoresByWar[w.warId] = m.tornScore || 0;
       memberMap[m.playerId].avgFfByWar[w.warId] = m.avgFf || 0;
