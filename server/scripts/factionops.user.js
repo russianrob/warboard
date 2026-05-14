@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.48
+// @version      5.0.49
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.48';
+    const SCRIPT_VERSION = '5.0.49';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1875,10 +1875,21 @@ body.wb-chain-active {
 .wb-payouts-drilldown table {
     width: 100%; border-collapse: collapse; font-size: 11px;
 }
-/* v5.0.48: nudge the right-aligned Payout number a touch left of
-   the cell edge so it visually clears the Share column above. */
+/* v5.0.49: Payout numbers are LONG (e.g. \$151,800,000). Auto-table-
+   layout was sometimes squeezing the Payout column so the right-
+   aligned digits visually overflowed leftward across the Share
+   column boundary. min-width + nowrap reserves enough room. */
 .wb-payouts-drilldown td.payout-cell,
-.wb-payouts-drilldown th.payout-cell { padding-right: 16px; }
+.wb-payouts-drilldown th.payout-cell {
+    min-width: 120px;
+    white-space: nowrap;
+    padding-left: 12px;
+}
+.wb-payouts-drilldown td.share-cell,
+.wb-payouts-drilldown th.share-cell {
+    min-width: 56px;
+    white-space: nowrap;
+}
 .wb-payouts-drilldown th {
     text-align: left; padding: 4px 6px; font-size: 9.5px;
     color: #9ca3af; text-transform: uppercase; letter-spacing: 0.3px;
@@ -12202,7 +12213,7 @@ body.wb-chain-active {
               + `<th>Member</th>`
               + `<th class="right">Attacks</th>`
               + `<th class="right" title="Fair score — respect ÷ war ÷ chain_bonus ÷ warlord_bonus. Drives payout shares.">Score</th>`
-              + `<th class="right">Share</th>`
+              + `<th class="right share-cell">Share</th>`
               + `<th class="right payout-cell">Payout</th>`
               + `</tr></thead><tbody>`;
         for (const r of rows) {
@@ -12222,7 +12233,7 @@ body.wb-chain-active {
             html += `<td><a href="/profiles.php?XID=${escapeHtml(r.playerId)}" target="_blank" rel="noopener" style="color:#d1d5db;text-decoration:none;">${escapeHtml(r.name)}</a></td>`;
             html += `<td class="right">${r.attacks || '—'}</td>`;
             html += `<td class="right" style="font-weight:600;">${r.score}</td>`;
-            html += `<td class="right" style="color:#9ca3af;">${share.toFixed(1)}%</td>`;
+            html += `<td class="right share-cell" style="color:#9ca3af;">${share.toFixed(1)}%</td>`;
             html += `<td class="right payout-cell" style="color:#74c69d;font-weight:600;">${fmt$(r.payout)}</td>`;
             html += `</tr>`;
         }
