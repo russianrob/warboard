@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.58
+// @version      5.0.60
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.58';
+    const SCRIPT_VERSION = '5.0.60';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12254,7 +12254,12 @@ body.wb-chain-active {
             </div>`;
         }
 
-        let html = `<div class="wb-payouts-section-label">Drilldown — vs ${escapeHtml(war.enemyFactionName||'?')} · ${escapeHtml(war.warResult||'?')} · loot ${fmt$(war.lootTotal)} <span style="opacity:0.6;font-size:10px;">(${escapeHtml(sourceLabel)})</span> · total score ${war.totalScore}</div>`;
+        // v5.0.60: surface the 80/20 split so admins can see how much
+        // of the loot is being distributed vs retained by the faction.
+        const splitLine = (war.payoutPct != null && war.payoutPool != null && war.factionShare != null)
+            ? ` · payout pool ${fmt$(war.payoutPool)} (${Math.round(war.payoutPct * 100)}%) · faction keeps ${fmt$(war.factionShare)}`
+            : '';
+        let html = `<div class="wb-payouts-section-label">Drilldown — vs ${escapeHtml(war.enemyFactionName||'?')} · ${escapeHtml(war.warResult||'?')} · loot ${fmt$(war.lootTotal)} <span style="opacity:0.6;font-size:10px;">(${escapeHtml(sourceLabel)})</span>${splitLine} · total score ${war.totalScore}</div>`;
         html += lootDetail;
         html += `<div class="wb-payouts-drilldown"><table>`;
         // v5.0.45: simplified to 5 columns. Earlier 11-column layout

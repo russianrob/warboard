@@ -362,6 +362,18 @@ export async function computePayouts(warId, options = {}) {
     lootSource = detected.source;
   }
 
+  // v5.0.60: 80/20 split — 80% of loot is distributed to members
+  // (payoutPool), 20% stays with the faction. Per user policy:
+  // 'the payment ratio is 80% payouts and 20% faction keeps'.
+  // Configurable via options.payoutPct so a future faction settings
+  // UI can override per-faction (e.g., 70/30 or 100/0). Hard floor
+  // at 0, ceiling at 1.
+  const payoutPct = Number.isFinite(options.payoutPct)
+    ? Math.max(0, Math.min(1, Number(options.payoutPct)))
+    : 0.80;
+  const payoutPool = Math.round(lootTotal * payoutPct);
+  const factionShare = lootTotal - payoutPool;
+
   // ── Build merged member list ─────────────────────────────────────────
   // Primary key: playerId (from attacks). For each, fair_score is the
   // sum of (respect_gain / war / chain_bonus / warlord_bonus) over their
@@ -418,7 +430,7 @@ export async function computePayouts(warId, options = {}) {
       const primary = useFair ? m.fairScore : m.tornScore;
       const sharePct = totalScore > 0 ? (primary / totalScore) * 100 : 0;
       const dollarPayout = totalScore > 0
-        ? Math.round((primary / totalScore) * lootTotal)
+        ? Math.round((primary / totalScore) * payoutPool) // 80% pool, not full loot
         : 0;
       return {
         playerId: m.playerId,
@@ -458,6 +470,9 @@ export async function computePayouts(warId, options = {}) {
     lootBreakdown,
     lootSource,
     lootAutoDetected: options.lootTotal == null && lootTotal > 0,
+    payoutPct,    // e.g., 0.8 = 80% to members
+    payoutPool,   // dollars distributed to members
+    factionShare, // dollars retained by faction
     totalScore: Math.round(totalScore * 10) / 10,
     members,
     // Total attacks shown in heatmap header. Sum from our merged member
@@ -502,6 +517,9 @@ export async function computePayoutsHeatmap(factionId, options = {}) {
         // user explicitly asked for this estimate breakdown.
         lootBreakdown: r.lootBreakdown,
         lootSource: r.lootSource,
+        payoutPct: r.payoutPct,
+        payoutPool: r.payoutPool,
+        factionShare: r.factionShare,
         totalScore: r.totalScore,
         members: r.members,
       });
@@ -586,6 +604,9 @@ export async function computePayoutsHeatmap(factionId, options = {}) {
       lootTotal: w.lootTotal || 0,
       lootBreakdown: w.lootBreakdown || null,
       lootSource: w.lootSource || null,
+      payoutPct: w.payoutPct ?? 0.80,
+      payoutPool: w.payoutPool || 0,
+      factionShare: w.factionShare || 0,
       totalScore: w.totalScore || 0,
       error: w.error || null,
     })),
