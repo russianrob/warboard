@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.47
+// @version      5.0.48
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.47';
+    const SCRIPT_VERSION = '5.0.48';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1874,17 +1874,11 @@ body.wb-chain-active {
 }
 .wb-payouts-drilldown table {
     width: 100%; border-collapse: collapse; font-size: 11px;
-    /* v5.0.47: fixed layout + explicit colgroup widths so the Payout
-       column doesn't drift visually under the Share header. With
-       auto-layout the dollar amounts (e.g. \$151,800,000) forced
-       column widths to redistribute oddly. */
-    table-layout: fixed;
 }
-.wb-payouts-drilldown col.col-name { width: auto; }
-.wb-payouts-drilldown col.col-atk    { width: 64px; }
-.wb-payouts-drilldown col.col-score  { width: 70px; }
-.wb-payouts-drilldown col.col-share  { width: 56px; }
-.wb-payouts-drilldown col.col-payout { width: 110px; }
+/* v5.0.48: nudge the right-aligned Payout number a touch left of
+   the cell edge so it visually clears the Share column above. */
+.wb-payouts-drilldown td.payout-cell,
+.wb-payouts-drilldown th.payout-cell { padding-right: 16px; }
 .wb-payouts-drilldown th {
     text-align: left; padding: 4px 6px; font-size: 9.5px;
     color: #9ca3af; text-transform: uppercase; letter-spacing: 0.3px;
@@ -12209,7 +12203,7 @@ body.wb-chain-active {
               + `<th class="right">Attacks</th>`
               + `<th class="right" title="Fair score — respect ÷ war ÷ chain_bonus ÷ warlord_bonus. Drives payout shares.">Score</th>`
               + `<th class="right">Share</th>`
-              + `<th class="right">Payout</th>`
+              + `<th class="right payout-cell">Payout</th>`
               + `</tr></thead><tbody>`;
         for (const r of rows) {
             const share = totalScore > 0 ? (r.score / totalScore) * 100 : 0;
@@ -12229,7 +12223,7 @@ body.wb-chain-active {
             html += `<td class="right">${r.attacks || '—'}</td>`;
             html += `<td class="right" style="font-weight:600;">${r.score}</td>`;
             html += `<td class="right" style="color:#9ca3af;">${share.toFixed(1)}%</td>`;
-            html += `<td class="right" style="color:#74c69d;font-weight:600;">${fmt$(r.payout)}</td>`;
+            html += `<td class="right payout-cell" style="color:#74c69d;font-weight:600;">${fmt$(r.payout)}</td>`;
             html += `</tr>`;
         }
         html += `</tbody></table></div>`;
