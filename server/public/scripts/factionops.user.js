@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.40
+// @version      5.0.41
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.40';
+    const SCRIPT_VERSION = '5.0.41';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12070,7 +12070,8 @@ body.wb-chain-active {
         // Member rows
         for (const m of members) {
             html += `<div class="wb-payouts-heat-row" style="grid-template-columns:${cols};">`;
-            html += `<div class="wb-payouts-heat-namecol" title="${escapeHtml(m.name)} [${m.playerId}] — ${m.warsParticipated} wars · $${(m.totalPayout||0).toLocaleString()} total">${escapeHtml(m.name)}<span class="pid">[${m.playerId}]</span></div>`;
+            const totalAtk = m.totalAttacks || 0;
+            html += `<div class="wb-payouts-heat-namecol" title="${escapeHtml(m.name)} [${m.playerId}] — ${m.warsParticipated} war(s) · ${totalAtk} attack(s) · $${(m.totalPayout||0).toLocaleString()} total">${escapeHtml(m.name)}<span class="pid">[${m.playerId}]</span></div>`;
             for (const w of wars) {
                 const score = m.scoresByWar[w.warId];
                 const max = colMax[w.warId] || 1;
@@ -12083,7 +12084,8 @@ body.wb-chain-active {
                     const alpha = 0.18 + intensity * 0.72;
                     const sel = String(w.warId) === String(_payoutsModalState.selectedWarId) ? ' selected' : '';
                     const payout = m.payoutsByWar[w.warId] || 0;
-                    const tooltip = `${m.name} in ${w.enemyFactionName||'?'}: ${score} pts · $${payout.toLocaleString()}`;
+                    const atk = (m.attacksByWar && m.attacksByWar[w.warId]) || 0;
+                    const tooltip = `${m.name} in ${w.enemyFactionName||'?'}: ${score} pts · ${atk} atk · $${payout.toLocaleString()}`;
                     html += `<div class="wb-payouts-heat-cell${sel}" style="background:rgba(116,198,141,${alpha.toFixed(3)});" data-war="${escapeHtml(w.warId)}" data-uid="${escapeHtml(m.playerId)}" title="${escapeHtml(tooltip)}">${score >= 1 ? Math.round(score) : score.toFixed(1)}</div>`;
                 }
             }
@@ -12122,26 +12124,61 @@ body.wb-chain-active {
             drill.innerHTML = `<div class="wb-payouts-drilldown" style="color:#ef4444;">War ${escapeHtml(warId)} failed to load: ${escapeHtml(war.error)}</div>`;
             return;
         }
-        // Pull this war's members from the matrix (each member has scoresByWar[warId])
+        // Pull this war's members from the matrix. v5.0.41: now also
+        // includes per-war attack count + breakdown so the table can
+        // surface 'how did I earn this score' columns (Atk, Asst, War,
+        // Retal). Without these the drilldown only showed score+payout
+        // and there was no way to see attack counts at all.
         const rows = data.members
             .filter(m => m.scoresByWar[warId] != null && m.scoresByWar[warId] > 0)
-            .map(m => ({
-                playerId: m.playerId,
-                name: m.name,
-                score: m.scoresByWar[warId],
-                payout: m.payoutsByWar[warId] || 0,
-            }))
+            .map(m => {
+                const bd = (m.breakdownByWar && m.breakdownByWar[warId]) || {};
+                return {
+                    playerId: m.playerId,
+                    name: m.name,
+                    score: m.scoresByWar[warId],
+                    payout: m.payoutsByWar[warId] || 0,
+                    attacks: (m.attacksByWar && m.attacksByWar[warId]) || 0,
+                    bd_war: bd.war_hit || 0,
+                    bd_retal: bd.retal || 0,
+                    bd_overseas: (bd.overseas_war || 0) + (bd.os_chain || 0),
+                    bd_chain: bd.chain_hit || 0,
+                    bd_assist: bd.assist || 0,
+                };
+            })
             .sort((a, b) => b.score - a.score);
         const totalScore = rows.reduce((s, m) => s + m.score, 0);
         const fmt$ = n => '$' + (n || 0).toLocaleString();
+        // Compact category-breakdown tooltip helper.
+        const bdTooltip = r => {
+            const parts = [];
+            if (r.bd_war) parts.push(`War: ${r.bd_war}`);
+            if (r.bd_retal) parts.push(`Retal: ${r.bd_retal}`);
+            if (r.bd_overseas) parts.push(`Overseas: ${r.bd_overseas}`);
+            if (r.bd_chain) parts.push(`Chain: ${r.bd_chain}`);
+            if (r.bd_assist) parts.push(`Assist: ${r.bd_assist}`);
+            return parts.join(' · ') || 'no breakdown data';
+        };
 
         let html = `<div class="wb-payouts-section-label">Drilldown — vs ${escapeHtml(war.enemyFactionName||'?')} · ${escapeHtml(war.warResult||'?')} · loot ${fmt$(war.lootTotal)} · total score ${war.totalScore}</div>`;
         html += `<div class="wb-payouts-drilldown"><table>`;
-        html += `<thead><tr><th>Member</th><th class="right">Score</th><th class="right">Share %</th><th class="right">Payout</th><th class="right"></th></tr></thead><tbody>`;
+        html += `<thead><tr><th>Member</th>`
+              + `<th class="right" title="Total ranked-war attacks">Atk</th>`
+              + `<th class="right" title="War hits (count)">War</th>`
+              + `<th class="right" title="Retals (count)">Retal</th>`
+              + `<th class="right" title="Assists (count)">Asst</th>`
+              + `<th class="right" title="Overseas attacks (count)">OS</th>`
+              + `<th class="right" title="Score (Torn-authoritative respect for this war)">Score</th>`
+              + `<th class="right">Share %</th><th class="right">Payout</th><th class="right"></th></tr></thead><tbody>`;
         for (const r of rows) {
             const share = totalScore > 0 ? (r.score / totalScore) * 100 : 0;
             html += `<tr>`;
             html += `<td><a href="/profiles.php?XID=${escapeHtml(r.playerId)}" target="_blank" rel="noopener" style="color:#d1d5db;text-decoration:none;">${escapeHtml(r.name)}</a> <span style="color:#6b7280;font-size:9px;">[${r.playerId}]</span></td>`;
+            html += `<td class="right" title="${escapeHtml(bdTooltip(r))}">${r.attacks || '—'}</td>`;
+            html += `<td class="right" style="color:#9ca3af;">${r.bd_war || '—'}</td>`;
+            html += `<td class="right" style="color:#9ca3af;">${r.bd_retal || '—'}</td>`;
+            html += `<td class="right" style="color:#9ca3af;">${r.bd_assist || '—'}</td>`;
+            html += `<td class="right" style="color:#9ca3af;">${r.bd_overseas || '—'}</td>`;
             html += `<td class="right">${r.score}</td>`;
             html += `<td class="right" style="color:#9ca3af;">${share.toFixed(1)}%</td>`;
             html += `<td class="right" style="color:#74c69d;font-weight:600;">${fmt$(r.payout)}</td>`;

@@ -376,17 +376,35 @@ export async function computePayoutsHeatmap(factionId, options = {}) {
           name: m.name,
           scoresByWar: {},
           payoutsByWar: {},
+          // Per-war attack count + breakdown so the drilldown can show
+          // 'Atk / Asst / War / Retal' columns instead of just a score.
+          // Without these the UI had no way to surface 'how did I earn
+          // this score' — user only saw aggregate dollar payouts.
+          attacksByWar: {},
+          breakdownByWar: {},
           totalScore: 0,
           totalPayout: 0,
+          totalAttacks: 0,
+          totalBreakdown: {}, // war_hit / retal / overseas_war / chain_hit / os_chain / assist counts
           warsParticipated: 0,
         };
       }
       memberMap[m.playerId].name = m.name;
       memberMap[m.playerId].scoresByWar[w.warId] = m.score;
       memberMap[m.playerId].payoutsByWar[w.warId] = m.dollarPayout;
+      memberMap[m.playerId].attacksByWar[w.warId] = m.attackCount || 0;
+      memberMap[m.playerId].breakdownByWar[w.warId] = m.breakdown || {};
       memberMap[m.playerId].totalScore += m.score;
       memberMap[m.playerId].totalPayout += m.dollarPayout;
+      memberMap[m.playerId].totalAttacks += m.attackCount || 0;
       memberMap[m.playerId].warsParticipated++;
+      // Roll up per-category breakdown across wars
+      if (m.breakdown) {
+        for (const [cat, n] of Object.entries(m.breakdown)) {
+          memberMap[m.playerId].totalBreakdown[cat] =
+            (memberMap[m.playerId].totalBreakdown[cat] || 0) + n;
+        }
+      }
     }
   }
   const members = Object.values(memberMap)
