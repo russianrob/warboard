@@ -310,17 +310,29 @@ export async function fetchFactionAttacks(factionId, apiKey, fromTs, toTs, optio
 
   for (let page = 0; page < MAX_PAGES; page++) {
     const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=attacks&from=${currentFrom}&to=${toTs}&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      const e = new Error(`Torn HTTP ${res.status}`);
-      e.httpStatus = res.status;
-      throw e;
-    }
-    const data = await res.json();
-    if (data.error) {
-      // Surface Torn errors to the caller (esp. code 7 for "key owner
-      // is no longer in this faction" — caller can quarantine + retry
-      // with a different pool key instead of silently returning []).
+    // v5.0.67: retry-with-backoff on transient code 5 (rate limit) so
+    // a busy moment in the shared key pool doesn't kill an in-progress
+    // multi-page fetch. Only retry code 5 — code 7 (key invalid) is
+    // permanent for this key and should propagate so the caller can
+    // quarantine + try another key.
+    let data;
+    let attempt = 0;
+    const MAX_ATTEMPTS = 4;
+    while (true) {
+      const res = await fetch(url);
+      if (!res.ok) {
+        const e = new Error(`Torn HTTP ${res.status}`);
+        e.httpStatus = res.status;
+        throw e;
+      }
+      data = await res.json();
+      if (!data.error) break; // success
+      if (data.error.code === 5 && attempt < MAX_ATTEMPTS - 1) {
+        attempt++;
+        const backoffMs = 5000 * attempt; // 5s, 10s, 15s
+        await new Promise(r => setTimeout(r, backoffMs));
+        continue;
+      }
       const e = new Error(`Torn API: ${data.error.error} (code ${data.error.code})`);
       e.code = data.error.code;
       throw e;
