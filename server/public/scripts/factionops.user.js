@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.55
+// @version      5.0.56
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.55';
+    const SCRIPT_VERSION = '5.0.56';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12271,7 +12271,34 @@ body.wb-chain-active {
               + `<th class="right" title="Fair score — respect ÷ war ÷ chain_bonus ÷ warlord_bonus. Drives payout shares.">Score</th>`
               + `<th class="right">Attacks</th>`
               + `</tr></thead><tbody>`;
-        for (const r of rows) {
+        // v5.0.56: pre-format every row's numeric values, then compute
+        // the max width per column so we can left-pad shorter values
+        // with non-breaking spaces. With monospace font + uniform
+        // string length, every cell's content has identical width and
+        // every column lines up perfectly across rows. Without this
+        // padding the user saw e.g. '$67,089' shifting columns vs
+        // '$151,849,807' in the same column.
+        const formatted = rows.map(r => {
+            const share = totalScore > 0 ? (r.score / totalScore) * 100 : 0;
+            return {
+                payout: fmt$(r.payout),
+                share: share.toFixed(1) + '%',
+                score: (Number(r.score) || 0).toFixed(2),
+                attacks: String(r.attacks || ''),
+            };
+        });
+        const padTo = {
+            payout: Math.max(...formatted.map(f => f.payout.length), 1),
+            share: Math.max(...formatted.map(f => f.share.length), 1),
+            score: Math.max(...formatted.map(f => f.score.length), 1),
+            attacks: Math.max(...formatted.map(f => f.attacks.length), 1),
+        };
+        const NBSP = ' ';
+        const lpad = (s, n) => NBSP.repeat(Math.max(0, n - s.length)) + s;
+
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            const f = formatted[i];
             const share = totalScore > 0 ? (r.score / totalScore) * 100 : 0;
             // Rich row tooltip with everything-you-might-want-to-know
             const detailParts = [];
@@ -12296,10 +12323,10 @@ body.wb-chain-active {
             });
             html += `<tr title="${escapeHtml(rowTip)}">`;
             html += `<td><a href="/profiles.php?XID=${escapeHtml(r.playerId)}" target="_blank" rel="noopener" style="color:#d1d5db;text-decoration:none;">${escapeHtml(r.name)}</a></td>`;
-            html += `<td class="right" style="color:#74c69d;font-weight:600;">${fmt$(r.payout)}</td>`;
-            html += `<td class="right" style="color:#9ca3af;">${share.toFixed(1)}%</td>`;
-            html += `<td class="right col-score">${(Number(r.score) || 0).toFixed(2)}</td>`;
-            html += `<td class="right col-attacks" data-breakdown='${escapeHtml(bdJson)}' title="Tap for attack breakdown">${r.attacks || '—'}</td>`;
+            html += `<td class="right" style="color:#74c69d;font-weight:600;">${lpad(f.payout, padTo.payout)}</td>`;
+            html += `<td class="right" style="color:#9ca3af;">${lpad(f.share, padTo.share)}</td>`;
+            html += `<td class="right col-score">${lpad(f.score, padTo.score)}</td>`;
+            html += `<td class="right col-attacks" data-breakdown='${escapeHtml(bdJson)}' title="Tap for attack breakdown">${lpad(f.attacks || '—', padTo.attacks)}</td>`;
             html += `</tr>`;
         }
         html += `</tbody></table></div>`;
