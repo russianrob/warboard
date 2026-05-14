@@ -302,7 +302,11 @@ export async function fetchFactionAttacks(factionId, apiKey, fromTs, toTs, optio
   const rankedWarOnly = options.rankedWarOnly !== false;
   const allAttacks = [];
   let currentFrom = fromTs;
-  const MAX_PAGES = 30; // safety limit
+  // v5.0.62: bumped from 30 → 200. Torn returns ≤100 attacks per
+  // page; busy ranked wars (e.g. Ringside 41296 had ~3700+ ranked
+  // attacks across 90 members) blew past the prior 3000-attack
+  // ceiling and Payouts under-counted by 40-60%.
+  const MAX_PAGES = 200;
 
   for (let page = 0; page < MAX_PAGES; page++) {
     const url = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=attacks&from=${currentFrom}&to=${toTs}&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
@@ -337,6 +341,10 @@ export async function fetchFactionAttacks(factionId, apiKey, fromTs, toTs, optio
     const maxTs = Math.max(...attacks.map(a => a.timestamp_ended || a.timestamp_started || 0));
     if (maxTs <= currentFrom) break; // no progress
     currentFrom = maxTs + 1;
+
+    // v5.0.62: pace at ≤100 calls/minute (Torn rate limit per key) so
+    // long busy wars (200+ pages) don't trip code 5. 700ms = ~85 RPM.
+    await new Promise(resolve => setTimeout(resolve, 700));
   }
 
   return allAttacks;
