@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.41
+// @version      5.0.42
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.41';
+    const SCRIPT_VERSION = '5.0.42';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12160,7 +12160,30 @@ body.wb-chain-active {
             return parts.join(' · ') || 'no breakdown data';
         };
 
-        let html = `<div class="wb-payouts-section-label">Drilldown — vs ${escapeHtml(war.enemyFactionName||'?')} · ${escapeHtml(war.warResult||'?')} · loot ${fmt$(war.lootTotal)} · total score ${war.totalScore}</div>`;
+        // v5.0.42: surface the cache-by-cache loot breakdown so admins
+        // can verify the auto-detected total instead of guessing where
+        // it came from. Source label tells them "this is from item
+        // market values" vs "this is a respect/points fallback".
+        const sourceLabel = war.lootSource === 'caches+cash' ? 'cache market values'
+            : war.lootSource === 'cash' ? 'cash reward'
+            : war.lootSource === 'points' ? 'points × $5K'
+            : war.lootSource === 'override' ? 'admin override'
+            : 'auto';
+        let lootDetail = '';
+        if (war.lootBreakdown && Array.isArray(war.lootBreakdown.items) && war.lootBreakdown.items.length > 0) {
+            const lines = war.lootBreakdown.items
+                .filter(it => it.lineTotal > 0)
+                .map(it => `${escapeHtml(it.name)} ×${it.quantity} = ${fmt$(it.lineTotal)}`);
+            if (war.lootBreakdown.cash > 0) lines.unshift(`Cash: ${fmt$(war.lootBreakdown.cash)}`);
+            lootDetail = `<div style="margin-top:6px;padding:8px 10px;background:rgba(116,198,141,0.07);border:1px solid rgba(116,198,141,0.18);border-radius:4px;font-size:11px;line-height:1.6;color:#9ca3af;">
+                <div style="color:#74c69d;font-weight:600;margin-bottom:4px;">Loot estimate (${escapeHtml(sourceLabel)})</div>
+                ${lines.join('<br>')}
+                <div style="margin-top:4px;font-size:10px;opacity:0.7;">Market prices — actual realized loot may vary if you sell below market or add treasury cash.</div>
+            </div>`;
+        }
+
+        let html = `<div class="wb-payouts-section-label">Drilldown — vs ${escapeHtml(war.enemyFactionName||'?')} · ${escapeHtml(war.warResult||'?')} · loot ${fmt$(war.lootTotal)} <span style="opacity:0.6;font-size:10px;">(${escapeHtml(sourceLabel)})</span> · total score ${war.totalScore}</div>`;
+        html += lootDetail;
         html += `<div class="wb-payouts-drilldown"><table>`;
         html += `<thead><tr><th>Member</th>`
               + `<th class="right" title="Total ranked-war attacks">Atk</th>`

@@ -411,6 +411,11 @@ export async function computePayoutsHeatmap(factionId, options = {}) {
         warResult: w.warResult,
         warEndedAt: w.warEndedAt,
         lootTotal: r.lootTotal,
+        // Pass-through so the drilldown UI can show 'how was the
+        // loot total computed' (Armor Cache x1 = $324M, etc.) —
+        // user explicitly asked for this estimate breakdown.
+        lootBreakdown: r.lootBreakdown,
+        lootSource: r.lootSource,
         totalScore: r.totalScore,
         members: r.members,
       });
@@ -484,6 +489,8 @@ export async function computePayoutsHeatmap(factionId, options = {}) {
       warResult: w.warResult,
       warEndedAt: w.warEndedAt,
       lootTotal: w.lootTotal || 0,
+      lootBreakdown: w.lootBreakdown || null,
+      lootSource: w.lootSource || null,
       totalScore: w.totalScore || 0,
       error: w.error || null,
     })),
