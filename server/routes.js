@@ -3962,6 +3962,93 @@ function scheduleFlyerDelaysSave() {
 }
 // Defer load until OC_HISTORY_DIR (declared further down) has initialised.
 setImmediate(loadFlyerDelays);
+
+// v3.2.11: Live per-slot Success Chance (%) scraped from the OC page DOM
+// by oc-spawn-assistance.user.js mgr_scrapeSlotSuccessChance(). Used by
+// the failure-risk engine to bypass CPR-history estimation in favor of
+// Torn's own rendered probability — same source the coaching tab uses on
+// completed crimes. Per-faction nested map; entries TTL 30 min so stale
+// data doesn't poison failure risk if no one's been on the OC page lately.
+// Shape: Map<factionId, Map<crimeId, Map<"uid::position-lower", { successPct, observedAt }>>>
+const _liveSuccess = new Map();
+const LIVE_SUCCESS_TTL_MS = 30 * 60 * 1000;
+function liveSuccessFile() { return pathJoin(OC_HISTORY_DIR, '..', 'oc-live-success.json'); }
+function loadLiveSuccess() {
+  try {
+    const file = liveSuccessFile();
+    if (!existsSync(file)) return;
+    const data = JSON.parse(readFileSync(file, 'utf-8'));
+    const cutoff = Date.now() - LIVE_SUCCESS_TTL_MS;
+    let total = 0;
+    for (const [fid, byCrime] of Object.entries(data)) {
+      const fMap = new Map();
+      for (const [cid, slots] of Object.entries(byCrime)) {
+        const sMap = new Map();
+        for (const [k, v] of Object.entries(slots)) {
+          if (v && v.observedAt >= cutoff) { sMap.set(k, v); total++; }
+        }
+        if (sMap.size) fMap.set(cid, sMap);
+      }
+      if (fMap.size) _liveSuccess.set(fid, fMap);
+    }
+    console.log(`[oc-live-success] Loaded ${total} fresh slot observation(s) from disk`);
+  } catch (e) {
+    console.error('[oc-live-success] Load error:', e.message);
+  }
+}
+let _liveSuccessSaveTimer = null;
+function scheduleLiveSuccessSave() {
+  if (_liveSuccessSaveTimer) return;
+  _liveSuccessSaveTimer = setTimeout(() => {
+    _liveSuccessSaveTimer = null;
+    try {
+      const obj = {};
+      for (const [fid, byCrime] of _liveSuccess) {
+        const f = {};
+        for (const [cid, slots] of byCrime) {
+          const s = {};
+          for (const [k, v] of slots) s[k] = v;
+          if (Object.keys(s).length) f[cid] = s;
+        }
+        if (Object.keys(f).length) obj[fid] = f;
+      }
+      writeFileSync(liveSuccessFile(), JSON.stringify(obj));
+    } catch (e) {
+      console.error('[oc-live-success] Save error:', e.message);
+    }
+  }, 30_000);
+}
+function recordLiveSuccess(fid, crimeId, slots) {
+  const f = String(fid), c = String(crimeId);
+  if (!_liveSuccess.has(f)) _liveSuccess.set(f, new Map());
+  const fMap = _liveSuccess.get(f);
+  if (!fMap.has(c)) fMap.set(c, new Map());
+  const sMap = fMap.get(c);
+  const now = Date.now();
+  let added = 0;
+  for (const slot of (slots || [])) {
+    const uid = String(slot.uid || slot.userID || '');
+    const pos = String(slot.position || '').toLowerCase();
+    const pct = Number(slot.successPct);
+    if (!uid || !pos || !Number.isFinite(pct)) continue;
+    sMap.set(`${uid}::${pos}`, { successPct: pct, observedAt: now });
+    added++;
+  }
+  if (added) scheduleLiveSuccessSave();
+  return added;
+}
+function getLiveSuccess(fid, crimeId, uid, position) {
+  const f = _liveSuccess.get(String(fid));
+  if (!f) return null;
+  const c = f.get(String(crimeId));
+  if (!c) return null;
+  const entry = c.get(`${String(uid)}::${String(position).toLowerCase()}`);
+  if (!entry) return null;
+  if (Date.now() - entry.observedAt > LIVE_SUCCESS_TTL_MS) return null;
+  return entry;
+}
+setImmediate(loadLiveSuccess);
+
 function engineSettingsHash(s) {
   return `${!!s.engine_slot_optimizer}|${!!s.engine_failure_risk}|${!!s.engine_cpr_forecaster}|${!!s.engine_member_projector}|${!!s.engine_member_reliability}|${!!s.engine_auto_dispatcher}`;
 }
@@ -4740,6 +4827,15 @@ function runFailureRisk(factionId, data) {
       const rawOverall = cpr?.cpr;
       const hasCprData = (rawPosCpr ?? 0) > 0 || (rawOverall ?? 0) > 0;
       const posCpr = rawPosCpr || rawOverall || 0;
+
+      // v3.2.11: prefer Torn's own per-slot Success Chance % when we
+      // have a fresh DOM-scrape from oc-spawn-assistance. This is the
+      // SAME number Torn shows on the OC page — way more accurate than
+      // our CPR + history estimate because Torn knows the actual
+      // formula (item bonuses, position quirks, defender-wide odds).
+      // Position lookup uses the bare position label lowercased (e.g.
+      // 'thief'), matching what the client scrape stores.
+      const liveSuc = getLiveSuccess(factionId, crime.id, uid, posBase);
       // Look up weight from weights object using position label
       const posLabel = s.position_info?.label || s.position || '';
       const posBase = posLabel.replace(/\s*#\d+$/, ''); // strip "#1" etc
@@ -4765,8 +4861,16 @@ function runFailureRisk(factionId, data) {
       // it, else the bare 50%). Members at or above 60% CPR are
       // near-certain success; only below 60% is real risk.
       let effectiveSuccessProb;
-      if (!hasCprData) {
+      let successSource = 'cpr';
+      if (liveSuc) {
+        // v3.2.11: Torn-rendered live success — use directly, skip
+        // CPR/history blending entirely. This is the authoritative
+        // number for the CURRENT slot assignment.
+        effectiveSuccessProb = Math.max(0, Math.min(1, liveSuc.successPct / 100));
+        successSource = 'live';
+      } else if (!hasCprData) {
         effectiveSuccessProb = histSuccessRate !== null ? histSuccessRate : 0.5;
+        successSource = histSuccessRate !== null ? 'history' : 'neutral';
       } else {
         effectiveSuccessProb = posCpr >= 60 ? 0.98 : posCpr / 100;
         if (histSuccessRate !== null) {
@@ -4788,6 +4892,10 @@ function runFailureRisk(factionId, data) {
         // True when there's no CPR cache for this member at all — UI can
         // render a "new member" badge instead of pretending the CPR is 0.
         isNewMember: !hasCprData,
+        // v3.2.11: surface where the success probability came from so the
+        // UI can show 'live' vs 'estimated' badges.
+        successSource,
+        liveAge: liveSuc ? Math.round((Date.now() - liveSuc.observedAt) / 1000) : null,
       });
     }
 
@@ -7810,6 +7918,22 @@ router.post("/api/war/:warId/payout-settings", express.json({ limit: '4kb' }), a
   store.setPayoutSettings(req.params.warId, settings);
   warPayouts.invalidateCache(req.params.warId);
   return res.json({ ok: true, settings });
+});
+
+// v3.2.11: receive per-slot Torn Success Chance % from oc-spawn-assistance
+// clients viewing the OC page. Used by the failure-risk engine instead
+// of CPR + history estimation. Throttled by client (one POST per ~30s
+// per visit) and entries TTL 30 min server-side.
+router.post("/api/oc/live-success", express.json({ limit: '32kb' }), async (req, res) => {
+  const ctx = await resolveVaultCaller(req, res);
+  if (!ctx) return;
+  const { info } = ctx;
+  const body = req.body || {};
+  const crimeId = body.crimeId;
+  const slots = Array.isArray(body.slots) ? body.slots : null;
+  if (!crimeId || !slots) return res.status(400).json({ error: "crimeId + slots required" });
+  const added = recordLiveSuccess(info.factionId, crimeId, slots);
+  return res.json({ ok: true, recorded: added });
 });
 
 router.post("/api/oc/missing-override", express.json({ limit: '4kb' }), async (req, res) => {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.10
+// @version      3.2.11
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.10';
+    const SCRIPT_VERSION = '3.2.11';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1766,30 +1766,99 @@
                 const scMatch = scText.match(/(-?\d+(?:\.\d+)?)/);
                 const successPct = scMatch ? parseFloat(scMatch[1]) : 0;
                 // Player ID — walk up from header to the slot wrapper
-                // (any ancestor with an XID profile link). React's CSS-
-                // module naming hashes the slot wrapper's class too, so
-                // we can't target it directly — walking up to find a
-                // descendant XID link is more robust.
+                // and ALSO try to find the enclosing crime ID. React
+                // hashes class names so we can't target the crime card
+                // directly; walk up looking for an href / hash that
+                // contains crimeId=<n>.
                 let wrapper = header.parentElement;
                 let userID = null;
+                let crimeId = null;
                 let walked = 0;
-                while (wrapper && walked < 6 && !userID) {
-                    const link = wrapper.querySelector('a[href*="XID="]');
-                    if (link) {
-                        const m = link.getAttribute('href').match(/XID=(\d+)/);
-                        if (m) userID = m[1];
+                while (wrapper && walked < 12 && !(userID && crimeId)) {
+                    if (!userID) {
+                        const link = wrapper.querySelector('a[href*="XID="]');
+                        if (link) {
+                            const m = link.getAttribute('href').match(/XID=(\d+)/);
+                            if (m) userID = m[1];
+                        }
                     }
-                    if (!userID) wrapper = wrapper.parentElement;
+                    if (!crimeId) {
+                        // Crime ID can appear in: hash anchors, data
+                        // attributes, or our own dispatcher banner data.
+                        const cidLink = wrapper.querySelector('a[href*="crimeId="]');
+                        if (cidLink) {
+                            const m = cidLink.getAttribute('href').match(/crimeId=(\d+)/);
+                            if (m) crimeId = m[1];
+                        }
+                        if (!crimeId && wrapper.dataset?.crimeId) crimeId = wrapper.dataset.crimeId;
+                    }
+                    wrapper = wrapper.parentElement;
                     walked++;
                 }
+                // v3.2.11: fallback — when only one crime card is
+                // expanded, the URL hash holds crimeId. Use it for any
+                // slot we couldn't tag via DOM-walk.
+                if (!crimeId) {
+                    const hashMatch = window.location.hash.match(/crimeId=(\d+)/);
+                    if (hashMatch) crimeId = hashMatch[1];
+                }
                 if (userID && position) {
-                    out.set(`${userID}:${position}`, { successPct, headerEl: header });
+                    out.set(`${userID}:${position}`, { successPct, headerEl: header, crimeId });
                 }
             }
         } catch (e) {
             console.warn('[OC Mgr] slot scrape error:', e?.message);
         }
         return out;
+    }
+
+    // v3.2.11: scrape the per-slot Success Chance % from the OC page
+    // DOM and POST to the server so the failure-risk engine can use
+    // Torn's authoritative number instead of CPR/history estimation.
+    // Throttled to once per 30s; only POSTs slots tagged with a crime
+    // ID. Server entries TTL 30 min.
+    let _liveSuccessLastPost = 0;
+    function pushLiveSuccessChances() {
+        if (Date.now() - _liveSuccessLastPost < 30_000) return;
+        const scraped = mgr_scrapeSlotSuccessChance();
+        if (!scraped.size) return;
+        const apiKey = getApiKey();
+        if (!apiKey) return;
+        // Group by crime ID — server endpoint expects one crime per POST.
+        const byCrime = new Map();
+        for (const [key, val] of scraped) {
+            if (!val.crimeId || !Number.isFinite(val.successPct)) continue;
+            const [userID, position] = key.split(':');
+            const list = byCrime.get(val.crimeId) || [];
+            list.push({ uid: userID, position, successPct: val.successPct });
+            byCrime.set(val.crimeId, list);
+        }
+        if (!byCrime.size) return;
+        _liveSuccessLastPost = Date.now();
+        const post = (crimeId, slots) => {
+            const url = `${CONFIG.SERVER_URL}/api/oc/live-success?key=${encodeURIComponent(apiKey)}`;
+            const body = JSON.stringify({ crimeId, slots });
+            try {
+                if (typeof GM_xmlhttpRequest === 'function') {
+                    GM_xmlhttpRequest({
+                        method: 'POST', url, data: body,
+                        headers: { 'Content-Type': 'application/json' },
+                        onload: () => {}, onerror: () => {}, timeout: 8000,
+                    });
+                } else {
+                    fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }).catch(() => {});
+                }
+            } catch (_) {}
+        };
+        for (const [crimeId, slots] of byCrime) post(crimeId, slots);
+    }
+    function startLiveSuccessPoller() {
+        if (window.__ocLiveSuccessPoller) return;
+        window.__ocLiveSuccessPoller = setInterval(() => {
+            try { pushLiveSuccessChances(); } catch (_) {}
+        }, 30_000);
+        // Initial run after DOM has had a moment to settle.
+        setTimeout(() => { try { pushLiveSuccessChances(); } catch (_) {} }, 5_000);
     }
 
     function mgr_scrapeBoundItems() {
@@ -6708,6 +6777,9 @@
             startRefreshCooldown();
             setTimeout(runAnalysis, 500);
         }
+        // v3.2.11: feed Torn's per-slot Success Chance to the server so
+        // the failure-risk engine can use it instead of CPR estimation.
+        startLiveSuccessPoller();
     }
 
     // Hide/show dispatcher banner on tab navigation
