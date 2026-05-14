@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.43
+// @version      5.0.44
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.43';
+    const SCRIPT_VERSION = '5.0.44';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12137,6 +12137,8 @@ body.wb-chain-active {
                     playerId: m.playerId,
                     name: m.name,
                     score: m.scoresByWar[warId],
+                    tornScore: (m.tornScoresByWar && m.tornScoresByWar[warId]) || 0,
+                    avgFf: (m.avgFfByWar && m.avgFfByWar[warId]) || 0,
                     payout: m.payoutsByWar[warId] || 0,
                     attacks: (m.attacksByWar && m.attacksByWar[warId]) || 0,
                     bd_war: bd.war_hit || 0,
@@ -12187,22 +12189,26 @@ body.wb-chain-active {
         html += `<div class="wb-payouts-drilldown"><table>`;
         html += `<thead><tr><th>Member</th>`
               + `<th class="right" title="Total ranked-war attacks">Atk</th>`
+              + `<th class="right" title="Average fair-fight multiplier across all attacks">FF</th>`
               + `<th class="right" title="War hits (count)">War</th>`
               + `<th class="right" title="Retals (count)">Retal</th>`
               + `<th class="right" title="Assists (count)">Asst</th>`
               + `<th class="right" title="Overseas attacks (count)">OS</th>`
-              + `<th class="right" title="Score (Torn-authoritative respect for this war)">Score</th>`
+              + `<th class="right" title="Fair score = respect ÷ war ÷ chain_bonus ÷ warlord_bonus, then × FF and other effort modifiers. Used for payout shares.">Fair</th>`
+              + `<th class="right" title="Torn's official ranked-war score (includes chain/war/warlord bonuses) — for comparison only">Torn</th>`
               + `<th class="right">Share %</th><th class="right">Payout</th></tr></thead><tbody>`;
         for (const r of rows) {
             const share = totalScore > 0 ? (r.score / totalScore) * 100 : 0;
             html += `<tr>`;
             html += `<td><a href="/profiles.php?XID=${escapeHtml(r.playerId)}" target="_blank" rel="noopener" style="color:#d1d5db;text-decoration:none;">${escapeHtml(r.name)}</a> <span style="color:#6b7280;font-size:9px;">[${r.playerId}]</span></td>`;
             html += `<td class="right" title="${escapeHtml(bdTooltip(r))}">${r.attacks || '—'}</td>`;
+            html += `<td class="right" style="color:#9ca3af;">${r.avgFf ? r.avgFf.toFixed(2) : '—'}</td>`;
             html += `<td class="right" style="color:#9ca3af;">${r.bd_war || '—'}</td>`;
             html += `<td class="right" style="color:#9ca3af;">${r.bd_retal || '—'}</td>`;
             html += `<td class="right" style="color:#9ca3af;">${r.bd_assist || '—'}</td>`;
             html += `<td class="right" style="color:#9ca3af;">${r.bd_overseas || '—'}</td>`;
-            html += `<td class="right">${r.score}</td>`;
+            html += `<td class="right" style="font-weight:600;">${r.score}</td>`;
+            html += `<td class="right" style="color:#6b7280;">${r.tornScore || '—'}</td>`;
             html += `<td class="right" style="color:#9ca3af;">${share.toFixed(1)}%</td>`;
             html += `<td class="right" style="color:#74c69d;font-weight:600;">${fmt$(r.payout)}</td>`;
             html += `</tr>`;
