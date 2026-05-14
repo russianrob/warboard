@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.51
+// @version      5.0.52
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.51';
+    const SCRIPT_VERSION = '5.0.52';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1888,9 +1888,38 @@ body.wb-chain-active {
 }
 .wb-payouts-drilldown td,
 .wb-payouts-drilldown th { white-space: nowrap; }
-/* Generous separation between the right-side numeric columns. */
-.wb-payouts-drilldown td.right + td.right,
-.wb-payouts-drilldown th.right + th.right { padding-left: 18px; }
+/* v5.0.52: separation between EVERY numeric column. The previous
+   adjacent-sibling rule (right + right) missed the last gap. A
+   brute-force per-cell padding handles every column uniformly. */
+.wb-payouts-drilldown td.right,
+.wb-payouts-drilldown th.right { padding-left: 22px; padding-right: 6px; }
+/* Score column gets a brighter color — was hard to read in dark mode. */
+.wb-payouts-drilldown td.col-score { color: #d1d5db; font-weight: 600; }
+.wb-payouts-drilldown td.col-attacks {
+    color: #74c69d; font-weight: 600; cursor: pointer;
+    text-decoration: underline dotted rgba(116,198,141,0.5);
+    text-underline-offset: 3px;
+}
+.wb-payouts-drilldown td.col-attacks:hover { color: #a3e0c1; }
+/* Click-popover for the attacks breakdown (works on touch where
+   native title tooltip doesn't). */
+.wb-attack-popover {
+    position: fixed; z-index: 1000001;
+    background: #0f1a14; border: 1px solid #2d4a3e;
+    border-radius: 6px; padding: 10px 14px; font-size: 11px;
+    color: #d1d5db; box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    min-width: 180px;
+}
+.wb-attack-popover .pop-title {
+    color: #74c69d; font-weight: 600; margin-bottom: 6px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.wb-attack-popover .pop-row {
+    display: flex; justify-content: space-between; gap: 12px;
+    padding: 2px 0;
+}
+.wb-attack-popover .pop-row .pop-cat { color: #9ca3af; }
+.wb-attack-popover .pop-row .pop-val { color: #d1d5db; font-weight: 600; }
 .wb-payouts-drilldown th {
     text-align: left; padding: 4px 6px; font-size: 9.5px;
     color: #9ca3af; text-transform: uppercase; letter-spacing: 0.3px;
@@ -12210,12 +12239,15 @@ body.wb-chain-active {
         // meant. The breakdown (war/retal/assist/OS counts), FF, and
         // Torn-score comparison still live in the row tooltip for any
         // admin who wants the detail.
+        // v5.0.52: reordered so Payout is leftmost numeric column
+        // (it's what admins actually act on). Attacks is last and is
+        // a click-popover trigger showing the per-category breakdown.
         html += `<thead><tr>`
               + `<th>Member</th>`
-              + `<th class="right">Attacks</th>`
-              + `<th class="right" title="Fair score — respect ÷ war ÷ chain_bonus ÷ warlord_bonus. Drives payout shares.">Score</th>`
-              + `<th class="right">Share</th>`
               + `<th class="right">Payout</th>`
+              + `<th class="right">Share</th>`
+              + `<th class="right" title="Fair score — respect ÷ war ÷ chain_bonus ÷ warlord_bonus. Drives payout shares.">Score</th>`
+              + `<th class="right">Attacks</th>`
               + `</tr></thead><tbody>`;
         for (const r of rows) {
             const share = totalScore > 0 ? (r.score / totalScore) * 100 : 0;
@@ -12229,17 +12261,84 @@ body.wb-chain-active {
             if (r.bd_assist) bdParts.push(`Asst ${r.bd_assist}`);
             if (r.bd_overseas) bdParts.push(`OS ${r.bd_overseas}`);
             if (bdParts.length) detailParts.push(`Breakdown: ${bdParts.join(' · ')}`);
+            // Per-row tooltip (kept for desktop hover) — but the real
+            // breakdown is in the click-popover wired below.
             const rowTip = `${r.name} [${r.playerId}]\n${detailParts.join('\n')}`;
+            // Encode breakdown as data attrs so the popover can read them
+            // without re-deriving from data.
+            const bdJson = JSON.stringify({
+                war: r.bd_war, retal: r.bd_retal, assist: r.bd_assist,
+                overseas: r.bd_overseas, chain: r.bd_chain,
+                avgFf: r.avgFf, tornScore: r.tornScore,
+                name: r.name,
+            });
             html += `<tr title="${escapeHtml(rowTip)}">`;
             html += `<td><a href="/profiles.php?XID=${escapeHtml(r.playerId)}" target="_blank" rel="noopener" style="color:#d1d5db;text-decoration:none;">${escapeHtml(r.name)}</a></td>`;
-            html += `<td class="right">${r.attacks || '—'}</td>`;
-            html += `<td class="right" style="font-weight:600;">${r.score}</td>`;
-            html += `<td class="right" style="color:#9ca3af;">${share.toFixed(1)}%</td>`;
             html += `<td class="right" style="color:#74c69d;font-weight:600;">${fmt$(r.payout)}</td>`;
+            html += `<td class="right" style="color:#9ca3af;">${share.toFixed(1)}%</td>`;
+            html += `<td class="right col-score">${r.score}</td>`;
+            html += `<td class="right col-attacks" data-breakdown='${escapeHtml(bdJson)}' title="Tap for attack breakdown">${r.attacks || '—'}</td>`;
             html += `</tr>`;
         }
         html += `</tbody></table></div>`;
         drill.innerHTML = html;
+
+        // ── Wire click-popover on Attacks cell ──────────────────────────
+        // Native title tooltip doesn't work on touch (PDA, phone) and is
+        // sluggish on desktop. Custom popover sits over the cell on click,
+        // closes on second click / outside click / Escape.
+        const closePopover = () => {
+            const existing = document.getElementById('wb-attack-popover');
+            if (existing) existing.remove();
+        };
+        drill.querySelectorAll('td.col-attacks').forEach(cell => {
+            cell.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const wasOpen = document.getElementById('wb-attack-popover');
+                closePopover();
+                if (wasOpen && wasOpen.dataset.forCell === cell.dataset.breakdown) return;
+                let bd;
+                try { bd = JSON.parse(cell.dataset.breakdown || '{}'); } catch (_) { return; }
+                const pop = document.createElement('div');
+                pop.id = 'wb-attack-popover';
+                pop.className = 'wb-attack-popover';
+                pop.dataset.forCell = cell.dataset.breakdown;
+                const rows = [];
+                if (bd.war) rows.push(['War hits', bd.war]);
+                if (bd.retal) rows.push(['Retals', bd.retal]);
+                if (bd.assist) rows.push(['Assists', bd.assist]);
+                if (bd.overseas) rows.push(['Overseas', bd.overseas]);
+                if (bd.chain) rows.push(['Chain hits', bd.chain]);
+                if (bd.avgFf) rows.push(['Avg FF', bd.avgFf.toFixed(2)]);
+                if (bd.tornScore) rows.push(['Torn score', bd.tornScore]);
+                pop.innerHTML = `<div class="pop-title">${escapeHtml(bd.name || 'Attack breakdown')}</div>`
+                    + rows.map(([k, v]) => `<div class="pop-row"><span class="pop-cat">${escapeHtml(String(k))}</span><span class="pop-val">${escapeHtml(String(v))}</span></div>`).join('');
+                document.body.appendChild(pop);
+                // Position above-or-below the cell, clamped to viewport.
+                const rect = cell.getBoundingClientRect();
+                const popRect = pop.getBoundingClientRect();
+                let top = rect.bottom + 6;
+                if (top + popRect.height > window.innerHeight - 8) {
+                    top = Math.max(8, rect.top - popRect.height - 6);
+                }
+                let left = rect.right - popRect.width;
+                if (left < 8) left = 8;
+                pop.style.top = top + 'px';
+                pop.style.left = left + 'px';
+            });
+        });
+        // Outside-click + Escape close
+        if (!window.__wbAttackPopoverGlobal) {
+            window.__wbAttackPopoverGlobal = true;
+            document.addEventListener('click', (e) => {
+                if (e.target.closest('.wb-attack-popover')) return;
+                if (e.target.closest('td.col-attacks')) return;
+                closePopover();
+            }, true);
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') closePopover();
+            });
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
