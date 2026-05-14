@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.68
+// @version      5.0.69
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.68';
+    const SCRIPT_VERSION = '5.0.69';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12049,6 +12049,7 @@ body.wb-chain-active {
                         <option value="static"${_payoutsModalState.mode === 'static' ? ' selected' : ''}>Termed Mode</option>
                     </select>
                     <button id="wb-htm-payouts-refresh" style="background:#2d4a3e;color:#d1d5db;border:0;border-radius:3px;padding:3px 9px;font-size:11px;cursor:pointer;">Refresh</button>
+                    <button id="wb-htm-payouts-gear" title="Per-war payout settings" style="background:none;border:1px solid #2d4a3e;border-radius:3px;color:#d1d5db;font-size:14px;cursor:pointer;padding:1px 8px;line-height:1.2;">⚙</button>
                     <span id="wb-htm-payouts-meta" style="color:#6b7280;margin-left:auto;"></span>
                 </div>
                 <div id="wb-payouts-body-inner"></div>
@@ -12060,6 +12061,11 @@ body.wb-chain-active {
             });
             pane.querySelector('#wb-htm-payouts-refresh').addEventListener('click', async () => {
                 await fetchAndRenderPayoutsHeatmap(true);
+            });
+            // v5.0.69: gear button → settings panel (was added to a
+            // different modal that this flow doesn't actually use).
+            pane.querySelector('#wb-htm-payouts-gear').addEventListener('click', () => {
+                openPayoutsSettingsPanel();
             });
         }
         await fetchAndRenderPayoutsHeatmap();
