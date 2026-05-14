@@ -183,7 +183,7 @@ export async function computePayouts(warId, options = {}) {
   }
 
   const ourFid = String(war.factionId);
-  const byAttacker = {}; // playerId → { name, score, breakdown }
+  const byAttacker = {}; // playerId → { name, computedScore, breakdown, attackCount }
 
   for (const atk of attacks) {
     if (String(atk.attacker_faction || "") !== ourFid) continue;
@@ -198,12 +198,46 @@ export async function computePayouts(warId, options = {}) {
       byAttacker[aid] = {
         playerId: aid,
         name: String(atk.attacker_name || `Player ${aid}`),
-        score: 0,
+        computedScore: 0,
         breakdown: {},
+        attackCount: 0,
       };
     }
-    byAttacker[aid].score += w;
+    byAttacker[aid].computedScore += w;
     byAttacker[aid].breakdown[cat] = (byAttacker[aid].breakdown[cat] || 0) + 1;
+    byAttacker[aid].attackCount += 1;
+  }
+
+  // ── Authoritative scores: pull Torn's official ranked-war report ─────
+  // Prior bug: my weighted-attack score (war_hit=ff*1, retal=ff*1.25, …)
+  // is a rough approximation that doesn't match what Torn actually
+  // shows in war.php?step=rankreport. Torn's score factors in defender
+  // level, fair fight, group bonuses, overseas penalties — all the
+  // respect-formula nuance that's not in the attack-modifiers field.
+  // When the official report exists, use its per-member scores 1:1 so
+  // the Payouts tab matches Torn's own ranking. Fall back to weighted
+  // computation only when the report isn't available (war too recent
+  // for the report to be published, or API rejects it).
+  let reportMembers = null;
+  let scoreSource = "computed";
+  let reportTotalScore = 0;
+  let reportTotalAttacks = 0;
+  try {
+    const report = await fetchRankedWarReport(war.factionId, apiKey, warId);
+    const factionsList = Array.isArray(report.factions)
+      ? report.factions
+      : Object.values(report.factions || {});
+    const myFaction = factionsList.find(f => String(f.id) === ourFid);
+    if (myFaction && Array.isArray(myFaction.members) && myFaction.members.length > 0) {
+      reportMembers = myFaction.members;
+      scoreSource = "report";
+      for (const m of reportMembers) {
+        reportTotalScore += Number(m.score) || 0;
+        reportTotalAttacks += Number(m.attacks) || 0;
+      }
+    }
+  } catch (_) {
+    // Report unavailable — use computed weighted scores below.
   }
 
   // Loot — caller-supplied wins; fall back to auto-detect from the
@@ -215,25 +249,58 @@ export async function computePayouts(warId, options = {}) {
     lootTotal = await tryFetchLoot(war.factionId, apiKey, warId);
   }
 
-  const totalScore = Object.values(byAttacker)
-    .reduce((s, m) => s + m.score, 0);
+  let members;
+  let totalScore;
 
-  const members = Object.values(byAttacker)
-    .map(m => {
-      const sharePct = totalScore > 0 ? (m.score / totalScore) * 100 : 0;
-      const dollarPayout = totalScore > 0
-        ? Math.round((m.score / totalScore) * lootTotal)
-        : 0;
-      return {
-        playerId: m.playerId,
-        name: m.name,
-        score: Math.round(m.score * 100) / 100,
-        sharePct: Math.round(sharePct * 10) / 10,
-        dollarPayout,
-        breakdown: m.breakdown,
-      };
-    })
-    .sort((a, b) => b.score - a.score);
+  if (reportMembers) {
+    // Build the member list from the official report. Merge our
+    // attack-derived `breakdown` (war_hit / retal / overseas / chain /
+    // assist counts) for each member as additional context, but the
+    // score itself is the report's authoritative number.
+    totalScore = reportTotalScore;
+    members = reportMembers
+      .map(m => {
+        const aid = String(m.id);
+        const score = Number(m.score) || 0;
+        const sharePct = totalScore > 0 ? (score / totalScore) * 100 : 0;
+        const dollarPayout = totalScore > 0
+          ? Math.round((score / totalScore) * lootTotal)
+          : 0;
+        const local = byAttacker[aid] || {};
+        return {
+          playerId: aid,
+          name: String(m.name || local.name || `Player ${aid}`),
+          score: Math.round(score * 100) / 100,
+          sharePct: Math.round(sharePct * 10) / 10,
+          dollarPayout,
+          attackCount: Number(m.attacks) || local.attackCount || 0,
+          level: Number(m.level) || null,
+          breakdown: local.breakdown || {},
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+  } else {
+    // Fall back to weighted-attack computation (mode-dependent).
+    totalScore = Object.values(byAttacker)
+      .reduce((s, m) => s + m.computedScore, 0);
+    members = Object.values(byAttacker)
+      .map(m => {
+        const sharePct = totalScore > 0 ? (m.computedScore / totalScore) * 100 : 0;
+        const dollarPayout = totalScore > 0
+          ? Math.round((m.computedScore / totalScore) * lootTotal)
+          : 0;
+        return {
+          playerId: m.playerId,
+          name: m.name,
+          score: Math.round(m.computedScore * 100) / 100,
+          sharePct: Math.round(sharePct * 10) / 10,
+          dollarPayout,
+          attackCount: m.attackCount,
+          breakdown: m.breakdown,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+  }
 
   const result = {
     warId,
@@ -242,13 +309,14 @@ export async function computePayouts(warId, options = {}) {
     enemyFactionName: war.enemyFactionName || null,
     warResult: war.warResult || null,
     mode,
+    scoreSource, // "report" (Torn-authoritative) or "computed" (our weighting)
     fromTs,
     toTs,
     lootTotal,
     lootAutoDetected: options.lootTotal == null && lootTotal > 0,
     totalScore: Math.round(totalScore * 10) / 10,
     members,
-    attackCount: attacks.length,
+    attackCount: scoreSource === "report" ? reportTotalAttacks : attacks.length,
     generatedAt: Date.now(),
   };
 
