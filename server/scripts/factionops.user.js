@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.52
+// @version      5.0.53
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.52';
+    const SCRIPT_VERSION = '5.0.53';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1890,9 +1890,18 @@ body.wb-chain-active {
 .wb-payouts-drilldown th { white-space: nowrap; }
 /* v5.0.52: separation between EVERY numeric column. The previous
    adjacent-sibling rule (right + right) missed the last gap. A
-   brute-force per-cell padding handles every column uniformly. */
+   brute-force per-cell padding handles every column uniformly.
+   v5.0.53: tabular-nums forces every digit to render at the same
+   width — without it '75' and '49' (proportional digits) had
+   different LEFT-edges when right-aligned, making the column
+   visually zigzag down the page. */
 .wb-payouts-drilldown td.right,
-.wb-payouts-drilldown th.right { padding-left: 22px; padding-right: 6px; }
+.wb-payouts-drilldown th.right {
+    padding-left: 22px;
+    padding-right: 6px;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+}
 /* Score column gets a brighter color — was hard to read in dark mode. */
 .wb-payouts-drilldown td.col-score { color: #d1d5db; font-weight: 600; }
 .wb-payouts-drilldown td.col-attacks {
