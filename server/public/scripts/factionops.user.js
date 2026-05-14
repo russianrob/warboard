@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.53
+// @version      5.0.54
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.53';
+    const SCRIPT_VERSION = '5.0.54';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1899,6 +1899,13 @@ body.wb-chain-active {
 .wb-payouts-drilldown th.right {
     padding-left: 22px;
     padding-right: 6px;
+    /* v5.0.54: tabular-nums alone wasn't enough on iOS Safari —
+       system font support for the feature is inconsistent across
+       weights, so digits still rendered at slightly different widths
+       and the column zigzagged. Force a real monospace font on every
+       numeric cell — every digit is guaranteed to be the same width. */
+    font-family: "SF Mono", "Menlo", "Monaco", "Cascadia Mono",
+                 "Roboto Mono", "DejaVu Sans Mono", "Courier New", monospace;
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
 }
@@ -1906,8 +1913,14 @@ body.wb-chain-active {
 .wb-payouts-drilldown td.col-score { color: #d1d5db; font-weight: 600; }
 .wb-payouts-drilldown td.col-attacks {
     color: #74c69d; font-weight: 600; cursor: pointer;
-    text-decoration: underline dotted rgba(116,198,141,0.5);
-    text-underline-offset: 3px;
+    /* v5.0.54: removed underline-dotted — text-decoration was
+       slightly affecting per-cell width on iOS, contributing to
+       the column zigzag. Use a small dot indicator instead. */
+}
+.wb-payouts-drilldown td.col-attacks::after {
+    content: " \\00b7";  /* middle dot — lightweight tappability hint */
+    color: rgba(116,198,141,0.4);
+    margin-left: 1px;
 }
 .wb-payouts-drilldown td.col-attacks:hover { color: #a3e0c1; }
 /* Click-popover for the attacks breakdown (works on touch where
