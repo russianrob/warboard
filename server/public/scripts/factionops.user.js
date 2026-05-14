@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.42
+// @version      5.0.43
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.42';
+    const SCRIPT_VERSION = '5.0.43';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12192,7 +12192,7 @@ body.wb-chain-active {
               + `<th class="right" title="Assists (count)">Asst</th>`
               + `<th class="right" title="Overseas attacks (count)">OS</th>`
               + `<th class="right" title="Score (Torn-authoritative respect for this war)">Score</th>`
-              + `<th class="right">Share %</th><th class="right">Payout</th><th class="right"></th></tr></thead><tbody>`;
+              + `<th class="right">Share %</th><th class="right">Payout</th></tr></thead><tbody>`;
         for (const r of rows) {
             const share = totalScore > 0 ? (r.score / totalScore) * 100 : 0;
             html += `<tr>`;
@@ -12205,23 +12205,10 @@ body.wb-chain-active {
             html += `<td class="right">${r.score}</td>`;
             html += `<td class="right" style="color:#9ca3af;">${share.toFixed(1)}%</td>`;
             html += `<td class="right" style="color:#74c69d;font-weight:600;">${fmt$(r.payout)}</td>`;
-            html += `<td class="right">`;
-            if (r.payout > 0) {
-                html += `<a class="send-btn" href="/factions.php?step=your&type=1#/tab=controls" target="_blank" rel="noopener" data-amount="${r.payout}" data-name="${escapeHtml(r.name)}">Send</a>`;
-            }
-            html += `</td></tr>`;
+            html += `</tr>`;
         }
         html += `</tbody></table></div>`;
         drill.innerHTML = html;
-        drill.querySelectorAll('a.send-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const amt = btn.dataset.amount || '0';
-                try { navigator.clipboard.writeText(amt); } catch (_) {}
-                const orig = btn.textContent;
-                btn.textContent = 'Copied!';
-                setTimeout(() => { btn.textContent = orig; }, 1200);
-            });
-        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════
