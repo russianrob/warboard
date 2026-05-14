@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.54
+// @version      5.0.55
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.54';
+    const SCRIPT_VERSION = '5.0.55';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12298,7 +12298,7 @@ body.wb-chain-active {
             html += `<td><a href="/profiles.php?XID=${escapeHtml(r.playerId)}" target="_blank" rel="noopener" style="color:#d1d5db;text-decoration:none;">${escapeHtml(r.name)}</a></td>`;
             html += `<td class="right" style="color:#74c69d;font-weight:600;">${fmt$(r.payout)}</td>`;
             html += `<td class="right" style="color:#9ca3af;">${share.toFixed(1)}%</td>`;
-            html += `<td class="right col-score">${r.score}</td>`;
+            html += `<td class="right col-score">${(Number(r.score) || 0).toFixed(2)}</td>`;
             html += `<td class="right col-attacks" data-breakdown='${escapeHtml(bdJson)}' title="Tap for attack breakdown">${r.attacks || '—'}</td>`;
             html += `</tr>`;
         }
