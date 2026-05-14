@@ -22,6 +22,44 @@ import path from "path";
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const _cache = new Map(); // `${warId}:${mode}` → { result, expiresAt }
 
+// v5.0.66: persist payouts results to disk for ENDED wars. Their
+// underlying Torn data is frozen (no new attacks possible), so the
+// computed payouts never change — caching forever saves the multi-
+// minute paginated fetch on every pm2 restart and every modal open
+// after the in-memory 5-min TTL would have expired.
+const PAYOUTS_CACHE_FILE = path.join(
+  process.env.DATA_DIR || "./data",
+  "war-payouts-cache.json"
+);
+let _diskCacheLoaded = false;
+function loadDiskCache() {
+  if (_diskCacheLoaded) return;
+  _diskCacheLoaded = true;
+  try {
+    const raw = fs.readFileSync(PAYOUTS_CACHE_FILE, "utf-8");
+    const data = JSON.parse(raw);
+    let count = 0;
+    for (const [key, entry] of Object.entries(data)) {
+      // Persisted entries never expire (war is ended → data is frozen).
+      _cache.set(key, { result: entry, expiresAt: Infinity });
+      count++;
+    }
+    if (count > 0) console.log(`[war-payouts] Loaded ${count} cached payout(s) from disk`);
+  } catch (_) { /* file missing or corrupted — proceed empty */ }
+}
+function persistDiskCache() {
+  try {
+    const obj = {};
+    for (const [key, entry] of _cache.entries()) {
+      // Only persist forever-cached entries (ended wars).
+      if (entry.expiresAt === Infinity) obj[key] = entry.result;
+    }
+    fs.writeFileSync(PAYOUTS_CACHE_FILE, JSON.stringify(obj));
+  } catch (e) {
+    console.warn(`[war-payouts] Disk cache write failed: ${e.message}`);
+  }
+}
+
 /** Default weights — match the OP's spec from t=16563983. */
 const WEIGHTS = {
   dynamic: {
@@ -173,6 +211,7 @@ async function tryFetchLoot(factionId, apiKey, rwId) {
  * }
  */
 export async function computePayouts(warId, options = {}) {
+  loadDiskCache(); // lazy: first call hydrates persisted ended-war results
   const mode = options.mode === "static" ? "static" : "dynamic";
   const cacheKey = `${warId}:${mode}`;
   const cached = _cache.get(cacheKey);
@@ -502,7 +541,15 @@ export async function computePayouts(warId, options = {}) {
     generatedAt: Date.now(),
   };
 
-  _cache.set(cacheKey, { result, expiresAt: Date.now() + CACHE_TTL_MS });
+  // v5.0.66: ended wars are immutable → cache forever + persist to
+  // disk. Active wars stay on the 5-min in-memory TTL since their
+  // attack log is still growing.
+  if (war.warEnded) {
+    _cache.set(cacheKey, { result, expiresAt: Infinity });
+    persistDiskCache();
+  } else {
+    _cache.set(cacheKey, { result, expiresAt: Date.now() + CACHE_TTL_MS });
+  }
   return { ...result, cached: false };
 }
 
