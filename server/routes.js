@@ -4827,18 +4827,16 @@ function runFailureRisk(factionId, data) {
       const rawOverall = cpr?.cpr;
       const hasCprData = (rawPosCpr ?? 0) > 0 || (rawOverall ?? 0) > 0;
       const posCpr = rawPosCpr || rawOverall || 0;
-
-      // v3.2.11: prefer Torn's own per-slot Success Chance % when we
-      // have a fresh DOM-scrape from oc-spawn-assistance. This is the
-      // SAME number Torn shows on the OC page — way more accurate than
-      // our CPR + history estimate because Torn knows the actual
-      // formula (item bonuses, position quirks, defender-wide odds).
-      // Position lookup uses the bare position label lowercased (e.g.
-      // 'thief'), matching what the client scrape stores.
-      const liveSuc = getLiveSuccess(factionId, crime.id, uid, posBase);
       // Look up weight from weights object using position label
       const posLabel = s.position_info?.label || s.position || '';
       const posBase = posLabel.replace(/\s*#\d+$/, ''); // strip "#1" etc
+
+      // v3.2.11: prefer Torn's own per-slot Success Chance % when we
+      // have a fresh DOM-scrape from oc-spawn-assistance. Same number
+      // Torn shows on the OC page — way more accurate than our CPR +
+      // history estimate. Position lookup uses posBase lowercased
+      // (matching what the client scrape stores).
+      const liveSuc = getLiveSuccess(factionId, crime.id, uid, posBase);
       // Try exact label first, then numbered variants
       let weight = crimeWeights[posLabel] || crimeWeights[posBase] || crimeWeights[posLabel.replace(/\s/g, '')] || crimeWeights[posBase.replace(/\s/g, '')] || 0;
       // Also try with number suffix: Looter1, Looter2 etc
