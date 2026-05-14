@@ -314,16 +314,9 @@ export async function computePayouts(warId, options = {}) {
     const aid = String(atk.attacker_id || "");
     if (!aid || aid === "0") continue; // stealth = 0; skip
 
-    // v5.0.44: filter to attacks that actually contributed respect.
-    // Without this, defended/stalemate/timeout attacks inflated counts
-    // and (when respect_gain=0) didn't change the score but did skew
-    // attack counts vs what Torn's official report shows.
-    const respectGain = Number(atk.respect_gain) || 0;
-    if (respectGain <= 0) continue;
-
-    // v5.0.57: track TOTAL attacks (war + non-war) per member for the
-    // war-vs-total breakdown ratio. Only ranked-war attacks contribute
-    // to scoring; non-war attacks just bump the total counter.
+    // v5.0.72: ensure entry exists FIRST so failed attacks get
+    // counted in totalAttacks + breakdown.failed even though they
+    // earn no respect and don't add to score.
     if (!byAttacker[aid]) {
       byAttacker[aid] = {
         playerId: aid,
@@ -333,11 +326,22 @@ export async function computePayouts(warId, options = {}) {
         ffSum: 0,
         ffSamples: 0,
         breakdown: {},
-        attackCount: 0,    // war-only count (drives the score)
-        totalAttacks: 0,   // war + non-war
+        attackCount: 0,    // successful war hits (drives the score)
+        totalAttacks: 0,   // every attack attempted (war + non-war + failed)
       };
     }
     byAttacker[aid].totalAttacks += 1;
+
+    // v5.0.44/72: failed attacks (defended, stalemate, lost, escaped,
+    // timeout, interrupted) have respect_gain = 0 and contribute
+    // nothing to the war score — skip scoring but record them in
+    // breakdown.failed so admins can see how many attempts each
+    // member made beyond the successful ones.
+    const respectGain = Number(atk.respect_gain) || 0;
+    if (respectGain <= 0) {
+      byAttacker[aid].breakdown.failed = (byAttacker[aid].breakdown.failed || 0) + 1;
+      continue;
+    }
 
     // v5.0.58: non-war attacks DO contribute to score, but at a
     // reduced 'assist-level' weight per user policy ('non war hits

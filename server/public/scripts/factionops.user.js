@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.69
+// @version      5.0.72
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.69';
+    const SCRIPT_VERSION = '5.0.72';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12374,6 +12374,7 @@ body.wb-chain-active {
                     bd_chain: bd.chain_hit || 0,
                     bd_assist: bd.assist || 0,
                     bd_non_war: bd.non_war || 0,
+                    bd_failed: bd.failed || 0,
                 };
             })
             .sort((a, b) => b.score - a.score);
@@ -12484,6 +12485,7 @@ body.wb-chain-active {
                 war: r.bd_war, retal: r.bd_retal, assist: r.bd_assist,
                 overseas: r.bd_overseas, chain: r.bd_chain,
                 non_war: r.bd_non_war,
+                failed: r.bd_failed,
                 avgFf: r.avgFf, tornScore: r.tornScore,
                 warAttacks: r.attacks, totalAttacks: r.totalAttacks,
                 name: r.name,
@@ -12535,6 +12537,7 @@ body.wb-chain-active {
                 if (bd.overseas) rows.push(['Overseas', bd.overseas]);
                 if (bd.chain) rows.push(['Chain hits', bd.chain]);
                 if (bd.non_war) rows.push(['Non-war hits', `${bd.non_war} (×0.3 weight)`]);
+                if (bd.failed) rows.push(['Failed', `${bd.failed} (no payout)`]);
                 if (bd.avgFf) rows.push(['Avg FF', bd.avgFf.toFixed(2)]);
                 if (bd.tornScore) rows.push(['Torn score', bd.tornScore]);
                 pop.innerHTML = `<div class="pop-title">${escapeHtml(bd.name || 'Attack breakdown')}</div>`
