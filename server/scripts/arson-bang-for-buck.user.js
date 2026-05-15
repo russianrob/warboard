@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson bang for buck (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.00.037-wb1
+// @version      1.00.037-wb2
 // @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Fork of Para_Thenics' v1.00.037 with hash-agnostic React selectors so it survives Torn frontend rebundles.
 // @author       Para_Thenics, auboli77 (fork by RussianRob)
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -13,6 +13,16 @@
 // =============================================================================
 // CHANGELOG (tornwar fork)
 // =============================================================================
+// 1.00.037-wb2 — iconTarget (mobile-click handler) was still pointing at
+//                [class*="title___"] but Torn renamed the element to
+//                titleAndScenario___ (substring 'title___' isn't present in
+//                that — it's 'title' then 'AndScenario___'). Selector now
+//                tries [class*="titleAndScenario___"] first, falls back to
+//                the old title___ for any future revert. Confirmed by
+//                Oceane [3148330] via forum post showing the new class.
+//                Fixes PDA mobile-tap behavior; desktop hover via
+//                hoverTarget kept working from wb1 because that wildcard
+//                ([class*="titleSection___"]) wasn't affected.
 // 1.00.037-wb1 — Replaced 7 hash-suffixed React class selectors with
 //                [class*="X___"] attribute selectors so the script keeps
 //                working across Torn bundle rebuilds. Same pattern as
@@ -3966,7 +3976,12 @@ function addTooltips() {
         const tooltip = createTooltip(selectedVariant, section, section);
 
         const hoverTarget = section.querySelector('[class*="crimeOptionSection___"][class*="titleSection___"]');
-        const iconTarget = section.querySelector('[class*="crimeOptionSection___"] [class*="title___"]'); // ✅ Only this small clickable area
+        // wb2: Torn renamed this element — old structure was `title___X`,
+        // new structure is `titleAndScenario___X`. The substring 'title___'
+        // (with underscores) isn't present in 'titleAndScenario___', so
+        // try the new selector first, fall back to the old one.
+        const iconTarget = section.querySelector('[class*="titleAndScenario___"]')
+                        || section.querySelector('[class*="crimeOptionSection___"] [class*="title___"]'); // ✅ Only this small clickable area
 
         // Desktop hover
         if (hoverTarget) {
