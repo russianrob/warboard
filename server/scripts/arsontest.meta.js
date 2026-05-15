@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.5.2
+// @version      0.5.3
 // @description  Tiny hand-curated scenario recipes for Arson — a sandbox the user can iterate on without touching the working 'arson-bang-for-buck' fork. Computes profit/nerve from the recipe + cached item market prices and badges each option on the crimes page.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
