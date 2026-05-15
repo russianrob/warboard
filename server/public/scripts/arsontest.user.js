@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.5.1
+// @version      0.5.2
 // @description  Tiny hand-curated scenario recipes for Arson — a sandbox the user can iterate on without touching the working 'arson-bang-for-buck' fork. Computes profit/nerve from the recipe + cached item market prices and badges each option on the crimes page.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -40,7 +40,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.5.1';
+    const VERSION = '0.5.2';
 
     // === SCENARIO RECIPES (sandbox — only what the user has confirmed) ===
     // Format: scenarioOrAction → { items: { itemNameLower: qty }, payout: dollars, nerve: optional }
@@ -59,6 +59,20 @@
         "it's a write off": {
             items: { 'gasoline': 2 },
             payout: 225_000,
+        },
+        // Bowling Alley → Strike While it's Hot. Same recipe template as
+        // Car Showroom 'Bright Spark' below; Bowling Alley pays $20K more
+        // for the same nerve, so it's the better grind target.
+        "strike while it's hot": {
+            items: { 'gasoline': 1, 'lighter': 1, 'methane': 1 },
+            payout: 230_000,
+            nerve: 20, // Torn's stats screen shows 20 N exactly
+        },
+        // Car Showroom → Bright Spark. Same recipe + nerve, lower payout.
+        "bright spark": {
+            items: { 'gasoline': 1, 'lighter': 1, 'methane': 1 },
+            payout: 210_000,
+            nerve: 20,
         },
     };
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
