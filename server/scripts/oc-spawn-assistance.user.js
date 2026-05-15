@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.19
+// @version      3.2.21
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -268,7 +268,7 @@
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
     let _lastAvailableCrimes = [];   // v3.2.13: stash of last fetched crimes (with IDs + slot assignments) for live-success crimeId resolution
-    const SCRIPT_VERSION = '3.2.19';
+    const SCRIPT_VERSION = '3.2.21';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -6752,7 +6752,14 @@
             tabBar.style.display = 'flex';
             adminTab.style.display    = canAdmin ? '' : 'none';
             managerTab.style.display  = canAdmin ? '' : 'none';
-            if (coachingTab) coachingTab.style.display = canAdmin ? '' : 'none';
+            // v3.2.21: Coaching tab UI hidden per user request — the
+            // CPR-tooltip per-checkpoint heatmap (which uses the same
+            // byCheckpoint data) is what admins actually use; the tab
+            // itself was redundant. Completed-tab XHR/fetch scraping
+            // (line ~1054 onwards) keeps populating the data so the
+            // tooltip + failure-risk's checkpoint-history branch still
+            // work end-to-end.
+            if (coachingTab) coachingTab.style.display = 'none';
             if (metricsTab)  metricsTab.style.display  = canAdmin ? '' : 'none';
             if (enginesTab)  enginesTab.style.display  = canAdmin ? '' : 'none';
 
@@ -6794,8 +6801,12 @@
             const cfgSection = document.getElementById('oc-cfg-section');
             if (cfgSection) cfgSection.style.display = (isDev(viewer) || canViewAdmin(viewer)) ? '' : 'none';
             if (canAdmin) {
-                const lastTab = GM_getValue('oc_last_tab', 'admin');
-                const validTabs = ['profile', 'admin', 'manager', 'coaching', 'metrics', 'engines'];
+                let lastTab = GM_getValue('oc_last_tab', 'admin');
+                // v3.2.21: 'coaching' removed from valid tabs since the
+                // tab UI is hidden. Anyone whose saved tab was coaching
+                // gets bumped to admin instead.
+                const validTabs = ['profile', 'admin', 'manager', 'metrics', 'engines'];
+                if (lastTab === 'coaching') lastTab = 'admin';
                 switchTab(validTabs.includes(lastTab) ? lastTab : 'admin');
             } else {
                 switchTab('profile');
