@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.13
+// @version      3.2.14
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,8 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.13';
+    let _lastAvailableCrimes = [];   // v3.2.13: stash of last fetched crimes (with IDs + slot assignments) for live-success crimeId resolution
+    const SCRIPT_VERSION = '3.2.14';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1821,26 +1822,50 @@
     function pushLiveSuccessChances() {
         if (Date.now() - _liveSuccessLastPost < 30_000) return;
         const scraped = mgr_scrapeSlotSuccessChance();
-        // v3.2.12: diagnostic — surface why the live-success POST might
-        // not be flowing. Browser console will show one line per tick;
-        // helps isolate 'no crimeId on slots' vs 'no DOM scrape at all'.
-        console.log('[OC live-success] scraped slots:', scraped.size,
-            scraped.size > 0 ? '(sample crimeId:' + (Array.from(scraped.values())[0]?.crimeId || 'NULL') + ')' : '');
-        if (!scraped.size) return;
+        if (!scraped.size) {
+            console.log('[OC live-success] scraped 0 slots (DOM not ready)');
+            return;
+        }
         const apiKey = getApiKey();
         if (!apiKey) { console.log('[OC live-success] no api key'); return; }
-        // Group by crime ID — server endpoint expects one crime per POST.
-        const byCrime = new Map();
-        let droppedNoCrime = 0;
-        for (const [key, val] of scraped) {
-            if (!val.crimeId || !Number.isFinite(val.successPct)) { droppedNoCrime++; continue; }
-            const [userID, position] = key.split(':');
-            const list = byCrime.get(val.crimeId) || [];
-            list.push({ uid: userID, position, successPct: val.successPct });
-            byCrime.set(val.crimeId, list);
+
+        // v3.2.13: resolve crime IDs by matching (userID, position) against
+        // the cached server crime list — DOM walk for crimeId href fails
+        // on the OC list page where crimes aren't expanded. Each placed
+        // (userId, position) combo usually maps to exactly one crime; if
+        // ambiguous (member in multiple OCs at same position) we skip.
+        const slotToCrime = new Map(); // "uid::position" → [crimeId, ...]
+        for (const crime of _lastAvailableCrimes) {
+            for (const s of (crime.slots || [])) {
+                const uid = String(s.user_id || s.user?.id || '');
+                if (!uid) continue;
+                const pos = String(s.position || '').toLowerCase();
+                const k = `${uid}:${pos}`;
+                if (!slotToCrime.has(k)) slotToCrime.set(k, []);
+                slotToCrime.get(k).push(crime.id);
+            }
         }
+
+        const byCrime = new Map();
+        let droppedNoCrime = 0, droppedAmbiguous = 0;
+        for (const [key, val] of scraped) {
+            if (!Number.isFinite(val.successPct)) { droppedNoCrime++; continue; }
+            // Prefer DOM-walk crimeId if we got one; else look up via cache.
+            let crimeId = val.crimeId;
+            if (!crimeId) {
+                const matches = slotToCrime.get(key);
+                if (!matches || matches.length === 0) { droppedNoCrime++; continue; }
+                if (matches.length > 1) { droppedAmbiguous++; continue; }
+                crimeId = matches[0];
+            }
+            const [userID, position] = key.split(':');
+            const list = byCrime.get(crimeId) || [];
+            list.push({ uid: userID, position, successPct: val.successPct });
+            byCrime.set(crimeId, list);
+        }
+        console.log(`[OC live-success] scraped ${scraped.size} slot(s); ${byCrime.size} crime(s) resolved; dropped ${droppedNoCrime} (unmatched) + ${droppedAmbiguous} (ambiguous)`);
         if (!byCrime.size) {
-            console.log('[OC live-success] no crime IDs found on any slot — dropped', droppedNoCrime, 'slot(s). Slot wrapper DOM walk did not find a crimeId href; expand a crime first or open it via deep link.');
+            console.log('[OC live-success] no slots could be resolved to crimes — _lastAvailableCrimes has', _lastAvailableCrimes.length, 'crime(s). Run a Refresh first, then try again.');
             return;
         }
         _liveSuccessLastPost = Date.now();
@@ -6580,6 +6605,10 @@
                     }
                     serverResp = await fetchServerOcData(apiKey);
                     ({ members, availableCrimes, cprCache: rawCprCache, viewer, weights, engines } = serverResp);
+                    // v3.2.13: stash for live-success poller — needs the
+                    // crime list (with IDs + slot assignments) to resolve
+                    // each scraped slot to its parent crime ID.
+                    _lastAvailableCrimes = Array.isArray(availableCrimes) ? availableCrimes : Object.values(availableCrimes || {});
                     // v3.1.38: stash hitRates so render functions can use them.
                     _lastHitRates = serverResp.hitRates || {};
                     // v3.1.49: stash per-member pending delays for the admin banner.
