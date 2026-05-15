@@ -4780,7 +4780,7 @@ function computeRecentCompletions(factionId, limit = 10) {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  FAILURE RISK ENGINE
 // ═══════════════════════════════════════════════════════════════════════════════
-function runFailureRisk(factionId, data) {
+async function runFailureRisk(factionId, data) {
   const crimes = data.crimes || data.availableCrimes || [];
   const cprCache = data.cprCache || {};
   const weights = data.weights || {};
@@ -4928,7 +4928,30 @@ function runFailureRisk(factionId, data) {
     const totalSlots = slots.length;
     const emptyCount = slots.filter(s => !s.user_id && !s.user?.id).length;
     if (emptyCount > 0 || filledSlots.length === 0) continue;
-    let overallSuccess = filledSlots.reduce((acc, s) => acc * s.successProb, 1);
+
+    // v3.2.18: use tornprobability's CalculateSuccess for the OC-level
+    // outcome instead of multiplying per-slot success probabilities.
+    // The multiplicative version assumed independent slot failures —
+    // a 6-slot OC with each slot at 75% became 18% all-pass = 82% risk,
+    // which felt way too pessimistic to admins. Torn's actual formula
+    // weights position importance and isn't strict AND-of-all-slots,
+    // and tornprobability publishes the proper calc as a service. With
+    // a 15-min upstream cache, we incur one HTTP call per crime per
+    // 15-min window — cheap.
+    let overallSuccess;
+    let outcomeSource = 'multiplicative';
+    try {
+      const cprs = filledSlots.map(s => Math.round(s.successProb * 100));
+      const outcome = await calculateOutcome(crime.name, cprs);
+      if (outcome && !outcome.error && Number.isFinite(outcome.successChance)) {
+        overallSuccess = outcome.successChance;
+        outcomeSource = 'tornprobability';
+      } else {
+        overallSuccess = filledSlots.reduce((acc, s) => acc * s.successProb, 1);
+      }
+    } catch (_) {
+      overallSuccess = filledSlots.reduce((acc, s) => acc * s.successProb, 1);
+    }
     const failureRisk = Math.round((1 - overallSuccess) * 1000) / 10;
 
     // Find weakest link: highest risk score
@@ -4941,6 +4964,7 @@ function runFailureRisk(factionId, data) {
     results.push({
       crimeId: crime.id, crimeName: crime.name, difficulty: crime.difficulty || 0,
       failureRisk, overallSuccess: Math.round(overallSuccess * 1000) / 10,
+      outcomeSource, // 'tornprobability' (real calc) or 'multiplicative' (fallback)
       totalSlots, filledSlots: filledSlots.length, emptySlots: slots.filter(s => !s.user_id && !s.user?.id).length,
       weakestLink: weakestLink ? {
         name: weakestLink.name, position: weakestLink.position,
@@ -6738,7 +6762,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
       data.weights = await getRoleWeights();
       const engines = {};
       if (fSettings.engine_slot_optimizer) engines.slotOptimizer = runSlotOptimizer(fid, data);
-      if (fSettings.engine_failure_risk) engines.failureRisk = runFailureRisk(fid, data);
+      if (fSettings.engine_failure_risk) engines.failureRisk = await runFailureRisk(fid, data);
       if (fSettings.engine_cpr_forecaster) engines.cprForecaster = runCprForecaster(fid, data);
       if (fSettings.engine_member_projector) engines.memberProjector = runMemberProjector(fid, data);
       if (fSettings.engine_member_reliability) engines.memberReliability = runMemberReliability(fid, data);
@@ -6833,7 +6857,7 @@ router.get("/api/oc/spawn-key", async (req, res) => {
             // v3.2.12: hydrate role weights here too (fallback path).
             data.weights = await getRoleWeights();
             if (fS2.engine_slot_optimizer) fS2engines.slotOptimizer = runSlotOptimizer(fid, data);
-            if (fS2.engine_failure_risk) fS2engines.failureRisk = runFailureRisk(fid, data);
+            if (fS2.engine_failure_risk) fS2engines.failureRisk = await runFailureRisk(fid, data);
             if (fS2.engine_cpr_forecaster) fS2engines.cprForecaster = runCprForecaster(fid, data);
             if (fS2.engine_member_projector) fS2engines.memberProjector = runMemberProjector(fid, data);
             if (fS2.engine_member_reliability) fS2engines.memberReliability = runMemberReliability(fid, data);
@@ -6947,7 +6971,7 @@ router.get("/api/oc/engines", async (req, res) => {
     } else {
       heavy = {
         slotOptimizer:     runSlotOptimizer(fid, data),
-        failureRisk:       runFailureRisk(fid, data),
+        failureRisk:       await runFailureRisk(fid, data),
         cprForecaster:     runCprForecaster(fid, data),
         memberProjector:   runMemberProjector(fid, data),
         memberReliability: runMemberReliability(fid, data),
