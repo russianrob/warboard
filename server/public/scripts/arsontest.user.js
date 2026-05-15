@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Auto-Extract (test)
 // @namespace    tornwar.com
-// @version      0.1.0
+// @version      0.2.0
 // @description  Auto-extract per-action profit/nerve on the crimes page — no hardcoded scenario list. Reads payout + item requirements straight from the live DOM so it works on any scenario Torn adds (Restaurant, Aircraft Hangar, etc.) without manual maintenance. Experimental fork of 'Arson bang for buck'.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -39,7 +39,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.1.0';
+    const VERSION = '0.2.0';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
 
@@ -216,6 +216,30 @@
             } catch (e) { WARN('parse failed for option', e); skipped++; }
         }
         LOG('scan: decorated=' + decorated + ' skipped=' + skipped);
+
+        // v0.2 diagnostic: when nothing decorated, dump the first option
+        // so we can see what's actually in the DOM. One-shot per page load.
+        if (decorated === 0 && skipped > 0 && !window.__arsontest_dumped) {
+            window.__arsontest_dumped = true;
+            const first = options[0];
+            const text = (first.textContent || '').replace(/\s+/g, ' ').trim();
+            console.group('[arsontest] DIAGNOSTIC — first option failed to parse');
+            console.log('text (first 500 chars):', text.slice(0, 500));
+            console.log('payout regex match:', text.match(/Payout:\s*\$?([\d.,]+)\s*([KMB]?)/i));
+            console.log('nerve regex match:', text.match(/Nerve:\s*(\d+)/i));
+            console.log('outerHTML (first 1500):', first.outerHTML.slice(0, 1500));
+            const childClasses = [];
+            first.querySelectorAll('*').forEach(n => {
+                if (n.className && typeof n.className === 'string') {
+                    const cls = n.className.split(' ').find(c => c.includes('___'));
+                    if (cls && !childClasses.includes(cls)) childClasses.push(cls);
+                }
+            });
+            console.log('hashed child classes (first 20):', childClasses.slice(0, 20));
+            console.log('item names cached (first 10):', Object.keys(itemValues).slice(0, 10));
+            console.log('item count cached:', Object.keys(itemValues).length);
+            console.groupEnd();
+        }
     }
 
     // === Init ===
