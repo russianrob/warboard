@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Auto-Extract (test)
 // @namespace    tornwar.com
-// @version      0.3.0
+// @version      0.4.0
 // @description  Auto-extract per-action profit/nerve on the crimes page — no hardcoded scenario list. Reads payout + item requirements straight from the live DOM so it works on any scenario Torn adds (Restaurant, Aircraft Hangar, etc.) without manual maintenance. Experimental fork of 'Arson bang for buck'.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -9,6 +9,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        unsafeWindow
 // @connect      api.torn.com
 // @downloadURL  https://tornwar.com/scripts/arsontest.user.js
 // @updateURL    https://tornwar.com/scripts/arsontest.meta.js
@@ -39,7 +40,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.3.0';
+    const VERSION = '0.4.0';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
 
@@ -251,6 +252,38 @@
         }
     }
 
+    // === v0.4 probe: dump unsafeWindow.torn keys looking for crime data ===
+    function probeTornState() {
+        if (window.__arsontest_probed) return;
+        window.__arsontest_probed = true;
+        const W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+        if (!W?.torn) {
+            LOG('PROBE: window.torn not exposed (data may only flow via XHR/AJAX)');
+            return;
+        }
+        console.group('[arsontest] PROBE — unsafeWindow.torn keys');
+        try {
+            console.log('top-level keys:', Object.keys(W.torn));
+            // Walk a few levels deep looking for anything crime-shaped.
+            const interesting = ['crimes', 'crime', 'arson', 'currentCrime', 'scenarios', 'options'];
+            const walk = (obj, path, depth) => {
+                if (depth > 3 || !obj || typeof obj !== 'object') return;
+                for (const k of Object.keys(obj)) {
+                    if (interesting.some(w => k.toLowerCase().includes(w))) {
+                        const v = obj[k];
+                        const preview = typeof v === 'object'
+                            ? `{${Object.keys(v || {}).slice(0, 8).join(', ')}}`
+                            : String(v).slice(0, 60);
+                        console.log(`${path}.${k}:`, preview);
+                    }
+                    if (depth < 3 && typeof obj[k] === 'object') walk(obj[k], path + '.' + k, depth + 1);
+                }
+            };
+            walk(W.torn, 'torn', 0);
+        } catch (e) { WARN('probe failed', e); }
+        console.groupEnd();
+    }
+
     // === Init ===
     LOG('starting v' + VERSION);
     if (!getApiKey()) {
@@ -270,6 +303,7 @@
     };
     startObserver();
     scheduleScan();
+    setTimeout(probeTornState, 2000); // wait for React state to populate
 
     // Public debug handle
     window.__arsontest = {
