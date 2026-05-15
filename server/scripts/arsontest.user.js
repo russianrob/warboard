@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.5.6
+// @version      0.5.7
 // @description  Tiny hand-curated scenario recipes for Arson — a sandbox the user can iterate on without touching the working 'arson-bang-for-buck' fork. Computes profit/nerve from the recipe + cached item market prices and badges each option on the crimes page.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -40,7 +40,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.5.6';
+    const VERSION = '0.5.7';
 
     // === SCENARIO RECIPES (sandbox — only what the user has confirmed) ===
     // Format: scenarioOrAction → { items: { itemNameLower: qty }, payout: dollars, nerve: optional }
@@ -91,12 +91,14 @@
             payout: 220_000,
             nerve: 15,
         },
-        // Hospital → Make a Killing. 3 kero + 1 lighter, 25 N.
-        // Payout swings $200K (rare miss with mixed gas+kero) to $460K
-        // (3-kero attempt). Using $360K as a representative median for
-        // the 3-kero recipe — the user's 7-attempt log averages ~$346K.
+        // Hospital → Make a Killing. v0.5.7: corrected from 3 kero +
+        // lighter to 3 kero + flamethrower equipped. Cost line of
+        // \$30,876 = 3 × kerosene (~\$10,292 each), no lighter added —
+        // confirms flamethrower is the equipped ignition (not
+        // consumed). Same convention as 'It's a Write Off' and
+        // 'Under the Table'.
         "make a killing": {
-            items: { 'kerosene': 3, 'lighter': 1 },
+            items: { 'kerosene': 3 },
             payout: 360_000,
             nerve: 25,
         },
