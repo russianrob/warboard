@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.12
+// @version      3.2.13
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.12';
+    const SCRIPT_VERSION = '3.2.13';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1845,7 +1845,10 @@
         }
         _liveSuccessLastPost = Date.now();
         const post = (crimeId, slots) => {
-            const url = `${CONFIG.SERVER_URL}/api/oc/live-success?key=${encodeURIComponent(apiKey)}`;
+            // v3.2.13: use SERVER (the actual constant), not the
+            // undefined CONFIG.SERVER_URL — that bug silently sent
+            // POSTs to 'undefined/api/oc/live-success' on every tick.
+            const url = `${SERVER}/api/oc/live-success?key=${encodeURIComponent(apiKey)}`;
             const body = JSON.stringify({ crimeId, slots });
             const onload = (res) => {
                 console.log('[OC live-success] POST crime=' + crimeId + ' slots=' + slots.length + ' → status=' + (res?.status ?? '?'));
