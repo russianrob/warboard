@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.5.0
+// @version      0.5.1
 // @description  Tiny hand-curated scenario recipes for Arson — a sandbox the user can iterate on without touching the working 'arson-bang-for-buck' fork. Computes profit/nerve from the recipe + cached item market prices and badges each option on the crimes page.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -40,7 +40,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.5.0';
+    const VERSION = '0.5.1';
 
     // === SCENARIO RECIPES (sandbox — only what the user has confirmed) ===
     // Format: scenarioOrAction → { items: { itemNameLower: qty }, payout: dollars, nerve: optional }
@@ -52,6 +52,13 @@
             items: { 'gasoline': 1, 'lighter': 1, 'methane': 2 },
             payout: 400_000,
             // nerve omitted → use heuristic 10 + 5×items below
+        },
+        // Lakehouse → It's a Write Off. Flamethrower is equipped, not
+        // consumed (same convention as 'Under the Table'), so it
+        // doesn't add to itemCost — only the 2 gasoline does.
+        "it's a write off": {
+            items: { 'gasoline': 2 },
+            payout: 225_000,
         },
     };
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
