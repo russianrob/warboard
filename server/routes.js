@@ -3971,7 +3971,14 @@ setImmediate(loadFlyerDelays);
 // data doesn't poison failure risk if no one's been on the OC page lately.
 // Shape: Map<factionId, Map<crimeId, Map<"uid::position-lower", { successPct, observedAt }>>>
 const _liveSuccess = new Map();
-const LIVE_SUCCESS_TTL_MS = 30 * 60 * 1000;
+// v3.2.20: bumped from 30min → 7 days. The user complained that live
+// numbers reset to 99% every hour or two — that was the engine cache
+// (1h TTL) recomputing AFTER live observations had aged out (30min
+// TTL) and falling back to the CPR estimate. Live data is keyed by
+// (crime, uid, position) so stale entries don't actively mislead — if
+// a slot's composition changes, the new key doesn't match the old
+// observation. Long TTL just lets cached numbers ride between visits.
+const LIVE_SUCCESS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 function liveSuccessFile() { return pathJoin(OC_HISTORY_DIR, '..', 'oc-live-success.json'); }
 function loadLiveSuccess() {
   try {
