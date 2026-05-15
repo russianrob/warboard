@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.5.7
+// @version      0.6.0
 // @description  Tiny hand-curated scenario recipes for Arson — a sandbox the user can iterate on without touching the working 'arson-bang-for-buck' fork. Computes profit/nerve from the recipe + cached item market prices and badges each option on the crimes page.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -40,14 +40,22 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.5.7';
+    const VERSION = '0.6.0';
+    const SERVER = 'https://tornwar.com';
 
-    // === SCENARIO RECIPES (sandbox — only what the user has confirmed) ===
-    // Format: scenarioOrAction → { items: { itemNameLower: qty }, payout: dollars, nerve: optional }
-    // Match key is normalized: lowercase + trimmed. Auto-extract fallback
-    // (commented-out below) gave up — Torn doesn't expose payout/items
-    // anywhere we can scrape. Keeping this small and admin-curated.
-    const RECIPES = {
+    // === RECIPES — server-cached, editable via UI ===========================
+    // v0.6: recipes now live in data/arson-recipes.json on the warboard
+    // server. Client fetches once on init, caches in localStorage with 10-
+    // min TTL, and the gear UI lets you add/edit/delete entries. The
+    // server endpoints are OPEN (no auth) per user's request — their
+    // Torn API key never touches the server for this feature. If
+    // griefing becomes an issue, add a shared header later.
+    //
+    // The hardcoded RECIPES below is a SEED FALLBACK only — used when
+    // the server fetch fails (network issue, fresh install, etc).
+    // ========================================================================
+    let RECIPES = {};
+    const FALLBACK_RECIPES = {
         'under the table': {
             items: { 'gasoline': 1, 'lighter': 1, 'methane': 2 },
             payout: 400_000,
@@ -103,6 +111,10 @@
             nerve: 25,
         },
     };
+    // Initialize RECIPES with fallback so the script works even before
+    // the server fetch resolves (or if the server is unreachable).
+    RECIPES = Object.assign({}, FALLBACK_RECIPES);
+
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
 
@@ -345,8 +357,224 @@
         console.groupEnd();
     }
 
+    // === Server-cached recipes ===
+    const RECIPE_TTL_MS = 10 * 60 * 1000;
+    function loadCachedRecipes() {
+        try {
+            const raw = localStorage.getItem('arsontest_recipes_cache');
+            if (!raw) return null;
+            const obj = JSON.parse(raw);
+            if (Date.now() - (obj.cachedAt || 0) < RECIPE_TTL_MS) return obj;
+        } catch (_) {}
+        return null;
+    }
+    async function fetchRecipes(forceFresh = false) {
+        if (!forceFresh) {
+            const cached = loadCachedRecipes();
+            if (cached?.data?.recipes) {
+                RECIPES = Object.assign({}, FALLBACK_RECIPES, cached.data.recipes);
+                LOG('recipes loaded from local cache:', Object.keys(RECIPES).length);
+                scheduleScan();
+                return;
+            }
+        }
+        try {
+            const data = await new Promise((resolve, reject) => {
+                if (typeof GM_xmlhttpRequest === 'function') {
+                    GM_xmlhttpRequest({
+                        method: 'GET', url: SERVER + '/api/arson/recipes',
+                        onload: r => { try { resolve(JSON.parse(r.responseText)); } catch (e) { reject(e); } },
+                        onerror: reject, timeout: 8000,
+                    });
+                } else {
+                    fetch(SERVER + '/api/arson/recipes').then(r => r.json()).then(resolve).catch(reject);
+                }
+            });
+            if (data?.recipes) {
+                RECIPES = Object.assign({}, FALLBACK_RECIPES, data.recipes);
+                try { localStorage.setItem('arsontest_recipes_cache', JSON.stringify({ data, cachedAt: Date.now() })); } catch (_) {}
+                LOG('recipes fetched from server:', Object.keys(RECIPES).length);
+                scheduleScan();
+            }
+        } catch (e) { WARN('recipe fetch failed (using fallback):', e?.message || e); }
+    }
+    async function postRecipe(key, recipe) {
+        const body = JSON.stringify(Object.assign({ key }, recipe));
+        return new Promise((resolve, reject) => {
+            if (typeof GM_xmlhttpRequest === 'function') {
+                GM_xmlhttpRequest({
+                    method: 'POST', url: SERVER + '/api/arson/recipes',
+                    headers: { 'Content-Type': 'application/json' }, data: body,
+                    onload: r => {
+                        try {
+                            const d = JSON.parse(r.responseText);
+                            r.status >= 200 && r.status < 300 ? resolve(d) : reject(new Error(d.error || ('HTTP ' + r.status)));
+                        } catch (e) { reject(e); }
+                    },
+                    onerror: () => reject(new Error('network')), timeout: 8000,
+                });
+            } else {
+                fetch(SERVER + '/api/arson/recipes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+                    .then(r => r.json().then(d => r.ok ? resolve(d) : reject(new Error(d.error || 'HTTP ' + r.status))))
+                    .catch(reject);
+            }
+        });
+    }
+    async function deleteRecipe(key) {
+        return new Promise((resolve, reject) => {
+            if (typeof GM_xmlhttpRequest === 'function') {
+                GM_xmlhttpRequest({
+                    method: 'DELETE', url: SERVER + '/api/arson/recipes/' + encodeURIComponent(key),
+                    onload: r => r.status >= 200 && r.status < 300 ? resolve() : reject(new Error('HTTP ' + r.status)),
+                    onerror: () => reject(new Error('network')), timeout: 8000,
+                });
+            } else {
+                fetch(SERVER + '/api/arson/recipes/' + encodeURIComponent(key), { method: 'DELETE' })
+                    .then(r => r.ok ? resolve() : reject(new Error('HTTP ' + r.status)))
+                    .catch(reject);
+            }
+        });
+    }
+
+    // === Recipe Editor UI ===
+    function openRecipeEditor() {
+        if (document.getElementById('arsontest-editor')) return;
+        const overlay = document.createElement('div');
+        overlay.id = 'arsontest-editor';
+        Object.assign(overlay.style, {
+            position: 'fixed', inset: '0', zIndex: '99998', background: 'rgba(0,0,0,0.7)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+        });
+        overlay.innerHTML = `
+            <div style="background:#1a1a1a;border:1px solid #444;border-radius:8px;padding:14px;color:#eee;font-family:sans-serif;font-size:12px;width:92vw;max-width:520px;max-height:88vh;display:flex;flex-direction:column;gap:10px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #333;padding-bottom:6px;">
+                    <span style="font-weight:600;color:#74c69d;font-size:13px;">Arson Recipes</span>
+                    <button id="arsontest-ed-close" style="background:none;border:0;color:#eee;font-size:18px;cursor:pointer;">✕</button>
+                </div>
+                <div id="arsontest-ed-list" style="overflow-y:auto;display:flex;flex-direction:column;gap:4px;max-height:40vh;font-family:monospace;font-size:11px;"></div>
+                <div style="border-top:1px solid #333;padding-top:8px;display:flex;flex-direction:column;gap:6px;">
+                    <span style="font-weight:600;color:#a78bfa;">Add / update</span>
+                    <input id="arsontest-ed-key" placeholder="scenario or action name (e.g. spirit level)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
+                    <input id="arsontest-ed-items" placeholder="items: gasoline:3 lighter:1" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
+                    <div style="display:flex;gap:6px;">
+                        <input id="arsontest-ed-payout" type="number" placeholder="payout (e.g. 280000)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;flex:1;">
+                        <input id="arsontest-ed-nerve" type="number" placeholder="nerve (optional)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;flex:1;">
+                    </div>
+                    <div style="display:flex;gap:6px;">
+                        <button id="arsontest-ed-save" style="background:#2d6a4f;color:#fff;border:0;border-radius:4px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer;flex:1;">Save</button>
+                        <button id="arsontest-ed-refresh" style="background:#374151;color:#fff;border:0;border-radius:4px;padding:6px 12px;font-size:11px;cursor:pointer;">Refresh</button>
+                    </div>
+                    <span id="arsontest-ed-status" style="color:#9ca3af;font-size:10px;min-height:14px;"></span>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        const status = (msg, color) => {
+            const s = overlay.querySelector('#arsontest-ed-status');
+            s.textContent = msg; s.style.color = color || '#9ca3af';
+        };
+        const renderList = () => {
+            const list = overlay.querySelector('#arsontest-ed-list');
+            const keys = Object.keys(RECIPES).sort();
+            if (!keys.length) { list.innerHTML = '<div style="color:#6b7280;">No recipes yet.</div>'; return; }
+            list.innerHTML = keys.map(k => {
+                const r = RECIPES[k];
+                const itemsStr = Object.entries(r.items).map(([n, q]) => q + ' ' + n).join(', ');
+                const nerveStr = r.nerve ? (' · ' + r.nerve + 'N') : '';
+                return `<div style="display:flex;justify-content:space-between;gap:6px;padding:3px 0;border-bottom:1px solid #2a2a2a;">
+                    <span style="color:#d1d5db;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${k}\n${itemsStr}\n$${r.payout.toLocaleString()}${nerveStr}">
+                        <b>${k}</b> · <span style="color:#9ca3af;">${itemsStr}</span> · <span style="color:#74c69d;">$${(r.payout/1000).toFixed(0)}K</span>${nerveStr}
+                    </span>
+                    <button class="arsontest-ed-edit" data-k="${k}" style="background:transparent;border:1px solid #444;color:#a78bfa;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">edit</button>
+                    <button class="arsontest-ed-del" data-k="${k}" style="background:transparent;border:1px solid #4a1a1a;color:#ef4444;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">del</button>
+                </div>`;
+            }).join('');
+            list.querySelectorAll('.arsontest-ed-edit').forEach(b => b.addEventListener('click', () => {
+                const k = b.dataset.k; const r = RECIPES[k];
+                overlay.querySelector('#arsontest-ed-key').value = k;
+                overlay.querySelector('#arsontest-ed-items').value = Object.entries(r.items).map(([n, q]) => n + ':' + q).join(' ');
+                overlay.querySelector('#arsontest-ed-payout').value = r.payout;
+                overlay.querySelector('#arsontest-ed-nerve').value = r.nerve || '';
+                status('Editing ' + k);
+            }));
+            list.querySelectorAll('.arsontest-ed-del').forEach(b => b.addEventListener('click', async () => {
+                const k = b.dataset.k;
+                if (!confirm('Delete recipe "' + k + '"?')) return;
+                try {
+                    await deleteRecipe(k);
+                    delete RECIPES[k];
+                    try { localStorage.removeItem('arsontest_recipes_cache'); } catch (_) {}
+                    status('Deleted ' + k, '#74c69d');
+                    renderList();
+                    scheduleScan();
+                } catch (e) { status('Delete failed: ' + e.message, '#ef4444'); }
+            }));
+        };
+        renderList();
+        overlay.querySelector('#arsontest-ed-close').addEventListener('click', () => overlay.remove());
+        overlay.querySelector('#arsontest-ed-refresh').addEventListener('click', async () => {
+            status('Fetching…');
+            try { localStorage.removeItem('arsontest_recipes_cache'); } catch (_) {}
+            await fetchRecipes(true);
+            renderList();
+            status('Refreshed (' + Object.keys(RECIPES).length + ' recipes)', '#74c69d');
+        });
+        overlay.querySelector('#arsontest-ed-save').addEventListener('click', async () => {
+            const key = overlay.querySelector('#arsontest-ed-key').value.trim().toLowerCase();
+            const itemsStr = overlay.querySelector('#arsontest-ed-items').value.trim();
+            const payout = Number(overlay.querySelector('#arsontest-ed-payout').value);
+            const nerve = Number(overlay.querySelector('#arsontest-ed-nerve').value);
+            if (!key) { status('Need a name', '#ef4444'); return; }
+            if (!Number.isFinite(payout) || payout <= 0) { status('Need a payout > 0', '#ef4444'); return; }
+            // Parse items: "gasoline:3 lighter:1" or "3 gasoline, 1 lighter"
+            const items = {};
+            const tokens = itemsStr.split(/[,\s]+/).filter(Boolean);
+            for (let i = 0; i < tokens.length; i++) {
+                const t = tokens[i];
+                if (t.includes(':')) {
+                    const [n, q] = t.split(':');
+                    const qty = Number(q);
+                    if (n && Number.isFinite(qty) && qty > 0) items[n.toLowerCase()] = qty;
+                } else if (/^\d+$/.test(t) && tokens[i+1]) {
+                    const qty = Number(t);
+                    const n = tokens[++i];
+                    if (n && qty > 0) items[n.toLowerCase()] = qty;
+                }
+            }
+            if (Object.keys(items).length === 0) { status('Need at least 1 item (e.g. gasoline:3)', '#ef4444'); return; }
+            const recipe = { items, payout };
+            if (Number.isFinite(nerve) && nerve > 0) recipe.nerve = nerve;
+            try {
+                await postRecipe(key, recipe);
+                RECIPES[key] = recipe;
+                try { localStorage.removeItem('arsontest_recipes_cache'); } catch (_) {}
+                status('Saved ' + key, '#74c69d');
+                renderList();
+                scheduleScan();
+            } catch (e) { status('Save failed: ' + e.message, '#ef4444'); }
+        });
+    }
+
+    function injectGearButton() {
+        if (document.getElementById('arsontest-gear')) return;
+        if (!document.body) { setTimeout(injectGearButton, 500); return; }
+        const btn = document.createElement('button');
+        btn.id = 'arsontest-gear';
+        btn.title = 'Edit arson recipes';
+        btn.textContent = '⚙';
+        Object.assign(btn.style, {
+            position: 'fixed', bottom: '20px', right: '20px', zIndex: '99997',
+            width: '40px', height: '40px', borderRadius: '50%',
+            background: '#2d6a4f', color: '#fff', border: '0',
+            fontSize: '20px', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+        });
+        btn.addEventListener('click', openRecipeEditor);
+        document.body.appendChild(btn);
+    }
+
     // === Init ===
     LOG('starting v' + VERSION);
+    fetchRecipes(); // pull latest from server, fallback to local cache, then to FALLBACK_RECIPES
     if (!getApiKey()) {
         // Wait for body before injecting prompt
         const t = setInterval(() => {
@@ -355,6 +583,7 @@
     } else {
         refreshItemPrices();
     }
+    setTimeout(injectGearButton, 500);
 
     // Re-scan on DOM mutations (Torn lazy-renders crime cards)
     const observer = new MutationObserver(() => scheduleScan());

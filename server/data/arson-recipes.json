@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "updatedAt": 1778873800000,
+  "recipes": {
+    "under the table": { "items": { "gasoline": 1, "lighter": 1, "methane": 2 }, "payout": 400000 },
+    "it's a write off":  { "items": { "gasoline": 2 }, "payout": 225000 },
+    "strike while it's hot": { "items": { "gasoline": 1, "lighter": 1, "methane": 1 }, "payout": 230000, "nerve": 20 },
+    "bright spark":      { "items": { "gasoline": 1, "lighter": 1, "methane": 1 }, "payout": 210000, "nerve": 20 },
+    "spirit level":      { "items": { "gasoline": 3 }, "payout": 280000 },
+    "wet behind the ears": { "items": { "kerosene": 1, "lighter": 1 }, "payout": 220000, "nerve": 15 },
+    "make a killing":    { "items": { "kerosene": 3 }, "payout": 360000, "nerve": 25 }
+  }
+}

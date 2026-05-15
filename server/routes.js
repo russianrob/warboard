@@ -8050,6 +8050,84 @@ router.post("/api/oc/live-success", express.json({ limit: '32kb' }), async (req,
   return res.json({ ok: true, recorded: added });
 });
 
+// =============================================================================
+// ARSON RECIPES — server-cached scenario recipes for arsontest.user.js
+// =============================================================================
+// OPEN ENDPOINTS (no API key auth) per user's explicit request — they don't
+// want their Torn API key to touch the warboard server for this feature.
+// Recipes are public game-data; trust-based read/write. If griefing becomes
+// an issue we can add a shared-secret header later.
+//
+// Storage: data/arson-recipes.json (loaded lazily, debounced save).
+// GET    /api/arson/recipes        → returns full table
+// POST   /api/arson/recipes        → upsert one  { key, items, payout, nerve? }
+// DELETE /api/arson/recipes/:key   → remove
+// =============================================================================
+const ARSON_RECIPES_FILE = pathJoin(OC_HISTORY_DIR, '..', 'arson-recipes.json');
+let _arsonRecipes = null;
+function loadArsonRecipes() {
+  if (_arsonRecipes) return _arsonRecipes;
+  try {
+    const raw = readFileSync(ARSON_RECIPES_FILE, 'utf-8');
+    _arsonRecipes = JSON.parse(raw);
+  } catch (_) {
+    _arsonRecipes = { version: 1, updatedAt: Date.now(), recipes: {} };
+  }
+  return _arsonRecipes;
+}
+let _arsonSaveTimer = null;
+function scheduleArsonSave() {
+  if (_arsonSaveTimer) return;
+  _arsonSaveTimer = setTimeout(() => {
+    _arsonSaveTimer = null;
+    try {
+      writeFileSync(ARSON_RECIPES_FILE, JSON.stringify(_arsonRecipes, null, 2));
+    } catch (e) { console.error('[arson-recipes] save error:', e.message); }
+  }, 1000);
+}
+
+router.get("/api/arson/recipes", async (req, res) => {
+  return res.json(loadArsonRecipes());
+});
+
+router.post("/api/arson/recipes", express.json({ limit: '8kb' }), async (req, res) => {
+  const body = req.body || {};
+  const key = String(body.key || '').toLowerCase().trim();
+  if (!key) return res.status(400).json({ error: "key required" });
+  if (!body.items || typeof body.items !== 'object') return res.status(400).json({ error: "items required (object: {name: qty})" });
+  const items = {};
+  for (const [n, q] of Object.entries(body.items)) {
+    const qty = Number(q);
+    const name = String(n || '').toLowerCase().trim();
+    if (!name || !Number.isFinite(qty) || qty <= 0) continue;
+    items[name] = Math.floor(qty);
+  }
+  if (Object.keys(items).length === 0) return res.status(400).json({ error: "no valid items" });
+  const payout = Number(body.payout);
+  if (!Number.isFinite(payout) || payout <= 0) return res.status(400).json({ error: "payout must be > 0" });
+  const recipe = { items, payout };
+  if (Number.isFinite(Number(body.nerve)) && Number(body.nerve) > 0) {
+    recipe.nerve = Math.floor(Number(body.nerve));
+  }
+  const data = loadArsonRecipes();
+  data.recipes[key] = recipe;
+  data.updatedAt = Date.now();
+  scheduleArsonSave();
+  console.log(`[arson-recipes] upsert '${key}'`);
+  return res.json({ ok: true, key, recipe });
+});
+
+router.delete("/api/arson/recipes/:key", async (req, res) => {
+  const key = String(req.params.key || '').toLowerCase().trim();
+  const data = loadArsonRecipes();
+  if (!data.recipes[key]) return res.status(404).json({ error: "recipe not found" });
+  delete data.recipes[key];
+  data.updatedAt = Date.now();
+  scheduleArsonSave();
+  console.log(`[arson-recipes] deleted '${key}'`);
+  return res.json({ ok: true });
+});
+
 router.post("/api/oc/missing-override", express.json({ limit: '4kb' }), async (req, res) => {
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
