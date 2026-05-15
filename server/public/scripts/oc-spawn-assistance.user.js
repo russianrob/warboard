@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.16
+// @version      3.2.17
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -268,7 +268,7 @@
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
     let _lastAvailableCrimes = [];   // v3.2.13: stash of last fetched crimes (with IDs + slot assignments) for live-success crimeId resolution
-    const SCRIPT_VERSION = '3.2.16';
+    const SCRIPT_VERSION = '3.2.17';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1758,9 +1758,18 @@
         try {
             const headers = document.querySelectorAll('[class*="slotHeader___"]');
             for (const header of headers) {
-                // Position from the title__ span inside the header
+                // Position from the title__ span inside the header.
+                // v3.2.17: strip '#N' suffix so 'Muscle #1', 'Muscle #2',
+                // 'Muscle #3' all key as 'muscle' — matches what the
+                // server-side slot-composition lookup uses (s.position
+                // is the bare label without numbering). Without this
+                // strip, multi-slot positions in crimes like Stage Fright
+                // (3× Muscle) had their successPct silently dropped as
+                // 'unmatched' because the (uid, 'muscle #1') key didn't
+                // match the server's (uid, 'muscle') composition entry.
                 const titleEl = header.querySelector('[class*="title___"]');
-                const position = titleEl?.textContent?.trim().toLowerCase() || '';
+                const positionRaw = titleEl?.textContent?.trim().toLowerCase() || '';
+                const position = positionRaw.replace(/\s*#\d+$/, '');
                 // Success chance from the successChance__ child
                 const scEl = header.querySelector('[class*="successChance___"]');
                 const scText = scEl?.textContent?.trim() || '';
