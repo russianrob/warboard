@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.5.4
+// @version      0.5.5
 // @description  Tiny hand-curated scenario recipes for Arson — a sandbox the user can iterate on without touching the working 'arson-bang-for-buck' fork. Computes profit/nerve from the recipe + cached item market prices and badges each option on the crimes page.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -40,7 +40,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.5.4';
+    const VERSION = '0.5.5';
 
     // === SCENARIO RECIPES (sandbox — only what the user has confirmed) ===
     // Format: scenarioOrAction → { items: { itemNameLower: qty }, payout: dollars, nerve: optional }
@@ -80,13 +80,16 @@
             items: { 'gasoline': 3 },
             payout: 280_000,
         },
-        // Apartment → Wet Behind the Ears. 2 gas + 1 lighter, 20 N.
-        // Confirmed by user attempt log: $220K payout, $1,132 item cost,
-        // $10,943/N profit.
+        // Apartment → Wet Behind the Ears. v0.5.5: switched to the
+        // kerosene variant (blue container in Torn's UI) at 15 N — user
+        // confirmed this is the recipe they actually run. Cost ~$11,975
+        // (1 kero + 1 lighter); typical payout $200K-$250K; representative
+        // $220K → $13,868/N. Higher per-attempt cost than the gas variant
+        // but lower nerve and higher profit/N when payout rolls high.
         "wet behind the ears": {
-            items: { 'gasoline': 2, 'lighter': 1 },
+            items: { 'kerosene': 1, 'lighter': 1 },
             payout: 220_000,
-            nerve: 20,
+            nerve: 15,
         },
     };
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
