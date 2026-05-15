@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Auto-Extract (test)
 // @namespace    tornwar.com
-// @version      0.2.0
+// @version      0.3.0
 // @description  Auto-extract per-action profit/nerve on the crimes page — no hardcoded scenario list. Reads payout + item requirements straight from the live DOM so it works on any scenario Torn adds (Restaurant, Aircraft Hangar, etc.) without manual maintenance. Experimental fork of 'Arson bang for buck'.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -39,7 +39,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.2.0';
+    const VERSION = '0.3.0';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
 
@@ -205,7 +205,12 @@
     }
 
     function scan() {
-        const options = document.querySelectorAll('[class*="crimeOptionSection___"]');
+        // v0.3: crimeOptionSection___ is just the title strip (text was
+        // 'ShackSmoke Out' — scenario name + action name only). The
+        // payout + item requirements live in the parent wrapper. Try
+        // the wrapper first; fall back to the section.
+        let options = document.querySelectorAll('[class*="crimeOptionWrapper___"]');
+        if (!options.length) options = document.querySelectorAll('[class*="crimeOptionSection___"]');
         if (!options.length) return;
         let decorated = 0, skipped = 0;
         for (const el of options) {
@@ -217,26 +222,30 @@
         }
         LOG('scan: decorated=' + decorated + ' skipped=' + skipped);
 
-        // v0.2 diagnostic: when nothing decorated, dump the first option
-        // so we can see what's actually in the DOM. One-shot per page load.
+        // v0.3 diagnostic: when nothing decorated, dump the first option
+        // PLUS its parent chain so we can find where payout + items live.
         if (decorated === 0 && skipped > 0 && !window.__arsontest_dumped) {
             window.__arsontest_dumped = true;
             const first = options[0];
             const text = (first.textContent || '').replace(/\s+/g, ' ').trim();
             console.group('[arsontest] DIAGNOSTIC — first option failed to parse');
+            console.log('selector used:', options[0]?.className || '(none)');
             console.log('text (first 500 chars):', text.slice(0, 500));
             console.log('payout regex match:', text.match(/Payout:\s*\$?([\d.,]+)\s*([KMB]?)/i));
             console.log('nerve regex match:', text.match(/Nerve:\s*(\d+)/i));
+            // Walk PARENTS — text content gets richer the higher we go.
+            console.group('parent chain (each row: classes · textContent length · text preview):');
+            let p = first.parentElement;
+            for (let i = 0; i < 6 && p; i++) {
+                const ptxt = (p.textContent || '').replace(/\s+/g, ' ').trim();
+                const cls = (p.className && typeof p.className === 'string')
+                    ? p.className.split(' ').filter(c => c.includes('___')).join(', ')
+                    : '';
+                console.log(`L${i+1}:`, cls || '(no hashed class)', '·', ptxt.length, 'chars ·', ptxt.slice(0, 120));
+                p = p.parentElement;
+            }
+            console.groupEnd();
             console.log('outerHTML (first 1500):', first.outerHTML.slice(0, 1500));
-            const childClasses = [];
-            first.querySelectorAll('*').forEach(n => {
-                if (n.className && typeof n.className === 'string') {
-                    const cls = n.className.split(' ').find(c => c.includes('___'));
-                    if (cls && !childClasses.includes(cls)) childClasses.push(cls);
-                }
-            });
-            console.log('hashed child classes (first 20):', childClasses.slice(0, 20));
-            console.log('item names cached (first 10):', Object.keys(itemValues).slice(0, 10));
             console.log('item count cached:', Object.keys(itemValues).length);
             console.groupEnd();
         }

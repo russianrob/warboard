@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Auto-Extract (test)
 // @namespace    tornwar.com
-// @version      0.2.0
+// @version      0.3.0
 // @description  Auto-extract per-action profit/nerve on the crimes page — no hardcoded scenario list. Reads payout + item requirements straight from the live DOM so it works on any scenario Torn adds (Restaurant, Aircraft Hangar, etc.) without manual maintenance. Experimental fork of 'Arson bang for buck'.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
