@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn: Hide Crimes 2.0 Stories (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.2-wb1
+// @version      1.2-wb2
 // @description  Hides the narrative stories from the crime initiation interface. Fork of ReconDalek's v1.2 with hash-agnostic selectors so it survives Torn frontend rebundles.
 // @author       ReconDalek [2741093] (fork by RussianRob)
 // @match        https://www.torn.com/loader.php?sid=crimes*
@@ -15,6 +15,13 @@
 // =============================================================================
 // CHANGELOG (tornwar fork)
 // =============================================================================
+// 1.2-wb2 — Fix the known 'empty space remains' issue. Inject CSS rule
+//           that collapses story___, storyHeader___, storyWrap___,
+//           storyContainer___ to display:none + zero height/margin/padding
+//           so fixed-height parents collapse too. JS observer also walks
+//           up one level to hide the wrapper if it's now empty after
+//           removing the story. CSS wins instantly; JS cleans up edge
+//           cases. Same hash-agnostic pattern as wb1.
 // 1.2-wb1 — Replaced literal `.story___GmRvQ` (which broke the next time
 //           Torn rebundled and regenerated CSS-module hashes) with a
 //           hash-agnostic check: any class starting with `story___`.
@@ -25,24 +32,55 @@
 (function () {
     'use strict';
 
-    // Function to immediately remove story elements
+    // wb2: Inject CSS first so story elements collapse to zero size even
+    // before the JS observer fires. The literal node.remove() in the
+    // upstream left a gap when the parent had fixed height / padding —
+    // upstream author's known issue. CSS rule with !important wins
+    // against any inline styling Torn might set.
+    const css = `
+        [class*="story___"],
+        [class*="storyHeader___"],
+        [class*="storyWrap___"],
+        [class*="storyContainer___"] {
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: 0 !important;
+        }
+    `;
+    const styleEl = document.createElement('style');
+    styleEl.id = 'tornwar-hide-stories-css';
+    styleEl.textContent = css;
+    (document.head || document.documentElement).appendChild(styleEl);
+
+    // JS belt-and-braces: also REMOVE story nodes (in case CSS isn't
+    // enough) and walk up one level to collapse a wrapper whose only
+    // child was the story (catches anonymous flex/grid wrappers that
+    // would otherwise still reserve space).
     function removeStory(node) {
         if (node.nodeType !== Node.ELEMENT_NODE) return;
-        // Hash-agnostic match: catches story___GmRvQ, story___ABCDE, or
-        // whatever Torn regenerates next bundle.
         const hasStoryClass = node.className
             && typeof node.className === 'string'
             && node.className.split(' ').some(c => c.startsWith('story___'));
-        if (hasStoryClass) { node.remove(); return; }
-        // Also check descendants in case the added node contains stories.
+        if (hasStoryClass) {
+            const parent = node.parentElement;
+            node.remove();
+            // If the parent now has no element children, collapse it too —
+            // it was likely a wrapper that only existed to hold the story.
+            if (parent && parent !== document.body && parent.children.length === 0) {
+                parent.style.cssText += 'display:none !important;height:0 !important;margin:0 !important;padding:0 !important;';
+            }
+            return;
+        }
         node.querySelectorAll && node.querySelectorAll('[class*="story___"]')
-            .forEach(el => el.remove());
+            .forEach(el => removeStory(el));
     }
 
     // Initial removal in case some already exist.
     removeStory(document);
 
-    // Use MutationObserver to intercept new nodes before they render.
     const observer = new MutationObserver(mutations => {
         for (const mutation of mutations) {
             for (const node of mutation.addedNodes) {
@@ -50,7 +88,6 @@
             }
         }
     });
-
     observer.observe(document.body, {
         childList: true,
         subtree: true,
