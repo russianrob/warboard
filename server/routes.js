@@ -7946,13 +7946,22 @@ router.post("/api/war/:warId/payout-settings", express.json({ limit: '4kb' }), a
 // per visit) and entries TTL 30 min server-side.
 router.post("/api/oc/live-success", express.json({ limit: '32kb' }), async (req, res) => {
   const ctx = await resolveVaultCaller(req, res);
-  if (!ctx) return;
+  if (!ctx) {
+    // Don't log here — resolveVaultCaller already wrote a response.
+    // Log a marker so we can tell auth-rejected calls apart from no-traffic.
+    console.log('[oc-live-success] auth rejected (no ctx)');
+    return;
+  }
   const { info } = ctx;
   const body = req.body || {};
   const crimeId = body.crimeId;
   const slots = Array.isArray(body.slots) ? body.slots : null;
-  if (!crimeId || !slots) return res.status(400).json({ error: "crimeId + slots required" });
+  if (!crimeId || !slots) {
+    console.log(`[oc-live-success] bad body from ${info.playerName} (fid ${info.factionId}): crimeId=${crimeId}, slots=${slots ? slots.length : 'null'}`);
+    return res.status(400).json({ error: "crimeId + slots required" });
+  }
   const added = recordLiveSuccess(info.factionId, crimeId, slots);
+  console.log(`[oc-live-success] +${added} from ${info.playerName} fid=${info.factionId} crime=${crimeId} (${slots.length} sent)`);
   return res.json({ ok: true, recorded: added });
 });
 

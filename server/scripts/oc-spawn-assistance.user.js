@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.11
+// @version      3.2.12
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -267,7 +267,7 @@
     let _lastHitRates = {};          // v3.1.38: per-scenario empirical top-tier hit rates
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
-    const SCRIPT_VERSION = '3.2.11';
+    const SCRIPT_VERSION = '3.2.12';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -1821,34 +1821,51 @@
     function pushLiveSuccessChances() {
         if (Date.now() - _liveSuccessLastPost < 30_000) return;
         const scraped = mgr_scrapeSlotSuccessChance();
+        // v3.2.12: diagnostic — surface why the live-success POST might
+        // not be flowing. Browser console will show one line per tick;
+        // helps isolate 'no crimeId on slots' vs 'no DOM scrape at all'.
+        console.log('[OC live-success] scraped slots:', scraped.size,
+            scraped.size > 0 ? '(sample crimeId:' + (Array.from(scraped.values())[0]?.crimeId || 'NULL') + ')' : '');
         if (!scraped.size) return;
         const apiKey = getApiKey();
-        if (!apiKey) return;
+        if (!apiKey) { console.log('[OC live-success] no api key'); return; }
         // Group by crime ID — server endpoint expects one crime per POST.
         const byCrime = new Map();
+        let droppedNoCrime = 0;
         for (const [key, val] of scraped) {
-            if (!val.crimeId || !Number.isFinite(val.successPct)) continue;
+            if (!val.crimeId || !Number.isFinite(val.successPct)) { droppedNoCrime++; continue; }
             const [userID, position] = key.split(':');
             const list = byCrime.get(val.crimeId) || [];
             list.push({ uid: userID, position, successPct: val.successPct });
             byCrime.set(val.crimeId, list);
         }
-        if (!byCrime.size) return;
+        if (!byCrime.size) {
+            console.log('[OC live-success] no crime IDs found on any slot — dropped', droppedNoCrime, 'slot(s). Slot wrapper DOM walk did not find a crimeId href; expand a crime first or open it via deep link.');
+            return;
+        }
         _liveSuccessLastPost = Date.now();
         const post = (crimeId, slots) => {
             const url = `${CONFIG.SERVER_URL}/api/oc/live-success?key=${encodeURIComponent(apiKey)}`;
             const body = JSON.stringify({ crimeId, slots });
+            const onload = (res) => {
+                console.log('[OC live-success] POST crime=' + crimeId + ' slots=' + slots.length + ' → status=' + (res?.status ?? '?'));
+            };
+            const onerror = (err) => {
+                console.warn('[OC live-success] POST failed:', err?.error || err);
+            };
             try {
                 if (typeof GM_xmlhttpRequest === 'function') {
                     GM_xmlhttpRequest({
                         method: 'POST', url, data: body,
                         headers: { 'Content-Type': 'application/json' },
-                        onload: () => {}, onerror: () => {}, timeout: 8000,
+                        onload, onerror, timeout: 8000,
                     });
                 } else {
-                    fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }).catch(() => {});
+                    fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+                        .then(r => onload({ status: r.status }))
+                        .catch(onerror);
                 }
-            } catch (_) {}
+            } catch (e) { onerror(e); }
         };
         for (const [crimeId, slots] of byCrime) post(crimeId, slots);
     }
