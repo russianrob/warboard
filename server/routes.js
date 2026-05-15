@@ -4881,17 +4881,44 @@ async function runFailureRisk(factionId, data) {
           ? pHist.succeeded / (pHist.succeeded + pHist.failed)
           : null;
 
-      // No CPR data → neutral 50% (uses position-wide history if we have
-      // it, else the bare 50%). Members at or above 60% CPR are
-      // near-certain success; only below 60% is real risk.
+      // v3.2.20: per-checkpoint history product. cprCache[uid].byCheckpoint
+      // holds entries like 'CrimeName::Role::Cn' → { pass, fail, rate }
+      // built from completed-crime checkpoint outcomes. Multiplying the
+      // pass rates across all checkpoints for this exact OC+role gives
+      // the member's actual historical 'all checkpoints clear' rate.
+      let cpHistProb = null;
+      let cpHistSamples = 0;
+      if (cpr?.byCheckpoint) {
+        const prefix = `${crime.name}::${posBase}::C`;
+        const cps = [];
+        for (const [k, v] of Object.entries(cpr.byCheckpoint)) {
+          if (!k.startsWith(prefix)) continue;
+          const total = (v.pass || 0) + (v.fail || 0);
+          if (total === 0) continue;
+          cps.push({ rate: (v.rate || 0) / 100, samples: total });
+        }
+        if (cps.length > 0) {
+          // Use MIN sample count across checkpoints — the slot is only
+          // as confident as the weakest checkpoint sample.
+          cpHistSamples = Math.min(...cps.map(c => c.samples));
+          // Product of per-checkpoint pass rates = expected slot success.
+          cpHistProb = cps.reduce((acc, c) => acc * c.rate, 1);
+        }
+      }
+
+      // Success-probability ladder:
+      //   1) Live Torn % (DOM scrape — most accurate for THIS slot)
+      //   2) Per-checkpoint history product (≥5 samples)
+      //   3) CPR estimate (current fallback)
+      //   4) Neutral 0.5 (no data at all)
       let effectiveSuccessProb;
       let successSource = 'cpr';
       if (liveSuc) {
-        // v3.2.11: Torn-rendered live success — use directly, skip
-        // CPR/history blending entirely. This is the authoritative
-        // number for the CURRENT slot assignment.
         effectiveSuccessProb = Math.max(0, Math.min(1, liveSuc.successPct / 100));
         successSource = 'live';
+      } else if (cpHistProb != null && cpHistSamples >= 5) {
+        effectiveSuccessProb = cpHistProb;
+        successSource = 'checkpoint-history';
       } else if (!hasCprData) {
         effectiveSuccessProb = histSuccessRate !== null ? histSuccessRate : 0.5;
         successSource = histSuccessRate !== null ? 'history' : 'neutral';
