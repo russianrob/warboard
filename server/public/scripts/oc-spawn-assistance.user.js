@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.14
+// @version      3.2.16
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -268,7 +268,7 @@
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
     let _lastAvailableCrimes = [];   // v3.2.13: stash of last fetched crimes (with IDs + slot assignments) for live-success crimeId resolution
-    const SCRIPT_VERSION = '3.2.14';
+    const SCRIPT_VERSION = '3.2.16';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
@@ -4114,10 +4114,15 @@
             html += `<span style="color:${riskColor};font-weight:700;font-size:11px;">${c.failureRisk}% ${riskLabel}</span>`;
             html += `</div>`;
             html += `<div style="font-size:10px;color:#9ca3af;margin-bottom:4px;">${c.filledSlots}/${c.totalSlots} slots filled${c.emptySlots > 0 ? ` \u2014 <span style="color:#e5b567;">${c.emptySlots} empty</span>` : ''}</div>`;
-            // Danger slots: high weight + low CPR
+            // Danger slots: high weight + low success chance.
+            // v3.2.16: show the ACTUAL success% Torn would award (live
+            // when available, CPR-derived otherwise) — was previously
+            // showing raw CPR which didn't match Torn's number.
             if (c.dangerSlots && c.dangerSlots.length > 0) {
                 for (const d of c.dangerSlots) {
-                    html += `<div style="font-size:10px;color:#ef4444;padding:2px 0;">\u{1f6a8} <b>${d.name}</b> — ${d.position} (${d.cpr.toFixed(0)}% CPR, ${d.weight.toFixed(0)}% weight)</div>`;
+                    const pct = d.successPct != null ? d.successPct : Math.round(d.cpr || 0);
+                    const liveBadge = d.successSource === 'live' ? ' <span style="color:#74c69d;font-size:9px;">●live</span>' : '';
+                    html += `<div style="font-size:10px;color:#ef4444;padding:2px 0;">\u{1f6a8} <b>${d.name}</b> — ${d.position} (${pct}%${liveBadge}, ${d.weight.toFixed(0)}% weight)</div>`;
                 }
             }
             // Weakest link (if no danger slots, show weakest). New members
@@ -4125,8 +4130,15 @@
             // misleading "0% CPR" — they're an unknown, not a known weak link.
             if ((!c.dangerSlots || c.dangerSlots.length === 0) && c.weakestLink) {
                 const w = c.weakestLink;
-                const cprLabel = w.isNewMember ? 'new member' : `${w.cpr.toFixed(0)}% CPR`;
-                html += `<div style="font-size:10px;color:#e5b567;padding:2px 0;">Weakest: <b>${w.name}</b> — ${w.position} (${cprLabel}, ${w.weight.toFixed(0)}% weight)</div>`;
+                let pctLabel;
+                if (w.isNewMember) {
+                    pctLabel = 'new member';
+                } else {
+                    const pct = w.successPct != null ? w.successPct : Math.round(w.cpr || 0);
+                    const liveBadge = w.successSource === 'live' ? ' <span style="color:#74c69d;font-size:9px;">●live</span>' : '';
+                    pctLabel = `${pct}% chance${liveBadge}`;
+                }
+                html += `<div style="font-size:10px;color:#e5b567;padding:2px 0;">Weakest: <b>${w.name}</b> — ${w.position} (${pctLabel}, ${w.weight.toFixed(0)}% weight)</div>`;
             }
             html += `</div>`;
         }

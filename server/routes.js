@@ -4946,8 +4946,17 @@ function runFailureRisk(factionId, data) {
         name: weakestLink.name, position: weakestLink.position,
         cpr: weakestLink.cpr, weight: weakestLink.weight,
         isNewMember: !!weakestLink.isNewMember,
+        // v3.2.16: include successProb + source so UI can show the
+        // ACTUAL chance Torn would award (live or computed) instead of
+        // just the underlying CPR cache value.
+        successPct: Math.round((weakestLink.successProb || 0) * 100),
+        successSource: weakestLink.successSource,
       } : null,
-      dangerSlots: dangerSlots.map(s => ({ name: s.name, position: s.position, cpr: s.cpr, weight: s.weight })),
+      dangerSlots: dangerSlots.map(s => ({
+        name: s.name, position: s.position, cpr: s.cpr, weight: s.weight,
+        successPct: Math.round((s.successProb || 0) * 100),
+        successSource: s.successSource,
+      })),
       slotRisks,
       // Count of new members in this OC — useful for the UI to show
       // "+N new" when failure-risk is artificially uncertain.
