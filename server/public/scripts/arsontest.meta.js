@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Arson Auto-Extract (test)
+// @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.4.0
-// @description  Auto-extract per-action profit/nerve on the crimes page — no hardcoded scenario list. Reads payout + item requirements straight from the live DOM so it works on any scenario Torn adds (Restaurant, Aircraft Hangar, etc.) without manual maintenance. Experimental fork of 'Arson bang for buck'.
+// @version      0.5.0
+// @description  Tiny hand-curated scenario recipes for Arson — a sandbox the user can iterate on without touching the working 'arson-bang-for-buck' fork. Computes profit/nerve from the recipe + cached item market prices and badges each option on the crimes page.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com

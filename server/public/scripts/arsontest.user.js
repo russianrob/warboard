@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Arson Auto-Extract (test)
+// @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.4.0
-// @description  Auto-extract per-action profit/nerve on the crimes page — no hardcoded scenario list. Reads payout + item requirements straight from the live DOM so it works on any scenario Torn adds (Restaurant, Aircraft Hangar, etc.) without manual maintenance. Experimental fork of 'Arson bang for buck'.
+// @version      0.5.0
+// @description  Tiny hand-curated scenario recipes for Arson — a sandbox the user can iterate on without touching the working 'arson-bang-for-buck' fork. Computes profit/nerve from the recipe + cached item market prices and badges each option on the crimes page.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
@@ -40,7 +40,20 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.4.0';
+    const VERSION = '0.5.0';
+
+    // === SCENARIO RECIPES (sandbox — only what the user has confirmed) ===
+    // Format: scenarioOrAction → { items: { itemNameLower: qty }, payout: dollars, nerve: optional }
+    // Match key is normalized: lowercase + trimmed. Auto-extract fallback
+    // (commented-out below) gave up — Torn doesn't expose payout/items
+    // anywhere we can scrape. Keeping this small and admin-curated.
+    const RECIPES = {
+        'under the table': {
+            items: { 'gasoline': 1, 'lighter': 1, 'methane': 2 },
+            payout: 400_000,
+            // nerve omitted → use heuristic 10 + 5×items below
+        },
+    };
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
 
@@ -111,7 +124,32 @@
         } catch (e) { WARN('item price fetch failed', e); }
     }
 
-    // === DOM Extract ===
+    // === Recipe lookup ===
+    // Match an option by its title text against the RECIPES table.
+    // The text is the option's titleSection (e.g. 'ShackUnder the Table'
+    // or 'Law FirmUnder the Table' — scenario name + action name
+    // concatenated by Torn's React render).
+    function lookupRecipe(titleText) {
+        const t = String(titleText || '').toLowerCase();
+        for (const key of Object.keys(RECIPES)) {
+            if (t.includes(key)) return RECIPES[key];
+        }
+        return null;
+    }
+
+    function infoFromRecipe(recipe) {
+        const items = Object.entries(recipe.items).map(([name, qty]) => ({ name, qty }));
+        const itemCost = items.reduce((s, i) => s + (itemValues[i.name] || 0) * i.qty, 0);
+        const totalQty = items.reduce((s, i) => s + i.qty, 0);
+        const nerve = recipe.nerve || (10 + totalQty * 5);
+        const profit = recipe.payout - itemCost;
+        return {
+            payout: recipe.payout, nerve, items, itemCost, profit,
+            profitPerNerve: nerve > 0 ? profit / nerve : 0,
+        };
+    }
+
+    // === DOM Extract (legacy auto-extract — kept disabled; recipe lookup wins) ===
     // Pull payout, nerve, and items from a single action-option container.
     function parseActionOption(el) {
         const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
@@ -206,50 +244,24 @@
     }
 
     function scan() {
-        // v0.3: crimeOptionSection___ is just the title strip (text was
-        // 'ShackSmoke Out' — scenario name + action name only). The
-        // payout + item requirements live in the parent wrapper. Try
-        // the wrapper first; fall back to the section.
-        let options = document.querySelectorAll('[class*="crimeOptionWrapper___"]');
-        if (!options.length) options = document.querySelectorAll('[class*="crimeOptionSection___"]');
+        // v0.5: each option is a crimeOptionSection___ (title strip only —
+        // payout/items aren't in the DOM). Match its visible text against
+        // the RECIPES table; ignore options we have no recipe for.
+        const options = document.querySelectorAll('[class*="crimeOptionSection___"]');
         if (!options.length) return;
-        let decorated = 0, skipped = 0;
+        let decorated = 0, noRecipe = 0;
         for (const el of options) {
             try {
-                const info = parseActionOption(el);
-                if (info) { decorate(el, info); decorated++; }
-                else skipped++;
-            } catch (e) { WARN('parse failed for option', e); skipped++; }
+                const text = (el.textContent || '').trim();
+                const recipe = lookupRecipe(text);
+                if (!recipe) { noRecipe++; continue; }
+                const info = infoFromRecipe(recipe);
+                decorate(el, info);
+                decorated++;
+            } catch (e) { WARN('decorate failed', e); }
         }
-        LOG('scan: decorated=' + decorated + ' skipped=' + skipped);
+        LOG('scan: decorated=' + decorated + ' (no-recipe=' + noRecipe + ')');
 
-        // v0.3 diagnostic: when nothing decorated, dump the first option
-        // PLUS its parent chain so we can find where payout + items live.
-        if (decorated === 0 && skipped > 0 && !window.__arsontest_dumped) {
-            window.__arsontest_dumped = true;
-            const first = options[0];
-            const text = (first.textContent || '').replace(/\s+/g, ' ').trim();
-            console.group('[arsontest] DIAGNOSTIC — first option failed to parse');
-            console.log('selector used:', options[0]?.className || '(none)');
-            console.log('text (first 500 chars):', text.slice(0, 500));
-            console.log('payout regex match:', text.match(/Payout:\s*\$?([\d.,]+)\s*([KMB]?)/i));
-            console.log('nerve regex match:', text.match(/Nerve:\s*(\d+)/i));
-            // Walk PARENTS — text content gets richer the higher we go.
-            console.group('parent chain (each row: classes · textContent length · text preview):');
-            let p = first.parentElement;
-            for (let i = 0; i < 6 && p; i++) {
-                const ptxt = (p.textContent || '').replace(/\s+/g, ' ').trim();
-                const cls = (p.className && typeof p.className === 'string')
-                    ? p.className.split(' ').filter(c => c.includes('___')).join(', ')
-                    : '';
-                console.log(`L${i+1}:`, cls || '(no hashed class)', '·', ptxt.length, 'chars ·', ptxt.slice(0, 120));
-                p = p.parentElement;
-            }
-            console.groupEnd();
-            console.log('outerHTML (first 1500):', first.outerHTML.slice(0, 1500));
-            console.log('item count cached:', Object.keys(itemValues).length);
-            console.groupEnd();
-        }
     }
 
     // === v0.4 probe: dump unsafeWindow.torn keys looking for crime data ===
