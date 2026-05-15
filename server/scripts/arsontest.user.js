@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.5.3
+// @version      0.5.4
 // @description  Tiny hand-curated scenario recipes for Arson — a sandbox the user can iterate on without touching the working 'arson-bang-for-buck' fork. Computes profit/nerve from the recipe + cached item market prices and badges each option on the crimes page.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -40,7 +40,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.5.3';
+    const VERSION = '0.5.4';
 
     // === SCENARIO RECIPES (sandbox — only what the user has confirmed) ===
     // Format: scenarioOrAction → { items: { itemNameLower: qty }, payout: dollars, nerve: optional }
@@ -79,6 +79,14 @@
         "spirit level": {
             items: { 'gasoline': 3 },
             payout: 280_000,
+        },
+        // Apartment → Wet Behind the Ears. 2 gas + 1 lighter, 20 N.
+        // Confirmed by user attempt log: $220K payout, $1,132 item cost,
+        // $10,943/N profit.
+        "wet behind the ears": {
+            items: { 'gasoline': 2, 'lighter': 1 },
+            payout: 220_000,
+            nerve: 20,
         },
     };
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
