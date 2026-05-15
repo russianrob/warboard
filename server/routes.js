@@ -4025,16 +4025,27 @@ function recordLiveSuccess(fid, crimeId, slots) {
   if (!fMap.has(c)) fMap.set(c, new Map());
   const sMap = fMap.get(c);
   const now = Date.now();
-  let added = 0;
+  let added = 0, changed = 0;
   for (const slot of (slots || [])) {
     const uid = String(slot.uid || slot.userID || '');
     const pos = String(slot.position || '').toLowerCase();
     const pct = Number(slot.successPct);
     if (!uid || !pos || !Number.isFinite(pct)) continue;
-    sMap.set(`${uid}::${pos}`, { successPct: pct, observedAt: now });
+    const key = `${uid}::${pos}`;
+    const prev = sMap.get(key);
+    if (!prev || prev.successPct !== pct) changed++;
+    sMap.set(key, { successPct: pct, observedAt: now });
     added++;
   }
   if (added) scheduleLiveSuccessSave();
+  // v3.2.15: invalidate the engine cache for this faction when any
+  // observation actually changed a value — the failure-risk engine
+  // is cached for 1h and would otherwise serve stale CPR-derived
+  // numbers indefinitely. Clearing it forces the next /api/oc/spawn-key
+  // call to recompute with the fresh live-success data.
+  if (changed && _engineCache.has(f)) {
+    _engineCache.delete(f);
+  }
   return added;
 }
 function getLiveSuccess(fid, crimeId, uid, position) {
