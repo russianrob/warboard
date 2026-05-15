@@ -4920,6 +4920,11 @@ async function runFailureRisk(factionId, data) {
         // UI can show 'live' vs 'estimated' badges.
         successSource,
         liveAge: liveSuc ? Math.round((Date.now() - liveSuc.observedAt) / 1000) : null,
+        // v3.2.19: confidence count from per-checkpoint history (min
+        // samples across all checkpoints for this OC+role for this
+        // member). UI can show '★ 32 samples' to indicate trust.
+        cpHistSamples,
+        cpHistProbPct: cpHistProb != null ? Math.round(cpHistProb * 100) : null,
       });
     }
 
@@ -4975,11 +4980,13 @@ async function runFailureRisk(factionId, data) {
         // just the underlying CPR cache value.
         successPct: Math.round((weakestLink.successProb || 0) * 100),
         successSource: weakestLink.successSource,
+        cpHistSamples: weakestLink.cpHistSamples || 0,
       } : null,
       dangerSlots: dangerSlots.map(s => ({
         name: s.name, position: s.position, cpr: s.cpr, weight: s.weight,
         successPct: Math.round((s.successProb || 0) * 100),
         successSource: s.successSource,
+        cpHistSamples: s.cpHistSamples || 0,
       })),
       slotRisks,
       // Count of new members in this OC — useful for the UI to show
