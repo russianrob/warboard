@@ -100,10 +100,14 @@ app.use(helmet({
 // Strict limit on auth endpoint — prevents API key brute-force and Torn API flooding
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  // Bumped from 20 → 60. A legitimate user with multiple tabs / script
-  // versions open can easily burn through 20 on a pm2 restart (every tab
-  // re-auths). 60/15min still caps brute-force attempts at 4/min average.
-  max: 60,
+  // 2026-05-16: bumped 60 → 200. The APK + PDA + desktop browser
+  // all on the same home IP combine to easily exceed 60/15min — every
+  // SSE reconnect, every pm2 reload, every tab switch can trigger a
+  // re-auth. User reported APK error 'Couldn't authenticate, too many
+  // auth attempts'. 200/15min still caps brute-force at ~13/min
+  // average — far below any practical attack rate, and the per-IP
+  // bucket means one home network can't take down anyone else.
+  max: 200,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many auth attempts, try again in a few minutes' },
