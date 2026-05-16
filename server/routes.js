@@ -8049,8 +8049,8 @@ router.get("/admin/payouts", (req, res) => {
     <div>
       <label>Mode</label><br>
       <select id="mode-pick">
-        <option value="dynamic">dynamic (member×fight)</option>
-        <option value="static">static (flat per-fight)</option>
+        <option value="dynamic">ffwar (member×fight)</option>
+        <option value="static">termwar (flat per-fight)</option>
       </select>
     </div>
     <div>
