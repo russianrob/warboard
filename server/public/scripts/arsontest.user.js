@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.15
+// @version      0.8.16
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,16 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.16 — User: 'on some locations i cant click to get scenario because
+//          theres no rdcipe like church snd waste facility'. arson-bang-
+//          for-buck only creates a tooltip for scenarios in its hardcoded
+//          `scenarios` table. Church/Waste Facility scenarios aren't in
+//          it, so no .custom-tooltip ever appears, and v0.8.15's header
+//          prepender has nothing to attach to.
+//          Fallback: 150ms after the card click, if no .custom-tooltip
+//          is visible, show our own popup with the scenario name. Skip
+//          button taps (Ignite/Collect/etc) using the same exclusion
+//          list arson-bang-for-buck uses.
 // 0.8.15 — User: 'same shows receipe tooltip on image click'. v0.8.14's
 //          capture-phase img-target delegate still wasn't firing — likely
 //          because the user's tap target isn't an <img> element (Torn
@@ -197,7 +207,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.15';
+    const VERSION = '0.8.16';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -679,8 +689,33 @@
     function installCardClickTracker() {
         document.addEventListener('click', (e) => {
             try {
+                // Ignore taps on interactive elements (commit/collect buttons,
+                // inputs, links). Match arson-bang-for-buck's exclusion list.
+                if (e.target.closest && e.target.closest('button, a, input, select, textarea, [role="button"]')) return;
                 const card = e.target.closest && e.target.closest('[class*="sections___"]');
-                if (card) _lastClickedCard = card;
+                if (!card) return;
+                _lastClickedCard = card;
+                // Fallback: 150ms after the click, if no .custom-tooltip
+                // became visible (i.e. arson-bang-for-buck doesn't have
+                // this scenario in its table — e.g. Church, Waste
+                // Facility), show our own popup with just the scenario
+                // name. Skip if our own popup is already up.
+                setTimeout(() => {
+                    const visible = document.querySelector('.custom-tooltip[style*="display: flex"]');
+                    if (visible) return; // arson-bang-for-buck handled it
+                    if (document.querySelector('.arsontest-action-popup')) return;
+                    const wrapper = card.querySelector('[class*="titleAndScenario___"]');
+                    if (!wrapper) return;
+                    const actionDiv = wrapper.querySelector('[class*="scenario___"]');
+                    const action = actionDiv ? actionDiv.textContent.trim() : '';
+                    if (!action) return;
+                    const locDiv = Array.from(wrapper.children).find(c =>
+                        !c.className || !String(c.className).includes('scenario___'));
+                    const loc = locDiv ? locDiv.textContent.trim().replace(/ ·.*$/, '') : '';
+                    const text = loc ? loc + ' · ' + action : action;
+                    // Anchor popup to the card so it positions naturally
+                    showActionPopup(text, card);
+                }, 150);
             } catch (_) {}
         }, true); // capture so we see the click before arson-bang-for-buck
     }
