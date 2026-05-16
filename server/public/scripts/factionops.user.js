@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.90
+// @version      5.0.91
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.90';
+    const SCRIPT_VERSION = '5.0.91';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -6526,7 +6526,12 @@ body.wb-chain-active {
     }
 
     // ---- Energy bar via API ----
-    const ENERGY_POLL_MS = 60000; // 60 seconds
+    // v5.0.91: bumped 60s → 300s (5 min). Energy ticks at 5-minute
+    // intervals in Torn anyway, so polling more often is wasted work.
+    // The display still counts down in real time between polls via
+    // updateEnergyDisplay() using the anchored ticktime — no visible
+    // freshness loss.
+    const ENERGY_POLL_MS = 5 * 60 * 1000; // 5 minutes
     let energyPollInterval = null;
     let energyState = { current: 0, max: 0, ticktime: 0, fulltime: 0 };
     let energyTickAnchorAt = 0; // wall-clock when we last set ticktime
@@ -6574,7 +6579,7 @@ body.wb-chain-active {
         if (energyPollInterval) return;
         pollEnergy();
         energyPollInterval = setInterval(pollEnergy, ENERGY_POLL_MS);
-        log('Energy poll started (every 60s)');
+        log('Energy poll started (every ' + Math.round(ENERGY_POLL_MS/1000) + 's)');
     }
 
     function stopEnergyPoll() {
