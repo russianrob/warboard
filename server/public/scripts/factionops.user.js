@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.92
+// @version      5.0.93
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -22,6 +22,7 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
+// @grant        GM_setClipboard
 // @connect      tornwar.com
 // @connect      localhost
 // @connect      *
@@ -54,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.92';
+    const SCRIPT_VERSION = '5.0.93';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -5038,6 +5039,26 @@ body.wb-chain-active {
     // SECTION 8: ACTION HELPERS (HTTP POST)
     // =========================================================================
 
+    // v5.0.93: copy 'I got <Name>' to clipboard whenever you call a
+    // target, so you can paste it into faction chat immediately.
+    // Uses GM_setClipboard when granted (works in PDA + Tampermonkey),
+    // falls back to navigator.clipboard.writeText otherwise.
+    function copyCallTextToClipboard(targetName) {
+        if (!targetName) return;
+        const text = 'I got ' + targetName;
+        try {
+            if (typeof GM_setClipboard === 'function') {
+                GM_setClipboard(text, 'text');
+                return;
+            }
+        } catch (_) {}
+        try {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                navigator.clipboard.writeText(text).catch(() => {});
+            }
+        } catch (_) {}
+    }
+
     function emitCallTarget(targetId, isDeal) {
         // v5.0.23: removed the silent `if (!state.connected) return;` —
         // PDA users on flaky mobile data flip state.connected=false after
@@ -5070,6 +5091,10 @@ body.wb-chain-active {
         updateTargetRow(tid);
         if (CONFIG.AUTO_SORT) debouncedSort();
         const targetName = state.statuses[tid]?.name || null;
+        // v5.0.93: copy 'I got <Name>' to clipboard so the user can
+        // paste into faction chat immediately. Fires on the optimistic
+        // update so the clipboard is ready before the server round-trip.
+        if (targetName) copyCallTextToClipboard(targetName);
         const payload = { warId, targetId: tid, targetName };
         if (isDeal) payload.isDeal = true;
         postAction('/api/call', payload)
