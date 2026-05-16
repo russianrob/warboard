@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.77
+// @version      5.0.78
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.77';
+    const SCRIPT_VERSION = '5.0.78';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2972,74 +2972,74 @@ body.wb-chain-active {
             const s = state.statuses[it.targetId];
             return (s && Number(s.level)) || 0;
         };
-        // v5.0.21: detect once per sort whether the user has any
-        // stats-scale data (BSP TBS or FFS bs_estimate). If not, the
-        // stats sort can't work — silently fall back to using FFS
-        // rating (FF score) instead. Per-user detection avoids mixing
-        // stats-scale values (millions/billions) with rating-scale
-        // values (0-10) within a single sort.
-        const _bspInstalled = (() => {
+
+        // Level sorts don't need stats sources — handle and return.
+        if (_sortMode === 'level-asc' || _sortMode === 'level-desc') {
+            items.sort((a,b) => _sortMode === 'level-asc'
+                ? getLevel(a) - getLevel(b)
+                : getLevel(b) - getLevel(a));
+            return items;
+        }
+
+        // v5.0.78: the prior _useStats check was "does ANY user have
+        // BSP or FFS data?" — but for war targets the answer is often
+        // 'yes for some random previously-visited person, no for any
+        // war target' which made the sort silently do nothing (every
+        // current item returned -1 → comparator no-op). Switch to a
+        // per-target check: compute the value for every item up front,
+        // count how many are non-null, and only fall back to FF rating
+        // if NONE of the current targets had a stats value.
+        const getBspFfs = (it) => {
             try {
-                for (let i = 0; i < localStorage.length; i++) {
-                    const k = localStorage.key(i);
-                    if (k && k.indexOf('tdup.battleStatsPredictor.cache.prediction.') === 0) return true;
+                const bsp = fetchBspPrediction(it.targetId);
+                if (bsp && bsp.TBS != null) {
+                    const n = Number(bsp.TBS);
+                    if (Number.isFinite(n)) return n;
                 }
             } catch (_) {}
-            return false;
-        })();
-        const _ffsHasAnyEstimate = (() => {
-            for (const v of _ffsStatsCache.values()) {
-                if (typeof v === 'number') return true;
-            }
-            return false;
-        })();
-        const _useStats = _bspInstalled || _ffsHasAnyEstimate;
-        // v5.0.77: diagnostic — when stats sort silently does nothing
-        // because no stats source is populated, surface it in console
-        // so the user knows WHY their click had no visible effect.
-        if (!_useStats && (_sortMode === 'stats-asc' || _sortMode === 'stats-desc')) {
-            console.log('[factionops] stats sort: no BSP entries in localStorage and no FFS cache hits — falling back to FF rating. Install BSP / FFS or wait for cache to populate.');
+            const ffs = _ffsStatsCache.get(String(it.targetId));
+            return (typeof ffs === 'number') ? ffs : null;
+        };
+        const getFfRating = (it) => {
+            const c = (typeof ffCache !== 'undefined') ? ffCache[it.targetId] : null;
+            return (c && typeof c.value === 'number') ? c.value : null;
+        };
+
+        const statsMap = new Map();
+        let withStats = 0;
+        for (const it of items) {
+            const v = getBspFfs(it);
+            if (v !== null) { withStats++; statsMap.set(it.targetId, v); }
         }
-        const getStats = _useStats
-            ? (it) => {
-                // Stats-scale path: BSP first, FFS estimate fallback.
-                try {
-                    const bsp = fetchBspPrediction(it.targetId);
-                    if (bsp && bsp.TBS != null) {
-                        const n = Number(bsp.TBS);
-                        if (Number.isFinite(n)) return n;
-                    }
-                } catch (_) {}
-                const ffs = _ffsStatsCache.get(String(it.targetId));
-                return (typeof ffs === 'number') ? ffs : -1;
-            }
-            : (it) => {
-                // No stats data anywhere — sort by FFS rating instead.
-                const c = (typeof ffCache !== 'undefined') ? ffCache[it.targetId] : null;
-                return (c && typeof c.value === 'number') ? c.value : -1;
+
+        let valueFn;
+        if (withStats > 0) {
+            // Mix: items with BSP/FFS use that value; items without
+            // get -1 so they sink to the bottom of the sort.
+            valueFn = (it) => statsMap.has(it.targetId)
+                ? statsMap.get(it.targetId) : -1;
+            console.log('[factionops] stats sort:', withStats, '/', items.length,
+                'current targets have BSP/FFS data');
+        } else {
+            // Nobody in the current target set has BSP/FFS — fall back
+            // to FF rating (factionops's own data, populated by every
+            // overlay render). At least produces a meaningful order.
+            console.log('[factionops] stats sort: 0 /', items.length,
+                'current targets have BSP/FFS — using FF rating as fallback');
+            valueFn = (it) => {
+                const v = getFfRating(it);
+                return v !== null ? v : -1;
             };
-        switch (_sortMode) {
-            case 'level-asc':  items.sort((a,b) => getLevel(a) - getLevel(b)); break;
-            case 'level-desc': items.sort((a,b) => getLevel(b) - getLevel(a)); break;
-            case 'stats-asc':
-                items.sort((a,b) => {
-                    const av = getStats(a), bv = getStats(b);
-                    if (av === -1 && bv === -1) return 0;
-                    if (av === -1) return 1;
-                    if (bv === -1) return -1;
-                    return av - bv;
-                });
-                break;
-            case 'stats-desc':
-                items.sort((a,b) => {
-                    const av = getStats(a), bv = getStats(b);
-                    if (av === -1 && bv === -1) return 0;
-                    if (av === -1) return 1;
-                    if (bv === -1) return -1;
-                    return bv - av;
-                });
-                break;
         }
+
+        const cmpAsc = (a, b) => {
+            const av = valueFn(a), bv = valueFn(b);
+            if (av === -1 && bv === -1) return 0;
+            if (av === -1) return 1;
+            if (bv === -1) return -1;
+            return av - bv;
+        };
+        items.sort(_sortMode === 'stats-asc' ? cmpAsc : (a, b) => -cmpAsc(a, b));
         return items;
     }
 
