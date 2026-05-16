@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.14
+// @version      0.8.15
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,22 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.15 — User: 'same shows receipe tooltip on image click'. v0.8.14's
+//          capture-phase img-target delegate still wasn't firing — likely
+//          because the user's tap target isn't an <img> element (Torn
+//          frequently uses background-image CSS on divs, so closest('img')
+//          returns null).
+//          New approach: stop fighting arson-bang-for-buck. Piggyback on
+//          its tooltip instead.
+//            (1) Capture-phase click listener records which crime card
+//                was last clicked (_lastClickedCard).
+//            (2) MutationObserver watches every .custom-tooltip element
+//                (arson-bang-for-buck's tooltip class). When one switches
+//                to display:flex, prepend a green 'Location · Scenario'
+//                header line at the top, taking the scenario name from
+//                the tracked card.
+//          Result: ONE tooltip with BOTH the scenario name AND the
+//          recipe details. No duplicate popups, no click-handler war.
 // 0.8.14 — User: 'clicking on image brings up receipe tootip not scenario
 //          tooltip'. v0.8.12 attached click handler per <img> and called
 //          e.stopPropagation(). Two failures:
@@ -181,7 +197,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.14';
+    const VERSION = '0.8.15';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -647,45 +663,85 @@
         }, 50);
     }
 
-    // v0.8.14: Switched to capture-phase event delegation on document.
-    // Per-element click handlers (v0.8.12) were either not attaching to
-    // the right img element or arson-bang-for-buck's section-level
-    // handler was still firing because stopPropagation in the bubble
-    // phase doesn't stop a capture-phase listener that already fired.
-    // Capture-phase document-level listener runs BEFORE every bubble
-    // listener anywhere in the tree, and stopImmediatePropagation
-    // prevents the event from going any further.
-    //
-    // Also: popup now shows ONLY the scenario (action) name — recipe
-    // details are arson-bang-for-buck's job. User wanted a SCENARIO
-    // tooltip; including recipe text made it look like a duplicate of
-    // the existing recipe tooltip.
-    let _imageTooltipDelegateInstalled = false;
-    function installImageTooltipDelegate() {
-        if (_imageTooltipDelegateInstalled) return;
-        _imageTooltipDelegateInstalled = true;
+    // v0.8.15: Piggyback on arson-bang-for-buck's tooltip instead of
+    // trying to fight it. arson-bang-for-buck creates a div with class
+    // 'custom-tooltip', appends it to document.body, and toggles
+    // tooltip.style.display = 'flex' when shown. We:
+    //   (1) Track the most-recently-clicked crime card via a capture-
+    //       phase click listener.
+    //   (2) Watch every .custom-tooltip element. When it switches to
+    //       display:flex, prepend a green 'Scenario: X' header line
+    //       (taking X from the tracked card's scenario___ child).
+    // User gets ONE tooltip with both the scenario name AND the
+    // recipe details — no duplicate popups, no fighting over click
+    // handlers.
+    let _lastClickedCard = null;
+    function installCardClickTracker() {
         document.addEventListener('click', (e) => {
             try {
-                const img = e.target.closest && e.target.closest('img');
-                if (!img) return;
-                // Must be inside a crime card with a titleAndScenario wrapper
-                const card = img.closest('[class*="sections___"]') || img.closest('[class*="crimeOption"]');
-                if (!card) return;
-                const wrapper = card.querySelector('[class*="titleAndScenario___"]');
-                if (!wrapper) return;
-                const actionDiv = wrapper.querySelector('[class*="scenario___"]');
-                if (!actionDiv) return;
-                const action = actionDiv.textContent.trim();
-                if (!action) return;
-                // Stop the click so arson-bang-for-buck's section handler
-                // doesn't ALSO fire and show its recipe tooltip on top.
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                e.preventDefault();
-                showActionPopup(action, img);
-            } catch (_) { /* swallow — never break the page */ }
-        }, true); // capture: true — fires BEFORE any bubble-phase handler
-        LOG('image-tooltip delegate installed (capture phase)');
+                const card = e.target.closest && e.target.closest('[class*="sections___"]');
+                if (card) _lastClickedCard = card;
+            } catch (_) {}
+        }, true); // capture so we see the click before arson-bang-for-buck
+    }
+
+    function prependScenarioHeader(tooltipEl) {
+        if (!_lastClickedCard) return;
+        if (tooltipEl.querySelector('.arsontest-scenario-header')) return;
+        const wrapper = _lastClickedCard.querySelector('[class*="titleAndScenario___"]');
+        if (!wrapper) return;
+        const actionDiv = wrapper.querySelector('[class*="scenario___"]');
+        const action = actionDiv ? actionDiv.textContent.trim() : '';
+        if (!action) return;
+        const locDiv = Array.from(wrapper.children).find(c =>
+            !c.className || !String(c.className).includes('scenario___'));
+        const loc = locDiv ? locDiv.textContent.trim().replace(/ ·.*$/, '') : '';
+        const header = document.createElement('div');
+        header.className = 'arsontest-scenario-header';
+        header.textContent = loc ? loc + ' · ' + action : action;
+        header.style.cssText = [
+            'color:#74c69d !important',
+            'font-weight:700 !important',
+            'font-size:13px !important',
+            'border-bottom:1px solid #444 !important',
+            'margin:-2px -4px 6px -4px !important',
+            'padding:2px 4px 4px 4px !important',
+        ].join(';');
+        tooltipEl.insertBefore(header, tooltipEl.firstChild);
+    }
+
+    function watchTooltip(tt) {
+        if (tt.dataset.arsontestWatched) return;
+        tt.dataset.arsontestWatched = '1';
+        // Initial check (in case it's already display:flex)
+        if (tt.style.display === 'flex') prependScenarioHeader(tt);
+        const obs = new MutationObserver(() => {
+            if (tt.style.display === 'flex') prependScenarioHeader(tt);
+        });
+        obs.observe(tt, { attributes: true, attributeFilter: ['style'] });
+    }
+
+    function installTooltipPiggyback() {
+        // Catch existing tooltips
+        document.querySelectorAll('.custom-tooltip').forEach(watchTooltip);
+        // Catch new tooltips added to body by arson-bang-for-buck
+        const bodyObs = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                for (const node of m.addedNodes) {
+                    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                    if (node.classList && node.classList.contains('custom-tooltip')) {
+                        watchTooltip(node);
+                    }
+                    // Also catch tooltips nested inside added subtrees
+                    if (node.querySelectorAll) {
+                        node.querySelectorAll('.custom-tooltip').forEach(watchTooltip);
+                    }
+                }
+            }
+        });
+        if (document.body) bodyObs.observe(document.body, { childList: true, subtree: false });
+        else setTimeout(installTooltipPiggyback, 500);
+        LOG('tooltip piggyback installed — will prepend scenario name to .custom-tooltip');
     }
 
     // Hover-tooltip on desktop via img.title — quick and free, no delegation
@@ -858,7 +914,8 @@
     // === Init ===
     LOG('starting v' + VERSION);
     injectGlobalScenarioCss();
-    installImageTooltipDelegate();  // v0.8.14: capture-phase delegate beats arson-bang-for-buck
+    installCardClickTracker();      // v0.8.15: record which card was last clicked
+    installTooltipPiggyback();      // v0.8.15: prepend scenario name to arson-bang-for-buck tooltip
     setImageTitles();               // desktop hover + cursor pointer
     rewriteLocationText();          // fallback
     injectPdaActionNames();         // belt-and-braces
