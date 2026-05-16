@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.6
+// @version      0.8.7
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,13 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.7 — User: 'like in the desktop view'. They just want the action
+//         name visible under the location, same as desktop. v0.8.6 was
+//         overcomplicating with formatRecipeLine (location · items ·
+//         payout · nerve). Simpler: pull text from the hidden
+//         scenario___ child and render it in a plain visible div. No
+//         RECIPES lookup needed — works on every card regardless of
+//         whether the recipe is in our DB.
 // 0.8.6 — User: 'i only see location but i dont see scenario'. The action
 //         element IS in the DOM (confirmed in the PDA dump user pasted)
 //         but Torn's PDA CSS HIDES anything with the scenario___ class.
@@ -88,7 +95,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.6';
+    const VERSION = '0.8.7';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -349,68 +356,45 @@
         return locStr + itemsStr + ' · ' + payoutStr + nerveStr;
     }
     function injectPdaActionNames() {
-        if (!RECIPES || Object.keys(RECIPES).length === 0) return;
-        // v0.8.6: The action element IS in the DOM but Torn's PDA CSS
-        // HIDES the scenario___ class. Previous versions cloned that
-        // hidden element — the clone inherited the same hiding CSS and
-        // was invisible too. So:
-        //   - Walk the wrapper's direct children (no class filter — gets
-        //     both the visible location div and the hidden action div)
-        //   - Identify action (RECIPES key match) vs location
-        //   - Inject a FRESH <div> (no scenario___ class) with !important
-        //     styling so PDA CSS can't hide it.
+        // v0.8.7: User wants PDA to look like desktop — just the action
+        // name visible under the location, nothing fancy. The action
+        // element IS in the PDA DOM (<div class="scenario___...">) but
+        // PDA CSS hides it. Pull its text, render a plain visible div
+        // with the same text. No recipe lookup needed — works whether
+        // or not RECIPES is populated.
         const wrappers = document.querySelectorAll('[class*="titleAndScenario___"]:not([data-arsontest-injected])');
         let injected = 0;
         for (const w of wrappers) {
             try {
-                const children = Array.from(w.children)
-                    .filter(c => !c.hasAttribute('data-arsontest-injected-action'));
-                if (children.length === 0) continue;
+                // Find the action: the scenario___ child (PDA hides it).
+                const actionEl = w.querySelector('[class*="scenario___"]:not([data-arsontest-injected-action])');
+                if (!actionEl) continue;
+                const actionText = actionEl.textContent.trim();
+                if (!actionText) continue;
 
-                // Identify action (matches a RECIPES key) and location
-                let action = null, location = null;
-                for (const c of children) {
-                    const t = c.textContent.trim();
-                    if (!t) continue;
-                    if (RECIPES[t.toLowerCase()]) {
-                        if (!action) action = t;
-                    } else if (!location) {
-                        location = t;
-                    }
+                // If it's already visible on screen (desktop), skip —
+                // we only need to inject when PDA CSS has hidden it.
+                const cs = window.getComputedStyle(actionEl);
+                if (cs.display !== 'none' && cs.visibility !== 'hidden' &&
+                    parseFloat(cs.opacity) > 0 && actionEl.offsetHeight > 0) {
+                    w.dataset.arsontestInjected = '1';
+                    continue;
                 }
 
-                // Build label
-                let label = null;
-                if (action) {
-                    label = formatRecipeLine(RECIPES[action.toLowerCase()]);
-                } else if (location) {
-                    // No action recognised — fall back to listing all
-                    // recipes whose .location field matches.
-                    const matches = Object.entries(RECIPES).filter(([_, r]) =>
-                        r.location && r.location.toLowerCase() === location.toLowerCase());
-                    if (matches.length > 0) {
-                        label = matches.map(([k, r]) =>
-                            k + ' (' + formatRecipeLine(r) + ')').join(' / ');
-                    }
-                }
-                if (!label) continue;
-
-                // Plain div — no inherited hiding from scenario___.
-                // !important on every property fights Torn's PDA CSS.
+                // Plain div — no scenario___ class, no inherited hide rules.
                 const tag = document.createElement('div');
                 tag.setAttribute('data-arsontest-injected-action', '1');
-                tag.textContent = label;
+                tag.textContent = actionText;
                 tag.style.cssText = [
                     'display:block !important',
                     'visibility:visible !important',
-                    'opacity:0.95 !important',
+                    'opacity:1 !important',
                     'height:auto !important',
                     'overflow:visible !important',
                     'font-size:11px !important',
                     'line-height:1.3 !important',
-                    'color:#74c69d !important',
-                    'font-weight:600 !important',
-                    'margin-top:2px !important',
+                    'color:#999 !important',
+                    'margin-top:1px !important',
                     'white-space:normal !important',
                 ].join(';');
                 w.appendChild(tag);
@@ -418,7 +402,7 @@
                 injected++;
             } catch (e) { /* skip malformed cards silently */ }
         }
-        if (injected > 0) LOG('injected', injected, 'recipe label(s) into crime cards');
+        if (injected > 0) LOG('injected', injected, 'action name(s) into crime cards');
     }
 
     // === Auto-capture location ↔ action from desktop DOM =====================
@@ -497,11 +481,10 @@
 
     // === Init ===
     LOG('starting v' + VERSION);
-    // Fetch recipes first so capture/injection have data to match against.
-    fetchRecipes().then(() => {
-        autoCaptureLocations();
-        injectPdaActionNames();
-        watchForCards();
-    });
+    // Inject can run immediately — it doesn't need RECIPES. Capture
+    // still needs them (only POSTs known keys) so chain that after fetch.
+    injectPdaActionNames();
+    watchForCards();
+    fetchRecipes().then(() => autoCaptureLocations());
     setTimeout(injectGearButton, 500);
 })();
