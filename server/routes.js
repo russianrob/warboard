@@ -7982,15 +7982,14 @@ router.get("/api/war/payouts/list", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// GET /admin/payouts — web UI for war payouts. TOTP admin login required
-// (same cookie used by /admin). The page itself still needs a Torn API
-// key to hit the payouts endpoints (which auth via resolveVaultCaller);
-// pasted once and stored in localStorage by the browser.
+// GET /admin/payouts — web UI for war payouts. No TOTP gate on the HTML
+// page itself; access control is enforced at the API endpoint level
+// (resolveVaultCaller -> admin role check) against the pasted Torn API
+// key. A non-admin (or non-faction-member) gets a 403 from
+// /api/war/payouts/list and can't load anything. The pasted key is
+// stored in localStorage by the browser only.
 // ─────────────────────────────────────────────────────────────────────────
 router.get("/admin/payouts", (req, res) => {
-  if (!_verifyAdminCookie(req)) {
-    return res.redirect(302, '/admin?return=' + encodeURIComponent('/admin/payouts'));
-  }
   res.set('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!doctype html>
 <html lang="en"><head>
