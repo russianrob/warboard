@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.98
+// @version      5.0.99
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.98';
+    const SCRIPT_VERSION = '5.0.99';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12595,9 +12595,9 @@ body.wb-chain-active {
                         <small>Multiplier for hits during the war that weren't ranked-war attacks. Default 0.3 (assist-level).</small>
                     </label>
                     <label>
-                        <span>Failed attack weight</span>
+                        <span>Loss attack weight</span>
                         <input type="number" id="wb-set-failed" min="0" step="0.05" placeholder="0" value="${cur.failedWeight != null ? cur.failedWeight : ''}">
-                        <small>Flat score per failed attempt (defended/stalemate/lost/escaped). Default 0 — no payout for failures. Set 0.1 to reward effort with ~10% of a war-hit's payout per attempt.</small>
+                        <small>Flat score per lost attempt (defended/stalemate/lost/escaped). Default 0 — no payout for losses. Set 0.1 to reward effort with ~10% of a war-hit's payout per attempt.</small>
                     </label>
                 </div>
                 <div class="wb-payouts-settings-footer">
