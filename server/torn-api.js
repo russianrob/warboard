@@ -166,8 +166,14 @@ export async function fetchRankedWar(factionId, apiKey) {
  */
 export async function fetchRankedWarReport(factionId, apiKey, warId) {
   // v2 endpoint: /v2/faction/rankedwarreport?id=WAR_ID
-  // If no warId provided, fetch rankedwars first to find the last completed war
+  // If no warId provided, fetch rankedwars first to find the last completed war.
+  // 2026-05-16: also trigger the lookup when warId looks like the warboard's
+  // internal 'war_<factionId>' format — that's NOT a Torn rank ID, and passing
+  // it straight to Torn returns 0 loot because the rank ID lookup fails.
   let rwId = warId;
+  if (rwId && /^war_/i.test(String(rwId))) {
+    rwId = null; // force lookup of the actual Torn ranked war ID
+  }
   if (!rwId) {
     const rwUrl = `https://api.torn.com/faction/${encodeURIComponent(factionId)}?selections=rankedwars&key=${encodeURIComponent(apiKey)}&comment=wb-api`;
     const rwRes = await fetch(rwUrl);
