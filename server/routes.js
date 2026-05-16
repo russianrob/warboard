@@ -7955,8 +7955,9 @@ router.get("/api/war/payouts/heatmap", async (req, res) => {
     return res.status(403).json({ error: "Admin role required" });
   }
   const mode = req.query.mode === 'static' ? 'static' : 'dynamic';
+  const forceFresh = req.query.fresh === '1';
   try {
-    const result = await warPayouts.computePayoutsHeatmap(info.factionId, { mode });
+    const result = await warPayouts.computePayoutsHeatmap(info.factionId, { mode, forceFresh });
     return res.json(result);
   } catch (e) {
     return res.status(500).json({ error: e.message });

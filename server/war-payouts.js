@@ -626,6 +626,13 @@ export async function computePayouts(warId, options = {}) {
  */
 export async function computePayoutsHeatmap(factionId, options = {}) {
   const mode = options.mode === "static" ? "static" : "dynamic";
+  // 2026-05-16: forward forceFresh so the modal Refresh button can
+  // actually bust the per-war cache. Without this, fresh=1 on the
+  // heatmap endpoint propagated to listEligibleWars but NOT to the
+  // computePayouts call below — so a war with bad cached data
+  // (e.g. loot=$0 because Torn's report wasn't ready when first
+  // computed) would never recompute.
+  const forceFresh = !!options.forceFresh;
   // v5.0.71: only show the most-recent ended war by default. With
   // disk-cache the second-load is instant, but a cold load (after
   // pm2 restart, with multiple historical wars) was paginating
@@ -643,7 +650,7 @@ export async function computePayoutsHeatmap(factionId, options = {}) {
   // cache is cold; cached calls return instantly anyway.
   for (const w of wars) {
     try {
-      const r = await computePayouts(w.warId, { mode });
+      const r = await computePayouts(w.warId, { mode, forceFresh });
       perWar.push({
         warId: w.warId,
         enemyFactionName: w.enemyFactionName,
