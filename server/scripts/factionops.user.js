@@ -9651,6 +9651,65 @@ body.wb-chain-active {
      * Create the floating ASSIST button on attack pages.
      * Sends a request for backup to all faction members.
      */
+    // v5.0.75: draggable Retal/Assist button helper. Restores saved
+    // position on create; persists on drop. Suppresses click event
+    // if the pointer moved more than 3px so dragging never fires a
+    // stray retal request.
+    function makeAssistBtnDraggable(btn, mode) {
+        const KEY = 'wb_assist_btn_pos_' + (mode || 'default');
+        try {
+            const saved = GM_getValue(KEY, null);
+            const pos = saved && typeof saved === 'string' ? JSON.parse(saved) : saved;
+            if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y)) {
+                const x = Math.max(0, Math.min(window.innerWidth - 60, pos.x));
+                const y = Math.max(0, Math.min(window.innerHeight - 40, pos.y));
+                btn.style.left = x + 'px';
+                btn.style.top = y + 'px';
+                btn.style.right = 'auto';
+                btn.style.bottom = 'auto';
+            }
+        } catch (_) {}
+        let dragging = false, moved = false, startX = 0, startY = 0, btnX = 0, btnY = 0;
+        const onDown = (e) => {
+            const t = e.touches ? e.touches[0] : e;
+            dragging = true; moved = false;
+            startX = t.clientX; startY = t.clientY;
+            const r = btn.getBoundingClientRect();
+            btnX = r.left; btnY = r.top;
+            btn.style.transition = 'none';
+        };
+        const onMove = (e) => {
+            if (!dragging) return;
+            const t = e.touches ? e.touches[0] : e;
+            const dx = t.clientX - startX, dy = t.clientY - startY;
+            if (!moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) moved = true;
+            if (!moved) return;
+            btn.style.left = Math.max(0, Math.min(window.innerWidth - btn.offsetWidth, btnX + dx)) + 'px';
+            btn.style.top = Math.max(0, Math.min(window.innerHeight - btn.offsetHeight, btnY + dy)) + 'px';
+            btn.style.right = 'auto';
+            btn.style.bottom = 'auto';
+            if (e.cancelable) e.preventDefault();
+        };
+        const onUp = () => {
+            if (!dragging) return;
+            dragging = false;
+            btn.style.transition = '';
+            if (moved) {
+                try { GM_setValue(KEY, JSON.stringify({ x: btn.offsetLeft, y: btn.offsetTop })); } catch (_) {}
+                const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); btn.removeEventListener('click', swallow, true); };
+                btn.addEventListener('click', swallow, true);
+                setTimeout(() => btn.removeEventListener('click', swallow, true), 200);
+            }
+        };
+        btn.addEventListener('mousedown', onDown);
+        btn.addEventListener('touchstart', onDown, { passive: true });
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('mouseup', onUp);
+        document.addEventListener('touchend', onUp);
+        document.addEventListener('touchcancel', onUp);
+    }
+
     function createAssistButton() {
         if (document.getElementById('wb-assist-btn')) return;
 
