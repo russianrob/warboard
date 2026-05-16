@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.12
+// @version      0.8.13
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,17 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.13 — User: 'for recipe tool doesnt show stoke option'. Added stoke
+//          (boost) items to the recipe schema. In Torn arson, after a
+//          crime is ignited a second player can 'stoke' it with extra
+//          items to boost the payout — that's a separate ingredient
+//          list from the ignite list.
+//          Schema now: { items, stoke?, payout, nerve?, location? }
+//          Editor: new optional 'stoke items' input next to 'ignite items'.
+//          List render + tooltip popup: shows ' / stoke: 2 gasoline'
+//          after the ignite items.
+//          Server (routes.js): POST accepts body.stoke (same shape as
+//          items), preserves existing stoke when an update omits it.
 // 0.8.12 — User: 'maybe add a tooltip for the image on the left? because
 //          scenario isnt working'. v0.8.11's inline text rewrite also
 //          didn't show — every inline approach has failed because an
@@ -152,7 +163,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.12';
+    const VERSION = '0.8.13';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -257,7 +268,8 @@
                     <span style="font-weight:600;color:#a78bfa;">Add / update</span>
                     <input id="arsontest-ed-key" placeholder="action name (e.g. spirit level)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
                     <input id="arsontest-ed-loc" placeholder="location (e.g. Apartment, Lakehouse)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
-                    <input id="arsontest-ed-items" placeholder="items: gasoline:3 lighter:1" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
+                    <input id="arsontest-ed-items" placeholder="ignite items: gasoline:3 lighter:1" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
+                    <input id="arsontest-ed-stoke" placeholder="stoke items (optional): gasoline:2" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
                     <div style="display:flex;gap:6px;">
                         <input id="arsontest-ed-payout" type="number" placeholder="payout (e.g. 280000)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;flex:1;">
                         <input id="arsontest-ed-nerve" type="number" placeholder="nerve (optional)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;flex:1;">
@@ -306,6 +318,9 @@
                 overlay.querySelector('#arsontest-ed-key').value = k;
                 overlay.querySelector('#arsontest-ed-loc').value = r.location || '';
                 overlay.querySelector('#arsontest-ed-items').value = Object.entries(r.items).map(([n, q]) => n + ':' + q).join(' ');
+                overlay.querySelector('#arsontest-ed-stoke').value = r.stoke
+                    ? Object.entries(r.stoke).map(([n, q]) => n + ':' + q).join(' ')
+                    : '';
                 overlay.querySelector('#arsontest-ed-payout').value = r.payout;
                 overlay.querySelector('#arsontest-ed-nerve').value = r.nerve || '';
                 status('Editing ' + k);
@@ -402,29 +417,18 @@
             const key = overlay.querySelector('#arsontest-ed-key').value.trim().toLowerCase();
             const location = overlay.querySelector('#arsontest-ed-loc').value.trim();
             const itemsStr = overlay.querySelector('#arsontest-ed-items').value.trim();
+            const stokeStr = overlay.querySelector('#arsontest-ed-stoke').value.trim();
             const payout = Number(overlay.querySelector('#arsontest-ed-payout').value);
             const nerve = Number(overlay.querySelector('#arsontest-ed-nerve').value);
             if (!key) { status('Need a name', '#ef4444'); return; }
             if (!Number.isFinite(payout) || payout <= 0) { status('Need a payout > 0', '#ef4444'); return; }
-            // Parse items: "gasoline:3 lighter:1" or "3 gasoline, 1 lighter"
-            const items = {};
-            const tokens = itemsStr.split(/[,\s]+/).filter(Boolean);
-            for (let i = 0; i < tokens.length; i++) {
-                const t = tokens[i];
-                if (t.includes(':')) {
-                    const [n, q] = t.split(':');
-                    const qty = Number(q);
-                    if (n && Number.isFinite(qty) && qty > 0) items[n.toLowerCase()] = qty;
-                } else if (/^\d+$/.test(t) && tokens[i+1]) {
-                    const qty = Number(t);
-                    const n = tokens[++i];
-                    if (n && qty > 0) items[n.toLowerCase()] = qty;
-                }
-            }
+            const items = parseItemsString(itemsStr);
             if (Object.keys(items).length === 0) { status('Need at least 1 item (e.g. gasoline:3)', '#ef4444'); return; }
             const recipe = { items, payout };
             if (Number.isFinite(nerve) && nerve > 0) recipe.nerve = nerve;
             if (location) recipe.location = location;
+            const stoke = parseItemsString(stokeStr);
+            if (Object.keys(stoke).length > 0) recipe.stoke = stoke;
             try {
                 await postRecipe(key, recipe);
                 RECIPES[key] = recipe;
@@ -471,15 +475,38 @@
     //     MutationObserver doesn't double-add
     //   - Skip wrappers that already have 2+ scenario children (desktop
     //     view where Torn renders both)
+    function formatItems(items) {
+        return Object.entries(items).map(([n, q]) => q + ' ' + n).join(', ');
+    }
     function formatRecipeLine(recipe) {
-        const itemsStr = Object.entries(recipe.items)
-            .map(([n, q]) => q + ' ' + n).join(', ');
+        const itemsStr = formatItems(recipe.items);
+        const stokeStr = recipe.stoke
+            ? ' / stoke: ' + formatItems(recipe.stoke)
+            : '';
         const payoutStr = recipe.payout >= 1000
             ? '$' + Math.round(recipe.payout / 1000) + 'K'
             : '$' + recipe.payout;
         const nerveStr = recipe.nerve ? (' · ' + recipe.nerve + 'N') : '';
         const locStr = recipe.location ? recipe.location + ' · ' : '';
-        return locStr + itemsStr + ' · ' + payoutStr + nerveStr;
+        return locStr + itemsStr + stokeStr + ' · ' + payoutStr + nerveStr;
+    }
+    // Reusable item-string parser ("gasoline:3 lighter:1" or "3 gasoline, 1 lighter")
+    function parseItemsString(str) {
+        const out = {};
+        const tokens = String(str || '').split(/[,\s]+/).filter(Boolean);
+        for (let i = 0; i < tokens.length; i++) {
+            const t = tokens[i];
+            if (t.includes(':')) {
+                const [n, q] = t.split(':');
+                const qty = Number(q);
+                if (n && Number.isFinite(qty) && qty > 0) out[n.toLowerCase()] = qty;
+            } else if (/^\d+$/.test(t) && tokens[i+1]) {
+                const qty = Number(t);
+                const n = tokens[++i];
+                if (n && qty > 0) out[n.toLowerCase()] = qty;
+            }
+        }
+        return out;
     }
     // v0.8.10: Inject a global stylesheet rule that force-shows
     // scenario___ AND its descendants. The v0.8.9 debug dump revealed

@@ -8060,7 +8060,7 @@ router.post("/api/oc/live-success", express.json({ limit: '32kb' }), async (req,
 //
 // Storage: data/arson-recipes.json (loaded lazily, debounced save).
 // GET    /api/arson/recipes        → returns full table
-// POST   /api/arson/recipes        → upsert one  { key, items, payout, nerve? }
+// POST   /api/arson/recipes        → upsert one  { key, items, payout, nerve?, location?, stoke? }
 // DELETE /api/arson/recipes/:key   → remove
 // =============================================================================
 const ARSON_RECIPES_FILE = pathJoin(OC_HISTORY_DIR, '..', 'arson-recipes.json');
@@ -8116,11 +8116,27 @@ router.post("/api/arson/recipes", express.json({ limit: '8kb' }), async (req, re
     const loc = body.location.trim().slice(0, 60);
     if (loc) recipe.location = loc;
   }
+  // Optional stoke (boost) ingredients — added by someone else after the
+  // arson is ignited to boost the payout. Same shape as items.
+  if (body.stoke && typeof body.stoke === 'object') {
+    const stoke = {};
+    for (const [n, q] of Object.entries(body.stoke)) {
+      const qty = Number(q);
+      const name = String(n || '').toLowerCase().trim();
+      if (!name || !Number.isFinite(qty) || qty <= 0) continue;
+      stoke[name] = Math.floor(qty);
+    }
+    if (Object.keys(stoke).length > 0) recipe.stoke = stoke;
+  }
   const data = loadArsonRecipes();
   // Preserve existing location if the new POST didn't include one — admins
   // editing items shouldn't have to retype the location every time.
   if (!recipe.location && data.recipes[key]?.location) {
     recipe.location = data.recipes[key].location;
+  }
+  // Same for stoke — preserve previous value if the new POST omitted it.
+  if (!recipe.stoke && data.recipes[key]?.stoke) {
+    recipe.stoke = data.recipes[key].stoke;
   }
   data.recipes[key] = recipe;
   data.updatedAt = Date.now();
