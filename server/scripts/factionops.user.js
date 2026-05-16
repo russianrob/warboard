@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.83
+// @version      5.0.84
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.83';
+    const SCRIPT_VERSION = '5.0.84';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -4267,10 +4267,10 @@ body.wb-chain-active {
                             || `Target #${tid}`;
                         const dealLabel = callData.isDeal ? ' \uD83D\uDD12 Deal' : '';
                         showCallToast(tid, `${callData.calledBy.name} called ${targetName}${dealLabel}`);
-                        firePdaNotification('target_called',
-                            callData.isDeal ? '\uD83D\uDD12 Deal Call' : '\uD83C\uDFAF Target Called',
-                            `${callData.calledBy.name} called ${targetName}${dealLabel}`,
-                            `https://www.torn.com/page.php?sid=attack&user2ID=${tid}`);
+                        // v5.0.84: PDA notification removed per user request
+                        // ('can we remove target calls from notification
+                        // system?'). The 2s call toast above stays \u2014
+                        // it's an inline overlay cue, not a notification.
                     }
                     broadcastStateChange({ type: 'call_update', targetId: tid });
                 }

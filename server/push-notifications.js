@@ -36,7 +36,7 @@ if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
  * This is the canonical list — the settings UI reads from this.
  */
 export const NOTIFICATION_TYPES = {
-  target_called:   { label: "Target Calls",         description: "When a teammate calls a target",                    default: true  },
+  target_called:   { label: "Target Calls",         description: "When a teammate calls a target",                    default: false },
   chain_alert:     { label: "Chain Break Alerts",    description: "When chain timer drops below 30s",                  default: true  },
   hospital_pop:    { label: "Hospital Pops",         description: "When an enemy target leaves the hospital",          default: false },
   bonus_imminent:  { label: "Bonus Milestones",      description: "When a bonus hit is 1–2 attacks away",              default: true  },
