@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.75
+// @version      5.0.76
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.75';
+    const SCRIPT_VERSION = '5.0.76';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2800,15 +2800,8 @@ body.wb-chain-active {
 .fo-card-retal-btn:active { transform: translateY(0); }
 .fo-card-retal-btn:disabled { background: #636e72; color: #b0b8bc; cursor: not-allowed; transform: none; }
 .fo-card-retal-icon { font-size: 9px; }
-/* v5.0.74: when injected into the upper info row (next to username),
-   nudge it right in a flex parent + add a tiny margin so it doesn't
-   crowd the name text. Bottom-row injection (.buttons-list fallback)
-   keeps the inherited inline-flex layout from above. */
-.fo-card-retal-btn-upper {
-    margin-left: auto;
-    margin-right: 4px;
-    align-self: center;
-}
+/* v5.0.74 .fo-card-retal-btn-upper class removed in v5.0.76 (mini-
+   profile injection reverted to bottom .buttons-list). */
 
 /* Faction cooldowns dashboard (Option B — self-reported bars). */
 .fo-bars-section {
@@ -5128,29 +5121,12 @@ body.wb-chain-active {
             btn.dataset.targetName = targetName;
             btn.innerHTML = '<span class="fo-card-retal-icon">\u26A0</span>Retal';
 
-            // v5.0.75: inject next to the player NAME LINK (which we
-            // already locate above), not into a guessed wrapper. The
-            // name link is reliably high up in the card; appending the
-            // button as its next sibling puts it inline with the name \u2014
-            // top of the card, no positioning hacks. Falls back through
-            // named upper containers, then .buttons-list. Does NOT
-            // touch the card wrapper's position (v5.0.29 mistake).
-            let injected = false;
-            const tryAppend = (target, sourceTag) => {
-                if (!target || injected) return;
-                btn.classList.add('fo-card-retal-btn-upper');
-                target.appendChild(btn);
-                injected = true;
-                console.log('[FactionOps] retal injected via', sourceTag);
-            };
-            tryAppend(nameLink.parentElement, 'nameLink.parentElement');
-            tryAppend(card.querySelector('[class*="profile-mini-_info"]'), '_info');
-            tryAppend(card.querySelector('[class*="profile-mini-_username"]')?.parentElement, '_username.parent');
-            if (!injected) {
-                btn.classList.remove('fo-card-retal-btn-upper');
-                buttonsList.appendChild(btn);
-                console.log('[FactionOps] retal injected via fallback .buttons-list');
-            }
+            // v5.0.76: REVERTED v5.0.74/75 upper-row injection per user
+            // request \u2014 'was fine where it was'. Back to the simple
+            // inline-flex append into .buttons-list (the original v5.0.35
+            // location). Note: the draggable PROFILE-PAGE retal button
+            // (#wb-assist-btn) is a separate feature and is untouched.
+            buttonsList.appendChild(btn);
 
             clearInterval(timer);
         }, 200);
