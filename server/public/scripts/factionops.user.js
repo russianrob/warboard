@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.88
+// @version      5.0.89
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.88';
+    const SCRIPT_VERSION = '5.0.89';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -7698,26 +7698,25 @@ body.wb-chain-active {
     const REFRESH_DEBOUNCE_MS = IS_PDA ? 500 : 200;
     let _refreshDebounceTimer = null;
     function refreshAllRows() {
-        // v5.0.88: skip entirely when the tab is hidden. No point
-        // rendering 90 rows the user can't see. visibilitychange
-        // listener (installed below) catches up once they come back.
-        if (typeof document.hidden === 'boolean' && document.hidden) return;
+        // v5.0.89: hidden-tab skip is DESKTOP ONLY. PDA WebViews can
+        // report document.hidden=true even while the user is actively
+        // viewing the app (different visibility semantics than a
+        // browser tab). That was blocking every render on Android PDA
+        // and leaving the stats column empty in user screenshots.
+        if (!IS_PDA && typeof document.hidden === 'boolean' && document.hidden) return;
         if (_refreshDebounceTimer) return;
         _refreshDebounceTimer = setTimeout(() => {
             _refreshDebounceTimer = null;
-            // Re-check at fire time — tab may have gone hidden during
-            // the debounce window.
-            if (typeof document.hidden === 'boolean' && document.hidden) return;
+            if (!IS_PDA && typeof document.hidden === 'boolean' && document.hidden) return;
             _refreshAllRowsImpl();
         }, REFRESH_DEBOUNCE_MS);
     }
-    // When the tab becomes visible again, force one immediate refresh
-    // so the user sees current state instead of waiting for the next
-    // SSE message to trigger it.
-    if (typeof document.addEventListener === 'function') {
+    // visibilitychange catch-up — only meaningful for desktop where
+    // the hidden-skip actually fires. PDA never skips so no catch-up
+    // needed there either.
+    if (!IS_PDA && typeof document.addEventListener === 'function') {
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
-                // Skip the debounce; refresh now since they just looked at it
                 if (_refreshDebounceTimer) {
                     clearTimeout(_refreshDebounceTimer);
                     _refreshDebounceTimer = null;
