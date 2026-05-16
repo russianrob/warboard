@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.3
+// @version      0.8.4
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,17 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.4 — Corrected PDA inject logic. User showed actual PDA DOM:
+//         <div class="scenario___DtvAZ">Shielded from the Truth</div>
+//         — that's an ACTION name (recipe key), not a location. v0.8.2
+//         assumed the visible PDA scenario was the location and tried to
+//         filter recipes by .location matching, which returned zero
+//         matches and skipped every card.
+//         Now: look up RECIPES[visibleText.toLowerCase()] directly; if
+//         hit, render location · items · payout next to it. Falls back
+//         to old location-based lookup if the text isn't a recipe key.
+//         Also made auto-capture (desktop) order-agnostic — identifies
+//         action vs location by which one matches a RECIPES key.
 // 0.8.3 — Auto-capture location ↔ action pairs from desktop DOM. Only 5/123
 //         recipes had a `location` field set, and backfilling manually is
 //         fragile because arson-bang-for-buck's source contains no
@@ -55,7 +66,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.3';
+    const VERSION = '0.8.4';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -286,16 +297,17 @@
         document.body.appendChild(btn);
     }
 
-    // === Inject action names next to PDA location names ======================
-    // v0.8.2: v0.8.1's CSS-only override didn't help — Torn doesn't just
-    // hide the action-name element on PDA, it omits it from the DOM
-    // entirely (only the LOCATION scenario___ child renders).
+    // === Inject recipe details next to PDA scenario names ====================
+    // v0.8.4: Corrected — PDA renders the ACTION name in the single
+    // visible scenario___ child (not the location). Example user-confirmed
+    // markup: <div class="scenario___DtvAZ">Shielded from the Truth</div>
+    // — "Shielded from the Truth" is an action name (recipe key), not a
+    // location. So look up RECIPES[text.toLowerCase()] directly and append
+    // the recipe's location + items + payout.
     //
-    // This injection finds each titleAndScenario___ wrapper, reads the
-    // location name from the single scenario___ child, looks up matching
-    // recipes from arsontest RECIPES, and appends a CLONE of the existing
-    // scenario element with the action names as text. Cloning inherits
-    // all Torn classes/CSS so the injected label looks native.
+    // Fallback: if the visible text doesn't match an action key, try the
+    // old "treat as location" lookup so this still works for any scenario
+    // child that happens to be a location.
     //
     // Hard rules to avoid the v0.6 'broke the tooltip' regression:
     //   - Only APPEND new children (never modify existing element style or
@@ -304,6 +316,16 @@
     //     MutationObserver doesn't double-add
     //   - Skip wrappers that already have 2+ scenario children (desktop
     //     view where Torn renders both)
+    function formatRecipeLine(recipe) {
+        const itemsStr = Object.entries(recipe.items)
+            .map(([n, q]) => q + ' ' + n).join(', ');
+        const payoutStr = recipe.payout >= 1000
+            ? '$' + Math.round(recipe.payout / 1000) + 'K'
+            : '$' + recipe.payout;
+        const nerveStr = recipe.nerve ? (' · ' + recipe.nerve + 'N') : '';
+        const locStr = recipe.location ? recipe.location + ' · ' : '';
+        return locStr + itemsStr + ' · ' + payoutStr + nerveStr;
+    }
     function injectPdaActionNames() {
         if (!RECIPES || Object.keys(RECIPES).length === 0) return;
         const wrappers = document.querySelectorAll('[class*="titleAndScenario___"]:not([data-arsontest-injected])');
@@ -314,34 +336,44 @@
                 // Desktop already shows both — skip
                 if (scenarios.length >= 2) { w.dataset.arsontestInjected = '1'; continue; }
                 if (scenarios.length === 0) continue;
-                const locationName = scenarios[0].textContent.trim();
-                if (!locationName) continue;
-                const matches = Object.entries(RECIPES).filter(([_, r]) =>
-                    r.location && r.location.toLowerCase() === locationName.toLowerCase());
-                if (matches.length === 0) continue;
-                // Clone the location element (preserves Torn's class set + CSS)
+                const text = scenarios[0].textContent.trim();
+                if (!text) continue;
+
+                // Primary: visible text IS the action name (recipe key).
+                let label = null;
+                const directRecipe = RECIPES[text.toLowerCase()];
+                if (directRecipe) {
+                    label = formatRecipeLine(directRecipe);
+                } else {
+                    // Fallback: text might be a location — list matching actions
+                    const matches = Object.entries(RECIPES).filter(([_, r]) =>
+                        r.location && r.location.toLowerCase() === text.toLowerCase());
+                    if (matches.length > 0) {
+                        label = matches.map(([k]) => k).join(' / ');
+                    }
+                }
+                if (!label) continue;
+
+                // Clone the scenario element (preserves Torn's class set + CSS)
                 const clone = scenarios[0].cloneNode(false);
-                const actionNames = matches.map(([k]) => k).join(' / ');
-                clone.textContent = actionNames;
+                clone.textContent = label;
                 clone.setAttribute('data-arsontest-injected-action', '1');
-                clone.style.cssText += 'opacity:0.8;';
+                clone.style.cssText += 'opacity:0.85;font-size:0.85em;color:#74c69d;';
                 w.appendChild(clone);
                 w.dataset.arsontestInjected = '1';
                 injected++;
             } catch (e) { /* skip malformed cards silently */ }
         }
-        if (injected > 0) LOG('injected', injected, 'action name(s) into location cards');
+        if (injected > 0) LOG('injected', injected, 'recipe label(s) into crime cards');
     }
 
     // === Auto-capture location ↔ action from desktop DOM =====================
     // v0.8.3: User has 117/123 recipes with no `location` field set. Manual
     // backfill is fragile because arson-bang-for-buck's source has no
     // location data — only `action → variants`. Solution: on desktop the
-    // titleAndScenario___ wrapper renders BOTH children
-    // (scenarios[0] = location, scenarios[1] = action). Capture these
-    // pairs once and POST any new mappings back to the server. One
-    // desktop crime-page visit backfills every action that's currently
-    // visible on the screen.
+    // titleAndScenario___ wrapper renders BOTH children. v0.8.4 confirms
+    // ordering by checking each: whichever matches a RECIPE key is the
+    // action; the other is the location.
     //
     // Safe to run on every page: only POSTs when the captured location
     // differs from (or is missing on) the existing RECIPES entry, and
@@ -357,10 +389,19 @@
                 // Need both children — desktop only. Skip our own injected
                 // clone (marked with data-arsontest-injected-action).
                 if (scenarios.length < 2) continue;
-                if (scenarios[1].hasAttribute('data-arsontest-injected-action')) continue;
-                const location = scenarios[0].textContent.trim();
-                const action = scenarios[1].textContent.trim();
-                if (!location || !action) continue;
+                // Identify which child is the action (matches a RECIPES key)
+                // and which is the location, regardless of DOM order.
+                const texts = Array.from(scenarios)
+                    .filter(s => !s.hasAttribute('data-arsontest-injected-action'))
+                    .map(s => s.textContent.trim())
+                    .filter(Boolean);
+                if (texts.length < 2) continue;
+                let action = null, location = null;
+                for (const t of texts) {
+                    if (RECIPES[t.toLowerCase()]) { action = t; }
+                    else if (!location) { location = t; }
+                }
+                if (!action || !location) continue;
                 const key = action.toLowerCase();
                 if (_capturedThisSession.has(key)) continue;
                 const existing = RECIPES[key];
