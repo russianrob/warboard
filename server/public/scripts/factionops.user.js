@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.97
+// @version      5.0.98
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.97';
+    const SCRIPT_VERSION = '5.0.98';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -6675,12 +6675,12 @@ body.wb-chain-active {
     }
 
     // ---- Energy bar via API ----
-    // v5.0.91: bumped 60s → 300s (5 min). Energy ticks at 5-minute
-    // intervals in Torn anyway, so polling more often is wasted work.
-    // The display still counts down in real time between polls via
-    // updateEnergyDisplay() using the anchored ticktime — no visible
-    // freshness loss.
-    const ENERGY_POLL_MS = 5 * 60 * 1000; // 5 minutes
+    // v5.0.91: 60s → 300s. v5.0.98: 300s → 600s (aligned with the
+    // attacks + ffscouter polls so the cellular radio wakes once per
+    // 10-min cycle instead of three times). Energy display still
+    // counts down in real time between polls via anchored ticktime
+    // so the absolute value is at most 10 min stale, smoothly.
+    const ENERGY_POLL_MS = 10 * 60 * 1000; // 10 minutes
     let energyPollInterval = null;
     let energyState = { current: 0, max: 0, ticktime: 0, fulltime: 0 };
     let energyTickAnchorAt = 0; // wall-clock when we last set ticktime
@@ -6745,13 +6745,12 @@ body.wb-chain-active {
     // timestamp window and dedupes by Torn fight ID — produces richer
     // per-attack analytics in the post-war report than the faction
     // attacks-feed alone (mug $, modifiers, defends, KO outcomes).
-    // v5.0.97: bumped 60s → 5 min. Attack ledger updates a couple
-    // minutes slower but the cellular radio gets to sleep instead of
-    // staying lit by a Torn API call every 60s. Attack feed is also
-    // backed up by server-side polling via store.getPollingKey, so
-    // missed attacks still get captured — just from another teammate's
-    // client.
-    const ATTACKS_POLL_MS = 5 * 60 * 1000;
+    // v5.0.97: 60s → 5 min. v5.0.98: 5 min → 10 min (aligned with
+    // bars + ffscouter polls so the cellular radio wakes once per
+    // 10-min cycle). Server-side polling backstop still catches any
+    // attacks this client misses, so the post-war ledger stays
+    // complete — just settles ~20 min after war end instead of ~10.
+    const ATTACKS_POLL_MS = 10 * 60 * 1000;
     let attacksPollInterval = null;
 
     function pollAttacks() {
@@ -8718,7 +8717,7 @@ body.wb-chain-active {
 
         // Fetch Fair Fight data from ffscouter.com (initial + periodic refresh)
         fetchFairFightBatch();
-        setInterval(fetchFairFightBatch, 5 * 60 * 1000); // refresh every 5 min
+        setInterval(fetchFairFightBatch, 10 * 60 * 1000); // v5.0.98: 5 min → 10 min, aligned with bars/attacks polls
 
         // v5.0.92: shared-BSP pool. Pull on init + every 30 min. Push
         // own BSP entries (opt-in via CONFIG.SHARE_BSP) on init + every
