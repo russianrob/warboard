@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.1
+// @version      0.8.2
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -39,7 +39,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.1';
+    const VERSION = '0.8.2';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -270,33 +270,72 @@
         document.body.appendChild(btn);
     }
 
-    // === Force-show scenario names on PDA ====================================
-    // v0.8.1: Torn's desktop view shows the scenario / action name under each
-    // location card (e.g. 'Yurt — High Time'). On PDA the same DOM element
-    // appears to be present but CSS-hidden for screen-space reasons. Inject
-    // a !important rule that overrides the hide, so users can match the
-    // visible scenario name against arsontest recipes (the location field).
-    // Pure additive CSS — doesn't touch any element's position/layout.
-    // If a future Torn rebundle renames the class away from 'scenario___',
-    // this rule simply does nothing (won't break anything).
-    function injectScenarioNamesCss() {
-        if (document.getElementById('arsontest-show-scenarios-css')) return;
-        const style = document.createElement('style');
-        style.id = 'arsontest-show-scenarios-css';
-        style.textContent = `
-            [class*="scenario___"] {
-                display: inline-block !important;
-                opacity: 1 !important;
-                visibility: visible !important;
-                height: auto !important;
-                overflow: visible !important;
-            }
-        `;
-        (document.head || document.documentElement).appendChild(style);
+    // === Inject action names next to PDA location names ======================
+    // v0.8.2: v0.8.1's CSS-only override didn't help — Torn doesn't just
+    // hide the action-name element on PDA, it omits it from the DOM
+    // entirely (only the LOCATION scenario___ child renders).
+    //
+    // This injection finds each titleAndScenario___ wrapper, reads the
+    // location name from the single scenario___ child, looks up matching
+    // recipes from arsontest RECIPES, and appends a CLONE of the existing
+    // scenario element with the action names as text. Cloning inherits
+    // all Torn classes/CSS so the injected label looks native.
+    //
+    // Hard rules to avoid the v0.6 'broke the tooltip' regression:
+    //   - Only APPEND new children (never modify existing element style or
+    //     position)
+    //   - Mark each wrapper with data-arsontest-injected so the
+    //     MutationObserver doesn't double-add
+    //   - Skip wrappers that already have 2+ scenario children (desktop
+    //     view where Torn renders both)
+    function injectPdaActionNames() {
+        if (!RECIPES || Object.keys(RECIPES).length === 0) return;
+        const wrappers = document.querySelectorAll('[class*="titleAndScenario___"]:not([data-arsontest-injected])');
+        let injected = 0;
+        for (const w of wrappers) {
+            try {
+                const scenarios = w.querySelectorAll('[class*="scenario___"]');
+                // Desktop already shows both — skip
+                if (scenarios.length >= 2) { w.dataset.arsontestInjected = '1'; continue; }
+                if (scenarios.length === 0) continue;
+                const locationName = scenarios[0].textContent.trim();
+                if (!locationName) continue;
+                const matches = Object.entries(RECIPES).filter(([_, r]) =>
+                    r.location && r.location.toLowerCase() === locationName.toLowerCase());
+                if (matches.length === 0) continue;
+                // Clone the location element (preserves Torn's class set + CSS)
+                const clone = scenarios[0].cloneNode(false);
+                const actionNames = matches.map(([k]) => k).join(' / ');
+                clone.textContent = actionNames;
+                clone.setAttribute('data-arsontest-injected-action', '1');
+                clone.style.cssText += 'opacity:0.8;';
+                w.appendChild(clone);
+                w.dataset.arsontestInjected = '1';
+                injected++;
+            } catch (e) { /* skip malformed cards silently */ }
+        }
+        if (injected > 0) LOG('injected', injected, 'action name(s) into location cards');
+    }
+
+    // Re-run on DOM mutations (Torn lazy-renders cards). Debounced so we
+    // don't churn during heavy renders.
+    let _injectTimer = null;
+    function scheduleInject() {
+        if (_injectTimer) return;
+        _injectTimer = setTimeout(() => { _injectTimer = null; injectPdaActionNames(); }, 400);
+    }
+    function watchForCards() {
+        if (!document.body) { setTimeout(watchForCards, 500); return; }
+        const obs = new MutationObserver(() => scheduleInject());
+        obs.observe(document.body, { childList: true, subtree: true });
     }
 
     // === Init ===
     LOG('starting v' + VERSION);
-    injectScenarioNamesCss();
+    // Fetch recipes first so injection has location data to match against.
+    fetchRecipes().then(() => {
+        injectPdaActionNames();
+        watchForCards();
+    });
     setTimeout(injectGearButton, 500);
 })();
