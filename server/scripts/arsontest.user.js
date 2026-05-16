@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.17
+// @version      0.8.18
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,26 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.18 — User: 'i want the format to match the same one as original
+//          arson buck one'. v0.8.17's fallback popup used arsontest's
+//          own dark-green theme with a single 'Location · Scenario \n
+//          items · payout · nerve' text. Doesn't match arson-bang-for-
+//          buck's bullet-line look.
+//          Rewrote fallback as showFallbackTooltip(action, location,
+//          recipe, anchor) that uses arson-bang-for-buck's same
+//          .custom-tooltip class (inherits its CSS — dark bg, padding,
+//          radius, font, gap, shadow). Bullet lines in the same order:
+//            [green header]  Location · Scenario
+//            • Payout: 280K
+//            • Profit/Nerve: 17.5K   (if nerve known)
+//            • Nerve: 16
+//            • Place: 3 Gasoline, 1 Lighter
+//            • Stoke: 2 Gasoline     (if recipe.stoke)
+//          Item names title-cased to match arson-bang-for-buck.
+//          Profit/Nerve calculated payout / nerve, formatted as Xk for
+//          values ≥ 1000.
+//          Header gets a bottom border to separate it from the bullet
+//          items — green color marks it as ours, not from upstream.
 // 0.8.17 — User screenshots: tooltip on crime page doesn't show recipe
 //          even when arsontest has one stored. The v0.8.16 fallback
 //          popup only showed 'Location · Scenario' — never included
@@ -220,7 +240,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.17';
+    const VERSION = '0.8.18';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -648,26 +668,57 @@
     // left of every card) that pops up a floating tooltip with the
     // action name + recipe details (if known). stopPropagation so we
     // don't fight arson-bang-for-buck's section-level click handler.
-    function showActionPopup(text, anchor) {
-        document.querySelectorAll('.arsontest-action-popup').forEach(el => el.remove());
+    // v0.8.18: Match arson-bang-for-buck's tooltip format. Use its
+    // `.custom-tooltip` class (inherits its CSS) and the same bullet-
+    // line layout: '• Payout: X', '• Place: Y', '• Stoke: Z', etc.
+    // Extra `arsontest-fallback-tooltip` class lets us identify our
+    // own for cleanup without conflicting with arson-bang-for-buck.
+    function buildBulletDiv(text) {
+        const d = document.createElement('div');
+        d.textContent = '• ' + text;
+        return d;
+    }
+    function formatItemsBullet(items) {
+        return Object.entries(items)
+            .map(([n, q]) => q + ' ' + n.replace(/\b\w/g, c => c.toUpperCase()))
+            .join(', ');
+    }
+    function showFallbackTooltip(action, location, recipe, anchor) {
+        document.querySelectorAll('.arsontest-fallback-tooltip').forEach(el => el.remove());
         const tt = document.createElement('div');
-        tt.className = 'arsontest-action-popup';
-        tt.textContent = text;
-        Object.assign(tt.style, {
-            position: 'fixed', background: '#0f1a14', color: '#74c69d',
-            border: '1px solid #2d6a4f', borderRadius: '6px',
-            padding: '6px 10px', fontSize: '12px', fontWeight: '600',
-            lineHeight: '1.4', zIndex: '99999',
-            boxShadow: '0 4px 14px rgba(0,0,0,0.6)',
-            maxWidth: '75vw',
-            whiteSpace: 'pre-line', // preserve \n line breaks
-        });
+        tt.className = 'custom-tooltip arsontest-fallback-tooltip';
+        // Header line — scenario name, bold + green so it stands out from
+        // the bullet items (matches the v0.8.15 piggyback header style).
+        const header = document.createElement('div');
+        header.textContent = location ? location + ' · ' + action : action;
+        header.style.cssText = 'color:#74c69d;font-weight:700;border-bottom:1px solid #555;padding-bottom:3px;margin-bottom:2px;';
+        tt.appendChild(header);
+        if (recipe) {
+            // Same line order as arson-bang-for-buck: Payout, Profit/Nerve, Place, Stoke
+            const payoutK = Math.round(recipe.payout / 1000);
+            tt.appendChild(buildBulletDiv('Payout: ' + payoutK + 'K'));
+            if (recipe.nerve && recipe.nerve > 0) {
+                const ppn = recipe.payout / recipe.nerve;
+                const ppnStr = ppn >= 1000
+                    ? (Math.round(ppn / 100) / 10) + 'K'
+                    : Math.round(ppn) + '';
+                tt.appendChild(buildBulletDiv('Profit/Nerve: ' + ppnStr));
+                tt.appendChild(buildBulletDiv('Nerve: ' + recipe.nerve));
+            }
+            tt.appendChild(buildBulletDiv('Place: ' + formatItemsBullet(recipe.items)));
+            if (recipe.stoke && Object.keys(recipe.stoke).length) {
+                tt.appendChild(buildBulletDiv('Stoke: ' + formatItemsBullet(recipe.stoke)));
+            }
+        }
+        // Inherit .custom-tooltip CSS from arson-bang-for-buck, but override
+        // display:none so it shows. position:fixed (vs custom-tooltip's
+        // absolute) so we can use viewport coords without scrollY math.
+        tt.style.cssText += ';display:flex;opacity:1;pointer-events:auto;position:fixed;';
         document.body.appendChild(tt);
         const r = anchor.getBoundingClientRect();
         const ttR = tt.getBoundingClientRect();
-        // Position below the anchor, but flip up if it'd run off-screen.
         let top = r.bottom + 4;
-        if (top + ttR.height > window.innerHeight - 8) top = r.top - ttR.height - 4;
+        if (top + ttR.height > window.innerHeight - 8) top = Math.max(8, r.top - ttR.height - 4);
         let left = r.left;
         if (left + ttR.width > window.innerWidth - 8) left = window.innerWidth - ttR.width - 8;
         if (left < 8) left = 8;
@@ -685,6 +736,14 @@
             document.addEventListener('click', dismiss, true);
             document.addEventListener('touchstart', dismiss, true);
         }, 50);
+    }
+    // Back-compat shim — older paths still call showActionPopup with
+    // a single text string (no recipe). Treat as header-only fallback.
+    function showActionPopup(text, anchor) {
+        const parts = String(text).split(/[·\n]/).map(s => s.trim()).filter(Boolean);
+        const action = parts.pop() || text;
+        const location = parts.join(' · ');
+        showFallbackTooltip(action, location, null, anchor);
     }
 
     // v0.8.15: Piggyback on arson-bang-for-buck's tooltip instead of
@@ -717,7 +776,7 @@
                 setTimeout(() => {
                     const visible = document.querySelector('.custom-tooltip[style*="display: flex"]');
                     if (visible) return; // arson-bang-for-buck handled it
-                    if (document.querySelector('.arsontest-action-popup')) return;
+                    if (document.querySelector('.arsontest-fallback-tooltip')) return;
                     const wrapper = card.querySelector('[class*="titleAndScenario___"]');
                     if (!wrapper) return;
                     const actionDiv = wrapper.querySelector('[class*="scenario___"]');
@@ -726,17 +785,11 @@
                     const locDiv = Array.from(wrapper.children).find(c =>
                         !c.className || !String(c.className).includes('scenario___'));
                     const loc = locDiv ? locDiv.textContent.trim().replace(/ ·.*$/, '') : '';
-                    let text = loc ? loc + ' · ' + action : action;
                     // arson-bang-for-buck didn't have this scenario in its
-                    // table — but arsontest's recipes might. Append the
-                    // recipe one-liner if we have one, so the user still
-                    // sees ingredients + payout for these "unknown"
-                    // scenarios (e.g. Church, Waste Facility).
+                    // table — show our own popup using its same format
+                    // (bullet lines, .custom-tooltip CSS class).
                     const recipe = RECIPES[action.toLowerCase()];
-                    if (recipe) {
-                        text += '\n' + formatRecipeLine(recipe);
-                    }
-                    showActionPopup(text, card);
+                    showFallbackTooltip(action, loc, recipe || null, card);
                 }, 150);
             } catch (_) {}
         }, true); // capture so we see the click before arson-bang-for-buck
