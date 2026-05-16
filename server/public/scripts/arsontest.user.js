@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.16
+// @version      0.8.17
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,19 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.17 — User screenshots: tooltip on crime page doesn't show recipe
+//          even when arsontest has one stored. The v0.8.16 fallback
+//          popup only showed 'Location · Scenario' — never included
+//          recipe data from RECIPES even when present.
+//          Fix: when the fallback fires (arson-bang-for-buck had no
+//          tooltip), look up RECIPES[action] and append the formatted
+//          recipe line on a second line of the popup.
+//          showActionPopup now uses whiteSpace: pre-line so \n actually
+//          breaks lines instead of being collapsed.
+//          No risk of duplication: the recipe line is only appended in
+//          the FALLBACK case, which only fires when arson-bang-for-buck
+//          didn't show its own .custom-tooltip (i.e. it doesn't have
+//          this scenario in its hardcoded table).
 // 0.8.16 — User: 'on some locations i cant click to get scenario because
 //          theres no rdcipe like church snd waste facility'. arson-bang-
 //          for-buck only creates a tooltip for scenarios in its hardcoded
@@ -207,7 +220,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.16';
+    const VERSION = '0.8.17';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -644,9 +657,10 @@
             position: 'fixed', background: '#0f1a14', color: '#74c69d',
             border: '1px solid #2d6a4f', borderRadius: '6px',
             padding: '6px 10px', fontSize: '12px', fontWeight: '600',
-            lineHeight: '1.3', zIndex: '99999',
+            lineHeight: '1.4', zIndex: '99999',
             boxShadow: '0 4px 14px rgba(0,0,0,0.6)',
-            maxWidth: '75vw', whiteSpace: 'normal',
+            maxWidth: '75vw',
+            whiteSpace: 'pre-line', // preserve \n line breaks
         });
         document.body.appendChild(tt);
         const r = anchor.getBoundingClientRect();
@@ -712,8 +726,16 @@
                     const locDiv = Array.from(wrapper.children).find(c =>
                         !c.className || !String(c.className).includes('scenario___'));
                     const loc = locDiv ? locDiv.textContent.trim().replace(/ ·.*$/, '') : '';
-                    const text = loc ? loc + ' · ' + action : action;
-                    // Anchor popup to the card so it positions naturally
+                    let text = loc ? loc + ' · ' + action : action;
+                    // arson-bang-for-buck didn't have this scenario in its
+                    // table — but arsontest's recipes might. Append the
+                    // recipe one-liner if we have one, so the user still
+                    // sees ingredients + payout for these "unknown"
+                    // scenarios (e.g. Church, Waste Facility).
+                    const recipe = RECIPES[action.toLowerCase()];
+                    if (recipe) {
+                        text += '\n' + formatRecipeLine(recipe);
+                    }
                     showActionPopup(text, card);
                 }, 150);
             } catch (_) {}
