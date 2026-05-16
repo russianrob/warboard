@@ -7981,6 +7981,253 @@ router.get("/api/war/payouts/list", async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// GET /admin/payouts — web UI for war payouts. TOTP admin login required
+// (same cookie used by /admin). The page itself still needs a Torn API
+// key to hit the payouts endpoints (which auth via resolveVaultCaller);
+// pasted once and stored in localStorage by the browser.
+// ─────────────────────────────────────────────────────────────────────────
+router.get("/admin/payouts", (req, res) => {
+  if (!_verifyAdminCookie(req)) {
+    return res.redirect(302, '/admin?return=' + encodeURIComponent('/admin/payouts'));
+  }
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>War Payouts — warboard admin</title>
+<style>
+  :root{color-scheme:dark}
+  body{background:#0a0f12;color:#e5e7eb;font-family:-apple-system,system-ui,sans-serif;margin:0;padding:20px}
+  .card{background:#0f1a2e;border:1px solid #1e3a5f;border-radius:8px;padding:18px;margin-bottom:14px}
+  h1{font-size:18px;margin:0 0 4px;color:#fff}
+  h1 small{font-size:11px;color:#9ca3af;font-weight:400;margin-left:8px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  label{font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.3px}
+  input,select{background:#060b12;border:1px solid #1e3a5f;color:#e5e7eb;border-radius:4px;padding:7px 9px;font-family:monospace;font-size:12px;min-width:160px}
+  button{background:#2d6a4f;color:#fff;border:0;border-radius:4px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer}
+  button:hover{background:#3a8862}
+  button.secondary{background:#1e3a5f}
+  button.secondary:hover{background:#2a4f7a}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .status{font-size:11px;min-height:16px;color:#ef4444;line-height:1.4;margin-top:6px}
+  .status.ok{color:#74c69d}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #1e3a5f}
+  th{color:#9ca3af;font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:.3px;background:#0a1424;position:sticky;top:0}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr:hover td{background:#0a1424}
+  .meta{font-size:11px;color:#9ca3af;margin-top:6px}
+  .meta b{color:#e5e7eb;font-weight:600}
+  .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+  .topbar a{color:#9ca3af;font-size:11px;text-decoration:none}
+  .topbar a:hover{color:#e5e7eb}
+</style>
+</head><body>
+<div class="topbar">
+  <h1>💰 War Payouts <small>warboard admin</small></h1>
+  <a href="/admin">← admin home</a>
+</div>
+
+<div class="card">
+  <div class="row">
+    <div>
+      <label>Torn API key</label><br>
+      <input type="password" id="apikey" placeholder="paste once, saved in browser" autocomplete="off">
+    </div>
+    <button id="save-key" class="secondary">Save key</button>
+    <button id="clear-key" class="secondary">Clear</button>
+    <span class="status" id="key-status"></span>
+  </div>
+</div>
+
+<div class="card" id="wars-card" style="display:none">
+  <div class="row">
+    <div>
+      <label>War</label><br>
+      <select id="war-pick"><option value="">— pick a war —</option></select>
+    </div>
+    <div>
+      <label>Mode</label><br>
+      <select id="mode-pick">
+        <option value="dynamic">dynamic (member×fight)</option>
+        <option value="static">static (flat per-fight)</option>
+      </select>
+    </div>
+    <div>
+      <label>Loot override</label><br>
+      <input type="number" id="loot-input" placeholder="optional" min="0">
+    </div>
+    <button id="load-btn">Load</button>
+    <button id="refresh-btn" class="secondary">Force refresh</button>
+    <span class="status" id="load-status"></span>
+  </div>
+</div>
+
+<div class="card" id="result-card" style="display:none">
+  <div class="meta" id="result-meta"></div>
+  <div style="overflow:auto;max-height:70vh;margin-top:10px">
+    <table id="result-table">
+      <thead><tr id="result-head"></tr></thead>
+      <tbody id="result-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const KEY_LS = 'warboard_admin_payouts_apikey';
+const apikeyEl = document.getElementById('apikey');
+const keyStatus = document.getElementById('key-status');
+const warsCard = document.getElementById('wars-card');
+const warPick = document.getElementById('war-pick');
+const modePick = document.getElementById('mode-pick');
+const lootInput = document.getElementById('loot-input');
+const loadBtn = document.getElementById('load-btn');
+const refreshBtn = document.getElementById('refresh-btn');
+const loadStatus = document.getElementById('load-status');
+const resultCard = document.getElementById('result-card');
+const resultMeta = document.getElementById('result-meta');
+const resultHead = document.getElementById('result-head');
+const resultBody = document.getElementById('result-body');
+
+function getKey() { return localStorage.getItem(KEY_LS) || ''; }
+function setKey(k) { localStorage.setItem(KEY_LS, k); }
+function clearKey() { localStorage.removeItem(KEY_LS); }
+
+function apiHeaders() {
+  const k = getKey();
+  return k ? { 'x-api-key': k } : {};
+}
+
+async function loadWarList() {
+  if (!getKey()) { warsCard.style.display = 'none'; return; }
+  loadStatus.textContent = 'Loading war list...';
+  loadStatus.className = 'status';
+  try {
+    const r = await fetch('/api/war/payouts/list', { headers: apiHeaders() });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(e.error || ('HTTP ' + r.status));
+    }
+    const data = await r.json();
+    const wars = data.wars || [];
+    warPick.innerHTML = '<option value="">— pick a war —</option>';
+    for (const w of wars) {
+      const label = (w.label || w.warId) + (w.endedAt ? ' (ended ' + new Date(w.endedAt).toLocaleDateString() + ')' : '');
+      const opt = document.createElement('option');
+      opt.value = w.warId;
+      opt.textContent = label;
+      warPick.appendChild(opt);
+    }
+    warsCard.style.display = '';
+    loadStatus.textContent = wars.length + ' war(s) available';
+    loadStatus.className = 'status ok';
+  } catch (e) {
+    loadStatus.textContent = 'War list failed: ' + e.message;
+    loadStatus.className = 'status';
+    warsCard.style.display = '';
+  }
+}
+
+async function loadPayouts(forceFresh) {
+  const warId = warPick.value;
+  if (!warId) { loadStatus.textContent = 'Pick a war first'; loadStatus.className = 'status'; return; }
+  loadStatus.textContent = 'Computing payouts...';
+  loadStatus.className = 'status';
+  resultCard.style.display = 'none';
+  const params = new URLSearchParams({ mode: modePick.value });
+  const loot = lootInput.value.trim();
+  if (loot) params.set('loot', loot);
+  if (forceFresh) params.set('fresh', '1');
+  try {
+    const r = await fetch('/api/war/' + encodeURIComponent(warId) + '/payouts?' + params, { headers: apiHeaders() });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(e.error || ('HTTP ' + r.status));
+    }
+    const data = await r.json();
+    renderPayouts(data);
+    loadStatus.textContent = 'Loaded';
+    loadStatus.className = 'status ok';
+  } catch (e) {
+    loadStatus.textContent = 'Load failed: ' + e.message;
+    loadStatus.className = 'status';
+  }
+}
+
+function fmtN(n) { if (n == null || isNaN(n)) return '—'; return Number(n).toLocaleString(); }
+
+function renderPayouts(data) {
+  const members = data.members || data.payouts || data.rows || [];
+  if (!members.length) {
+    resultMeta.innerHTML = 'No members in payout data.';
+    resultCard.style.display = '';
+    resultHead.innerHTML = '';
+    resultBody.innerHTML = '';
+    return;
+  }
+  // Auto-detect columns from the first row's keys (excludes obvious noise).
+  const skip = new Set(['userId', 'playerId', 'id']);
+  const sample = members[0];
+  const cols = Object.keys(sample).filter(k => !skip.has(k));
+  // Always lead with name
+  cols.sort((a, b) => {
+    if (a === 'name') return -1;
+    if (b === 'name') return 1;
+    if (a === 'payout' || a === 'amount') return 1; // payout last
+    if (b === 'payout' || b === 'amount') return -1;
+    return 0;
+  });
+  resultHead.innerHTML = cols.map(c => '<th>' + c + '</th>').join('');
+  resultBody.innerHTML = members.map(m => {
+    return '<tr>' + cols.map(c => {
+      const v = m[c];
+      const isNum = typeof v === 'number';
+      return '<td' + (isNum ? ' class="num"' : '') + '>' + (isNum ? fmtN(v) : (v == null ? '—' : v)) + '</td>';
+    }).join('') + '</tr>';
+  }).join('');
+  // Header meta
+  const total = (data.totalPayout != null) ? data.totalPayout
+              : (data.totalLoot != null) ? data.totalLoot
+              : members.reduce((a, m) => a + (Number(m.payout || m.amount || 0)), 0);
+  resultMeta.innerHTML = '<b>' + members.length + '</b> members · total <b>$' + fmtN(total) + '</b> · mode <b>' + modePick.value + '</b>'
+    + (data.cached ? ' · <span style="color:#fdcb6e">cached</span>' : '')
+    + (data.computedAt ? ' · computed ' + new Date(data.computedAt).toLocaleString() : '');
+  resultCard.style.display = '';
+}
+
+document.getElementById('save-key').addEventListener('click', () => {
+  const k = apikeyEl.value.trim();
+  if (!k) { keyStatus.textContent = 'Empty key'; keyStatus.className='status'; return; }
+  setKey(k);
+  apikeyEl.value = '';
+  keyStatus.textContent = 'Saved';
+  keyStatus.className = 'status ok';
+  loadWarList();
+});
+document.getElementById('clear-key').addEventListener('click', () => {
+  clearKey();
+  keyStatus.textContent = 'Cleared';
+  keyStatus.className = 'status';
+  warsCard.style.display = 'none';
+  resultCard.style.display = 'none';
+});
+loadBtn.addEventListener('click', () => loadPayouts(false));
+refreshBtn.addEventListener('click', () => loadPayouts(true));
+
+// Init
+if (getKey()) {
+  keyStatus.textContent = 'API key loaded from browser storage';
+  keyStatus.className = 'status ok';
+  loadWarList();
+} else {
+  keyStatus.textContent = 'No saved key — paste one to begin';
+  keyStatus.className = 'status';
+}
+</script>
+</body></html>`);
+});
+
 // v5.0.68: per-war payout-calc settings (admin-only). GET returns
 // the current overrides; POST stores new ones + invalidates the
 // payouts cache for that war so the next compute uses them.
