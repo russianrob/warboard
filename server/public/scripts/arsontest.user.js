@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.5
+// @version      0.8.6
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,13 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.6 — User: 'i only see location but i dont see scenario'. The action
+//         element IS in the DOM (confirmed in the PDA dump user pasted)
+//         but Torn's PDA CSS HIDES anything with the scenario___ class.
+//         v0.8.5 cloned that hidden element — the clone inherited the
+//         hiding rule and was invisible too. Fix: build a fresh <div>
+//         with NO scenario___ class and explicit !important styling so
+//         PDA CSS can't override it.
 // 0.8.5 — User showed full PDA DOM:
 //           <div class="titleAndScenario___...">
 //             <div>Forgery Workshop</div>                  ← location (NO class)
@@ -81,7 +88,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.5';
+    const VERSION = '0.8.6';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -343,31 +350,71 @@
     }
     function injectPdaActionNames() {
         if (!RECIPES || Object.keys(RECIPES).length === 0) return;
-        // Target the ACTION element directly. Confirmed DOM (v0.8.5):
-        //   <div class="titleAndScenario___...">
-        //     <div>Forgery Workshop</div>                  ← location (no class)
-        //     <div class="scenario___...">Shielded from
-        //                                 the Truth</div>  ← action (this one)
-        //   </div>
-        // Only the action child carries the scenario___ class, so we look
-        // up RECIPES[action.text] and inject a sibling label with the
-        // recipe's items + payout + nerve.
-        const actionEls = document.querySelectorAll('[class*="scenario___"]:not([data-arsontest-processed])');
+        // v0.8.6: The action element IS in the DOM but Torn's PDA CSS
+        // HIDES the scenario___ class. Previous versions cloned that
+        // hidden element — the clone inherited the same hiding CSS and
+        // was invisible too. So:
+        //   - Walk the wrapper's direct children (no class filter — gets
+        //     both the visible location div and the hidden action div)
+        //   - Identify action (RECIPES key match) vs location
+        //   - Inject a FRESH <div> (no scenario___ class) with !important
+        //     styling so PDA CSS can't hide it.
+        const wrappers = document.querySelectorAll('[class*="titleAndScenario___"]:not([data-arsontest-injected])');
         let injected = 0;
-        for (const el of actionEls) {
+        for (const w of wrappers) {
             try {
-                // Skip if this is our own injected clone
-                if (el.hasAttribute('data-arsontest-injected-action')) continue;
-                const text = el.textContent.trim();
-                if (!text) continue;
-                el.setAttribute('data-arsontest-processed', '1');
-                const recipe = RECIPES[text.toLowerCase()];
-                if (!recipe) continue;
-                const clone = el.cloneNode(false);
-                clone.textContent = formatRecipeLine(recipe);
-                clone.setAttribute('data-arsontest-injected-action', '1');
-                clone.style.cssText += 'opacity:0.85;font-size:0.85em;color:#74c69d;display:block;';
-                el.insertAdjacentElement('afterend', clone);
+                const children = Array.from(w.children)
+                    .filter(c => !c.hasAttribute('data-arsontest-injected-action'));
+                if (children.length === 0) continue;
+
+                // Identify action (matches a RECIPES key) and location
+                let action = null, location = null;
+                for (const c of children) {
+                    const t = c.textContent.trim();
+                    if (!t) continue;
+                    if (RECIPES[t.toLowerCase()]) {
+                        if (!action) action = t;
+                    } else if (!location) {
+                        location = t;
+                    }
+                }
+
+                // Build label
+                let label = null;
+                if (action) {
+                    label = formatRecipeLine(RECIPES[action.toLowerCase()]);
+                } else if (location) {
+                    // No action recognised — fall back to listing all
+                    // recipes whose .location field matches.
+                    const matches = Object.entries(RECIPES).filter(([_, r]) =>
+                        r.location && r.location.toLowerCase() === location.toLowerCase());
+                    if (matches.length > 0) {
+                        label = matches.map(([k, r]) =>
+                            k + ' (' + formatRecipeLine(r) + ')').join(' / ');
+                    }
+                }
+                if (!label) continue;
+
+                // Plain div — no inherited hiding from scenario___.
+                // !important on every property fights Torn's PDA CSS.
+                const tag = document.createElement('div');
+                tag.setAttribute('data-arsontest-injected-action', '1');
+                tag.textContent = label;
+                tag.style.cssText = [
+                    'display:block !important',
+                    'visibility:visible !important',
+                    'opacity:0.95 !important',
+                    'height:auto !important',
+                    'overflow:visible !important',
+                    'font-size:11px !important',
+                    'line-height:1.3 !important',
+                    'color:#74c69d !important',
+                    'font-weight:600 !important',
+                    'margin-top:2px !important',
+                    'white-space:normal !important',
+                ].join(';');
+                w.appendChild(tag);
+                w.dataset.arsontestInjected = '1';
                 injected++;
             } catch (e) { /* skip malformed cards silently */ }
         }
