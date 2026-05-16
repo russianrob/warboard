@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.76
+// @version      5.0.77
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.76';
+    const SCRIPT_VERSION = '5.0.77';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2994,6 +2994,12 @@ body.wb-chain-active {
             return false;
         })();
         const _useStats = _bspInstalled || _ffsHasAnyEstimate;
+        // v5.0.77: diagnostic — when stats sort silently does nothing
+        // because no stats source is populated, surface it in console
+        // so the user knows WHY their click had no visible effect.
+        if (!_useStats && (_sortMode === 'stats-asc' || _sortMode === 'stats-desc')) {
+            console.log('[factionops] stats sort: no BSP entries in localStorage and no FFS cache hits — falling back to FF rating. Install BSP / FFS or wait for cache to populate.');
+        }
         const getStats = _useStats
             ? (it) => {
                 // Stats-scale path: BSP first, FFS estimate fallback.
@@ -8430,6 +8436,11 @@ body.wb-chain-active {
             sortSel.value = _sortMode;
             sortSel.addEventListener('change', () => {
                 const newMode = sortSel.value;
+                // v5.0.77: diagnostic — log every sort change so we can
+                // confirm the handler is firing and that _sortMode is
+                // being updated. Helps diagnose 'sort doesn't work'
+                // reports (handler issue vs render issue vs no-data).
+                console.log('[factionops] sort changed →', newMode);
                 setSortMode(newMode);
                 renderOverlay();
                 if (newMode === 'stats-asc' || newMode === 'stats-desc') {
