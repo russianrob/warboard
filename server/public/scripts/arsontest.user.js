@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.7.0
+// @version      0.8.0
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -39,7 +39,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.7.0';
+    const VERSION = '0.8.0';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -142,7 +142,8 @@
                 <div id="arsontest-ed-list" style="overflow-y:auto;display:flex;flex-direction:column;gap:4px;max-height:40vh;font-family:monospace;font-size:11px;"></div>
                 <div style="border-top:1px solid #333;padding-top:8px;display:flex;flex-direction:column;gap:6px;">
                     <span style="font-weight:600;color:#a78bfa;">Add / update</span>
-                    <input id="arsontest-ed-key" placeholder="scenario or action name (e.g. spirit level)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
+                    <input id="arsontest-ed-key" placeholder="action name (e.g. spirit level)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
+                    <input id="arsontest-ed-loc" placeholder="location (e.g. Apartment, Lakehouse)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
                     <input id="arsontest-ed-items" placeholder="items: gasoline:3 lighter:1" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
                     <div style="display:flex;gap:6px;">
                         <input id="arsontest-ed-payout" type="number" placeholder="payout (e.g. 280000)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;flex:1;">
@@ -163,15 +164,23 @@
         };
         const renderList = () => {
             const list = overlay.querySelector('#arsontest-ed-list');
-            const keys = Object.keys(RECIPES).sort();
-            if (!keys.length) { list.innerHTML = '<div style="color:#6b7280;">No recipes yet.</div>'; return; }
-            list.innerHTML = keys.map(k => {
-                const r = RECIPES[k];
+            // Sort by location first (entries without location sink), then action.
+            const entries = Object.entries(RECIPES).sort((a, b) => {
+                const la = (a[1].location || '￿~~~').toLowerCase();
+                const lb = (b[1].location || '￿~~~').toLowerCase();
+                if (la !== lb) return la < lb ? -1 : 1;
+                return a[0] < b[0] ? -1 : 1;
+            });
+            if (!entries.length) { list.innerHTML = '<div style="color:#6b7280;">No recipes yet.</div>'; return; }
+            list.innerHTML = entries.map(([k, r]) => {
                 const itemsStr = Object.entries(r.items).map(([n, q]) => q + ' ' + n).join(', ');
                 const nerveStr = r.nerve ? (' · ' + r.nerve + 'N') : '';
+                const locStr = r.location
+                    ? `<span style="color:#f4a261;font-weight:700;">${r.location}</span> · `
+                    : `<span style="color:#6b7280;font-style:italic;">(no location)</span> · `;
                 return `<div style="display:flex;justify-content:space-between;gap:6px;padding:3px 0;border-bottom:1px solid #2a2a2a;">
-                    <span style="color:#d1d5db;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${k}\n${itemsStr}\n$${r.payout.toLocaleString()}${nerveStr}">
-                        <b>${k}</b> · <span style="color:#9ca3af;">${itemsStr}</span> · <span style="color:#74c69d;">$${(r.payout/1000).toFixed(0)}K</span>${nerveStr}
+                    <span style="color:#d1d5db;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.location ? r.location + ' / ' : ''}${k}\n${itemsStr}\n$${r.payout.toLocaleString()}${nerveStr}">
+                        ${locStr}<b>${k}</b> · <span style="color:#9ca3af;">${itemsStr}</span> · <span style="color:#74c69d;">$${(r.payout/1000).toFixed(0)}K</span>${nerveStr}
                     </span>
                     <button class="arsontest-ed-edit" data-k="${k}" style="background:transparent;border:1px solid #444;color:#a78bfa;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">edit</button>
                     <button class="arsontest-ed-del" data-k="${k}" style="background:transparent;border:1px solid #4a1a1a;color:#ef4444;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">del</button>
@@ -180,6 +189,7 @@
             list.querySelectorAll('.arsontest-ed-edit').forEach(b => b.addEventListener('click', () => {
                 const k = b.dataset.k; const r = RECIPES[k];
                 overlay.querySelector('#arsontest-ed-key').value = k;
+                overlay.querySelector('#arsontest-ed-loc').value = r.location || '';
                 overlay.querySelector('#arsontest-ed-items').value = Object.entries(r.items).map(([n, q]) => n + ':' + q).join(' ');
                 overlay.querySelector('#arsontest-ed-payout').value = r.payout;
                 overlay.querySelector('#arsontest-ed-nerve').value = r.nerve || '';
@@ -208,6 +218,7 @@
         });
         overlay.querySelector('#arsontest-ed-save').addEventListener('click', async () => {
             const key = overlay.querySelector('#arsontest-ed-key').value.trim().toLowerCase();
+            const location = overlay.querySelector('#arsontest-ed-loc').value.trim();
             const itemsStr = overlay.querySelector('#arsontest-ed-items').value.trim();
             const payout = Number(overlay.querySelector('#arsontest-ed-payout').value);
             const nerve = Number(overlay.querySelector('#arsontest-ed-nerve').value);
@@ -231,6 +242,7 @@
             if (Object.keys(items).length === 0) { status('Need at least 1 item (e.g. gasoline:3)', '#ef4444'); return; }
             const recipe = { items, payout };
             if (Number.isFinite(nerve) && nerve > 0) recipe.nerve = nerve;
+            if (location) recipe.location = location;
             try {
                 await postRecipe(key, recipe);
                 RECIPES[key] = recipe;

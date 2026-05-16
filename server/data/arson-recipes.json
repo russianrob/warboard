@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "updatedAt": 1778894428402,
+  "version": 3,
+  "updatedAt": 1778897292099,
   "recipes": {
     "a hot lead": {
       "items": {
@@ -99,7 +99,8 @@
         "methane": 1
       },
       "payout": 210000,
-      "nerve": 20
+      "nerve": 20,
+      "location": "Car Showroom"
     },
     "burned by stupidity": {
       "items": {
@@ -380,7 +381,8 @@
       "items": {
         "gasoline": 2
       },
-      "payout": 225000
+      "payout": 225000,
+      "location": "Lakehouse"
     },
     "it's not all white": {
       "items": {
@@ -655,7 +657,8 @@
         "methane": 1
       },
       "payout": 230000,
-      "nerve": 20
+      "nerve": 20,
+      "location": "Bowling Alley"
     },
     "swansong": {
       "items": {
@@ -727,7 +730,8 @@
         "lighter": 1,
         "methane": 2
       },
-      "payout": 400000
+      "payout": 400000,
+      "location": "Law Firm"
     },
     "unspilled beans": {
       "items": {
@@ -766,14 +770,16 @@
         "lighter": 1
       },
       "payout": 220000,
-      "nerve": 15
+      "nerve": 15,
+      "location": "Apartment"
     },
     "make a killing": {
       "items": {
         "kerosene": 3
       },
       "payout": 360000,
-      "nerve": 25
+      "nerve": 25,
+      "location": "Hospital"
     }
   }
 }

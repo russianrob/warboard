@@ -8109,7 +8109,19 @@ router.post("/api/arson/recipes", express.json({ limit: '8kb' }), async (req, re
   if (Number.isFinite(Number(body.nerve)) && Number(body.nerve) > 0) {
     recipe.nerve = Math.floor(Number(body.nerve));
   }
+  // Optional location label so the editor can group/sort by where the
+  // action is played (e.g. 'Apartment', 'Lakehouse'). Just a display
+  // field — no game logic relies on it.
+  if (body.location && typeof body.location === 'string') {
+    const loc = body.location.trim().slice(0, 60);
+    if (loc) recipe.location = loc;
+  }
   const data = loadArsonRecipes();
+  // Preserve existing location if the new POST didn't include one — admins
+  // editing items shouldn't have to retype the location every time.
+  if (!recipe.location && data.recipes[key]?.location) {
+    recipe.location = data.recipes[key].location;
+  }
   data.recipes[key] = recipe;
   data.updatedAt = Date.now();
   scheduleArsonSave();
