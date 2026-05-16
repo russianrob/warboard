@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.96
+// @version      5.0.97
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.96';
+    const SCRIPT_VERSION = '5.0.97';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -4012,20 +4012,14 @@ body.wb-chain-active {
     // triggers share one upstream call. Uses the stored API key (not
     // JWT) since the flights endpoint does Torn-key verification.
     let _flightsFetchInFlight = null;
-    let _flightsDiagCount = 0;
+    // v5.0.97: stubbed out — foFlightDiag previously POSTed every call
+    // to /api/debug/client-log (up to 30/load), which contributed to
+    // the ~10k client-log hits/day we saw in nginx stats. Pure
+    // diagnostic with no behavioral dependency; killing the POST
+    // saves cellular bytes + server log noise. Console.log only path
+    // kept so devs can still inspect via DevTools if needed.
     function foFlightDiag(msg) {
-        if (_flightsDiagCount > 30) return;
-        _flightsDiagCount++;
-        console.log('[fo-flights] ' + msg);
-        try {
-            httpRequest({
-                method: 'POST',
-                url: `${CONFIG.SERVER_URL}/api/debug/client-log`,
-                headers: { 'Content-Type': 'application/json' },
-                data: JSON.stringify({ tag: 'fo-flights', data: { msg, ts: Date.now() } }),
-                onload() {}, onerror() {},
-            });
-        } catch (_) {}
+        // no-op — was: POST to /api/debug/client-log
     }
     async function refreshFlightsForTravelers() {
         const FLIGHT_REFRESH_MIN_MS = 60_000;
@@ -6751,7 +6745,13 @@ body.wb-chain-active {
     // timestamp window and dedupes by Torn fight ID — produces richer
     // per-attack analytics in the post-war report than the faction
     // attacks-feed alone (mug $, modifiers, defends, KO outcomes).
-    const ATTACKS_POLL_MS = 60000;
+    // v5.0.97: bumped 60s → 5 min. Attack ledger updates a couple
+    // minutes slower but the cellular radio gets to sleep instead of
+    // staying lit by a Torn API call every 60s. Attack feed is also
+    // backed up by server-side polling via store.getPollingKey, so
+    // missed attacks still get captured — just from another teammate's
+    // client.
+    const ATTACKS_POLL_MS = 5 * 60 * 1000;
     let attacksPollInterval = null;
 
     function pollAttacks() {
@@ -6776,7 +6776,7 @@ body.wb-chain-active {
         if (attacksPollInterval) return;
         pollAttacks();
         attacksPollInterval = setInterval(pollAttacks, ATTACKS_POLL_MS);
-        log('Attack telemetry poll started (every 60s)');
+        log('Attack telemetry poll started (every ' + Math.round(ATTACKS_POLL_MS/1000) + 's)');
     }
 
     function stopAttacksPoll() {
