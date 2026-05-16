@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.99
+// @version      5.1.0
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.99';
+    const SCRIPT_VERSION = '5.1.0';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -12957,7 +12957,7 @@ body.wb-chain-active {
                 if (bd.overseas) rows.push(['Overseas', bd.overseas]);
                 if (bd.chain) rows.push(['Chain hits', bd.chain]);
                 if (bd.non_war) rows.push(['Non-war hits', `${bd.non_war} (×0.3 weight)`]);
-                if (bd.failed) rows.push(['Failed', String(bd.failed)]);
+                if (bd.failed) rows.push(['Losses', String(bd.failed)]);
                 if (bd.avgFf) rows.push(['Avg FF', bd.avgFf.toFixed(2)]);
                 if (bd.tornScore) rows.push(['Torn score', bd.tornScore]);
                 pop.innerHTML = `<div class="pop-title">${escapeHtml(bd.name || 'Attack breakdown')}</div>`
