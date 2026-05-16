@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.84
+// @version      5.0.85
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.84';
+    const SCRIPT_VERSION = '5.0.85';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3038,19 +3038,19 @@ body.wb-chain-active {
             // get -1 so they sink to the bottom of the sort.
             valueFn = (it) => statsMap.has(it.targetId)
                 ? statsMap.get(it.targetId) : -1;
-            console.log('[factionops] stats sort:', withStats, '/', items.length,
-                'current targets have BSP/FFS data');
         } else {
             // Nobody in the current target set has BSP/FFS — fall back
             // to FF rating (factionops's own data, populated by every
             // overlay render). At least produces a meaningful order.
-            console.log('[factionops] stats sort: 0 /', items.length,
-                'current targets have BSP/FFS — using FF rating as fallback');
             valueFn = (it) => {
                 const v = getFfRating(it);
                 return v !== null ? v : -1;
             };
         }
+        // v5.0.85: removed diagnostic console.log lines that fired
+        // every render under stats sort. On PDA each console.log is
+        // measurably expensive — keeping them after the bug was
+        // diagnosed adds lag for no benefit.
 
         const cmpAsc = (a, b) => {
             const av = valueFn(a), bv = valueFn(b);
@@ -8465,7 +8465,6 @@ body.wb-chain-active {
             sortSel.value = _sortMode;
             sortSel.addEventListener('change', () => {
                 const newMode = sortSel.value;
-                console.log('[factionops] sort changed →', newMode);
                 setSortMode(newMode);
                 renderOverlay();
                 if (newMode === 'stats-asc' || newMode === 'stats-desc') {
