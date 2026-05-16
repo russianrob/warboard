@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.78
+// @version      5.0.79
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.78';
+    const SCRIPT_VERSION = '5.0.79';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2981,14 +2981,30 @@ body.wb-chain-active {
             return items;
         }
 
-        // v5.0.78: the prior _useStats check was "does ANY user have
-        // BSP or FFS data?" — but for war targets the answer is often
-        // 'yes for some random previously-visited person, no for any
-        // war target' which made the sort silently do nothing (every
-        // current item returned -1 → comparator no-op). Switch to a
-        // per-target check: compute the value for every item up front,
-        // count how many are non-null, and only fall back to FF rating
-        // if NONE of the current targets had a stats value.
+        // v5.0.79: three stats sources in order of precision:
+        //   1. BSP TBS (exact, from user's own profile visits)
+        //   2. FFS bs_estimate (exact, from FFS userscript IndexedDB)
+        //   3. ffCache[id].bsHuman parsed midpoint (range like "10M-50M"
+        //      → 30M, less precise but factionops already fetches it
+        //      via ffscouter.com API for every war target so it's
+        //      almost always available)
+        const parseBsHuman = (s) => {
+            // Examples: "10M-50M", "1.2B", "500K", "10M", "1.5B-3B"
+            if (!s || typeof s !== 'string') return null;
+            const unit = (u) => u === 'B' ? 1e9 : u === 'M' ? 1e6 : u === 'K' ? 1e3 : 1;
+            const parts = s.split('-').map(p => p.trim());
+            const toNum = (p) => {
+                const m = p.match(/^([\d.]+)\s*([KMB])?$/i);
+                if (!m) return null;
+                const n = parseFloat(m[1]);
+                if (!Number.isFinite(n)) return null;
+                return n * unit((m[2] || '').toUpperCase());
+            };
+            const a = toNum(parts[0]);
+            if (a === null) return null;
+            const b = parts[1] ? toNum(parts[1]) : null;
+            return b !== null ? (a + b) / 2 : a;
+        };
         const getBspFfs = (it) => {
             try {
                 const bsp = fetchBspPrediction(it.targetId);
@@ -2998,7 +3014,11 @@ body.wb-chain-active {
                 }
             } catch (_) {}
             const ffs = _ffsStatsCache.get(String(it.targetId));
-            return (typeof ffs === 'number') ? ffs : null;
+            if (typeof ffs === 'number') return ffs;
+            // Tertiary: parse ffCache's human-readable string.
+            const c = (typeof ffCache !== 'undefined') ? ffCache[it.targetId] : null;
+            const parsed = c ? parseBsHuman(c.bsHuman) : null;
+            return parsed !== null ? parsed : null;
         };
         const getFfRating = (it) => {
             const c = (typeof ffCache !== 'undefined') ? ffCache[it.targetId] : null;
@@ -8436,19 +8456,19 @@ body.wb-chain-active {
             sortSel.value = _sortMode;
             sortSel.addEventListener('change', () => {
                 const newMode = sortSel.value;
-                // v5.0.77: diagnostic — log every sort change so we can
-                // confirm the handler is firing and that _sortMode is
-                // being updated. Helps diagnose 'sort doesn't work'
-                // reports (handler issue vs render issue vs no-data).
                 console.log('[factionops] sort changed →', newMode);
                 setSortMode(newMode);
                 renderOverlay();
                 if (newMode === 'stats-asc' || newMode === 'stats-desc') {
+                    // v5.0.79: kick an immediate ffscouter batch fetch
+                    // when user picks stats sort. fetchFairFightBatch
+                    // is single-flight + skips already-cached uids, so
+                    // this is safe to call eagerly. Then re-render
+                    // after 2.5s to pick up fresh data.
+                    try { fetchFairFightBatch(); } catch (_) {}
                     setTimeout(() => {
-                        // Only re-render if still on stats mode (user may
-                        // have flipped back to smart already).
                         if (_sortMode === newMode) renderOverlay();
-                    }, 1500);
+                    }, 2500);
                 }
             });
         }
