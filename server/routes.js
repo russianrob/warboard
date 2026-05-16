@@ -8161,7 +8161,7 @@ async function loadPayouts(forceFresh) {
 function fmtN(n) { if (n == null || isNaN(n)) return '—'; return Number(n).toLocaleString(); }
 
 function renderPayouts(data) {
-  const members = data.members || data.payouts || data.rows || [];
+  const members = data.members || [];
   if (!members.length) {
     resultMeta.innerHTML = 'No members in payout data.';
     resultCard.style.display = '';
@@ -8169,33 +8169,41 @@ function renderPayouts(data) {
     resultBody.innerHTML = '';
     return;
   }
-  // Auto-detect columns from the first row's keys (excludes obvious noise).
-  const skip = new Set(['userId', 'playerId', 'id']);
-  const sample = members[0];
-  const cols = Object.keys(sample).filter(k => !skip.has(k));
-  // Always lead with name
-  cols.sort((a, b) => {
-    if (a === 'name') return -1;
-    if (b === 'name') return 1;
-    if (a === 'payout' || a === 'amount') return 1; // payout last
-    if (b === 'payout' || b === 'amount') return -1;
-    return 0;
-  });
-  resultHead.innerHTML = cols.map(c => '<th>' + c + '</th>').join('');
+  // Explicit columns matching computePayouts() return shape — server
+  // fields are: name, score, sharePct, dollarPayout, attackCount,
+  // totalAttacks, avgFf, level, tornScore, tornAttacks
+  const cols = [
+    { key: 'name',         label: 'Member',     num: false },
+    { key: 'level',        label: 'Lvl',        num: true },
+    { key: 'attackCount',  label: 'War atks',   num: true },
+    { key: 'totalAttacks', label: 'Total atks', num: true },
+    { key: 'score',        label: 'Score',      num: true, fmt: v => Number(v).toFixed(1) },
+    { key: 'avgFf',        label: 'Avg FF',     num: true, fmt: v => Number(v).toFixed(2) },
+    { key: 'sharePct',     label: 'Share %',    num: true, fmt: v => Number(v).toFixed(1) + '%' },
+    { key: 'dollarPayout', label: 'Payout $',   num: true, fmt: v => '$' + fmtN(v) },
+  ];
+  resultHead.innerHTML = cols.map(c => '<th' + (c.num ? ' style="text-align:right"' : '') + '>' + c.label + '</th>').join('');
   resultBody.innerHTML = members.map(m => {
     return '<tr>' + cols.map(c => {
-      const v = m[c];
-      const isNum = typeof v === 'number';
-      return '<td' + (isNum ? ' class="num"' : '') + '>' + (isNum ? fmtN(v) : (v == null ? '—' : v)) + '</td>';
+      const v = m[c.key];
+      const display = v == null ? '—' : (c.fmt ? c.fmt(v) : (c.num ? fmtN(v) : v));
+      return '<td' + (c.num ? ' class="num"' : '') + '>' + display + '</td>';
     }).join('') + '</tr>';
   }).join('');
-  // Header meta
-  const total = (data.totalPayout != null) ? data.totalPayout
-              : (data.totalLoot != null) ? data.totalLoot
-              : members.reduce((a, m) => a + (Number(m.payout || m.amount || 0)), 0);
-  resultMeta.innerHTML = '<b>' + members.length + '</b> members · total <b>$' + fmtN(total) + '</b> · mode <b>' + modePick.value + '</b>'
+  // Header meta — use real fields from computePayouts
+  const pool = Number(data.payoutPool || 0);
+  const fac = Number(data.factionShare || 0);
+  const loot = Number(data.lootTotal || 0);
+  const pct = Math.round((data.payoutPct || 0) * 100);
+  resultMeta.innerHTML =
+      '<b>' + members.length + '</b> members'
+    + ' · enemy <b>' + (data.enemyFactionName || '?') + '</b>'
+    + ' · result <b>' + (data.warResult || '?') + '</b>'
+    + ' · loot <b>$' + fmtN(loot) + '</b>'
+    + ' · payout pool <b>$' + fmtN(pool) + '</b> (' + pct + '%)'
+    + ' · faction <b>$' + fmtN(fac) + '</b>'
     + (data.cached ? ' · <span style="color:#fdcb6e">cached</span>' : '')
-    + (data.computedAt ? ' · computed ' + new Date(data.computedAt).toLocaleString() : '');
+    + (data.generatedAt ? ' · computed ' + new Date(data.generatedAt).toLocaleString() : '');
   resultCard.style.display = '';
 }
 
