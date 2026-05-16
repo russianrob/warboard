@@ -1770,18 +1770,25 @@ router.post("/api/status", requireAuth, async (req, res) => {
       const st = statusData.status || "";
       const isHospital = st.toLowerCase().includes("hospital");
 
-      // If hospital, soft-uncall after delay — but NOT for deal calls
-      // (deal calls reserve the target for multiple hits, so hospitalization is expected)
-      if (isHospital && war.calls[targetId] && !war.calls[targetId].isDeal) {
-        const timerKey = `${warId}:${targetId}`;
-        clearExistingTimer(timerKey);
-        callTimers.set(
-          timerKey,
-          setTimeout(() => {
-            uncallTarget(warId, targetId);
-          }, SOFT_UNCALL_MS),
-        );
-      }
+      // 2026-05-16: soft-uncall-on-hospital removed.
+      //
+      // Bug it was masking: 'two people calling/stealing same target'.
+      // The previous logic fired a SILENT uncall 30s after ANY target
+      // transitioned into hospital while called — even if an enemy
+      // hospitalized them, even if the caller never attacked. Then a
+      // second player could call the same target with no 409. From the
+      // user's perspective the call vanished out from under them.
+      //
+      // Genuine 'caller landed the hit, free the slot' case is still
+      // handled by war-status-monitor.js attacks-feed auto-uncall
+      // (line 425+), which only fires when call.calledBy.id ===
+      // attacker_id from the faction attack log AND the result is a
+      // SUCCESS_RESULTS attack. That one DOES log
+      // '[attacks-feed] auto-uncalled X — <result> by caller Y'.
+      //
+      // Regular calls still hit the 5-min server expiry via
+      // scheduleCallExpiry, so a caller who fails to attack within 5
+      // min still releases the slot. Deal calls keep their 2h timer.
 
       // Push notification: target left hospital (was hospital, now isn't)
       if (wasHospital && !isHospital) {

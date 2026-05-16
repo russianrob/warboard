@@ -182,22 +182,14 @@ export function registerSocketHandlers(io, socket) {
       updatedBy: { id: user.playerId, name: user.playerName },
     });
 
-    // If target NEWLY enters hospital and is currently called, soft-uncall after delay
-    // Skip if target was already in hospital when called (caller intended to reserve them)
-    const wasHospital = existing.status && existing.status.toLowerCase().includes("hospital");
-    if (status.toLowerCase().includes("hospital") && !wasHospital) {
-      const call = war.calls[targetId];
-      if (call) {
-        const timerKey = `${player.warId}:${targetId}`;
-        clearExistingTimer(timerKey);
-        callTimers.set(
-          timerKey,
-          setTimeout(() => {
-            uncallTarget(io, player.warId, targetId, "hospital");
-          }, SOFT_UNCALL_MS),
-        );
-      }
-    }
+    // 2026-05-16: soft-uncall-on-hospital removed (matches routes.js).
+    // Was silently clearing calls 30s after ANY hospital transition,
+    // even when an enemy hospitalized the called target. Result: a
+    // second player could re-call the target with no 409, looking
+    // like a call was stolen. attacks-feed auto-uncall handles the
+    // genuine 'caller landed the hit' case (war-status-monitor.js
+    // line 425+) with a log line; everything else falls back to the
+    // 5-min server expiry.
   });
 
   // ── refresh_statuses ────────────────────────────────────────────────
@@ -263,6 +255,7 @@ function uncallTarget(io, warId, targetId, reason) {
   const war = store.getWar(warId);
   if (!war || !war.calls[targetId]) return;
 
+  const caller = war.calls[targetId].calledBy || {};
   delete war.calls[targetId];
   store.saveState();
 
@@ -270,4 +263,8 @@ function uncallTarget(io, warId, targetId, reason) {
   clearExistingTimer(timerKey);
 
   io.to(`war_${warId}`).emit("target_uncalled", { targetId, reason });
+  // 2026-05-16: log every server-side uncall so we can trace 'where
+  // did my call go?' reports. The silent variant of this fn caused
+  // exactly that diagnostic black hole.
+  console.log(`[socket-uncall] cleared ${targetId} (was ${caller.name || '?'}, reason=${reason})`);
 }
