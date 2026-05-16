@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.11
+// @version      0.8.12
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,19 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.12 — User: 'maybe add a tooltip for the image on the left? because
+//          scenario isnt working'. v0.8.11's inline text rewrite also
+//          didn't show — every inline approach has failed because an
+//          ancestor of scenario___ collapses to zero height.
+//          New UX: tap the location card's <img> to pop a tooltip with
+//          'Location · Action Name' (and recipe info if the action is
+//          in RECIPES). Floating div positioned via getBoundingClientRect,
+//          flips above if it'd overflow the viewport, dismisses on next
+//          tap outside.
+//          stopPropagation on the image click so we don't fight arson-
+//          bang-for-buck's section-level click handler (which fires on
+//          the rest of the card for its ingredient tooltip).
+//          Also sets img.title for desktop browser-native hover tooltip.
 // 0.8.11 — v0.8.10 dump showed scenario___ has display:block visibility:
 //          visible opacity:1 fontSize:11px text present — but offsetH=0.
 //          Means an ANCESTOR (titleAndScenario___ or higher) collapses
@@ -139,7 +152,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.11';
+    const VERSION = '0.8.12';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -545,6 +558,91 @@
         if (rewritten > 0) LOG('rewrote', rewritten, 'location label(s) with action name');
     }
 
+    // v0.8.12: Tap-on-image tooltip. Inline text approaches all failed
+    // because PDA collapses something up the ancestor chain. Instead,
+    // attach a tap handler to the location-card's <img> (visible on the
+    // left of every card) that pops up a floating tooltip with the
+    // action name + recipe details (if known). stopPropagation so we
+    // don't fight arson-bang-for-buck's section-level click handler.
+    function showActionPopup(text, anchor) {
+        document.querySelectorAll('.arsontest-action-popup').forEach(el => el.remove());
+        const tt = document.createElement('div');
+        tt.className = 'arsontest-action-popup';
+        tt.textContent = text;
+        Object.assign(tt.style, {
+            position: 'fixed', background: '#0f1a14', color: '#74c69d',
+            border: '1px solid #2d6a4f', borderRadius: '6px',
+            padding: '6px 10px', fontSize: '12px', fontWeight: '600',
+            lineHeight: '1.3', zIndex: '99999',
+            boxShadow: '0 4px 14px rgba(0,0,0,0.6)',
+            maxWidth: '75vw', whiteSpace: 'normal',
+        });
+        document.body.appendChild(tt);
+        const r = anchor.getBoundingClientRect();
+        const ttR = tt.getBoundingClientRect();
+        // Position below the anchor, but flip up if it'd run off-screen.
+        let top = r.bottom + 4;
+        if (top + ttR.height > window.innerHeight - 8) top = r.top - ttR.height - 4;
+        let left = r.left;
+        if (left + ttR.width > window.innerWidth - 8) left = window.innerWidth - ttR.width - 8;
+        if (left < 8) left = 8;
+        tt.style.top = top + 'px';
+        tt.style.left = left + 'px';
+        // Dismiss on next tap outside.
+        setTimeout(() => {
+            const dismiss = (ev) => {
+                if (!tt.contains(ev.target)) {
+                    tt.remove();
+                    document.removeEventListener('click', dismiss, true);
+                    document.removeEventListener('touchstart', dismiss, true);
+                }
+            };
+            document.addEventListener('click', dismiss, true);
+            document.addEventListener('touchstart', dismiss, true);
+        }, 50);
+    }
+
+    function attachImageTooltips() {
+        const wrappers = document.querySelectorAll('[class*="titleAndScenario___"]');
+        let attached = 0;
+        for (const w of wrappers) {
+            try {
+                // Find the action name from the (often hidden) scenario___ child
+                const actionDiv = w.querySelector('[class*="scenario___"]');
+                if (!actionDiv) continue;
+                const action = actionDiv.textContent.trim();
+                if (!action) continue;
+                // Find location text
+                const locDiv = Array.from(w.children).find(c =>
+                    !c.className || !String(c.className).includes('scenario___'));
+                const location = locDiv ? locDiv.textContent.trim().replace(/ ·.*$/, '') : '';
+                // Find the card and its image
+                const card = w.closest('[class*="sections___"]') || w.closest('[class*="crimeOption"]');
+                if (!card) continue;
+                const img = card.querySelector('img');
+                if (!img) continue;
+                if (img.dataset.arsontestTt === '1') continue;
+                img.dataset.arsontestTt = '1';
+                img.style.cursor = 'pointer';
+                // Native browser tooltip on hover (desktop)
+                img.title = location ? location + ' · ' + action : action;
+                // Tap handler (PDA + click on desktop)
+                img.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    let text = action;
+                    if (location) text = location + ' · ' + action;
+                    const recipe = RECIPES[action.toLowerCase()];
+                    if (recipe) {
+                        text += '\n' + formatRecipeLine(recipe);
+                    }
+                    showActionPopup(text, img);
+                });
+                attached++;
+            } catch (e) { /* skip */ }
+        }
+        if (attached > 0) LOG('attached tap-tooltip to', attached, 'image(s)');
+    }
+
     function injectPdaActionNames() {
         // v0.8.8: v0.8.7 still didn't render visibly. Three redundant
         // approaches so at least one survives whatever PDA CSS is doing:
@@ -680,8 +778,9 @@
         _injectTimer = setTimeout(() => {
             _injectTimer = null;
             autoCaptureLocations();   // desktop: learn location↔action
-            rewriteLocationText();    // PDA: write action into visible location div
-            injectPdaActionNames();   // belt-and-braces: also try the div injects
+            attachImageTooltips();    // PDA: tap card image → popup with action name
+            rewriteLocationText();    // fallback: try writing action into visible location div
+            injectPdaActionNames();   // belt-and-braces
         }, 400);
     }
     function watchForCards() {
@@ -693,8 +792,9 @@
     // === Init ===
     LOG('starting v' + VERSION);
     injectGlobalScenarioCss();
-    rewriteLocationText();   // v0.8.11 primary: rewrite the visible location text
-    injectPdaActionNames();  // belt-and-braces
+    attachImageTooltips();    // v0.8.12 primary: tap-on-image popup
+    rewriteLocationText();    // fallback
+    injectPdaActionNames();   // belt-and-braces
     watchForCards();
     fetchRecipes().then(() => autoCaptureLocations());
     setTimeout(injectGearButton, 500);
