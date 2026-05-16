@@ -332,20 +332,33 @@ export async function computePayouts(warId, options = {}) {
     }
     byAttacker[aid].totalAttacks += 1;
 
-    // v5.0.44/72/73: failed attacks (defended, stalemate, lost,
-    // escaped, timeout, interrupted) have respect_gain = 0 and
-    // earned no respect for the war. By default they don't pay
-    // (failedWeight = 0) but admins can opt in to effort-based
-    // payouts via the gear panel. Setting failedWeight = 0.1 means
-    // each failed attempt adds 0.1 to the member's score (flat,
-    // since respect_gain is 0 so a multiplier would also be 0).
+    // 2026-05-17: loss attacks ONLY (Lost, Stalemate, Escape,
+    // Interrupted, Timeout) bucket into breakdown.failed.
+    //
+    // Previous gate was `respect_gain <= 0` — too broad. That caught
+    // legitimate WINS that happen to earn no respect, most notably
+    // Assists (the killer gets the respect, not the assister) and
+    // hits on already-injured / stat-locked / pre-mugged targets.
+    // User report: 'N4 failes 6 times but he only lost once' — the
+    // other 5 were assists / zero-respect wins.
+    //
+    // SUCCESS_RESULTS for reference (mirror of war-status-monitor.js):
+    //   Attacked, Hospitalized, Mugged, Looted, Special, Assist
+    // Everything else with respect_gain<=0 we treat as a real loss.
+    const LOSS_RESULTS = new Set([
+      'Lost', 'Stalemate', 'Escape', 'Interrupted', 'Timeout',
+    ]);
     const respectGain = Number(atk.respect_gain) || 0;
     if (respectGain <= 0) {
-      byAttacker[aid].breakdown.failed = (byAttacker[aid].breakdown.failed || 0) + 1;
-      const FAILED_WEIGHT = Number.isFinite(settings.failedWeight)
-        ? Math.max(0, Number(settings.failedWeight))
-        : 0;
-      if (FAILED_WEIGHT > 0) byAttacker[aid].fairScoreSum += FAILED_WEIGHT;
+      const result = String(atk.result || '');
+      if (LOSS_RESULTS.has(result)) {
+        byAttacker[aid].breakdown.failed = (byAttacker[aid].breakdown.failed || 0) + 1;
+        const FAILED_WEIGHT = Number.isFinite(settings.failedWeight)
+          ? Math.max(0, Number(settings.failedWeight))
+          : 0;
+        if (FAILED_WEIGHT > 0) byAttacker[aid].fairScoreSum += FAILED_WEIGHT;
+      }
+      // Either way, no respect to score from this attack — continue.
       continue;
     }
 
