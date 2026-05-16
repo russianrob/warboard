@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.10
+// @version      0.8.11
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,16 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.11 — v0.8.10 dump showed scenario___ has display:block visibility:
+//          visible opacity:1 fontSize:11px text present — but offsetH=0.
+//          Means an ANCESTOR (titleAndScenario___ or higher) collapses
+//          to zero height regardless of child styles. CSS rules on the
+//          scenario element can't fix that.
+//          New approach: rewrite the LOCATION div's text content. The
+//          location div is visible to the user ('Forgery Workshop'),
+//          so appending ' · Shielded from the Truth' to it makes the
+//          action visible WITHOUT fighting hidden ancestors.
+//          Idempotent — won't re-apply if location text already has ' · '.
 // 0.8.10 — Debug dump from v0.8.9 revealed offsetHeight=0 on scenario
 //          elements DESPITE display:block visibility:visible opacity:1
 //          inline. That means PDA's CSS is hiding inner CONTENT
@@ -129,7 +139,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.10';
+    const VERSION = '0.8.11';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -502,6 +512,39 @@
         (document.head || document.documentElement).appendChild(s);
     }
 
+    // v0.8.11: Forget trying to unhide the scenario___ element. The
+    // v0.8.10 dump showed it has display:block visibility:visible
+    // opacity:1 fontSize:11px text-content present — yet offsetHeight=0.
+    // That means an ANCESTOR (the titleAndScenario___ wrapper or higher)
+    // is collapsed to zero height regardless of the child's own styles.
+    //
+    // The LOCATION div (the unclassed one — "Forgery Workshop") IS
+    // visible to the user. So append the action name to the location
+    // div's text. No fighting with hidden ancestors.
+    function rewriteLocationText() {
+        const wrappers = document.querySelectorAll('[class*="titleAndScenario___"]');
+        let rewritten = 0;
+        for (const w of wrappers) {
+            try {
+                const children = Array.from(w.children);
+                // The location is the child WITHOUT scenario___ class.
+                const locationDiv = children.find(c =>
+                    !c.className || !String(c.className).includes('scenario___'));
+                const actionDiv = children.find(c =>
+                    c.className && String(c.className).includes('scenario___'));
+                if (!locationDiv || !actionDiv) continue;
+                const loc = locationDiv.textContent.trim();
+                const action = actionDiv.textContent.trim();
+                if (!loc || !action) continue;
+                // Don't re-apply if our marker is already present.
+                if (locationDiv.textContent.includes(' · ')) continue;
+                locationDiv.textContent = loc + ' · ' + action;
+                rewritten++;
+            } catch (e) { /* skip */ }
+        }
+        if (rewritten > 0) LOG('rewrote', rewritten, 'location label(s) with action name');
+    }
+
     function injectPdaActionNames() {
         // v0.8.8: v0.8.7 still didn't render visibly. Three redundant
         // approaches so at least one survives whatever PDA CSS is doing:
@@ -636,8 +679,9 @@
         if (_injectTimer) return;
         _injectTimer = setTimeout(() => {
             _injectTimer = null;
-            autoCaptureLocations(); // desktop: learn
-            injectPdaActionNames(); // PDA: show
+            autoCaptureLocations();   // desktop: learn location↔action
+            rewriteLocationText();    // PDA: write action into visible location div
+            injectPdaActionNames();   // belt-and-braces: also try the div injects
         }, 400);
     }
     function watchForCards() {
@@ -648,12 +692,9 @@
 
     // === Init ===
     LOG('starting v' + VERSION);
-    // Global CSS rule first — survives React reconciliation, fixes the
-    // PDA 'scenario hidden via descendant CSS' case revealed by v0.8.9's
-    // debug dump (offsetHeight=0 despite display:block on container).
     injectGlobalScenarioCss();
-    // DOM injects still run too (belt-and-braces).
-    injectPdaActionNames();
+    rewriteLocationText();   // v0.8.11 primary: rewrite the visible location text
+    injectPdaActionNames();  // belt-and-braces
     watchForCards();
     fetchRecipes().then(() => autoCaptureLocations());
     setTimeout(injectGearButton, 500);
