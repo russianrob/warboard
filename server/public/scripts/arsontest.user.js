@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.2
+// @version      0.8.3
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,22 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.3 — Auto-capture location ↔ action pairs from desktop DOM. Only 5/123
+//         recipes had a `location` field set, and backfilling manually is
+//         fragile because arson-bang-for-buck's source contains no
+//         location data. On desktop the titleAndScenario___ wrapper
+//         renders both scenario___ children (location + action). Capture
+//         those pairs and POST updated recipes to the server. One desktop
+//         crime-page visit backfills every action that's on screen.
+//         Safe-by-default: only POSTs when the captured location differs
+//         from the existing entry, and only for actions that already
+//         exist in RECIPES — never invents new recipe keys.
+// 0.8.2 — Inject action names next to PDA location names (v0.8.1's
+//         CSS-only override didn't work because Torn omits the element
+//         on PDA rather than CSS-hiding it). Clones the existing
+//         scenario element so styling inherits.
+// 0.8.0 — Added `location` field to recipe schema + editor sorts list
+//         by location then action. Backfilled 6 known locations.
 // 0.7.0 — Stripped to a pure recipe editor. v0.6 was still scanning the
 //         page DOM and adding profit/nerve badges to each crime option,
 //         and to anchor the badge it set el.style.position = 'relative'
@@ -39,7 +55,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.2';
+    const VERSION = '0.8.3';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -317,12 +333,65 @@
         if (injected > 0) LOG('injected', injected, 'action name(s) into location cards');
     }
 
+    // === Auto-capture location ↔ action from desktop DOM =====================
+    // v0.8.3: User has 117/123 recipes with no `location` field set. Manual
+    // backfill is fragile because arson-bang-for-buck's source has no
+    // location data — only `action → variants`. Solution: on desktop the
+    // titleAndScenario___ wrapper renders BOTH children
+    // (scenarios[0] = location, scenarios[1] = action). Capture these
+    // pairs once and POST any new mappings back to the server. One
+    // desktop crime-page visit backfills every action that's currently
+    // visible on the screen.
+    //
+    // Safe to run on every page: only POSTs when the captured location
+    // differs from (or is missing on) the existing RECIPES entry, and
+    // only for actions that ALREADY exist in RECIPES (we never invent a
+    // new recipe key — that's the editor's job).
+    const _capturedThisSession = new Set();
+    async function autoCaptureLocations() {
+        if (!RECIPES || Object.keys(RECIPES).length === 0) return;
+        const wrappers = document.querySelectorAll('[class*="titleAndScenario___"]');
+        for (const w of wrappers) {
+            try {
+                const scenarios = w.querySelectorAll('[class*="scenario___"]');
+                // Need both children — desktop only. Skip our own injected
+                // clone (marked with data-arsontest-injected-action).
+                if (scenarios.length < 2) continue;
+                if (scenarios[1].hasAttribute('data-arsontest-injected-action')) continue;
+                const location = scenarios[0].textContent.trim();
+                const action = scenarios[1].textContent.trim();
+                if (!location || !action) continue;
+                const key = action.toLowerCase();
+                if (_capturedThisSession.has(key)) continue;
+                const existing = RECIPES[key];
+                if (!existing) continue; // never invent recipes
+                if (existing.location &&
+                    existing.location.toLowerCase() === location.toLowerCase()) {
+                    _capturedThisSession.add(key);
+                    continue; // already correct
+                }
+                // POST updated recipe with location field
+                const updated = Object.assign({}, existing, { location });
+                _capturedThisSession.add(key);
+                postRecipe(key, updated).then(() => {
+                    RECIPES[key] = updated;
+                    try { localStorage.removeItem('arsontest_recipes_cache'); } catch (_) {}
+                    LOG('auto-captured location:', action, '→', location);
+                }).catch(e => WARN('auto-capture POST failed for', action, e.message));
+            } catch (e) { /* skip malformed cards */ }
+        }
+    }
+
     // Re-run on DOM mutations (Torn lazy-renders cards). Debounced so we
     // don't churn during heavy renders.
     let _injectTimer = null;
     function scheduleInject() {
         if (_injectTimer) return;
-        _injectTimer = setTimeout(() => { _injectTimer = null; injectPdaActionNames(); }, 400);
+        _injectTimer = setTimeout(() => {
+            _injectTimer = null;
+            autoCaptureLocations(); // desktop: learn
+            injectPdaActionNames(); // PDA: show
+        }, 400);
     }
     function watchForCards() {
         if (!document.body) { setTimeout(watchForCards, 500); return; }
@@ -332,8 +401,9 @@
 
     // === Init ===
     LOG('starting v' + VERSION);
-    // Fetch recipes first so injection has location data to match against.
+    // Fetch recipes first so capture/injection have data to match against.
     fetchRecipes().then(() => {
+        autoCaptureLocations();
         injectPdaActionNames();
         watchForCards();
     });
