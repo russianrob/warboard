@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.20
+// @version      0.8.21
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,23 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.21 — User: 'i dont see the recipe'. Most likely cause: RECIPES
+//          lookup misses because the DOM scenario name uses curly
+//          apostrophes (U+2019) or different whitespace than the stored
+//          key (which has straight U+0027 apostrophes). v0.8.20's
+//          fallback would silently show only the header.
+//          Fixes:
+//          (1) normalizeRecipeKey() — lowercases, converts smart
+//              quotes/dashes to straight, collapses whitespace. Used by
+//              new lookupRecipe(action) that tries exact match, then
+//              normalize-both-sides match.
+//          (2) Fallback path uses lookupRecipe() instead of direct
+//              RECIPES[action.toLowerCase()].
+//          (3) When still no recipe, show italic gray 'No recipe stored
+//              — tap ⚙ button to add' hint instead of a header-only
+//              tooltip (which looked like a bug to the user).
+//          (4) LOG line shows what scenario name was searched and
+//              whether we found a recipe — helps diagnose mismatches.
 // 0.8.20 — User: 'the second tooltip has location twice and doesnt look
 //          like the first one'. Two bugs:
 //          (1) The piggyback observer watches ALL .custom-tooltip elements
@@ -278,13 +295,41 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.20';
+    const VERSION = '0.8.21';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
 
     // === Recipes — server-cached, editable via UI ============================
     let RECIPES = {}; // lazy-populated from server fetch on first editor open
+
+    // Normalize a scenario name for lookup. Torn's DOM sometimes uses
+    // curly apostrophes (’) while stored keys use straight ('), and
+    // extra whitespace creeps in from React renders. Without this,
+    // 'Child's Play' (DOM, U+2019) wouldn't match "child's play"
+    // (stored, U+0027) and the tooltip silently has no recipe data.
+    function normalizeRecipeKey(s) {
+        return String(s || '')
+            .toLowerCase()
+            .replace(/[‘’‚‛]/g, "'") // smart quotes → '
+            .replace(/[“”]/g, '"')              // smart double quotes
+            .replace(/–|—/g, '-')               // en/em dash → hyphen
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+    // Lookup that tries exact-then-normalized. Returns the recipe or null.
+    function lookupRecipe(action) {
+        if (!action) return null;
+        const direct = RECIPES[action.toLowerCase()];
+        if (direct) return direct;
+        const norm = normalizeRecipeKey(action);
+        if (RECIPES[norm]) return RECIPES[norm];
+        // Try every key with normalize-both-sides
+        for (const k of Object.keys(RECIPES)) {
+            if (normalizeRecipeKey(k) === norm) return RECIPES[k];
+        }
+        return null;
+    }
 
     const RECIPE_TTL_MS = 10 * 60 * 1000;
     function loadCachedRecipes() {
@@ -770,6 +815,13 @@
             if (recipe.dampen && Object.keys(recipe.dampen).length) {
                 tt.appendChild(buildBulletDiv('Dampen: ' + formatItemsBullet(recipe.dampen)));
             }
+        } else {
+            // No recipe in arsontest's RECIPES table. Show a clear hint
+            // so the user knows it's missing (vs. silently empty tooltip).
+            const hint = document.createElement('div');
+            hint.textContent = 'No recipe stored — tap ⚙ button to add';
+            hint.style.cssText = 'color:#9ca3af;font-style:italic;font-size:11px;';
+            tt.appendChild(hint);
         }
         // Inherit .custom-tooltip CSS from arson-bang-for-buck, but override
         // display:none so it shows. position:fixed (vs custom-tooltip's
@@ -849,8 +901,9 @@
                     // arson-bang-for-buck didn't have this scenario in its
                     // table — show our own popup using its same format
                     // (bullet lines, .custom-tooltip CSS class).
-                    const recipe = RECIPES[action.toLowerCase()];
-                    showFallbackTooltip(action, loc, recipe || null, card);
+                    const recipe = lookupRecipe(action);
+                    LOG('fallback popup:', action, recipe ? '(recipe found)' : '(NO RECIPE STORED)');
+                    showFallbackTooltip(action, loc, recipe, card);
                 }, 150);
             } catch (_) {}
         }, true); // capture so we see the click before arson-bang-for-buck
