@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.94
+// @version      5.0.95
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.94';
+    const SCRIPT_VERSION = '5.0.95';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -5039,13 +5039,18 @@ body.wb-chain-active {
     // SECTION 8: ACTION HELPERS (HTTP POST)
     // =========================================================================
 
-    // v5.0.94: copy 'I got <Name>[ in N minutes]' to clipboard when you
-    // call a target. Time-remaining only included when the target has
-    // an active timer (hospital countdown most commonly). Minutes only,
-    // no seconds — easier to read in chat.
-    function copyCallTextToClipboard(targetId, targetName) {
+    // v5.0.95: copy call message to clipboard with different wording
+    // for regular call vs deal call:
+    //   Regular:  'I got <Name>[ in N minutes]'
+    //   Deal:     'I have a med deal with <Name>[ in N minutes]'
+    // Time-remaining only included when the target has an active
+    // timer (hospital countdown most commonly). Minutes only, no
+    // seconds — easier to read in chat.
+    function copyCallTextToClipboard(targetId, targetName, isDeal) {
         if (!targetName) return;
-        let text = 'I got ' + targetName;
+        let text = isDeal
+            ? 'I have a med deal with ' + targetName
+            : 'I got ' + targetName;
         try {
             const s = state.statuses && state.statuses[targetId];
             if (s) {
@@ -5101,10 +5106,10 @@ body.wb-chain-active {
         updateTargetRow(tid);
         if (CONFIG.AUTO_SORT) debouncedSort();
         const targetName = state.statuses[tid]?.name || null;
-        // v5.0.93/v5.0.94: copy 'I got <Name>[ in N minutes]' to
-        // clipboard. Fires on the optimistic update so the clipboard
+        // v5.0.95: copy call message to clipboard — wording branches
+        // on isDeal flag. Fires on the optimistic update so clipboard
         // is ready before the server round-trip.
-        if (targetName) copyCallTextToClipboard(tid, targetName);
+        if (targetName) copyCallTextToClipboard(tid, targetName, !!isDeal);
         const payload = { warId, targetId: tid, targetName };
         if (isDeal) payload.isDeal = true;
         postAction('/api/call', payload)
