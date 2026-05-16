@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.79
+// @version      5.0.80
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.79';
+    const SCRIPT_VERSION = '5.0.80';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -11786,8 +11786,10 @@ body.wb-chain-active {
             <div style="flex: 1; word-wrap: break-word;">${message}</div>
         `;
 
-        // Calculate duration based on text length (min 3.5s, max 10s)
-        const duration = Math.min(Math.max(3500, message.length * 70), 10000);
+        // v5.0.80: fixed 2-second duration per user request. Assist
+        // toasts (showAssistToast) keep their 15s because they're
+        // interactive — user must tap the ATTACK button.
+        const duration = 2000;
 
         // Progress bar at the bottom
         const progressBar = document.createElement('div');
