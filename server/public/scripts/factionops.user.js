@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.91
+// @version      5.0.92
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.91';
+    const SCRIPT_VERSION = '5.0.92';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -66,6 +66,11 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
         PDA_NOTIFICATIONS: GM_getValue('factionops_pda_notif', IS_PDA),
         ENEMY_ATTACK_NOTIF: GM_getValue('factionops_enemy_attack_notif', false),
         KEEP_ALIVE: GM_getValue('factionops_keep_alive', false),
+        // v5.0.92: opt-in BSP sharing — uploads your BSP cache entries
+        // for current war targets to the warboard server, where they
+        // become a fallback for teammates whose own BSP cache is empty
+        // for those targets.
+        SHARE_BSP: GM_getValue('factionops_share_bsp', false),
         // v5.0.26: bumped per user request — was 5 min / 15 min.
         // Regular calls: 15 min auto-expire (auto-uncall-on-attack
         // is a separate server-side change, see backlog).
@@ -95,6 +100,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
             PDA_NOTIFICATIONS: 'factionops_pda_notif',
             ENEMY_ATTACK_NOTIF: 'factionops_enemy_attack_notif',
             KEEP_ALIVE: 'factionops_keep_alive',
+            SHARE_BSP: 'factionops_share_bsp',
         };
         if (gmKeys[key]) {
             GM_setValue(gmKeys[key], value);
@@ -3546,6 +3552,10 @@ body.wb-chain-active {
     // safe. Cache miss = original behavior + write; cache hit = no I/O.
     const _bspMemo = new Map(); // userId -> { data, fetchedAt }
     const BSP_MEMO_TTL_MS = 30 * 1000;
+    // v5.0.92: faction-shared BSP pool, fetched from the warboard server.
+    // Filled in by refreshSharedBsp() on init + periodically. Indexed by
+    // userId so a single lookup mirrors the localStorage shape.
+    const _sharedBsp = new Map(); // userId -> { TBS, sharedByName, updatedAt }
     function fetchBspPrediction(userId) {
         const now = Date.now();
         const cached = _bspMemo.get(userId);
@@ -3556,17 +3566,99 @@ body.wb-chain-active {
             const raw = localStorage.getItem(
                 'tdup.battleStatsPredictor.cache.prediction.' + userId
             );
-            if (!raw) {
-                _bspMemo.set(userId, { data: null, fetchedAt: now });
-                return null;
+            if (raw) {
+                const pred = JSON.parse(raw);
+                const value = pred || null;
+                _bspMemo.set(userId, { data: value, fetchedAt: now });
+                if (value) return value;
             }
-            const pred = JSON.parse(raw);
-            const value = pred || null;
+        } catch (e) { /* fall through */ }
+        // v5.0.92: no local BSP for this target — try the faction-shared
+        // pool. A teammate with a richer BSP cache may have uploaded
+        // this entry. Shape matches local: { TBS, ... }.
+        const shared = _sharedBsp.get(String(userId));
+        if (shared && Number.isFinite(shared.TBS) && shared.TBS > 0) {
+            const value = { TBS: shared.TBS, _source: 'shared' };
             _bspMemo.set(userId, { data: value, fetchedAt: now });
             return value;
-        } catch (e) {
-            return null;
         }
+        _bspMemo.set(userId, { data: null, fetchedAt: now });
+        return null;
+    }
+
+    // v5.0.92: GET the faction's pooled BSP cache and seed _sharedBsp.
+    // Called on script init and on a slow timer (every 30 min). Cheap —
+    // typically <20KB JSON, all numeric fields. Also invalidates the
+    // _bspMemo so the next render picks up new entries.
+    function refreshSharedBsp() {
+        if (!state.jwtToken) return;
+        const url = CONFIG.SERVER_URL + '/api/faction/bsp-share';
+        httpRequest({
+            method: 'GET',
+            url,
+            headers: { Authorization: 'Bearer ' + state.jwtToken },
+            onload(res) {
+                try {
+                    if (res.status !== 200) return;
+                    const data = JSON.parse(res.responseText);
+                    if (!data || !data.entries) return;
+                    let added = 0;
+                    for (const [uid, entry] of Object.entries(data.entries)) {
+                        if (!entry || !Number.isFinite(Number(entry.TBS))) continue;
+                        _sharedBsp.set(String(uid), {
+                            TBS: Number(entry.TBS),
+                            sharedByName: entry.sharedByName || '?',
+                            updatedAt: entry.updatedAt || 0,
+                        });
+                        added++;
+                    }
+                    _bspMemo.clear(); // invalidate so next render sees fresh data
+                    log('shared BSP refreshed —', added, 'entries from faction pool');
+                } catch (_) { /* silent */ }
+            },
+            onerror() { /* silent */ },
+        });
+    }
+
+    // v5.0.92: upload local BSP entries for current war targets to the
+    // faction-shared pool. Opt-in via CONFIG.SHARE_BSP. Only sends
+    // entries the user actually has locally (no point uploading misses).
+    function uploadLocalBspToShared() {
+        if (!CONFIG.SHARE_BSP) return;
+        if (!state.jwtToken) return;
+        const targetIds = Object.keys(state.statuses || {});
+        if (targetIds.length === 0) return;
+        const entries = {};
+        let count = 0;
+        for (const uid of targetIds) {
+            try {
+                const raw = localStorage.getItem(
+                    'tdup.battleStatsPredictor.cache.prediction.' + uid
+                );
+                if (!raw) continue;
+                const pred = JSON.parse(raw);
+                if (!pred || pred.TBS == null) continue;
+                const tbs = Number(pred.TBS);
+                if (!Number.isFinite(tbs) || tbs <= 0) continue;
+                entries[uid] = { TBS: Math.round(tbs) };
+                count++;
+            } catch (_) { /* skip */ }
+        }
+        if (count === 0) return;
+        const url = CONFIG.SERVER_URL + '/api/faction/bsp-share';
+        httpRequest({
+            method: 'POST',
+            url,
+            headers: {
+                Authorization: 'Bearer ' + state.jwtToken,
+                'Content-Type': 'application/json',
+            },
+            data: JSON.stringify({ entries }),
+            onload(res) {
+                if (res.status === 200) log('uploaded', count, 'BSP entries to faction pool');
+            },
+            onerror() { /* silent */ },
+        });
     }
 
     /**
@@ -5484,6 +5576,14 @@ body.wb-chain-active {
             </div>
 
             <div class="wb-settings-row">
+                <span>Share my BSP stats with faction</span>
+                <label class="wb-toggle">
+                    <input type="checkbox" id="wb-toggle-share-bsp" ${CONFIG.SHARE_BSP ? 'checked' : ''}>
+                    <span class="wb-toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="wb-settings-row">
                 <span>Share my API key with faction pool</span>
                 <label class="wb-toggle">
                     <input type="checkbox" id="wb-toggle-pool-opt">
@@ -5702,6 +5802,20 @@ body.wb-chain-active {
                 e.target.value = CONFIG.CHAIN_ALERT_THRESHOLD;
             }
         });
+
+        const shareBspEl = document.getElementById('wb-toggle-share-bsp');
+        if (shareBspEl) {
+            shareBspEl.addEventListener('change', (e) => {
+                setConfig('SHARE_BSP', e.target.checked);
+                if (e.target.checked) {
+                    // Immediate upload so faction sees the new data right away.
+                    try { uploadLocalBspToShared(); } catch (_) {}
+                    showToast('Sharing your BSP cache with faction', 'info');
+                } else {
+                    showToast('Stopped sharing BSP cache', 'info');
+                }
+            });
+        }
 
         document.getElementById('wb-toggle-keep-alive').addEventListener('change', (e) => {
             setConfig('KEEP_ALIVE', e.target.checked);
@@ -8564,6 +8678,15 @@ body.wb-chain-active {
         // Fetch Fair Fight data from ffscouter.com (initial + periodic refresh)
         fetchFairFightBatch();
         setInterval(fetchFairFightBatch, 5 * 60 * 1000); // refresh every 5 min
+
+        // v5.0.92: shared-BSP pool. Pull on init + every 30 min. Push
+        // own BSP entries (opt-in via CONFIG.SHARE_BSP) on init + every
+        // 6 hours — entries change rarely so frequent uploads are
+        // wasted bandwidth.
+        setTimeout(refreshSharedBsp, 2000);  // wait for JWT to be set
+        setInterval(refreshSharedBsp, 30 * 60 * 1000);
+        setTimeout(uploadLocalBspToShared, 5000);
+        setInterval(uploadLocalBspToShared, 6 * 60 * 60 * 1000);
 
         // v5.0.30: combined heatmap modal — single 📊 button opens a
         // tabbed modal with Activity + Payouts heatmaps. Was two separate

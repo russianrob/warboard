@@ -8186,6 +8186,87 @@ router.delete("/api/arson/recipes/:key", async (req, res) => {
   return res.json({ ok: true });
 });
 
+// =============================================================================
+// SHARED BSP CACHE — faction-pooled Battle Stats Predictor entries
+// =============================================================================
+// Members opt into uploading their BSP predictions (tdup.battleStatsPredictor
+// localStorage entries) for current war targets. Server merges per-faction.
+// Other faction members fetch the merged pool and use it as a fallback when
+// their OWN BSP cache doesn't have an entry — so a faction with one
+// well-traveled member can give everyone good stats coverage.
+//
+// Storage shape (data/faction-bsp-shared.json):
+//   { [factionId]: { [targetId]: { TBS, sharedBy, sharedByName, updatedAt } } }
+//
+// Auth: requireAuth (JWT) — both endpoints scoped to caller's factionId.
+// =============================================================================
+const BSP_SHARED_FILE = pathJoin(OC_HISTORY_DIR, '..', 'faction-bsp-shared.json');
+let _bspShared = null;
+function loadBspShared() {
+  if (_bspShared) return _bspShared;
+  try {
+    const raw = readFileSync(BSP_SHARED_FILE, 'utf-8');
+    _bspShared = JSON.parse(raw);
+  } catch (_) {
+    _bspShared = {};
+  }
+  return _bspShared;
+}
+let _bspSharedSaveTimer = null;
+function scheduleBspSharedSave() {
+  if (_bspSharedSaveTimer) return;
+  _bspSharedSaveTimer = setTimeout(() => {
+    _bspSharedSaveTimer = null;
+    try {
+      writeFileSync(BSP_SHARED_FILE, JSON.stringify(_bspShared, null, 2));
+    } catch (e) { console.error('[bsp-shared] save error:', e.message); }
+  }, 2000);
+}
+
+router.post("/api/faction/bsp-share", requireAuth, express.json({ limit: '256kb' }), (req, res) => {
+  const { playerId, playerName, factionId } = req.user;
+  const entries = (req.body && req.body.entries) || null;
+  if (!entries || typeof entries !== 'object') {
+    return res.status(400).json({ error: "entries object required: { uid: { TBS } }" });
+  }
+  const data = loadBspShared();
+  const fid = String(factionId);
+  if (!data[fid]) data[fid] = {};
+  const now = Date.now();
+  let upserted = 0;
+  for (const [uid, entry] of Object.entries(entries)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const tbs = Number(entry.TBS);
+    if (!Number.isFinite(tbs) || tbs <= 0) continue;
+    const uidKey = String(uid);
+    // Only overwrite if newer than existing OR the existing entry was
+    // shared by this same player (so a member's re-upload refreshes
+    // their own contributions but doesn't stomp a teammate's newer one).
+    const existing = data[fid][uidKey];
+    if (existing && existing.updatedAt > now - 60_000 && String(existing.sharedBy) !== String(playerId)) {
+      continue; // someone else shared this within the last minute, keep theirs
+    }
+    data[fid][uidKey] = {
+      TBS: Math.round(tbs),
+      sharedBy: String(playerId),
+      sharedByName: playerName,
+      updatedAt: now,
+    };
+    upserted++;
+  }
+  if (upserted > 0) scheduleBspSharedSave();
+  console.log(`[bsp-shared] ${playerName} (${playerId}, fid ${factionId}) uploaded ${upserted} BSP entries`);
+  return res.json({ ok: true, upserted });
+});
+
+router.get("/api/faction/bsp-share", requireAuth, (req, res) => {
+  const { factionId } = req.user;
+  const data = loadBspShared();
+  const fid = String(factionId);
+  const entries = data[fid] || {};
+  return res.json({ factionId: fid, entries, count: Object.keys(entries).length });
+});
+
 router.post("/api/oc/missing-override", express.json({ limit: '4kb' }), async (req, res) => {
   const ctx = await resolveVaultCaller(req, res);
   if (!ctx) return;
