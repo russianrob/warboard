@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.93
+// @version      5.0.94
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.93';
+    const SCRIPT_VERSION = '5.0.94';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -5039,13 +5039,23 @@ body.wb-chain-active {
     // SECTION 8: ACTION HELPERS (HTTP POST)
     // =========================================================================
 
-    // v5.0.93: copy 'I got <Name>' to clipboard whenever you call a
-    // target, so you can paste it into faction chat immediately.
-    // Uses GM_setClipboard when granted (works in PDA + Tampermonkey),
-    // falls back to navigator.clipboard.writeText otherwise.
-    function copyCallTextToClipboard(targetName) {
+    // v5.0.94: copy 'I got <Name>[ in N minutes]' to clipboard when you
+    // call a target. Time-remaining only included when the target has
+    // an active timer (hospital countdown most commonly). Minutes only,
+    // no seconds — easier to read in chat.
+    function copyCallTextToClipboard(targetId, targetName) {
         if (!targetName) return;
-        const text = 'I got ' + targetName;
+        let text = 'I got ' + targetName;
+        try {
+            const s = state.statuses && state.statuses[targetId];
+            if (s) {
+                const rem = statusRemainingSec(s);
+                if (rem && rem > 0) {
+                    const mins = Math.max(1, Math.round(rem / 60));
+                    text += ' in ' + mins + (mins === 1 ? ' minute' : ' minutes');
+                }
+            }
+        } catch (_) { /* don't let timer calc kill the copy */ }
         try {
             if (typeof GM_setClipboard === 'function') {
                 GM_setClipboard(text, 'text');
@@ -5091,10 +5101,10 @@ body.wb-chain-active {
         updateTargetRow(tid);
         if (CONFIG.AUTO_SORT) debouncedSort();
         const targetName = state.statuses[tid]?.name || null;
-        // v5.0.93: copy 'I got <Name>' to clipboard so the user can
-        // paste into faction chat immediately. Fires on the optimistic
-        // update so the clipboard is ready before the server round-trip.
-        if (targetName) copyCallTextToClipboard(targetName);
+        // v5.0.93/v5.0.94: copy 'I got <Name>[ in N minutes]' to
+        // clipboard. Fires on the optimistic update so the clipboard
+        // is ready before the server round-trip.
+        if (targetName) copyCallTextToClipboard(tid, targetName);
         const payload = { warId, targetId: tid, targetName };
         if (isDeal) payload.isDeal = true;
         postAction('/api/call', payload)
