@@ -8112,10 +8112,12 @@ async function loadWarList() {
     const wars = data.wars || [];
     warPick.innerHTML = '<option value="">— pick a war —</option>';
     for (const w of wars) {
-      const label = (w.label || w.warId) + (w.endedAt ? ' (ended ' + new Date(w.endedAt).toLocaleDateString() + ')' : '');
+      const enemy = w.enemyFactionName || w.label || ('war ' + w.warId);
+      const result = w.warResult ? ' [' + w.warResult + ']' : '';
+      const dt = w.warEndedAt ? ' (ended ' + new Date(w.warEndedAt).toLocaleDateString() + ')' : '';
       const opt = document.createElement('option');
       opt.value = w.warId;
-      opt.textContent = label;
+      opt.textContent = enemy + result + dt;
       warPick.appendChild(opt);
     }
     warsCard.style.display = '';
