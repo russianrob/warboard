@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.9
+// @version      0.8.10
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,18 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.10 — Debug dump from v0.8.9 revealed offsetHeight=0 on scenario
+//          elements DESPITE display:block visibility:visible opacity:1
+//          inline. That means PDA's CSS is hiding inner CONTENT
+//          (font-size:0 on descendants, or display:none on the inner
+//          <b> tag where the text-walker found the recipe text).
+//          Inline style on the container can't fix descendants. Solution:
+//          inject a global <style> rule targeting [class*="scenario___"]
+//          AND `[class*="scenario___"] *` so descendants are also
+//          force-shown. CSS rule lives in <head> — survives React
+//          reconciliation. Debug also enhanced to dump innerHTML and
+//          firstChild computed style so next round we can see what's
+//          inside.
 // 0.8.9 — Added Debug button to the editor (next to Save/Refresh). When
 //         tapped it dumps to a green-on-black textarea:
 //           - count of every candidate selector
@@ -117,7 +129,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.9';
+    const VERSION = '0.8.10';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -318,7 +330,9 @@
                 lines.push('[' + i + '] ' + wraps[i].outerHTML.slice(0, 400));
                 lines.push('');
             }
-            // Dump first 3 scenario elements (if any)
+            // Dump first 3 scenario elements (if any) — include inner
+            // structure so we can see what's wrapped inside the
+            // scenario___ container.
             const scens = document.querySelectorAll('[class*="scenario___"]');
             lines.push('--- scenario elements (first 3) ---');
             for (let i = 0; i < Math.min(3, scens.length); i++) {
@@ -326,9 +340,16 @@
                 const cs = window.getComputedStyle(el);
                 lines.push('[' + i + '] text="' + el.textContent.trim() + '"');
                 lines.push('    class=' + el.className);
-                lines.push('    display=' + cs.display + ' vis=' + cs.visibility + ' op=' + cs.opacity + ' h=' + cs.height + ' offsetH=' + el.offsetHeight);
-                lines.push('    parent.class=' + (el.parentElement?.className || '(none)'));
-                lines.push('    outerHTML=' + el.outerHTML.slice(0, 200));
+                lines.push('    display=' + cs.display + ' vis=' + cs.visibility + ' op=' + cs.opacity + ' h=' + cs.height + ' offsetH=' + el.offsetHeight + ' fontSize=' + cs.fontSize);
+                lines.push('    innerHTML=' + el.innerHTML.slice(0, 200));
+                // Inspect first descendant element if any
+                const firstChild = el.firstElementChild;
+                if (firstChild) {
+                    const ccs = window.getComputedStyle(firstChild);
+                    lines.push('    firstChild=<' + firstChild.tagName + ' class="' + (firstChild.className || '') + '"> display=' + ccs.display + ' vis=' + ccs.visibility + ' fontSize=' + ccs.fontSize + ' offsetH=' + firstChild.offsetHeight);
+                } else {
+                    lines.push('    (no child element; textNode only)');
+                }
                 lines.push('');
             }
             // Find any element that contains a known recipe key in its text
@@ -437,6 +458,50 @@
         const locStr = recipe.location ? recipe.location + ' · ' : '';
         return locStr + itemsStr + ' · ' + payoutStr + nerveStr;
     }
+    // v0.8.10: Inject a global stylesheet rule that force-shows
+    // scenario___ AND its descendants. The v0.8.9 debug dump revealed
+    // offsetHeight=0 even with display:block visibility:visible inline
+    // — meaning PDA's CSS is hiding the INNER content (font-size:0 on
+    // children, or display:none on descendants). Inline styles only
+    // hit the container element; a stylesheet rule can target
+    // `scenario___ *` to unhide descendants too. CSS rule also survives
+    // React re-renders, unlike DOM-mutation injects which get
+    // reconciled away.
+    function injectGlobalScenarioCss() {
+        if (document.getElementById('arsontest-scenario-show-css')) return;
+        const s = document.createElement('style');
+        s.id = 'arsontest-scenario-show-css';
+        s.textContent = `
+            [class*="titleAndScenario___"] > *,
+            [class*="scenario___"],
+            [class*="scenario___"] * {
+                display: revert !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+                height: auto !important;
+                min-height: 0 !important;
+                max-height: none !important;
+                overflow: visible !important;
+                clip: auto !important;
+                clip-path: none !important;
+                transform: none !important;
+                font-size: revert !important;
+                line-height: revert !important;
+                color: inherit !important;
+                width: auto !important;
+                max-width: none !important;
+            }
+            [class*="scenario___"] {
+                display: block !important;
+                font-size: 11px !important;
+                line-height: 1.3 !important;
+                color: #999 !important;
+                margin-top: 1px !important;
+            }
+        `;
+        (document.head || document.documentElement).appendChild(s);
+    }
+
     function injectPdaActionNames() {
         // v0.8.8: v0.8.7 still didn't render visibly. Three redundant
         // approaches so at least one survives whatever PDA CSS is doing:
@@ -583,8 +648,11 @@
 
     // === Init ===
     LOG('starting v' + VERSION);
-    // Inject can run immediately — it doesn't need RECIPES. Capture
-    // still needs them (only POSTs known keys) so chain that after fetch.
+    // Global CSS rule first — survives React reconciliation, fixes the
+    // PDA 'scenario hidden via descendant CSS' case revealed by v0.8.9's
+    // debug dump (offsetHeight=0 despite display:block on container).
+    injectGlobalScenarioCss();
+    // DOM injects still run too (belt-and-braces).
     injectPdaActionNames();
     watchForCards();
     fetchRecipes().then(() => autoCaptureLocations());
