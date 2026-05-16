@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn: Hide Crimes 2.0 Stories (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.2-wb2
+// @version      1.2-wb3
 // @description  Hides the narrative stories from the crime initiation interface. Fork of ReconDalek's v1.2 with hash-agnostic selectors so it survives Torn frontend rebundles.
 // @author       ReconDalek [2741093] (fork by RussianRob)
 // @match        https://www.torn.com/loader.php?sid=crimes*
@@ -15,6 +15,12 @@
 // =============================================================================
 // CHANGELOG (tornwar fork)
 // =============================================================================
+// 1.2-wb3 — Narrowed CSS back to ONLY [class*="story___"] (strict match).
+//           wb2's broader storyHeader___ / storyWrap___ /
+//           storyContainer___ rules hid Torn's crime names and broke
+//           the arson-bang-for-buck tooltip (both likely use a class
+//           with 'story' as a substring). JS observer still collapses
+//           empty wrappers if a gap remains after the story is removed.
 // 1.2-wb2 — Fix the known 'empty space remains' issue. Inject CSS rule
 //           that collapses story___, storyHeader___, storyWrap___,
 //           storyContainer___ to display:none + zero height/margin/padding
@@ -33,15 +39,16 @@
     'use strict';
 
     // wb2: Inject CSS first so story elements collapse to zero size even
-    // before the JS observer fires. The literal node.remove() in the
-    // upstream left a gap when the parent had fixed height / padding —
-    // upstream author's known issue. CSS rule with !important wins
-    // against any inline styling Torn might set.
+    // before the JS observer fires.
+    // wb3: NARROWED the selector list back to only [class*="story___"].
+    // wb2's storyHeader___ / storyWrap___ / storyContainer___ rules were
+    // hiding too much — user reported crime names disappearing and the
+    // arson-bang-for-buck tooltip not working. Both probably use a class
+    // with 'story' as a substring (e.g. storyTitle___, storyTooltip___).
+    // Going strict-only avoids that collateral damage; the JS observer
+    // below still walks up to collapse an empty wrapper if needed.
     const css = `
-        [class*="story___"],
-        [class*="storyHeader___"],
-        [class*="storyWrap___"],
-        [class*="storyContainer___"] {
+        [class*="story___"] {
             display: none !important;
             height: 0 !important;
             min-height: 0 !important;
