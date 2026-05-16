@@ -1,40 +1,19 @@
 // ==UserScript==
-// @name         Arson bang for buck (tornwar fork)
-// @namespace    tornwar.com
-// @version      1.00.037-wb2
-// @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Fork of Para_Thenics' v1.00.037 with hash-agnostic React selectors so it survives Torn frontend rebundles.
-// @author       Para_Thenics, auboli77 (fork by RussianRob)
+// @name         Arson bang for buck
+// @namespace    Para_Thenics.torn.com
+// @version      1.00.040-fix3
+// @description  Display profit per nerve and how to perform
+// @author       Para_Thenics, auboli77
 // @match        https://www.torn.com/page.php?sid=crimes*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
-// @downloadURL  https://tornwar.com/scripts/arson-bang-for-buck.user.js
-// @updateURL    https://tornwar.com/scripts/arson-bang-for-buck.meta.js
 // ==/UserScript==
-//
-// =============================================================================
-// CHANGELOG (tornwar fork)
-// =============================================================================
-// 1.00.037-wb2 — iconTarget (mobile-click handler) was still pointing at
-//                [class*="title___"] but Torn renamed the element to
-//                titleAndScenario___ (substring 'title___' isn't present in
-//                that — it's 'title' then 'AndScenario___'). Selector now
-//                tries [class*="titleAndScenario___"] first, falls back to
-//                the old title___ for any future revert. Confirmed by
-//                Oceane [3148330] via forum post showing the new class.
-//                Fixes PDA mobile-tap behavior; desktop hover via
-//                hoverTarget kept working from wb1 because that wildcard
-//                ([class*="titleSection___"]) wasn't affected.
-// 1.00.037-wb1 — Replaced 7 hash-suffixed React class selectors with
-//                [class*="X___"] attribute selectors so the script keeps
-//                working across Torn bundle rebuilds. Same pattern as
-//                FactionOps and OC Spawn use.
-// =============================================================================
 (function() {
     'use strict';
-
+ 
     //  Torn API Key handling
     let apiKey = localStorage.getItem('tornApiKey') || "";
-
-
+ 
+ 
 function askForApiKeyInline() {
     const container = document.createElement('div');
     Object.assign(container.style, {
@@ -49,15 +28,15 @@ function askForApiKeyInline() {
         boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
         fontSize: '14px'
     });
-
+ 
     container.innerHTML = `
         <p style="margin:0 0 8px;">Enter your Torn API key:</p>
         <input type="text" id="apiKeyInput" style="width:200px;padding:5px;" placeholder="API key" />
         <button id="saveApiKeyBtn" style="margin-left:8px;padding:5px 10px;background:#28a745;color:#fff;border:none;border-radius:4px;cursor:pointer;">Save</button>
     `;
-
+ 
     document.body.appendChild(container);
-
+ 
     document.getElementById('saveApiKeyBtn').addEventListener('click', () => {
         const inputKey = document.getElementById('apiKeyInput').value.trim();
         if (inputKey) {
@@ -70,45 +49,45 @@ function askForApiKeyInline() {
         }
     });
 }
-
+ 
 if (!apiKey) {
     askForApiKeyInline();
 }
 ``
-
-
+ 
+ 
     // Torn API item IDs
     const itemIDs = [742, 172, 1458, 1457, 1264, 1462, 1461, 1219, 1460, 1459, 833, 1463, 1272, 54, 1248, 196, 407, 280, 1089, 1294, 1282, 220, 278, 1085, 259, 200, 265, 358, 1286, 1094, 427, 45, 275, 201, 221];
     let myItemValues = {};
-
-
-
+ 
+ 
+ 
 async function getPricesFromAPI() {
     if (!apiKey) {
         console.warn("[ArsonBangForBuck] No API key found.");
         return false; // No key, fail
     }
-
+ 
     try {
         console.log("[ArsonBangForBuck] Fetching item prices from Torn API...");
         const updatedValues = {};
-
+ 
         const requestUrl = `https://api.torn.com/v2/torn/items?cat=All&sort=ASC&key=${apiKey}`;
         const response = await fetch(requestUrl);
         const data = await response.json();
-
+ 
         if (data.error) {
             console.error("[ArsonBangForBuck] Torn API error:", data.error.error);
             return false; //  Stop and fail if API error
         }
-
+ 
         const wantedItemIdsSet = new Set(itemIDs);
         data.items.forEach(item => {
             if (wantedItemIdsSet.has(item.id)) {
                 updatedValues[item.name] = String(item.value.market_price);
             }
         });
-
+ 
         if (Object.keys(updatedValues).length > 0) {
             itemValues = { ...itemValues, ...updatedValues };
             saveItemValues();
@@ -118,19 +97,19 @@ async function getPricesFromAPI() {
             console.warn("[ArsonBangForBuck] No matching items were updated.");
             return false; // Nothing updated
         }
-
+ 
     } catch (error) {
         console.error("[ArsonBangForBuck] Network or fetch error:", error);
         return false; //  Fail on exception
     }
 }
-
-
-
-
+ 
+ 
+ 
+ 
     //  Call API fetch without blocking UI
     //getPricesFromAPI();
-
+ 
     // Scenario data
     const scenarios = {
 "A Bitter Taste": [
@@ -543,7 +522,7 @@ async function getPricesFromAPI() {
        "Profit/Nerve: 3.6K",
     "Flamethrower: No",
     "Place: 5 Gasoline ",
-
+ 
 ],
         [
             "Payout: 100K",
@@ -3236,8 +3215,8 @@ async function getPricesFromAPI() {
     "Dampen: "
 ]
     };
-
-
+ 
+ 
 // Item values persistence
 const defaultItemValues = {
     "Molotov Cocktail": "184388",
@@ -3253,7 +3232,7 @@ const defaultItemValues = {
     Sand: "144993",
     "Fire Extinguisher": "383256"
 };
-
+ 
 const evidenceItemValues = {
 Ammonia: "5257",
 Cannabis: "5834",
@@ -3276,11 +3255,11 @@ Stapler: "9078",
 Syringe: "1507",
 Toothbrush: "5030",
 };
-
-
-
+ 
+ 
+ 
 let itemValues = {};
-
+ 
 function loadItemValues() {
     const saved = localStorage.getItem('itemValues');
     if (saved) {
@@ -3295,29 +3274,29 @@ function loadItemValues() {
         itemValues = { ...defaultItemValues, ...evidenceItemValues };
     }
 }
-
+ 
 function saveItemValues() {
     localStorage.setItem('itemValues', JSON.stringify(itemValues));
 }
-
+ 
 //  Call this immediately after defining it
 loadItemValues();
-
-
-
-
+ 
+ 
+ 
+ 
 function calculateMaterialCost(lines) {
     let baseCost = 0;
     let optionalExtra = 0;
-
+ 
     const regex = /(\d+)\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)/g;
     const optionalRegex = /\?(\d+)\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)\?/g;
-
+ 
     lines.forEach(line => {
-
+ 
         // Remove optional blocks for base calculations
         const cleaned = line.replace(/\?[^?]+\?/g, "");
-
+ 
         // Base items
         if (/^(Place|Stoke|Dampen|Evidence)/i.test(line)) {
             let m;
@@ -3330,7 +3309,7 @@ function calculateMaterialCost(lines) {
                 }
             }
         }
-
+ 
         // Optional items
         let o;
         while ((o = optionalRegex.exec(line)) !== null) {
@@ -3342,25 +3321,25 @@ function calculateMaterialCost(lines) {
             }
         }
     });
-
+ 
     return {
         baseCost,
         optionalCost: baseCost + optionalExtra   // <<< KEY FIX
     };
 }
 ``
-
-
-
-
-
+ 
+ 
+ 
+ 
+ 
     // Highlight values persistence
     const defaultHighlightValues = {
         LowProfit: 5000,
         HighProfit: 10000
     };
     let highlightValues = { ...defaultHighlightValues };
-
+ 
     function loadHighlightValues() {
         const saved = localStorage.getItem('highlightValues');
         if (saved) {
@@ -3369,78 +3348,78 @@ function calculateMaterialCost(lines) {
     }
     function saveHighlightValues() { localStorage.setItem('highlightValues', JSON.stringify(highlightValues)); }
     loadHighlightValues();
-
+ 
     //  Helpers for cost/profit
     function parseValue(value) {
         return value.toUpperCase().endsWith("K") ? parseFloat(value) * 1000 : parseFloat(value);
     }
-
-
-
-
+ 
+ 
+ 
+ 
     function formatProfitNerve(value) {
         const rounded = Math.floor(value / 100) * 100;
         return rounded >= 1000 ? `${(rounded / 1000).toFixed(1)}K` : rounded.toString();
     }
-
-
-
-
+ 
+ 
+ 
+ 
 function calculateProfitPerNerve(lines) {
-
+ 
     // read payout
     const payoutLine = lines.find(l => l.startsWith("Payout:"));
     if (!payoutLine) return null;
-
+ 
     const match = payoutLine.match(/([\d\.]+)\s*K?/i);
     if (!match) return null;
-
+ 
     let payout = parseFloat(match[1]);
     if (/K/i.test(payoutLine)) payout *= 1000;
-
+ 
     const { baseCost, optionalCost } = calculateMaterialCost(lines);
-
+ 
     let itemCount = 0;
     let optionalItemCount = 0;
-
+ 
     const regex = /(\d+)\s+[A-Za-z]+/g;
     const optionalRegex = /\?(\d+)\s+[A-Za-z]+/g;
     const optionalAddRegex = /\?\+(\d+)\s+[A-Za-z]+/g;
-
+ 
     lines.forEach(line => {
-
+ 
         // 1. Remove optional before counting base items
         const cleaned = line.replace(/\?[^?]+\?/g, "");
         let m;
-
+ 
         if (/^(Place|Stoke|Dampen|Evidence)/i.test(line)) {
             while ((m = regex.exec(cleaned)) !== null) {
                 itemCount += parseInt(m[1], 10);
             }
         }
-
+ 
         // 2. Optional full items
         let o;
         while ((o = optionalRegex.exec(line)) !== null) {
             optionalItemCount += parseInt(o[1], 10);
         }
-
+ 
         // 3. Optional additions "?+1 Gasoline?"
         let o2;
         while ((o2 = optionalAddRegex.exec(line)) !== null) {
             optionalItemCount += parseInt(o2[1], 10);
         }
     });
-
+ 
     // correct nerve formula
     const baseNerve = 10 + (itemCount * 5);
     const optionalNerve = baseNerve + (optionalItemCount * 5);
-
+ 
     const baseProfit = (payout - baseCost) / baseNerve;
     const optionalProfit = (payout - optionalCost) / optionalNerve;
-
+ 
     const hasOptional = optionalItemCount > 0;
-
+ 
     return {
         profitText: hasOptional
             ? `<span style="color: orange;">${formatProfitNerve(optionalProfit)}</span> – ${formatProfitNerve(baseProfit)}`
@@ -3451,34 +3430,34 @@ function calculateProfitPerNerve(lines) {
         hasOptional
     };
 }
-
-
-
+ 
+ 
+ 
     //  CSS for highlights (aligned colors)
-
-
+ 
+ 
 // Remove any old highlight CSS from previous runs
 document.querySelectorAll('style').forEach(s => {
     if (s.textContent.includes('.highlight-negative')) {
         s.remove();
     }
 });
-
+ 
 // Create style element for dynamic theme-aware CSS
 const style = document.createElement('style');
 document.head.appendChild(style);
-
+ 
 // Universal Dark Mode detection
 function isDarkModeEnabled() {
     // 1. Torn checkbox
     const checkbox = document.getElementById('dark-mode-state');
     if (checkbox) return checkbox.checked;
-
+ 
     // 2. Body or HTML class
     const bodyClasses = document.body.className.toLowerCase();
     const htmlClasses = document.documentElement.className.toLowerCase();
     if (bodyClasses.includes('dark') || htmlClasses.includes('dark')) return true;
-
+ 
     // 3. Computed background brightness
     const bgColor = getComputedStyle(document.body).backgroundColor;
     const rgbMatch = bgColor.match(/\d+/g);
@@ -3487,17 +3466,17 @@ function isDarkModeEnabled() {
         const brightness = (r * 0.299 + g * 0.587 + b * 0.114);
         return brightness < 128; // Dark if brightness is low
     }
-
+ 
     // 4. Fallback to system preference
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
-
+ 
 // Apply theme-aware colors
-
+ 
 function applyThemeColors() {
     const isDarkMode = isDarkModeEnabled();
     const isColorblind = localStorage.getItem('colorblindMode') === 'true';
-
+ 
     const darkColors = isColorblind ? {
         negative: 'rgba(40, 40, 40, 0.7)',
         low:      'rgba(100, 100, 100, 0.3)',
@@ -3509,7 +3488,7 @@ function applyThemeColors() {
         high: 'rgba(40, 144, 69, 0.15)',
         jackpot: 'rgba(20, 255, 20, 0.20)'
     };
-
+ 
     const lightColors = isColorblind ? {
         negative: 'rgba(100, 100, 100, 0.4)',
         low:      'rgba(140, 140, 140, 0.3)',
@@ -3521,9 +3500,9 @@ function applyThemeColors() {
         high: 'rgba(150, 255, 150, 0.4)',
         jackpot: 'rgba(100, 255, 100, 0.5)'
     };
-
+ 
     const colors = isDarkMode ? darkColors : lightColors;
-
+ 
     style.textContent = `
         /* Tooltip styling */
         .custom-tooltip {
@@ -3542,13 +3521,13 @@ function applyThemeColors() {
             opacity: 0;
             pointer-events: none;
         }
-
+ 
         /* Highlight colors */
         .highlight-negative { background-color: ${colors.negative} !important; }
         .highlight-low { background-color: ${colors.low} !important; }
         .highlight-high { background-color: ${colors.high} !important; }
         .highlight-jackpot { background-color: ${colors.jackpot} !important; }
-
+ 
         /* Settings button */
         #itemValuesButton {
             position: absolute;
@@ -3563,7 +3542,7 @@ function applyThemeColors() {
             cursor: pointer;
             z-index: 9999;
         }
-
+ 
         /* Settings panel */
         #settingsPanel {
             position: absolute;
@@ -3577,13 +3556,13 @@ function applyThemeColors() {
             display: none;
             width: 260px; /* Compact width */
         }
-
+ 
         #settingsPanel h4 {
             margin: 6px 0;
             font-size: 13px;
             font-weight: bold;
         }
-
+ 
         /* Rows for label + input */
         #settingsPanel .item-row {
             display: flex;
@@ -3591,14 +3570,14 @@ function applyThemeColors() {
             align-items: center;
             margin-bottom: 3px;
         }
-
+ 
         #settingsPanel label {
             width: 120px; /* Fixed width for alignment */
             text-align: left;
             font-size: 12px;
             white-space: nowrap;
         }
-
+ 
         #settingsPanel input {
             width: 60px; /* Smaller box */
             text-align: right;
@@ -3608,57 +3587,61 @@ function applyThemeColors() {
         }
     `;
 }
-
-
-
+ 
+ 
+ 
 // Initial apply
 applyThemeColors();
-
+ 
 // Reapply when DOM changes (theme toggle or page updates)
 const themeObserver = new MutationObserver(applyThemeColors);
 themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
-
+ 
 // Debug log
 console.log('Dark Mode detected:', isDarkModeEnabled());
-
-
-
+ 
+ 
+ 
     //  Settings UI
-
-
+ 
+ 
 function createSettingsUI() {
-    const header = document.querySelector('#react-root [class*="appHeader___"].crimes-app-header');
+    // FIX: hashed class `appHeader___gUnYC` → attribute substring match.
+    // The header element also has the stable class `crimes-app-header`,
+    // which is the most reliable selector. Fall back to the hash-prefix match.
+    const header = document.querySelector('#react-root .crimes-app-header')
+                || document.querySelector('#react-root [class*="appHeader___"]');
     if (!header) return;
-
+ 
     const hasArson = header.textContent.includes('Arson');
     const existingButton = document.querySelector('#itemValuesButton');
     const existingPanel = document.querySelector('#settingsPanel');
-
+ 
     if (hasArson) {
         if (!existingButton) {
             header.style.position = 'relative';
-
+ 
             const newButton = document.createElement('button');
             newButton.id = 'itemValuesButton';
             newButton.textContent = 'Settings';
-
+ 
             const newPanel = document.createElement('div');
             newPanel.id = 'settingsPanel';
-
+ 
             // Tabs
             const tabContainer = document.createElement('div');
             tabContainer.style.marginBottom = '10px';
             tabContainer.style.display = 'flex';
             tabContainer.style.justifyContent = 'space-between';
             tabContainer.style.alignItems = 'center';
-
+ 
             const fuelTab = document.createElement('button');
             fuelTab.textContent = 'Fuel';
             const evidenceTab = document.createElement('button');
             evidenceTab.textContent = 'Evidence';
             const highlightTab = document.createElement('button');
             highlightTab.textContent = 'Highlight';
-
+ 
             [fuelTab, evidenceTab, highlightTab].forEach(btn => {
                 btn.style.background = '#444';
                 btn.style.color = '#fff';
@@ -3666,7 +3649,7 @@ function createSettingsUI() {
                 btn.style.padding = '5px 10px';
                 btn.style.cursor = 'pointer';
             });
-
+ 
             // API Button
             const apiButton = document.createElement('button');
             apiButton.textContent = 'API';
@@ -3687,7 +3670,7 @@ function createSettingsUI() {
                     alert('API key not changed.');
                 }
             };
-
+ 
             // Help link
             const helpLink = document.createElement('a');
             helpLink.href = 'https://www.torn.com/forums.php#/p=threads&f=67&t=16518811&b=0&a=0';
@@ -3699,17 +3682,17 @@ function createSettingsUI() {
             });
             helpLink.target = '_blank';
             helpLink.rel = 'noopener noreferrer';
-
+ 
             tabContainer.appendChild(fuelTab);
             tabContainer.appendChild(evidenceTab);
             tabContainer.appendChild(highlightTab);
             tabContainer.appendChild(apiButton);
             tabContainer.appendChild(helpLink);
             newPanel.appendChild(tabContainer);
-
+ 
             const contentDiv = document.createElement('div');
             newPanel.appendChild(contentDiv);
-
+ 
             // Colorblind toggle
             const colorblindContainer = document.createElement('div');
             colorblindContainer.className = 'item-row';
@@ -3725,7 +3708,7 @@ function createSettingsUI() {
             colorblindContainer.appendChild(colorblindLabel);
             colorblindContainer.appendChild(colorblindCheckbox);
             newPanel.appendChild(colorblindContainer);
-
+ 
             // Render functions
             function renderFuelItems() {
                 contentDiv.innerHTML = '<h4>Fuel Items</h4>';
@@ -3743,7 +3726,7 @@ function createSettingsUI() {
                 }
                 updateActionButton();
             }
-
+ 
             function renderEvidenceItems() {
                 contentDiv.innerHTML = '<h4>Evidence Items</h4>';
                 for (const item in evidenceItemValues) {
@@ -3760,7 +3743,7 @@ function createSettingsUI() {
                 }
                 updateActionButton();
             }
-
+ 
             function renderHighlightValues() {
                 contentDiv.innerHTML = '<h4>Highlight Values</h4>';
                 ['LowProfit', 'HighProfit'].forEach(key => {
@@ -3777,11 +3760,11 @@ function createSettingsUI() {
                 });
                 updateActionButton();
             }
-
+ 
             function updateActionButton() {
                 const existingActionBtn = document.querySelector('#settingsPanel button.action-btn');
                 if (existingActionBtn) existingActionBtn.remove();
-
+ 
                 const actionButton = document.createElement('button');
                 actionButton.className = 'action-btn';
                 Object.assign(actionButton.style, {
@@ -3794,7 +3777,7 @@ function createSettingsUI() {
                     width: '100%',
                     background: '#dc3545'
                 });
-
+ 
                 if (contentDiv.innerHTML.includes('Fuel Items') || contentDiv.innerHTML.includes('Evidence Items')) {
                     actionButton.textContent = 'Item Market Values';
                     actionButton.onclick = async () => {
@@ -3826,23 +3809,23 @@ function createSettingsUI() {
                         }
                     };
                 }
-
+ 
                 newPanel.appendChild(actionButton);
             }
-
+ 
             fuelTab.onclick = renderFuelItems;
             evidenceTab.onclick = renderEvidenceItems;
             highlightTab.onclick = renderHighlightValues;
-
+ 
             renderFuelItems(); // Default view
-
+ 
             header.appendChild(newButton);
             header.appendChild(newPanel);
-
+ 
             newButton.addEventListener('click', () => {
                 newPanel.style.display = (newPanel.style.display === 'none' || newPanel.style.display === '') ? 'block' : 'none';
             });
-
+ 
             document.addEventListener('click', (e) => {
                 if (!newPanel.contains(e.target) && e.target !== newButton) {
                     newPanel.style.display = 'none';
@@ -3854,48 +3837,48 @@ function createSettingsUI() {
         if (existingPanel) existingPanel.remove();
     }
 }
-
-
-
+ 
+ 
+ 
     // Helper CreateTooltip
 function formatPlaceholders(text) {
     return text.replace(/\?(.*?)\?/g, '<span style="color: orange; font-weight: bold;">$1</span>');
 }
-
+ 
     //  Tooltip creation + highlight logic
-
-
-
-
-
+ 
+ 
+ 
+ 
+ 
 function createTooltip(lines, section, highlightTarget) {
     const tooltip = document.createElement('div');
     tooltip.className = 'custom-tooltip';
     let ranges = null;
-
+ 
     lines.forEach(line => {
         const div = document.createElement('div');
         let content = line;
-
+ 
         if (line.startsWith("Profit/Nerve")) {
             ranges = calculateProfitPerNerve(lines);
             if (ranges) content = `Profit/Nerve: ${ranges.profitText}`;
         }
-
+ 
         div.innerHTML = `• ${formatPlaceholders(content)}`;
         tooltip.appendChild(div);
     });
-
+ 
     if (ranges) {
         const nerveDiv = document.createElement('div');
         nerveDiv.innerHTML = `• Total Nerve: ${ranges.nerveText}`;
         tooltip.appendChild(nerveDiv);
-
+ 
         // ✅ Always highlight based on base profit (even if optional exists)
         const baseProfitValue = ranges.profitText.replace(/<[^>]*>/g, '') // remove HTML tags
             .split('–').pop().trim(); // take the base value (right side)
         const numericValue = parseFloat(baseProfitValue.replace(/K/i, '')) * (baseProfitValue.includes('K') ? 1000 : 1);
-
+ 
         if (numericValue <= 0) {
             highlightTarget.classList.add('highlight-negative');
         } else if (numericValue <= highlightValues.LowProfit) {
@@ -3906,47 +3889,65 @@ function createTooltip(lines, section, highlightTarget) {
             highlightTarget.classList.add('highlight-jackpot');
         }
     }
-
+ 
     document.body.appendChild(tooltip);
     return tooltip;
 }
-
-
-
-
+ 
+ 
+ 
+ 
     function showTooltip(tooltip, target) {
         const visibleTooltip = document.querySelector('.custom-tooltip[style*="display: flex"]');
         if (visibleTooltip && visibleTooltip !== tooltip) {
             visibleTooltip.style.opacity = '0';
             setTimeout(() => visibleTooltip.style.display = 'none', 200);
         }
-
+ 
         tooltip.style.display = 'flex';
         tooltip.style.visibility = 'hidden';
         positionTooltip(tooltip, target);
         tooltip.style.visibility = 'visible';
         tooltip.style.opacity = '1';
     }
-
+ 
     function hideTooltip(tooltip) {
         tooltip.style.opacity = '0';
         setTimeout(() => tooltip.style.display = 'none', 200);
     }
-
+ 
     function positionTooltip(tooltip, target) {
         const rect = target.getBoundingClientRect();
         const tooltipRect = tooltip.getBoundingClientRect();
-        tooltip.style.left = `${rect.left + window.scrollX + (rect.width / 2) - (tooltipRect.width / 2)}px`;
-        tooltip.style.top = `${rect.top + window.scrollY - tooltipRect.height - 10}px`;
+        const viewportW = document.documentElement.clientWidth;
+        const margin = 6;
+ 
+        // Vertical: place above the target by default. If there isn't room above
+        // (common on mobile when the target is near the top), flip below.
+        let top = rect.top + window.scrollY - tooltipRect.height - 10;
+        if (rect.top - tooltipRect.height - 10 < 0) {
+            top = rect.bottom + window.scrollY + 10;
+        }
+ 
+        // Horizontal: center on the target, but clamp so the tooltip doesn't
+        // overflow the viewport on narrow screens.
+        let left = rect.left + window.scrollX + (rect.width / 2) - (tooltipRect.width / 2);
+        const minLeft = window.scrollX + margin;
+        const maxLeft = window.scrollX + viewportW - tooltipRect.width - margin;
+        if (left < minLeft) left = minLeft;
+        if (left > maxLeft) left = maxLeft;
+ 
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
     }
-
+ 
     function getSkillValue() {
         const skillButton = document.querySelector('button[aria-label^="Skill:"]');
         if (!skillButton) return 0;
         const match = skillButton.getAttribute('aria-label').match(/Skill:\s*([\d\.]+)/);
         return match ? parseFloat(match[1]) : 0;
     }
-
+ 
     function shouldShowScenario(lines, hasFlamethrower) {
         const flamethrowerLine = lines.find(line => line.trim().toLowerCase().startsWith('flamethrower:'));
         if (!flamethrowerLine) return true;
@@ -3954,75 +3955,87 @@ function createTooltip(lines, section, highlightTarget) {
         if (!hasFlamethrower && flamethrowerLine.toLowerCase().includes('yes')) return false;
         return true;
     }
-
-
+ 
+ 
 function addTooltips() {
     const skillValue = getSkillValue();
     const hasFlamethrower = skillValue >= 80;
-
+ 
+    // FIX: hashed class `sections___tZPkg` → attribute substring match.
     document.querySelectorAll('[class*="sections___"]').forEach(section => {
         if (section.dataset.tooltipAdded) return;
-
+ 
+        // FIX: hashed class `scenario___msSka` → attribute substring match.
         const scenarioName = section.querySelector('[class*="scenario___"]')?.textContent?.trim();
         if (!scenarioName || !scenarios[scenarioName]) return;
-
+ 
         const variants = scenarios[scenarioName];
         const selectedVariant = Array.isArray(variants[0])
             ? variants.find(v => shouldShowScenario(v, hasFlamethrower))
             : (shouldShowScenario(variants, hasFlamethrower) ? variants : null);
-
+ 
         if (!selectedVariant) return;
-
+ 
         const tooltip = createTooltip(selectedVariant, section, section);
-
-        const hoverTarget = section.querySelector('[class*="crimeOptionSection___"][class*="titleSection___"]');
-        // wb2: Torn renamed this element — old structure was `title___X`,
-        // new structure is `titleAndScenario___X`. The substring 'title___'
-        // (with underscores) isn't present in 'titleAndScenario___', so
-        // try the new selector first, fall back to the old one.
-        const iconTarget = section.querySelector('[class*="titleAndScenario___"]')
-                        || section.querySelector('[class*="crimeOptionSection___"] [class*="title___"]'); // ✅ Only this small clickable area
-
-        // Desktop hover
+ 
+        // FIX: hashed compound `crimeOptionSection___hslpu.flexGrow___S5IUQ.titleSection___CiZ8O`
+        // → attribute substring match on each hash prefix (all three must be present on the same element).
+        // This may not match on mobile (Torn PDA) if the DOM splits these classes across elements.
+        const hoverTarget = section.querySelector(
+            '[class*="crimeOptionSection___"][class*="flexGrow___"][class*="titleSection___"]'
+        );
+ 
+        // Desktop hover: attach to the title-section block when it exists.
         if (hoverTarget) {
             hoverTarget.addEventListener('mouseenter', () => showTooltip(tooltip, hoverTarget));
             hoverTarget.addEventListener('mouseleave', () => hideTooltip(tooltip));
         }
-
-        //  Mobile click behavior (restricted to .title___lw1Jr)
-        if (iconTarget) {
-            iconTarget.addEventListener('click', () => {
-                if (tooltip.style.display === 'flex') {
-                    hideTooltip(tooltip);
-                } else {
-                    showTooltip(tooltip, iconTarget);
-                }
-            });
-
-            // Hide tooltip when clicking outside
-            document.addEventListener('click', (e) => {
-                if (!tooltip.contains(e.target) && e.target !== iconTarget) {
-                    hideTooltip(tooltip);
-                }
-            });
-        }
-
+ 
+        // Mobile click: tap anywhere on the crime card (the info / empty area)
+        // to toggle the tooltip. We attach to the whole `section` and ignore
+        // clicks that originated inside a button, link, or input — that way
+        // the "commit crime" buttons (Ignite/Stoke/Collect) still work normally
+        // and don't trigger the tooltip. The original code attached this to a
+        // single hashed element (`title___lw1Jr`), which broke when the hash
+        // rotated or when substring matching pulled in an action-button class.
+        section.addEventListener('click', (e) => {
+            // Ignore taps on interactive elements (commit/collect buttons, inputs, links, etc.)
+            if (e.target.closest('button, a, input, select, textarea, [role="button"]')) return;
+ 
+            if (tooltip.style.display === 'flex') {
+                hideTooltip(tooltip);
+            } else {
+                // Position the tooltip relative to the section so it appears next to the card.
+                showTooltip(tooltip, section);
+            }
+        });
+ 
+        // Hide tooltip when tapping outside the card.
+        document.addEventListener('click', (e) => {
+            if (!tooltip.contains(e.target) && !section.contains(e.target)) {
+                hideTooltip(tooltip);
+            }
+        });
+ 
         section.dataset.tooltipAdded = "true";
     });
 }
-
-
-
+ 
+ 
+ 
 const observer = new MutationObserver(() => {
     addTooltips();
     createSettingsUI();
-
+ 
     // Remove Torn's highlight
+    // FIX: hashed class `crimeOptionWrapper___IOnLO` → attribute substring match.
+    // `pending-collect` is a stable (non-hashed) class and is used as-is in classList.remove.
     document.querySelectorAll('[class*="crimeOptionWrapper___"].pending-collect').forEach(el => {
         el.classList.remove('pending-collect');
     });
-
+ 
     // Highlight Collect and 2 softly if both exist
+    // FIX: hashed class `childrenWrapper___h2Sw5` → attribute substring match.
     document.querySelectorAll('[class*="childrenWrapper___"]').forEach(btn => {
         const text = btn.textContent.trim();
         if (text.includes('Collect') && text.includes('2')) {
@@ -4034,10 +4047,10 @@ const observer = new MutationObserver(() => {
         }
     });
 });
-
+ 
 //  Observe without delay
 observer.observe(document.body, { childList: true, subtree: true });
-
-
+ 
+ 
     addTooltips();
 })();
