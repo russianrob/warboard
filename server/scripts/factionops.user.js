@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.73
+// @version      5.0.74
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.73';
+    const SCRIPT_VERSION = '5.0.74';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2800,6 +2800,15 @@ body.wb-chain-active {
 .fo-card-retal-btn:active { transform: translateY(0); }
 .fo-card-retal-btn:disabled { background: #636e72; color: #b0b8bc; cursor: not-allowed; transform: none; }
 .fo-card-retal-icon { font-size: 9px; }
+/* v5.0.74: when injected into the upper info row (next to username),
+   nudge it right in a flex parent + add a tiny margin so it doesn't
+   crowd the name text. Bottom-row injection (.buttons-list fallback)
+   keeps the inherited inline-flex layout from above. */
+.fo-card-retal-btn-upper {
+    margin-left: auto;
+    margin-right: 4px;
+    align-self: center;
+}
 
 /* Faction cooldowns dashboard (Option B — self-reported bars). */
 .fo-bars-section {
@@ -5118,7 +5127,23 @@ body.wb-chain-active {
             btn.dataset.targetId = targetId;
             btn.dataset.targetName = targetName;
             btn.innerHTML = '<span class="fo-card-retal-icon">\u26A0</span>Retal';
-            buttonsList.appendChild(btn);
+
+            // v5.0.74: prefer the upper info row (next to username) so
+            // the button sits near the top of the mini-profile instead
+            // of buried at the bottom by the chat box. Falls back to
+            // the original .buttons-list site if Torn's class layout
+            // changes. Does NOT touch the card wrapper's positioning \u2014
+            // that was the v5.0.29 mistake that broke mini-profile
+            // invocation. Pure inline-flex append.
+            const upper = card.querySelector('[class*="profile-mini-_info"]')
+                       || card.querySelector('[class*="profile-mini-_username"]')?.parentElement
+                       || card.querySelector('[class*="profile-mini-_name"]')?.parentElement;
+            if (upper) {
+                btn.classList.add('fo-card-retal-btn-upper'); // CSS tweaks for the upper position
+                upper.appendChild(btn);
+            } else {
+                buttonsList.appendChild(btn);
+            }
 
             clearInterval(timer);
         }, 200);
