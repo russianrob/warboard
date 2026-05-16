@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.19
+// @version      0.8.20
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,21 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.20 — User: 'the second tooltip has location twice and doesnt look
+//          like the first one'. Two bugs:
+//          (1) The piggyback observer watches ALL .custom-tooltip elements
+//              — including our own fallback tooltip (which also uses that
+//              class for CSS inheritance). When fallback shows, the
+//              observer fires and prepends ANOTHER header on top of the
+//              one showFallbackTooltip already added → 'location twice'.
+//              Fix: prependScenarioHeader() skips elements with class
+//              'arsontest-fallback-tooltip'.
+//          (2) Piggyback header and fallback header had different CSS
+//              (different border color, no negative margins for full-
+//              width border in fallback, different padding/margin),
+//              making the two tooltips look visually distinct.
+//              Fix: extracted SCENARIO_HEADER_CSS + buildScenarioHeader()
+//              helper used by both paths → identical styling.
 // 0.8.19 — User: 'the recipe tool doesnt have nerve and dampen ones
 //          please include all categories that original tooltip has'.
 //          arson-bang-for-buck's tooltip categories:
@@ -263,7 +278,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.19';
+    const VERSION = '0.8.20';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -728,12 +743,10 @@
         document.querySelectorAll('.arsontest-fallback-tooltip').forEach(el => el.remove());
         const tt = document.createElement('div');
         tt.className = 'custom-tooltip arsontest-fallback-tooltip';
-        // Header line — scenario name, bold + green so it stands out from
-        // the bullet items (matches the v0.8.15 piggyback header style).
-        const header = document.createElement('div');
-        header.textContent = location ? location + ' · ' + action : action;
-        header.style.cssText = 'color:#74c69d;font-weight:700;border-bottom:1px solid #555;padding-bottom:3px;margin-bottom:2px;';
-        tt.appendChild(header);
+        // Header line — uses the SAME styling as the piggyback header
+        // (v0.8.20) so this fallback tooltip looks identical to the
+        // arson-bang-for-buck tooltip + piggyback header combo.
+        tt.appendChild(buildScenarioHeader(location ? location + ' · ' + action : action));
         if (recipe) {
             // Same line order as arson-bang-for-buck:
             //   Payout, Profit/Nerve, Nerve, Flamethrower, Place, Stoke, Dampen
@@ -843,8 +856,29 @@
         }, true); // capture so we see the click before arson-bang-for-buck
     }
 
+    // Shared header CSS so piggyback (arson-bang-for-buck tooltip) and
+    // fallback (our own tooltip) look identical.
+    const SCENARIO_HEADER_CSS = [
+        'color:#74c69d !important',
+        'font-weight:700 !important',
+        'font-size:13px !important',
+        'border-bottom:1px solid #444 !important',
+        'margin:-2px -4px 6px -4px !important',
+        'padding:2px 4px 4px 4px !important',
+    ].join(';');
+    function buildScenarioHeader(text) {
+        const header = document.createElement('div');
+        header.className = 'arsontest-scenario-header';
+        header.textContent = text;
+        header.style.cssText = SCENARIO_HEADER_CSS;
+        return header;
+    }
     function prependScenarioHeader(tooltipEl) {
         if (!_lastClickedCard) return;
+        // v0.8.20: skip our own fallback tooltips — they already have a
+        // header from showFallbackTooltip. Otherwise piggyback would
+        // double-prepend (= "location twice" bug user saw).
+        if (tooltipEl.classList.contains('arsontest-fallback-tooltip')) return;
         if (tooltipEl.querySelector('.arsontest-scenario-header')) return;
         const wrapper = _lastClickedCard.querySelector('[class*="titleAndScenario___"]');
         if (!wrapper) return;
@@ -854,18 +888,10 @@
         const locDiv = Array.from(wrapper.children).find(c =>
             !c.className || !String(c.className).includes('scenario___'));
         const loc = locDiv ? locDiv.textContent.trim().replace(/ ·.*$/, '') : '';
-        const header = document.createElement('div');
-        header.className = 'arsontest-scenario-header';
-        header.textContent = loc ? loc + ' · ' + action : action;
-        header.style.cssText = [
-            'color:#74c69d !important',
-            'font-weight:700 !important',
-            'font-size:13px !important',
-            'border-bottom:1px solid #444 !important',
-            'margin:-2px -4px 6px -4px !important',
-            'padding:2px 4px 4px 4px !important',
-        ].join(';');
-        tooltipEl.insertBefore(header, tooltipEl.firstChild);
+        tooltipEl.insertBefore(
+            buildScenarioHeader(loc ? loc + ' · ' + action : action),
+            tooltipEl.firstChild
+        );
     }
 
     function watchTooltip(tt) {
