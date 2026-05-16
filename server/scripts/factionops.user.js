@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.86
+// @version      5.0.87
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.86';
+    const SCRIPT_VERSION = '5.0.87';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -7669,7 +7669,23 @@ body.wb-chain-active {
     let warEndedBannerShown = false;
 
     /** Re-render all enhanced rows (after bulk state update). */
+    // v5.0.87: debounce refreshAllRows. SSE/socket war_update messages
+    // can arrive in bursts (status update + call update + bars update
+    // in the same tick) and each previously triggered a full overlay
+    // render. Now state merges still happen immediately on every
+    // message (correctness), but the UI refresh coalesces to one call
+    // per debounce window. PDA gets a longer window since it's CPU-
+    // constrained.
+    const REFRESH_DEBOUNCE_MS = IS_PDA ? 500 : 200;
+    let _refreshDebounceTimer = null;
     function refreshAllRows() {
+        if (_refreshDebounceTimer) return;
+        _refreshDebounceTimer = setTimeout(() => {
+            _refreshDebounceTimer = null;
+            _refreshAllRowsImpl();
+        }, REFRESH_DEBOUNCE_MS);
+    }
+    function _refreshAllRowsImpl() {
         // Check war-ended state on every refresh cycle
         if (state.warEnded && !warEndedBannerShown) showWarEndedBanner();
 
