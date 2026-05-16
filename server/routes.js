@@ -8093,9 +8093,11 @@ function getKey() { return localStorage.getItem(KEY_LS) || ''; }
 function setKey(k) { localStorage.setItem(KEY_LS, k); }
 function clearKey() { localStorage.removeItem(KEY_LS); }
 
-function apiHeaders() {
+function withKey(url) {
   const k = getKey();
-  return k ? { 'x-api-key': k } : {};
+  if (!k) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return url + sep + 'key=' + encodeURIComponent(k);
 }
 
 async function loadWarList() {
@@ -8103,7 +8105,7 @@ async function loadWarList() {
   loadStatus.textContent = 'Loading war list...';
   loadStatus.className = 'status';
   try {
-    const r = await fetch('/api/war/payouts/list', { headers: apiHeaders() });
+    const r = await fetch(withKey('/api/war/payouts/list'));
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
       throw new Error(e.error || ('HTTP ' + r.status));
@@ -8141,7 +8143,7 @@ async function loadPayouts(forceFresh) {
   if (loot) params.set('loot', loot);
   if (forceFresh) params.set('fresh', '1');
   try {
-    const r = await fetch('/api/war/' + encodeURIComponent(warId) + '/payouts?' + params, { headers: apiHeaders() });
+    const r = await fetch(withKey('/api/war/' + encodeURIComponent(warId) + '/payouts?' + params));
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
       throw new Error(e.error || ('HTTP ' + r.status));
