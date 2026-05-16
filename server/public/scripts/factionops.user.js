@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.80
+// @version      5.0.81
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.80';
+    const SCRIPT_VERSION = '5.0.81';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -10808,8 +10808,13 @@ body.wb-chain-active {
      * Show a brief toast notification at the top of the page.
      * Used for events like "Target called" or "Chain approaching bonus".
      */
-    // ── Persistent call toasts (stay until uncalled) ──
-    const activeCallToasts = new Map(); // targetId → toast element
+    // ── Call toasts ──
+    // v5.0.81: auto-dismiss after 2s (was: persistent-until-uncalled).
+    // User reported toasts were piling up on the page, especially on PDA.
+    // removeCallToast() is still called when a target gets uncalled so a
+    // toast that's still visible gets cleared early.
+    const activeCallToasts = new Map();    // targetId → toast element
+    const callToastTimers = new Map();     // targetId → setTimeout handle
 
     function ensureCallToastContainer() {
         let container = document.getElementById('fo-call-toast-container');
@@ -10856,9 +10861,17 @@ body.wb-chain-active {
         activeCallToasts.set(targetId, toast);
 
         requestAnimationFrame(() => { toast.style.opacity = '1'; });
+
+        // v5.0.81: auto-dismiss after 2s.
+        const timer = setTimeout(() => removeCallToast(targetId), 2000);
+        callToastTimers.set(targetId, timer);
     }
 
     function removeCallToast(targetId) {
+        // Clear any pending auto-dismiss timer so it doesn't fire after
+        // the element is already gone.
+        const t = callToastTimers.get(targetId);
+        if (t) { clearTimeout(t); callToastTimers.delete(targetId); }
         const toast = activeCallToasts.get(targetId);
         if (toast) {
             toast.style.opacity = '0';
