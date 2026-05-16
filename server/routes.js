@@ -8060,7 +8060,7 @@ router.post("/api/oc/live-success", express.json({ limit: '32kb' }), async (req,
 //
 // Storage: data/arson-recipes.json (loaded lazily, debounced save).
 // GET    /api/arson/recipes        → returns full table
-// POST   /api/arson/recipes        → upsert one  { key, items, payout, nerve?, location?, stoke? }
+// POST   /api/arson/recipes        → upsert one  { key, items, payout, nerve?, location?, stoke?, dampen?, flamethrower? }
 // DELETE /api/arson/recipes/:key   → remove
 // =============================================================================
 const ARSON_RECIPES_FILE = pathJoin(OC_HISTORY_DIR, '..', 'arson-recipes.json');
@@ -8128,6 +8128,23 @@ router.post("/api/arson/recipes", express.json({ limit: '8kb' }), async (req, re
     }
     if (Object.keys(stoke).length > 0) recipe.stoke = stoke;
   }
+  // Optional dampen ingredients — used to extinguish / suppress.
+  // Same shape as items / stoke.
+  if (body.dampen && typeof body.dampen === 'object') {
+    const dampen = {};
+    for (const [n, q] of Object.entries(body.dampen)) {
+      const qty = Number(q);
+      const name = String(n || '').toLowerCase().trim();
+      if (!name || !Number.isFinite(qty) || qty <= 0) continue;
+      dampen[name] = Math.floor(qty);
+    }
+    if (Object.keys(dampen).length > 0) recipe.dampen = dampen;
+  }
+  // Optional flamethrower flag — does this recipe assume flamethrower?
+  // Boolean stored verbatim.
+  if (typeof body.flamethrower === 'boolean') {
+    recipe.flamethrower = body.flamethrower;
+  }
   const data = loadArsonRecipes();
   // Preserve existing location if the new POST didn't include one — admins
   // editing items shouldn't have to retype the location every time.
@@ -8137,6 +8154,12 @@ router.post("/api/arson/recipes", express.json({ limit: '8kb' }), async (req, re
   // Same for stoke — preserve previous value if the new POST omitted it.
   if (!recipe.stoke && data.recipes[key]?.stoke) {
     recipe.stoke = data.recipes[key].stoke;
+  }
+  if (!recipe.dampen && data.recipes[key]?.dampen) {
+    recipe.dampen = data.recipes[key].dampen;
+  }
+  if (typeof recipe.flamethrower !== 'boolean' && typeof data.recipes[key]?.flamethrower === 'boolean') {
+    recipe.flamethrower = data.recipes[key].flamethrower;
   }
   data.recipes[key] = recipe;
   data.updatedAt = Date.now();

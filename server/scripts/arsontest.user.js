@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.18
+// @version      0.8.19
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,29 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.19 — User: 'the recipe tool doesnt have nerve and dampen ones
+//          please include all categories that original tooltip has'.
+//          arson-bang-for-buck's tooltip categories:
+//            Payout · Profit/Nerve · Flamethrower · Place · Stoke · Dampen
+//          arsontest had: items (=Place), stoke, payout, nerve, location.
+//          Missing: dampen, flamethrower.
+//          Added:
+//            - dampen: {name: qty}   — extinguish items
+//            - flamethrower: boolean — does this recipe assume flamethrower?
+//          Editor:
+//            - 'Dampen' input (same format as Place/Stoke)
+//            - 'Flamethrower' checkbox inline with payout/nerve
+//            - Relabelled 'ignite items' -> 'Place' to match upstream
+//            - Edit handler pre-fills both new fields
+//          Server (routes.js):
+//            - POST accepts body.dampen and body.flamethrower
+//            - Preserves existing values when an update omits them
+//            - Endpoint comment updated
+//          Tooltip (showFallbackTooltip):
+//            - Renders bullet lines in full upstream order:
+//              Payout, Profit/Nerve, Nerve, Flamethrower (Yes/No),
+//              Place, Stoke, Dampen
+//          List view + formatRecipeLine show dampen + 🔥 indicator.
 // 0.8.18 — User: 'i want the format to match the same one as original
 //          arson buck one'. v0.8.17's fallback popup used arsontest's
 //          own dark-green theme with a single 'Location · Scenario \n
@@ -240,7 +263,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.18';
+    const VERSION = '0.8.19';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -345,11 +368,16 @@
                     <span style="font-weight:600;color:#a78bfa;">Add / update</span>
                     <input id="arsontest-ed-key" placeholder="action name (e.g. spirit level)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
                     <input id="arsontest-ed-loc" placeholder="location (e.g. Apartment, Lakehouse)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
-                    <input id="arsontest-ed-items" placeholder="ignite items: gasoline:3 lighter:1" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
-                    <input id="arsontest-ed-stoke" placeholder="stoke items (optional): gasoline:2" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
-                    <div style="display:flex;gap:6px;">
-                        <input id="arsontest-ed-payout" type="number" placeholder="payout (e.g. 280000)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;flex:1;">
-                        <input id="arsontest-ed-nerve" type="number" placeholder="nerve (optional)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;flex:1;">
+                    <input id="arsontest-ed-items" placeholder="Place: gasoline:3 lighter:1" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
+                    <input id="arsontest-ed-stoke" placeholder="Stoke (optional): gasoline:2" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
+                    <input id="arsontest-ed-dampen" placeholder="Dampen (optional): waterbottle:1" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
+                    <div style="display:flex;gap:6px;align-items:center;">
+                        <input id="arsontest-ed-payout" type="number" placeholder="Payout (e.g. 280000)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;flex:1;">
+                        <input id="arsontest-ed-nerve" type="number" placeholder="Nerve (optional)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;flex:1;">
+                        <label style="display:flex;align-items:center;gap:3px;color:#eee;font-size:11px;white-space:nowrap;">
+                            <input id="arsontest-ed-flame" type="checkbox" style="margin:0;">
+                            <span>Flamethrower</span>
+                        </label>
                     </div>
                     <div style="display:flex;gap:6px;">
                         <button id="arsontest-ed-save" style="background:#2d6a4f;color:#fff;border:0;border-radius:4px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer;flex:1;">Save</button>
@@ -398,8 +426,12 @@
                 overlay.querySelector('#arsontest-ed-stoke').value = r.stoke
                     ? Object.entries(r.stoke).map(([n, q]) => n + ':' + q).join(' ')
                     : '';
+                overlay.querySelector('#arsontest-ed-dampen').value = r.dampen
+                    ? Object.entries(r.dampen).map(([n, q]) => n + ':' + q).join(' ')
+                    : '';
                 overlay.querySelector('#arsontest-ed-payout').value = r.payout;
                 overlay.querySelector('#arsontest-ed-nerve').value = r.nerve || '';
+                overlay.querySelector('#arsontest-ed-flame').checked = r.flamethrower === true;
                 status('Editing ' + k);
             }));
             list.querySelectorAll('.arsontest-ed-del').forEach(b => b.addEventListener('click', async () => {
@@ -495,8 +527,10 @@
             const location = overlay.querySelector('#arsontest-ed-loc').value.trim();
             const itemsStr = overlay.querySelector('#arsontest-ed-items').value.trim();
             const stokeStr = overlay.querySelector('#arsontest-ed-stoke').value.trim();
+            const dampenStr = overlay.querySelector('#arsontest-ed-dampen').value.trim();
             const payout = Number(overlay.querySelector('#arsontest-ed-payout').value);
             const nerve = Number(overlay.querySelector('#arsontest-ed-nerve').value);
+            const flamethrower = overlay.querySelector('#arsontest-ed-flame').checked;
             if (!key) { status('Need a name', '#ef4444'); return; }
             if (!Number.isFinite(payout) || payout <= 0) { status('Need a payout > 0', '#ef4444'); return; }
             const items = parseItemsString(itemsStr);
@@ -506,6 +540,9 @@
             if (location) recipe.location = location;
             const stoke = parseItemsString(stokeStr);
             if (Object.keys(stoke).length > 0) recipe.stoke = stoke;
+            const dampen = parseItemsString(dampenStr);
+            if (Object.keys(dampen).length > 0) recipe.dampen = dampen;
+            recipe.flamethrower = flamethrower;
             try {
                 await postRecipe(key, recipe);
                 RECIPES[key] = recipe;
@@ -560,12 +597,16 @@
         const stokeStr = recipe.stoke
             ? ' / stoke: ' + formatItems(recipe.stoke)
             : '';
+        const dampenStr = recipe.dampen
+            ? ' / dampen: ' + formatItems(recipe.dampen)
+            : '';
+        const flameStr = recipe.flamethrower === true ? ' · 🔥' : '';
         const payoutStr = recipe.payout >= 1000
             ? '$' + Math.round(recipe.payout / 1000) + 'K'
             : '$' + recipe.payout;
         const nerveStr = recipe.nerve ? (' · ' + recipe.nerve + 'N') : '';
         const locStr = recipe.location ? recipe.location + ' · ' : '';
-        return locStr + itemsStr + stokeStr + ' · ' + payoutStr + nerveStr;
+        return locStr + itemsStr + stokeStr + dampenStr + ' · ' + payoutStr + nerveStr + flameStr;
     }
     // Reusable item-string parser ("gasoline:3 lighter:1" or "3 gasoline, 1 lighter")
     function parseItemsString(str) {
@@ -694,7 +735,8 @@
         header.style.cssText = 'color:#74c69d;font-weight:700;border-bottom:1px solid #555;padding-bottom:3px;margin-bottom:2px;';
         tt.appendChild(header);
         if (recipe) {
-            // Same line order as arson-bang-for-buck: Payout, Profit/Nerve, Place, Stoke
+            // Same line order as arson-bang-for-buck:
+            //   Payout, Profit/Nerve, Nerve, Flamethrower, Place, Stoke, Dampen
             const payoutK = Math.round(recipe.payout / 1000);
             tt.appendChild(buildBulletDiv('Payout: ' + payoutK + 'K'));
             if (recipe.nerve && recipe.nerve > 0) {
@@ -705,9 +747,15 @@
                 tt.appendChild(buildBulletDiv('Profit/Nerve: ' + ppnStr));
                 tt.appendChild(buildBulletDiv('Nerve: ' + recipe.nerve));
             }
+            if (typeof recipe.flamethrower === 'boolean') {
+                tt.appendChild(buildBulletDiv('Flamethrower: ' + (recipe.flamethrower ? 'Yes' : 'No')));
+            }
             tt.appendChild(buildBulletDiv('Place: ' + formatItemsBullet(recipe.items)));
             if (recipe.stoke && Object.keys(recipe.stoke).length) {
                 tt.appendChild(buildBulletDiv('Stoke: ' + formatItemsBullet(recipe.stoke)));
+            }
+            if (recipe.dampen && Object.keys(recipe.dampen).length) {
+                tt.appendChild(buildBulletDiv('Dampen: ' + formatItemsBullet(recipe.dampen)));
             }
         }
         // Inherit .custom-tooltip CSS from arson-bang-for-buck, but override
