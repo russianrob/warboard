@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.0
+// @version      0.8.1
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -39,7 +39,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.0';
+    const VERSION = '0.8.1';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -270,7 +270,33 @@
         document.body.appendChild(btn);
     }
 
+    // === Force-show scenario names on PDA ====================================
+    // v0.8.1: Torn's desktop view shows the scenario / action name under each
+    // location card (e.g. 'Yurt — High Time'). On PDA the same DOM element
+    // appears to be present but CSS-hidden for screen-space reasons. Inject
+    // a !important rule that overrides the hide, so users can match the
+    // visible scenario name against arsontest recipes (the location field).
+    // Pure additive CSS — doesn't touch any element's position/layout.
+    // If a future Torn rebundle renames the class away from 'scenario___',
+    // this rule simply does nothing (won't break anything).
+    function injectScenarioNamesCss() {
+        if (document.getElementById('arsontest-show-scenarios-css')) return;
+        const style = document.createElement('style');
+        style.id = 'arsontest-show-scenarios-css';
+        style.textContent = `
+            [class*="scenario___"] {
+                display: inline-block !important;
+                opacity: 1 !important;
+                visibility: visible !important;
+                height: auto !important;
+                overflow: visible !important;
+            }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+    }
+
     // === Init ===
     LOG('starting v' + VERSION);
+    injectScenarioNamesCss();
     setTimeout(injectGearButton, 500);
 })();
