@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.8
+// @version      0.8.9
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,15 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.9 — Added Debug button to the editor (next to Save/Refresh). When
+//         tapped it dumps to a green-on-black textarea:
+//           - count of every candidate selector
+//           - first 3 titleAndScenario wrappers' outerHTML
+//           - first 3 scenario elements' text/class/computed style/parent
+//           - text-walker scan for the first 5 RECIPES keys (where they
+//             actually live in the DOM, what tag, what class)
+//         User on PDA can screenshot this and share so I can see what
+//         PDA's actual DOM looks like — we're working blind otherwise.
 // 0.8.8 — v0.8.7 still didn't render visibly ('i still dont see it').
 //         Triple-redundant approach so something has to land:
 //           (a) force-unhide the existing scenario___ element with
@@ -108,7 +117,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.8';
+    const VERSION = '0.8.9';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -221,8 +230,10 @@
                     <div style="display:flex;gap:6px;">
                         <button id="arsontest-ed-save" style="background:#2d6a4f;color:#fff;border:0;border-radius:4px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer;flex:1;">Save</button>
                         <button id="arsontest-ed-refresh" style="background:#374151;color:#fff;border:0;border-radius:4px;padding:6px 12px;font-size:11px;cursor:pointer;">Refresh</button>
+                        <button id="arsontest-ed-debug" style="background:#7c2d12;color:#fff;border:0;border-radius:4px;padding:6px 12px;font-size:11px;cursor:pointer;">🔍 Debug</button>
                     </div>
                     <span id="arsontest-ed-status" style="color:#9ca3af;font-size:10px;min-height:14px;"></span>
+                    <textarea id="arsontest-ed-debug-out" style="display:none;background:#000;color:#0f0;border:1px solid #444;border-radius:4px;padding:6px;font-size:10px;font-family:monospace;width:100%;height:200px;white-space:pre;overflow:auto;"></textarea>
                 </div>
             </div>
         `;
@@ -278,6 +289,64 @@
         };
         renderList();
         overlay.querySelector('#arsontest-ed-close').addEventListener('click', () => overlay.remove());
+        overlay.querySelector('#arsontest-ed-debug').addEventListener('click', () => {
+            const ta = overlay.querySelector('#arsontest-ed-debug-out');
+            ta.style.display = 'block';
+            const lines = [];
+            lines.push('=== arsontest v' + VERSION + ' DOM dump ===');
+            lines.push('UA: ' + navigator.userAgent.slice(0, 100));
+            lines.push('');
+            // Try several selectors
+            const probes = [
+                '[class*="titleAndScenario___"]',
+                '[class*="scenario___"]',
+                '[class*="crimeOptionSection___"]',
+                '[class*="title___"]',
+                '[class*="sections___"]',
+                '[class*="crimeOption"]',
+                '[class*="ArsonScenario"]',
+            ];
+            for (const sel of probes) {
+                const n = document.querySelectorAll(sel).length;
+                lines.push(sel + ' → ' + n + ' match' + (n === 1 ? '' : 'es'));
+            }
+            lines.push('');
+            // Dump first 3 titleAndScenario wrappers (if any)
+            const wraps = document.querySelectorAll('[class*="titleAndScenario___"]');
+            lines.push('--- titleAndScenario wrappers (first 3) ---');
+            for (let i = 0; i < Math.min(3, wraps.length); i++) {
+                lines.push('[' + i + '] ' + wraps[i].outerHTML.slice(0, 400));
+                lines.push('');
+            }
+            // Dump first 3 scenario elements (if any)
+            const scens = document.querySelectorAll('[class*="scenario___"]');
+            lines.push('--- scenario elements (first 3) ---');
+            for (let i = 0; i < Math.min(3, scens.length); i++) {
+                const el = scens[i];
+                const cs = window.getComputedStyle(el);
+                lines.push('[' + i + '] text="' + el.textContent.trim() + '"');
+                lines.push('    class=' + el.className);
+                lines.push('    display=' + cs.display + ' vis=' + cs.visibility + ' op=' + cs.opacity + ' h=' + cs.height + ' offsetH=' + el.offsetHeight);
+                lines.push('    parent.class=' + (el.parentElement?.className || '(none)'));
+                lines.push('    outerHTML=' + el.outerHTML.slice(0, 200));
+                lines.push('');
+            }
+            // Find any element that contains a known recipe key in its text
+            lines.push('--- text-search for recipe keys ---');
+            const keys = Object.keys(RECIPES).slice(0, 5);
+            for (const k of keys) {
+                const matches = [];
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+                    acceptNode: n => n.nodeValue.toLowerCase().includes(k.toLowerCase())
+                        ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+                });
+                let count = 0;
+                while (walker.nextNode() && count < 2) { count++; matches.push(walker.currentNode.parentElement?.tagName + '.' + (walker.currentNode.parentElement?.className || '?')); }
+                lines.push('"' + k + '" → ' + count + ' match(es) ' + matches.join(', '));
+            }
+            ta.value = lines.join('\n');
+            ta.select();
+        });
         overlay.querySelector('#arsontest-ed-refresh').addEventListener('click', async () => {
             status('Fetching…');
             try { localStorage.removeItem('arsontest_recipes_cache'); } catch (_) {}
