@@ -9268,10 +9268,29 @@ body.wb-chain-active {
             return;
         }
 
+        // 2. v5.0.83: ffCache bsHuman (sync) — populated by
+        // fetchFairFightBatch() for every war target. No FFS
+        // userscript install required.
+        const cc = (typeof ffCache !== 'undefined') ? ffCache[targetId] : null;
+        if (cc && cc.bsHuman) {
+            const key = `ffsh_${cc.bsHuman}`;
+            if (cell.dataset.foCache === key) return;
+            const midpoint = parseBsHumanMid(cc.bsHuman);
+            const tier = midpoint !== null ? bspTier(midpoint) : 'unknown';
+            cell.innerHTML = '';
+            cell.dataset.foCache = key;
+            const span = document.createElement('span');
+            span.className = `fo-bsp-stat tier-${tier}`;
+            span.title = `~${cc.bsHuman} total stats (FFS)`;
+            span.innerHTML = `${cc.bsHuman}<span class="fo-bsp-source">ffs</span>`;
+            cell.appendChild(span);
+            return;
+        }
+
         // If cell already has content, don't wipe it for async FFS reload
         if (cell.dataset.foCache && cell.dataset.foCache !== 'empty') return;
 
-        // 2. FFS fallback (async) — show dash while loading
+        // 3. FFS IndexedDB fallback (async) — show dash while loading
         cell.innerHTML = '';
         cell.dataset.foCache = 'loading';
         const span = document.createElement('span');
