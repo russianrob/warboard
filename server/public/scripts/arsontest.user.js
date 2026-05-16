@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.13
+// @version      0.8.14
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,24 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.14 — User: 'clicking on image brings up receipe tootip not scenario
+//          tooltip'. v0.8.12 attached click handler per <img> and called
+//          e.stopPropagation(). Two failures:
+//            (1) arson-bang-for-buck's section-level handler still fired
+//                (maybe the click target wasn't the img — could be an
+//                overlay/wrapper inside the card).
+//            (2) My popup included the recipe one-liner under the
+//                scenario name, which looked like a duplicate of the
+//                existing recipe tooltip from arson-bang-for-buck.
+//          Fix:
+//            (a) Single document-level click listener with capture:true.
+//                Runs BEFORE every bubble-phase handler in the page.
+//                stopImmediatePropagation prevents the event from
+//                reaching arson-bang-for-buck's section handler.
+//            (b) Popup now shows ONLY the scenario (action) name. Recipe
+//                details belong to arson-bang-for-buck's tooltip.
+//          setImageTitles() still runs per-tick to keep title='Action'
+//          and cursor:pointer for desktop UX.
 // 0.8.13 — User: 'for recipe tool doesnt show stoke option'. Added stoke
 //          (boost) items to the recipe schema. In Torn arson, after a
 //          crime is ignited a second player can 'stoke' it with extra
@@ -163,7 +181,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.13';
+    const VERSION = '0.8.14';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -629,45 +647,66 @@
         }, 50);
     }
 
-    function attachImageTooltips() {
-        const wrappers = document.querySelectorAll('[class*="titleAndScenario___"]');
-        let attached = 0;
-        for (const w of wrappers) {
+    // v0.8.14: Switched to capture-phase event delegation on document.
+    // Per-element click handlers (v0.8.12) were either not attaching to
+    // the right img element or arson-bang-for-buck's section-level
+    // handler was still firing because stopPropagation in the bubble
+    // phase doesn't stop a capture-phase listener that already fired.
+    // Capture-phase document-level listener runs BEFORE every bubble
+    // listener anywhere in the tree, and stopImmediatePropagation
+    // prevents the event from going any further.
+    //
+    // Also: popup now shows ONLY the scenario (action) name — recipe
+    // details are arson-bang-for-buck's job. User wanted a SCENARIO
+    // tooltip; including recipe text made it look like a duplicate of
+    // the existing recipe tooltip.
+    let _imageTooltipDelegateInstalled = false;
+    function installImageTooltipDelegate() {
+        if (_imageTooltipDelegateInstalled) return;
+        _imageTooltipDelegateInstalled = true;
+        document.addEventListener('click', (e) => {
             try {
-                // Find the action name from the (often hidden) scenario___ child
-                const actionDiv = w.querySelector('[class*="scenario___"]');
-                if (!actionDiv) continue;
+                const img = e.target.closest && e.target.closest('img');
+                if (!img) return;
+                // Must be inside a crime card with a titleAndScenario wrapper
+                const card = img.closest('[class*="sections___"]') || img.closest('[class*="crimeOption"]');
+                if (!card) return;
+                const wrapper = card.querySelector('[class*="titleAndScenario___"]');
+                if (!wrapper) return;
+                const actionDiv = wrapper.querySelector('[class*="scenario___"]');
+                if (!actionDiv) return;
                 const action = actionDiv.textContent.trim();
-                if (!action) continue;
-                // Find location text
-                const locDiv = Array.from(w.children).find(c =>
-                    !c.className || !String(c.className).includes('scenario___'));
-                const location = locDiv ? locDiv.textContent.trim().replace(/ ·.*$/, '') : '';
-                // Find the card and its image
-                const card = w.closest('[class*="sections___"]') || w.closest('[class*="crimeOption"]');
-                if (!card) continue;
+                if (!action) return;
+                // Stop the click so arson-bang-for-buck's section handler
+                // doesn't ALSO fire and show its recipe tooltip on top.
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                e.preventDefault();
+                showActionPopup(action, img);
+            } catch (_) { /* swallow — never break the page */ }
+        }, true); // capture: true — fires BEFORE any bubble-phase handler
+        LOG('image-tooltip delegate installed (capture phase)');
+    }
+
+    // Hover-tooltip on desktop via img.title — quick and free, no delegation
+    // needed. Runs from MutationObserver tick. Sets cursor to pointer too
+    // so the user knows the image is interactive on touch devices.
+    function setImageTitles() {
+        document.querySelectorAll('[class*="titleAndScenario___"]:not([data-arsontest-titled])').forEach(w => {
+            try {
+                const actionDiv = w.querySelector('[class*="scenario___"]');
+                if (!actionDiv) return;
+                const action = actionDiv.textContent.trim();
+                if (!action) return;
+                const card = w.closest('[class*="sections___"]');
+                if (!card) return;
                 const img = card.querySelector('img');
-                if (!img) continue;
-                if (img.dataset.arsontestTt === '1') continue;
-                img.dataset.arsontestTt = '1';
+                if (!img) return;
+                img.title = action;
                 img.style.cursor = 'pointer';
-                // Native browser tooltip on hover (desktop)
-                img.title = location ? location + ' · ' + action : action;
-                // Tap handler (PDA + click on desktop)
-                img.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    let text = action;
-                    if (location) text = location + ' · ' + action;
-                    const recipe = RECIPES[action.toLowerCase()];
-                    if (recipe) {
-                        text += '\n' + formatRecipeLine(recipe);
-                    }
-                    showActionPopup(text, img);
-                });
-                attached++;
-            } catch (e) { /* skip */ }
-        }
-        if (attached > 0) LOG('attached tap-tooltip to', attached, 'image(s)');
+                w.dataset.arsontestTitled = '1';
+            } catch (_) {}
+        });
     }
 
     function injectPdaActionNames() {
@@ -805,9 +844,9 @@
         _injectTimer = setTimeout(() => {
             _injectTimer = null;
             autoCaptureLocations();   // desktop: learn location↔action
-            attachImageTooltips();    // PDA: tap card image → popup with action name
-            rewriteLocationText();    // fallback: try writing action into visible location div
-            injectPdaActionNames();   // belt-and-braces
+            setImageTitles();         // desktop hover + cursor cue
+            rewriteLocationText();    // fallback: write action into visible location div
+            injectPdaActionNames();   // belt-and-braces inject
         }, 400);
     }
     function watchForCards() {
@@ -819,9 +858,10 @@
     // === Init ===
     LOG('starting v' + VERSION);
     injectGlobalScenarioCss();
-    attachImageTooltips();    // v0.8.12 primary: tap-on-image popup
-    rewriteLocationText();    // fallback
-    injectPdaActionNames();   // belt-and-braces
+    installImageTooltipDelegate();  // v0.8.14: capture-phase delegate beats arson-bang-for-buck
+    setImageTitles();               // desktop hover + cursor pointer
+    rewriteLocationText();          // fallback
+    injectPdaActionNames();         // belt-and-braces
     watchForCards();
     fetchRecipes().then(() => autoCaptureLocations());
     setTimeout(injectGearButton, 500);
