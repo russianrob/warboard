@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.4
+// @version      0.8.5
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,7 +16,22 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
-// 0.8.4 — Corrected PDA inject logic. User showed actual PDA DOM:
+// 0.8.5 — User showed full PDA DOM:
+//           <div class="titleAndScenario___...">
+//             <div>Forgery Workshop</div>                  ← location (NO class)
+//             <div class="scenario___...">Shielded...</div> ← action
+//           </div>
+//         The LOCATION child has NO class — only the action carries
+//         scenario___. Previous versions queried [class*="scenario___"]
+//         and only saw 1 element per wrapper, then bailed out thinking
+//         "PDA hides the second one". Both are present, but unclassed.
+//         Fix: skip the wrapper-counting heuristic entirely. Target the
+//         scenario___ element directly (it IS the action), look up
+//         RECIPES[text], inject sibling label with recipe details after it.
+//         Auto-capture (desktop) now iterates direct children of the
+//         wrapper instead of querySelectorAll('[class*="scenario___"]')
+//         so it can see the unclassed location child too.
+// 0.8.4 — PDA scenario is the ACTION not the location. User showed actual PDA DOM:
 //         <div class="scenario___DtvAZ">Shielded from the Truth</div>
 //         — that's an ACTION name (recipe key), not a location. v0.8.2
 //         assumed the visible PDA scenario was the location and tried to
@@ -66,7 +81,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.4';
+    const VERSION = '0.8.5';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -328,39 +343,31 @@
     }
     function injectPdaActionNames() {
         if (!RECIPES || Object.keys(RECIPES).length === 0) return;
-        const wrappers = document.querySelectorAll('[class*="titleAndScenario___"]:not([data-arsontest-injected])');
+        // Target the ACTION element directly. Confirmed DOM (v0.8.5):
+        //   <div class="titleAndScenario___...">
+        //     <div>Forgery Workshop</div>                  ← location (no class)
+        //     <div class="scenario___...">Shielded from
+        //                                 the Truth</div>  ← action (this one)
+        //   </div>
+        // Only the action child carries the scenario___ class, so we look
+        // up RECIPES[action.text] and inject a sibling label with the
+        // recipe's items + payout + nerve.
+        const actionEls = document.querySelectorAll('[class*="scenario___"]:not([data-arsontest-processed])');
         let injected = 0;
-        for (const w of wrappers) {
+        for (const el of actionEls) {
             try {
-                const scenarios = w.querySelectorAll('[class*="scenario___"]');
-                // Desktop already shows both — skip
-                if (scenarios.length >= 2) { w.dataset.arsontestInjected = '1'; continue; }
-                if (scenarios.length === 0) continue;
-                const text = scenarios[0].textContent.trim();
+                // Skip if this is our own injected clone
+                if (el.hasAttribute('data-arsontest-injected-action')) continue;
+                const text = el.textContent.trim();
                 if (!text) continue;
-
-                // Primary: visible text IS the action name (recipe key).
-                let label = null;
-                const directRecipe = RECIPES[text.toLowerCase()];
-                if (directRecipe) {
-                    label = formatRecipeLine(directRecipe);
-                } else {
-                    // Fallback: text might be a location — list matching actions
-                    const matches = Object.entries(RECIPES).filter(([_, r]) =>
-                        r.location && r.location.toLowerCase() === text.toLowerCase());
-                    if (matches.length > 0) {
-                        label = matches.map(([k]) => k).join(' / ');
-                    }
-                }
-                if (!label) continue;
-
-                // Clone the scenario element (preserves Torn's class set + CSS)
-                const clone = scenarios[0].cloneNode(false);
-                clone.textContent = label;
+                el.setAttribute('data-arsontest-processed', '1');
+                const recipe = RECIPES[text.toLowerCase()];
+                if (!recipe) continue;
+                const clone = el.cloneNode(false);
+                clone.textContent = formatRecipeLine(recipe);
                 clone.setAttribute('data-arsontest-injected-action', '1');
-                clone.style.cssText += 'opacity:0.85;font-size:0.85em;color:#74c69d;';
-                w.appendChild(clone);
-                w.dataset.arsontestInjected = '1';
+                clone.style.cssText += 'opacity:0.85;font-size:0.85em;color:#74c69d;display:block;';
+                el.insertAdjacentElement('afterend', clone);
                 injected++;
             } catch (e) { /* skip malformed cards silently */ }
         }
@@ -388,16 +395,17 @@
                 const scenarios = w.querySelectorAll('[class*="scenario___"]');
                 // Need both children — desktop only. Skip our own injected
                 // clone (marked with data-arsontest-injected-action).
-                if (scenarios.length < 2) continue;
-                // Identify which child is the action (matches a RECIPES key)
-                // and which is the location, regardless of DOM order.
-                const texts = Array.from(scenarios)
-                    .filter(s => !s.hasAttribute('data-arsontest-injected-action'))
-                    .map(s => s.textContent.trim())
+                // v0.8.5: The location child has NO class — only the action
+                // has scenario___. So iterate ALL direct children of the
+                // wrapper, not just scenario___-classed ones. Identify
+                // action by RECIPES key match.
+                const childTexts = Array.from(w.children)
+                    .filter(c => !c.hasAttribute('data-arsontest-injected-action'))
+                    .map(c => c.textContent.trim())
                     .filter(Boolean);
-                if (texts.length < 2) continue;
+                if (childTexts.length < 2) continue;
                 let action = null, location = null;
-                for (const t of texts) {
+                for (const t of childTexts) {
                     if (RECIPES[t.toLowerCase()]) { action = t; }
                     else if (!location) { location = t; }
                 }
