@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.89
+// @version      5.0.90
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.89';
+    const SCRIPT_VERSION = '5.0.90';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -6535,10 +6535,11 @@ body.wb-chain-active {
 
     function pollEnergy() {
         if (!CONFIG.API_KEY) return;
-        // Fetch bars + cooldowns in the same call; two purposes with one
-        // request budget hit. Response feeds both the local energy
-        // display and the faction-wide cooldowns dashboard via self-report.
-        const url = `https://api.torn.com/user/?selections=bars,cooldowns&key=${encodeURIComponent(CONFIG.API_KEY)}`;
+        // v5.0.90: dropped 'cooldowns' from Torn API selections + from the
+        // /api/me/bars POST body per user request. The cooldowns dashboard
+        // still gets data from other faction members' polls. Smaller
+        // Torn API response + less work per tick for this client.
+        const url = `https://api.torn.com/user/?selections=bars&key=${encodeURIComponent(CONFIG.API_KEY)}`;
         httpRequest({
             method: 'GET',
             url,
@@ -6555,16 +6556,13 @@ body.wb-chain-active {
                         energyTickAnchorAt = Date.now();
                         updateEnergyDisplay();
                     }
-                    // Self-report bars + cooldowns to the server so the
-                    // faction sees our dashboard row. Bundle only the
-                    // fields we actually display.
+                    // Self-report bars only — no cooldowns (v5.0.90).
                     const bars = {
                         energy: data.energy, nerve: data.nerve,
                         happy: data.happy, life: data.life, chain: data.chain,
                     };
-                    const cooldowns = data.cooldowns;
-                    if (state.jwtToken && (bars || cooldowns)) {
-                        postAction('/api/me/bars', { bars, cooldowns }).catch(() => {});
+                    if (state.jwtToken && bars) {
+                        postAction('/api/me/bars', { bars }).catch(() => {});
                     }
                 } catch (e) { /* silent */ }
             },
