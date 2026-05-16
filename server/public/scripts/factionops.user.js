@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.81
+// @version      5.0.82
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.81';
+    const SCRIPT_VERSION = '5.0.82';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3383,6 +3383,15 @@ body.wb-chain-active {
         }
         if (!call.calledBy) {
             log(`[auto-uncall] #${targetId} → hospital: call has no calledBy`);
+            return;
+        }
+        // v5.0.82: deal calls persist through hospital. They have a
+        // 2-hour DEAL_TIMEOUT (vs 15-min CALL_TIMEOUT) and exist
+        // specifically to claim a target for the next attack window,
+        // which means they need to survive the hospital trip the deal
+        // was likely intending to set up.
+        if (call.isDeal) {
+            log(`[auto-uncall] #${targetId} → hospital: deal call, persisting`);
             return;
         }
         const caller = String(call.calledBy.id);
