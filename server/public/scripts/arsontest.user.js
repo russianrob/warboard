@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.7
+// @version      0.8.8
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -16,6 +16,19 @@
 // =============================================================================
 // CHANGELOG
 // =============================================================================
+// 0.8.8 — v0.8.7 still didn't render visibly ('i still dont see it').
+//         Triple-redundant approach so something has to land:
+//           (a) force-unhide the existing scenario___ element with
+//               inline !important (inline beats stylesheet rules per CSS
+//               spec; safe to set display/visibility/opacity — doesn't
+//               change positioning context like the v0.6 'position:
+//               relative' regression did)
+//           (b) inject a plain div INSIDE the wrapper
+//           (c) ALSO insert a plain div AS NEXT SIBLING of the wrapper
+//               — escapes any wrapper-level overflow/max-height/clip-path
+//         FORCE_VISIBLE style string covers display, visibility, opacity,
+//         height, overflow, clip, clip-path, transform, position, width,
+//         font-size, color — defeats every common CSS hide pattern.
 // 0.8.7 — User: 'like in the desktop view'. They just want the action
 //         name visible under the location, same as desktop. v0.8.6 was
 //         overcomplicating with formatRecipeLine (location · items ·
@@ -95,7 +108,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.8.7';
+    const VERSION = '0.8.8';
     const SERVER = 'https://tornwar.com';
     const LOG = (...a) => console.log('[arsontest v' + VERSION + ']', ...a);
     const WARN = (...a) => console.warn('[arsontest]', ...a);
@@ -356,53 +369,73 @@
         return locStr + itemsStr + ' · ' + payoutStr + nerveStr;
     }
     function injectPdaActionNames() {
-        // v0.8.7: User wants PDA to look like desktop — just the action
-        // name visible under the location, nothing fancy. The action
-        // element IS in the PDA DOM (<div class="scenario___...">) but
-        // PDA CSS hides it. Pull its text, render a plain visible div
-        // with the same text. No recipe lookup needed — works whether
-        // or not RECIPES is populated.
+        // v0.8.8: v0.8.7 still didn't render visibly. Three redundant
+        // approaches so at least one survives whatever PDA CSS is doing:
+        //   (a) Force-unhide the existing scenario___ element with
+        //       inline !important — inline beats any stylesheet rule.
+        //       Setting display/visibility/opacity does NOT change
+        //       positioning context (the v0.6 regression was caused by
+        //       el.style.position='relative'); these are safe.
+        //   (b) Inject a fresh sibling div INSIDE the wrapper.
+        //   (c) ALSO insert a div AFTER the wrapper (as next sibling
+        //       of the wrapper itself) — escapes any parent overflow,
+        //       max-height, or clip-path the wrapper might apply.
+        const FORCE_VISIBLE = [
+            'display:block !important',
+            'visibility:visible !important',
+            'opacity:1 !important',
+            'height:auto !important',
+            'min-height:0 !important',
+            'max-height:none !important',
+            'overflow:visible !important',
+            'clip:auto !important',
+            'clip-path:none !important',
+            'transform:none !important',
+            'position:static !important',
+            'width:auto !important',
+            'max-width:none !important',
+            'font-size:11px !important',
+            'line-height:1.3 !important',
+            'color:#999 !important',
+            'white-space:normal !important',
+            'margin:1px 0 !important',
+            'padding:0 !important',
+        ].join(';');
+
         const wrappers = document.querySelectorAll('[class*="titleAndScenario___"]:not([data-arsontest-injected])');
         let injected = 0;
         for (const w of wrappers) {
             try {
-                // Find the action: the scenario___ child (PDA hides it).
                 const actionEl = w.querySelector('[class*="scenario___"]:not([data-arsontest-injected-action])');
                 if (!actionEl) continue;
                 const actionText = actionEl.textContent.trim();
                 if (!actionText) continue;
 
-                // If it's already visible on screen (desktop), skip —
-                // we only need to inject when PDA CSS has hidden it.
-                const cs = window.getComputedStyle(actionEl);
-                if (cs.display !== 'none' && cs.visibility !== 'hidden' &&
-                    parseFloat(cs.opacity) > 0 && actionEl.offsetHeight > 0) {
-                    w.dataset.arsontestInjected = '1';
-                    continue;
+                // (a) Force the original scenario element visible.
+                actionEl.style.cssText += ';' + FORCE_VISIBLE;
+
+                // (b) Inject inside the wrapper.
+                const inside = document.createElement('div');
+                inside.setAttribute('data-arsontest-injected-action', '1');
+                inside.textContent = actionText;
+                inside.style.cssText = FORCE_VISIBLE;
+                w.appendChild(inside);
+
+                // (c) Inject as next sibling of the wrapper (escapes any
+                // parent overflow/clip the wrapper itself might apply).
+                const outside = document.createElement('div');
+                outside.setAttribute('data-arsontest-injected-action-outside', '1');
+                outside.textContent = actionText;
+                outside.style.cssText = FORCE_VISIBLE;
+                if (w.parentElement) {
+                    w.insertAdjacentElement('afterend', outside);
                 }
 
-                // Plain div — no scenario___ class, no inherited hide rules.
-                const tag = document.createElement('div');
-                tag.setAttribute('data-arsontest-injected-action', '1');
-                tag.textContent = actionText;
-                tag.style.cssText = [
-                    'display:block !important',
-                    'visibility:visible !important',
-                    'opacity:1 !important',
-                    'height:auto !important',
-                    'overflow:visible !important',
-                    'font-size:11px !important',
-                    'line-height:1.3 !important',
-                    'color:#999 !important',
-                    'margin-top:1px !important',
-                    'white-space:normal !important',
-                ].join(';');
-                w.appendChild(tag);
                 w.dataset.arsontestInjected = '1';
                 injected++;
             } catch (e) { /* skip malformed cards silently */ }
         }
-        if (injected > 0) LOG('injected', injected, 'action name(s) into crime cards');
+        if (injected > 0) LOG('injected', injected, 'action name(s) into crime cards (3 paths)');
     }
 
     // === Auto-capture location ↔ action from desktop DOM =====================
