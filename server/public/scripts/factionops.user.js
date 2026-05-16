@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.82
+// @version      5.0.83
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.82';
+    const SCRIPT_VERSION = '5.0.83';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -9193,10 +9193,29 @@ body.wb-chain-active {
             return;
         }
 
+        // 2. v5.0.83: ffCache bsHuman (sync) — factionops's own
+        // ffscouter.com API integration populates this for every war
+        // target with a human-readable range like "10M-50M". Doesn't
+        // require the FFS userscript to be installed.
+        const cc = (typeof ffCache !== 'undefined') ? ffCache[targetId] : null;
+        if (cc && cc.bsHuman) {
+            const key = `ffsh_${cc.bsHuman}`;
+            if (el.dataset.foCache === key) return;
+            const midpoint = parseBsHumanMid(cc.bsHuman);
+            const tier = midpoint !== null ? bspTier(midpoint) : 'unknown';
+            el.dataset.foCache = key;
+            el.className = `fo-bsp-inline tier-${tier}`;
+            el.textContent = cc.bsHuman;
+            el.title = `~${cc.bsHuman} total stats (FFS)`;
+            return;
+        }
+
         // If already has content, don't wipe for async reload
         if (el.dataset.foCache && el.dataset.foCache !== 'empty') return;
 
-        // 2. FFS fallback (async)
+        // 3. FFS IndexedDB fallback (async) — only fires when the user
+        // has the FFS userscript itself installed AND it has cached
+        // data for this uid.
         el.dataset.foCache = 'loading';
         el.className = 'fo-bsp-inline tier-unknown';
         getFfScouterEstimate(targetId).then((ffs) => {
@@ -9209,6 +9228,26 @@ body.wb-chain-active {
             el.textContent = ffs.human || formatBspNumber(num);
             el.title = `~${num.toLocaleString()} total stats (FFS)`;
         });
+    }
+
+    // Parse 'bsHuman' range string ("10M-50M", "1.2B", "500K") to a
+    // midpoint number, for picking the BSP color tier. Mirrors the
+    // sort-side parser added in v5.0.79.
+    function parseBsHumanMid(s) {
+        if (!s || typeof s !== 'string') return null;
+        const unit = (u) => u === 'B' ? 1e9 : u === 'M' ? 1e6 : u === 'K' ? 1e3 : 1;
+        const parts = s.split('-').map(p => p.trim());
+        const toNum = (p) => {
+            const m = p.match(/^([\d.]+)\s*([KMB])?$/i);
+            if (!m) return null;
+            const n = parseFloat(m[1]);
+            if (!Number.isFinite(n)) return null;
+            return n * unit((m[2] || '').toUpperCase());
+        };
+        const a = toNum(parts[0]);
+        if (a === null) return null;
+        const b = parts[1] ? toNum(parts[1]) : null;
+        return b !== null ? (a + b) / 2 : a;
     }
 
     function renderOverlayBspCell(cell, targetId) {
