@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.74
+// @version      5.0.75
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.74';
+    const SCRIPT_VERSION = '5.0.75';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -5128,21 +5128,28 @@ body.wb-chain-active {
             btn.dataset.targetName = targetName;
             btn.innerHTML = '<span class="fo-card-retal-icon">\u26A0</span>Retal';
 
-            // v5.0.74: prefer the upper info row (next to username) so
-            // the button sits near the top of the mini-profile instead
-            // of buried at the bottom by the chat box. Falls back to
-            // the original .buttons-list site if Torn's class layout
-            // changes. Does NOT touch the card wrapper's positioning \u2014
-            // that was the v5.0.29 mistake that broke mini-profile
-            // invocation. Pure inline-flex append.
-            const upper = card.querySelector('[class*="profile-mini-_info"]')
-                       || card.querySelector('[class*="profile-mini-_username"]')?.parentElement
-                       || card.querySelector('[class*="profile-mini-_name"]')?.parentElement;
-            if (upper) {
-                btn.classList.add('fo-card-retal-btn-upper'); // CSS tweaks for the upper position
-                upper.appendChild(btn);
-            } else {
+            // v5.0.75: inject next to the player NAME LINK (which we
+            // already locate above), not into a guessed wrapper. The
+            // name link is reliably high up in the card; appending the
+            // button as its next sibling puts it inline with the name \u2014
+            // top of the card, no positioning hacks. Falls back through
+            // named upper containers, then .buttons-list. Does NOT
+            // touch the card wrapper's position (v5.0.29 mistake).
+            let injected = false;
+            const tryAppend = (target, sourceTag) => {
+                if (!target || injected) return;
+                btn.classList.add('fo-card-retal-btn-upper');
+                target.appendChild(btn);
+                injected = true;
+                console.log('[FactionOps] retal injected via', sourceTag);
+            };
+            tryAppend(nameLink.parentElement, 'nameLink.parentElement');
+            tryAppend(card.querySelector('[class*="profile-mini-_info"]'), '_info');
+            tryAppend(card.querySelector('[class*="profile-mini-_username"]')?.parentElement, '_username.parent');
+            if (!injected) {
+                btn.classList.remove('fo-card-retal-btn-upper');
                 buttonsList.appendChild(btn);
+                console.log('[FactionOps] retal injected via fallback .buttons-list');
             }
 
             clearInterval(timer);
