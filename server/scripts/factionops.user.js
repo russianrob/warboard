@@ -9683,6 +9683,13 @@ body.wb-chain-active {
             <span>${label}</span>
         `;
 
+        // v5.0.75: make the profile-page Retal button draggable. Persists
+        // position per-mode (retal vs assist save separately) via
+        // GM_setValue. CSS default is bottom-right; first drag overrides
+        // and sticks. Click suppressed if we actually moved (>3px) so
+        // drag-to-reposition doesn't fire the retal request.
+        makeAssistBtnDraggable(btn, mode);
+
         let cooldownTimer = null;
 
         btn.addEventListener('click', async () => {
