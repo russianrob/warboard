@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.87
+// @version      5.0.88
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.87';
+    const SCRIPT_VERSION = '5.0.88';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3537,14 +3537,33 @@ body.wb-chain-active {
      * Key: tdup.battleStatsPredictor.cache.prediction.<userId>
      * Returns the parsed object (has .TBS) or null.
      */
+    // v5.0.88: memoize BSP reads. Each renderOverlay call hits this for
+    // every target (90+ targets × 2 render functions per row = ~180
+    // localStorage reads + JSON.parse calls per render pass). With the
+    // refreshAllRows debounce we're down to 1-2 renders/sec under load,
+    // but those still add up — and BSP writes are rare (cache prediction
+    // every few minutes per profile visit), so a 30s in-memory cache is
+    // safe. Cache miss = original behavior + write; cache hit = no I/O.
+    const _bspMemo = new Map(); // userId -> { data, fetchedAt }
+    const BSP_MEMO_TTL_MS = 30 * 1000;
     function fetchBspPrediction(userId) {
+        const now = Date.now();
+        const cached = _bspMemo.get(userId);
+        if (cached && (now - cached.fetchedAt) < BSP_MEMO_TTL_MS) {
+            return cached.data;
+        }
         try {
             const raw = localStorage.getItem(
                 'tdup.battleStatsPredictor.cache.prediction.' + userId
             );
-            if (!raw) return null;
+            if (!raw) {
+                _bspMemo.set(userId, { data: null, fetchedAt: now });
+                return null;
+            }
             const pred = JSON.parse(raw);
-            return pred || null;
+            const value = pred || null;
+            _bspMemo.set(userId, { data: value, fetchedAt: now });
+            return value;
         } catch (e) {
             return null;
         }
@@ -7679,11 +7698,33 @@ body.wb-chain-active {
     const REFRESH_DEBOUNCE_MS = IS_PDA ? 500 : 200;
     let _refreshDebounceTimer = null;
     function refreshAllRows() {
+        // v5.0.88: skip entirely when the tab is hidden. No point
+        // rendering 90 rows the user can't see. visibilitychange
+        // listener (installed below) catches up once they come back.
+        if (typeof document.hidden === 'boolean' && document.hidden) return;
         if (_refreshDebounceTimer) return;
         _refreshDebounceTimer = setTimeout(() => {
             _refreshDebounceTimer = null;
+            // Re-check at fire time — tab may have gone hidden during
+            // the debounce window.
+            if (typeof document.hidden === 'boolean' && document.hidden) return;
             _refreshAllRowsImpl();
         }, REFRESH_DEBOUNCE_MS);
+    }
+    // When the tab becomes visible again, force one immediate refresh
+    // so the user sees current state instead of waiting for the next
+    // SSE message to trigger it.
+    if (typeof document.addEventListener === 'function') {
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                // Skip the debounce; refresh now since they just looked at it
+                if (_refreshDebounceTimer) {
+                    clearTimeout(_refreshDebounceTimer);
+                    _refreshDebounceTimer = null;
+                }
+                try { _refreshAllRowsImpl(); } catch (_) {}
+            }
+        });
     }
     function _refreshAllRowsImpl() {
         // Check war-ended state on every refresh cycle
