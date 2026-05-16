@@ -38,7 +38,7 @@ if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
 export const NOTIFICATION_TYPES = {
   target_called:   { label: "Target Calls",         description: "When a teammate calls a target",                    default: true  },
   chain_alert:     { label: "Chain Break Alerts",    description: "When chain timer drops below 30s",                  default: true  },
-  hospital_pop:    { label: "Hospital Pops",         description: "When an enemy target leaves the hospital",          default: true  },
+  hospital_pop:    { label: "Hospital Pops",         description: "When an enemy target leaves the hospital",          default: false },
   bonus_imminent:  { label: "Bonus Milestones",      description: "When a bonus hit is 1–2 attacks away",              default: true  },
   call_stolen:     { label: "Call Contested",        description: "When someone else views a target you called",       default: true  },
   war_target:      { label: "War Target Reached",    description: "When faction hits the custom war target",           default: true  },
