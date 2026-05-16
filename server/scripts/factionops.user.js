@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.85
+// @version      5.0.86
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -54,7 +54,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.85';
+    const SCRIPT_VERSION = '5.0.86';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -8488,9 +8488,14 @@ body.wb-chain-active {
             setTimeout(showWarEndedBanner, 500);
         }
 
-        // Set RT badge initial state
+        // Set RT badge initial state. v5.0.86: dropped the 5s setInterval
+        // wakeup — updateRtBadge is already called event-driven on every
+        // socket connect/disconnect/SSE message (lines 4457, 4476, 4569,
+        // 4596, 4640, 4649, 4729, 4742) so the polled wakeup was
+        // redundant noise. On PDA every interval tick crosses the
+        // JS→native bridge; killing it cuts background CPU. If badge
+        // drift becomes a problem a 60s safety poll can be added back.
         updateRtBadge();
-        setInterval(updateRtBadge, 5000);
 
         // Move Torn's native #barChain into our overlay header
         moveTornChainBar();
