@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.0.95
+// @version      5.0.96
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.0.95';
+    const SCRIPT_VERSION = '5.0.96';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -5039,28 +5039,29 @@ body.wb-chain-active {
     // SECTION 8: ACTION HELPERS (HTTP POST)
     // =========================================================================
 
-    // v5.0.95: copy call message to clipboard with different wording
+    // v5.0.96: copy call message to clipboard with different wording
     // for regular call vs deal call:
-    //   Regular:  'I got <Name>[ in N minutes]'
-    //   Deal:     'I have a med deal with <Name>[ in N minutes]'
-    // Time-remaining only included when the target has an active
-    // timer (hospital countdown most commonly). Minutes only, no
-    // seconds — easier to read in chat.
+    //   Regular:  'I got <Name>[ in N minutes]'   ← timer included
+    //   Deal:     'I have a med deal with <Name>' ← no timer per user
+    // Deals are arrangements, not race-the-clock events, so the time
+    // suffix doesn't add value there.
     function copyCallTextToClipboard(targetId, targetName, isDeal) {
         if (!targetName) return;
         let text = isDeal
             ? 'I have a med deal with ' + targetName
             : 'I got ' + targetName;
-        try {
-            const s = state.statuses && state.statuses[targetId];
-            if (s) {
-                const rem = statusRemainingSec(s);
-                if (rem && rem > 0) {
-                    const mins = Math.max(1, Math.round(rem / 60));
-                    text += ' in ' + mins + (mins === 1 ? ' minute' : ' minutes');
+        if (!isDeal) {
+            try {
+                const s = state.statuses && state.statuses[targetId];
+                if (s) {
+                    const rem = statusRemainingSec(s);
+                    if (rem && rem > 0) {
+                        const mins = Math.max(1, Math.round(rem / 60));
+                        text += ' in ' + mins + (mins === 1 ? ' minute' : ' minutes');
+                    }
                 }
-            }
-        } catch (_) { /* don't let timer calc kill the copy */ }
+            } catch (_) { /* don't let timer calc kill the copy */ }
+        }
         try {
             if (typeof GM_setClipboard === 'function') {
                 GM_setClipboard(text, 'text');
@@ -8566,7 +8567,7 @@ body.wb-chain-active {
                     </div>
                     <div class="fo-status-dot${state.connected ? '' : ' disconnected'}" id="fo-conn-dot" title="${state.connected ? 'Connected' : 'Disconnected'}"></div>
                     <span class="fo-rt-badge" id="fo-rt-badge"></span>
-                    <button class="fo-settings-btn" id="fo-heatmap-header-btn" title="Heatmaps (Activity + Payouts)">&#x1F4B0;</button>
+                    ${isLeader() ? `<button class="fo-settings-btn" id="fo-heatmap-header-btn" title="War Payouts">&#x1F4B0;</button>` : ''}
                     <button class="fo-settings-btn" id="fo-settings-btn" title="Settings">&#x2699;</button>
                     <div class="fo-energy-display" id="fo-energy-display" title="Energy">
                         <span class="fo-energy-label">E</span>
