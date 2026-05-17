@@ -111,15 +111,18 @@ const intervals = new Map();
 export function startWarStatusMonitor(io, warId) {
   if (timeouts.has(warId)) return; // already monitoring
 
-  // 2026-05-16: xanax-tracker live polling disabled per user request.
-  // It was generating ~40 'Incorrect ID-entity relation' errors per
-  // log window (Torn API returns code 7 for the armoury-news endpoint
-  // with these keys — long-standing issue, never made functional
-  // recovery). Module + post-war report integration left intact so
-  // any previously-collected xanaxStats still surfaces; just no new
-  // live polling. Backfill endpoint at /api/war/<id>/refresh-xanax
-  // (routes.js:6107) can be invoked manually if needed.
-  // import("./xanax-tracker.js").then(m => m.startXanaxTracker(warId)).catch(() => {});
+  // Co-start the xanax accountability tracker for this war. Polls
+  // armoury news every 5 min and accumulates per-member xanax-pulled
+  // counts that feed the post-war report. Idempotent.
+  //
+  // 2026-05-16: was temporarily disabled by mistake (user thought
+  // they were disabling xanax-subscriptions.js — a different module).
+  // 2026-05-17: re-enabled. The 'Incorrect ID-entity relation' errors
+  // in the log are real (some pool keys lack armoury access) but the
+  // pool rotates so successful polls still land. Errors are tolerable
+  // because they're the only way the tracker discovers which keys
+  // can hit the armoury endpoint at all.
+  import("./xanax-tracker.js").then(m => m.startXanaxTracker(warId)).catch(() => {});
 
   const scheduleNext = (delay) => {
     const tid = setTimeout(poll, delay);
