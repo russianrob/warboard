@@ -23,21 +23,24 @@ const toTs = war.warEndedAt
 
 console.log(`Backfill war_42055 (faction ${factionId}) from ${new Date(fromTs*1000).toISOString()} to ${new Date(toTs*1000).toISOString()}`);
 
-// Actual Torn armoury news format:
-//   <a href="...XID=PLAYERID">NAME</a> used one of the faction's Xanax items
-// (one entry per xanax taken)
-// Deposits look like "deposited Nx Xanax" — those should NOT count.
+// Torn armoury news formats (verified live 2026-05-17):
+//   <a ...XID=ID>NAME</a> used one of the faction's Xanax items     → use, qty=1
+//   <a ...XID=ID>NAME</a> deposited Nx Xanax                        → deposit, qty=N
+// Deposits subtract from the consumption count (user request: account
+// for xanax taken-but-not-used that gets put back).
+const USED_RE    = /<a[^>]*XID=(\d+)[^>]*>([^<]+)<\/a>\s+used\s+one\s+of\s+the\s+faction's\s+Xanax\s+items/i;
+const DEPOSIT_RE = /<a[^>]*XID=(\d+)[^>]*>([^<]+)<\/a>\s+deposited\s+(\d+)\s*x?\s*Xanax/i;
 function parseXanaxEntry(news) {
   const html = String(news || '');
-  // Match "used one of the faction's Xanax items" specifically
-  if (!/used one of the faction's Xanax items/i.test(html)) return null;
-  const m = html.match(/XID=(\d+)["'][^>]*>([^<]+)</);
-  if (!m) return null;
-  return {
-    playerId: m[1],
-    playerName: m[2].trim(),
-    qty: 1, // one entry = one xanax taken
-  };
+  let m = html.match(USED_RE);
+  if (m) return { playerId: m[1], playerName: m[2].trim(), qty: 1, type: 'used' };
+  m = html.match(DEPOSIT_RE);
+  if (m) {
+    const qty = parseInt(m[3], 10);
+    if (!Number.isFinite(qty) || qty <= 0) return null;
+    return { playerId: m[1], playerName: m[2].trim(), qty, type: 'deposited' };
+  }
+  return null;
 }
 
 async function fetchPage(toCursor) {
@@ -73,13 +76,26 @@ for (let page = 0; page < 30; page++) {
 }
 
 const taken = {}, names = {};
-let xanaxParsed = 0;
+let netParsed = 0;
+let useCount = 0, depCount = 0;
+// Sort by timestamp so deposits subtract from running totals as we
+// walk forward (mirrors the live tracker's chronological processing).
+all.sort((a, b) => a.timestamp - b.timestamp);
 for (const e of all) {
   const p = parseXanaxEntry(e.news);
   if (!p || !p.qty) continue;
-  taken[p.playerId] = (taken[p.playerId] || 0) + p.qty;
-  names[p.playerId] = p.playerName;
-  xanaxParsed += p.qty;
+  if (p.type === 'deposited') {
+    const cur = taken[p.playerId] || 0;
+    taken[p.playerId] = Math.max(0, cur - p.qty);
+    names[p.playerId] = p.playerName;
+    netParsed -= p.qty;
+    depCount += p.qty;
+  } else {
+    taken[p.playerId] = (taken[p.playerId] || 0) + p.qty;
+    names[p.playerId] = p.playerName;
+    netParsed += p.qty;
+    useCount += p.qty;
+  }
 }
 
 war.xanaxStats = {
@@ -93,7 +109,8 @@ war.xanaxStats = {
 };
 fs.writeFileSync(WARS_FILE, JSON.stringify(wars, null, 2));
 
-console.log(`\nDone. ${all.length} armoury entries, ${Object.keys(taken).length} members reported xanax, ${xanaxParsed} total xanax parsed.`);
+console.log(`\nDone. ${all.length} armoury entries, ${Object.keys(taken).filter(k => taken[k] > 0).length} members with net>0 xanax.`);
+console.log(`  uses: +${useCount}   deposits: -${depCount}   net: ${netParsed}`);
 console.log('Top 10:');
 for (const [pid, n] of Object.entries(taken).sort((a,b)=>b[1]-a[1]).slice(0,10)) {
   console.log(`  ${names[pid] || pid}: ${n}`);

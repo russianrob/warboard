@@ -50,30 +50,35 @@ const cursors  = new Map();
 const backoffs = new Map();
 
 /**
- * Match a "used one of the faction's Xanax items" event in a faction
- * news string. Real Torn armoury-news format (verified against live
- * /v2/faction/?selections=armorynews on 2026-05-09):
+ * Match xanax-related armoury news. Two phrasings observed in live data:
  *
- *   <a href = "http://www.torn.com/profiles.php?XID=3924994">Wintermoore</a>
- *     used one of the faction's Xanax items
+ *   <a ...XID=ID>NAME</a> used one of the faction's Xanax items
+ *     → consumption, one xanax per entry
  *
- * Each entry corresponds to ONE xanax (Torn doesn't batch). Returns
- * { playerId, playerName, qty: 1 } on match, null otherwise. Excludes
- * deposits ("deposited 1x Xanax") and item-creation events.
+ *   <a ...XID=ID>NAME</a> deposited Nx Xanax
+ *     → return to armoury — N can be any positive integer. 2026-05-17:
+ *       per user request, deposits subtract from the consumption count
+ *       so the net 'taken from war' figure is accurate for members who
+ *       took xanax but didn't end up using it (gave it back).
  *
- * Earlier draft assumed "took N x Xanax from the armoury" which doesn't
- * exist in live data — that phrasing applied to weapons/armor only.
+ * Returns:
+ *   { playerId, playerName, qty: 1, type: 'used' }       for consumption
+ *   { playerId, playerName, qty: N, type: 'deposited' }  for deposits
+ *   null                                                  for everything else
  */
 const TOOK_XANAX_RE = /<a[^>]*XID=(\d+)[^>]*>([^<]+)<\/a>\s+used\s+one\s+of\s+the\s+faction's\s+Xanax\s+items/i;
+const DEPOSIT_XANAX_RE = /<a[^>]*XID=(\d+)[^>]*>([^<]+)<\/a>\s+deposited\s+(\d+)\s*x?\s*Xanax/i;
 function parseXanaxEntry(news) {
   if (!news || typeof news !== "string") return null;
-  const m = news.match(TOOK_XANAX_RE);
-  if (!m) return null;
-  return {
-    playerId: m[1],
-    playerName: m[2].trim(),
-    qty: 1,
-  };
+  let m = news.match(TOOK_XANAX_RE);
+  if (m) return { playerId: m[1], playerName: m[2].trim(), qty: 1, type: 'used' };
+  m = news.match(DEPOSIT_XANAX_RE);
+  if (m) {
+    const qty = parseInt(m[3], 10);
+    if (!Number.isFinite(qty) || qty <= 0) return null;
+    return { playerId: m[1], playerName: m[2].trim(), qty, type: 'deposited' };
+  }
+  return null;
 }
 
 /**
@@ -227,9 +232,19 @@ async function pollOnce(warId) {
     stats.entryCount++;
     const parsed = parseXanaxEntry(e.news);
     if (!parsed) continue;
-    stats.taken[parsed.playerId] = (stats.taken[parsed.playerId] || 0) + parsed.qty;
-    stats.names[parsed.playerId] = parsed.playerName;
-    newCount += parsed.qty;
+    if (parsed.type === 'deposited') {
+      // 2026-05-17: deposits net against takes. Floor at 0 — a member
+      // who only deposits (e.g. brought xanax from outside) shouldn't
+      // show as a negative consumer.
+      const cur = stats.taken[parsed.playerId] || 0;
+      stats.taken[parsed.playerId] = Math.max(0, cur - parsed.qty);
+      stats.names[parsed.playerId] = parsed.playerName;
+      newCount -= parsed.qty; // log shows net change
+    } else {
+      stats.taken[parsed.playerId] = (stats.taken[parsed.playerId] || 0) + parsed.qty;
+      stats.names[parsed.playerId] = parsed.playerName;
+      newCount += parsed.qty;
+    }
   }
   stats.lastPolledAt = highestTs || Math.floor(Date.now()/1000);
   war.xanaxStats = stats;
