@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.6
+// @version      5.1.7
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.6';
+    const SCRIPT_VERSION = '5.1.7';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2854,14 +2854,19 @@ body.wb-chain-active {
     background: rgba(255,255,255,0.05); padding: 2px 7px; border-radius: 3px;
 }
 .fo-bars-list { padding: 6px 12px 10px; }
-/* v5.1.6: cooldown column dropped (cooldowns no longer polled per
-   v5.0.90). Grid is now 2 columns: energy bar + name. */
+/* v5.1.6: cooldown column dropped. v5.1.7: energy column widened a
+   bit to fit inline number (e.g. '400/150') for xanax-boosted
+   members where current > max. */
 .fo-bars-row {
     display: grid;
-    grid-template-columns: 90px minmax(0, 1fr);
+    grid-template-columns: 130px minmax(0, 1fr);
     gap: 10px; align-items: center; justify-content: start;
     padding: 4px 4px; font-size: 11px;
     border-bottom: 1px dashed rgba(255,255,255,0.04);
+}
+.fo-bar-cell .fo-bar-num {
+    font-size: 10px; color: #9ca3af; margin-left: 4px;
+    font-variant-numeric: tabular-nums; flex-shrink: 0;
 }
 .fo-bars-row:last-child { border-bottom: none; }
 .fo-bars-row .fo-bars-name { font-weight: 600; color: #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -7222,11 +7227,22 @@ body.wb-chain-active {
             const interval = Number(energyObj.interval) || 600;
             const ticktime = Number(energyObj.ticktime) || 0;
             const fulltime = Number(energyObj.fulltime) || 0;
-            if (cur0 >= max) return { current: max, maximum: max, pct: 100 };
+            // v5.1.7: don't cap at max — energy can exceed max via
+            // xanax (250e per pop) and the user wants to see the
+            // actual number. Bar fill clamps at 100% visually but the
+            // text shows the real value.
+            if (cur0 >= max) {
+                return {
+                    current: cur0, maximum: max,
+                    pct: Math.min(100, Math.round(100 * cur0 / max)),
+                };
+            }
             if (fulltime > 0 && ageSec >= fulltime) return { current: max, maximum: max, pct: 100 };
             let projected = cur0;
             if (ageSec >= ticktime && interval > 0 && increment > 0) {
                 const ticks = 1 + Math.floor((ageSec - ticktime) / interval);
+                // Cap projection at max for the regen path (you only
+                // regen UP to max; over-max only comes from drugs).
                 projected = Math.min(max, cur0 + ticks * increment);
             }
             return { current: projected, maximum: max, pct: Math.round(100 * projected / max) };
@@ -7268,12 +7284,21 @@ body.wb-chain-active {
                 return remHr > 0 ? `${days}d${remHr}h` : `${days}d`;
             };
             const name = escapeHtml(info.name || `#${pid}`);
+            // v5.1.7: show the energy NUMBER inline next to the bar.
+            // Especially important when current > maximum (xanax-boosted
+            // members) where the bar visually maxes at 100% but the
+            // actual value is e.g. 175/150 or 400/150.
+            const overMax = e.current > e.maximum;
+            const numText = overMax
+                ? `<b>${e.current}</b>/${e.maximum}`  // bold the over-max number to call attention
+                : `${e.current}/${e.maximum}`;
             const energyTip = `Energy: ${e.current}/${e.maximum} (${ePct}%)`;
             return `
                 <div class="fo-bars-row">
                     <div class="fo-bar-cell is-energy" title="${energyTip}" data-fo-tip="${energyTip}">
                         <span class="fo-bar-label">E</span>
-                        <div class="fo-bar-track"><div class="fo-bar-fill" style="width:${ePct}%"></div></div>
+                        <div class="fo-bar-track"><div class="fo-bar-fill" style="width:${Math.min(100, ePct)}%"></div></div>
+                        <span class="fo-bar-num"${overMax ? ' style="color:#74c69d;"' : ''}>${numText}</span>
                     </div>
                     <div class="fo-bars-name" title="${name} — last update ${fmtAgo(info.updatedAt)}" data-fo-tip="${name} — ${fmtAgo(info.updatedAt)}">${name} <span class="fo-bars-updated">${fmtAgo(info.updatedAt)}</span></div>
                 </div>
