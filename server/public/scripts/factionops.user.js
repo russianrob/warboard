@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.9
+// @version      5.1.10
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -56,7 +56,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.9';
+    const SCRIPT_VERSION = '5.1.10';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3527,6 +3527,12 @@ body.wb-chain-active {
         if (s.includes('fallen')) return 'fallen';
         return 'ok';
     }
+    // v5.1.10: hospital-countdown regex matching the icon HTML Torn
+    // embeds in updateIcons WS messages and getwarusers responses.
+    // Handles raw quotes + HTML-entity-escaped ones. Pattern mirrors
+    // CAT script's HOSP_REGEX for compatibility.
+    const HOSP_ICON_RE = /Hospital[^>]*data-time=(?:'|&#039;|&quot;|")(\d+)(?:'|&#039;|&quot;|")/i;
+
     function handleTornWsMessage(event) {
         try {
             const raw = event && event.data;
@@ -3541,26 +3547,123 @@ body.wb-chain-active {
                 catch (__) { return; }
             }
             const actions = deepFindActions(json);
-            if (!actions || !actions.updateStatus) return;
-            const u = actions.updateStatus;
-            const uid = String(u.userId || u.user_id || '');
-            if (!uid) return;
-            const st = u.status || {};
-            const text = String(st.text || st.status || '');
-            if (!text) return;
-            const normalized = _normalizeStatusText(text);
-            // until: absolute unix-seconds timestamp from Torn. Falls
-            // back to updateAt for hospital pop targets if until missing.
-            const until = Number(st.until)
-                || (normalized === 'hospital' ? Number(st.updateAt) : 0)
-                || 0;
-            const batch = {};
-            const entry = { status: normalized, until };
-            if (st.details) entry.description = String(st.details);
-            batch[uid] = entry;
-            try { mergeStatusesMonotonic(batch); } catch (_) {}
-            try { queuePeerRelay(batch); } catch (_) {}
+            if (!actions) return;
+
+            // updateStatus — status text + absolute until timestamp
+            if (actions.updateStatus) {
+                const u = actions.updateStatus;
+                const uid = String(u.userId || u.user_id || '');
+                if (uid) {
+                    const st = u.status || {};
+                    const text = String(st.text || st.status || '');
+                    if (text) {
+                        const normalized = _normalizeStatusText(text);
+                        // until: absolute unix-seconds timestamp from Torn. Falls
+                        // back to updateAt for hospital pop targets if until missing.
+                        const until = Number(st.until)
+                            || (normalized === 'hospital' ? Number(st.updateAt) : 0)
+                            || 0;
+                        const batch = {};
+                        const entry = { status: normalized, until };
+                        if (st.details) entry.description = String(st.details);
+                        batch[uid] = entry;
+                        try { mergeStatusesMonotonic(batch); } catch (_) {}
+                        try { queuePeerRelay(batch); } catch (_) {}
+                    }
+                }
+            }
+
+            // v5.1.10 (B): updateIcons — Torn pushes icon HTML for each
+            // user. The Hospital icon carries data-time="N" (seconds
+            // remaining). Gives us the exact countdown that updateStatus
+            // sometimes lacks. Data-time is RELATIVE to the time the WS
+            // message was sent, so we convert to absolute by adding to
+            // current clock — accurate within a few hundred ms.
+            if (actions.updateIcons) {
+                const u = actions.updateIcons;
+                const uid = String(u.userId || u.user_id || '');
+                const html = String(u.icons || '');
+                if (uid && html) {
+                    const m = html.match(HOSP_ICON_RE);
+                    if (m) {
+                        const seconds = parseInt(m[1], 10);
+                        if (Number.isFinite(seconds) && seconds > 0) {
+                            const untilSec = Math.floor(Date.now() / 1000) + seconds;
+                            const batch = { [uid]: { status: 'hospital', until: untilSec } };
+                            try { mergeStatusesMonotonic(batch); } catch (_) {}
+                            try { queuePeerRelay(batch); } catch (_) {}
+                        }
+                    }
+                }
+            }
         } catch (_) { /* never throw from WS handler */ }
+    }
+
+    // v5.1.10 (A): fetch interceptor for Torn war-page AJAX responses.
+    // When the user opens the war page, Torn itself fetches
+    // /page.php?sid=factionsUsers&step=getwarusers&warID=... which returns
+    // the full enemy faction member list (names + levels + statuses +
+    // areas) in one shot. Intercept the response and feed the data into
+    // mergeStatusesMonotonic + queuePeerRelay so we get every enemy's
+    // current status for free — no Torn API call from our key needed.
+    let _fetchInterceptorInstalled = false;
+    function installTornFetchInterceptor() {
+        if (_fetchInterceptorInstalled) return;
+        _fetchInterceptorInstalled = true;
+        const tw = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+        if (!tw || typeof tw.fetch !== 'function') return;
+        const originalFetch = tw.fetch.bind(tw);
+        try {
+            tw.fetch = async function patchedFetch(...args) {
+                const response = await originalFetch(...args);
+                try {
+                    let url = '';
+                    const firstArg = args[0];
+                    if (typeof firstArg === 'string') url = firstArg;
+                    else if (firstArg && typeof firstArg === 'object' && 'url' in firstArg) url = firstArg.url;
+                    if (url && url.includes('step=getwarusers')) {
+                        // Clone so the page's own consumer still gets the
+                        // body. .text() then JSON.parse to avoid auto-JSON
+                        // failures when content-type is unexpected.
+                        const clone = response.clone();
+                        clone.text().then(text => {
+                            if (!text || text[0] !== '{') return;
+                            try {
+                                const json = JSON.parse(text);
+                                const wd = json && json.warDesc;
+                                const members = wd && Array.isArray(wd.members) ? wd.members : [];
+                                if (members.length === 0) return;
+                                const batch = {};
+                                let count = 0;
+                                for (const m of members) {
+                                    const uid = String(m.userID || m.userid || '');
+                                    if (!uid) continue;
+                                    const st = m.status || {};
+                                    const text = String(st.text || st.status || '');
+                                    if (!text) continue;
+                                    const normalized = _normalizeStatusText(text);
+                                    const entry = { status: normalized };
+                                    if (m.playername) entry.name = String(m.playername);
+                                    if (m.level != null) entry.level = Number(m.level);
+                                    if (st.until) entry.until = Number(st.until);
+                                    batch[uid] = entry;
+                                    count++;
+                                }
+                                if (count > 0) {
+                                    log('[fetch-intercept] getwarusers captured', count, 'members');
+                                    try { mergeStatusesMonotonic(batch); } catch (_) {}
+                                    try { queuePeerRelay(batch); } catch (_) {}
+                                }
+                            } catch (_) { /* parse error — skip */ }
+                        }).catch(() => {});
+                    }
+                } catch (_) { /* don't break the page's fetch */ }
+                return response;
+            };
+            log('[fetch-intercept] installed — watching for getwarusers');
+        } catch (e) {
+            warn('[fetch-intercept] install failed:', e && e.message);
+        }
     }
     let _wsInterceptorInstalled = false;
     function installTornWsInterceptor() {
@@ -9026,6 +9129,11 @@ body.wb-chain-active {
         // detection (~100ms vs ~2s for news scrape). Falls behind news
         // + attack-result intercept + server polls as defense-in-depth.
         try { installTornWsInterceptor(); } catch (_) {}
+
+        // v5.1.10: fetch interceptor — captures Torn's own war-page
+        // ajax (step=getwarusers) for instant full-faction status
+        // hydration without a separate Torn API call from our key.
+        try { installTornFetchInterceptor(); } catch (_) {}
 
         // v5.0.30: combined heatmap modal — single 📊 button opens a
         // tabbed modal with Activity + Payouts heatmaps. Was two separate
