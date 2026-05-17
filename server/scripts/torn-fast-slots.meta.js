@@ -1,11 +1,12 @@
 // ==UserScript==
-// @name         Torn Fast Slots (tornwar fork)
+// @name         Torn Fast Slots (tornwar mirror)
 // @namespace    tornwar.com
-// @version      0.3-wb4
-// @description  Makes slots stop instantly. Fork of Silmaril [2665762]'s v0.3 with jQuery-ready gate, error-resilience for the 'keeps spinning' bug, and bounce-animation kill so the barrel lands instantly instead of running the 400ms easeOutBounce settle.
-// @author       Ramin Quluzade, Silmaril [2665762] (fork by RussianRob)
+// @version      0.3-wb6
+// @description  Makes slots stop instantly. Works for every spin except first.
+// @author       Ramin Quluzade, Silmaril [2665762] (mirrored by RussianRob)
 // @match        https://www.torn.com/loader.php?sid=slots
 // @match        https://www.torn.com/page.php?sid=slots
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
 // @license      MIT
 // @run-at       document-idle
 // @downloadURL  https://tornwar.com/scripts/torn-fast-slots.user.js
