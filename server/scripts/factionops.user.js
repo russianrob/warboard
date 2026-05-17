@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.14
+// @version      5.1.12
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -56,7 +56,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.14';
+    const SCRIPT_VERSION = '5.1.12';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -4957,38 +4957,21 @@ body.wb-chain-active {
         if (realtimeSocket) return; // already connected or connecting
         if (!state.jwtToken) return;
 
-        // --- Real-time Connection Strategy (v5.1.14) ---
-        //
-        // SSE via GM_xmlhttpRequest is the primary channel where it
-        // works reliably — Tampermonkey/Violentmonkey on Chrome/Firefox.
-        // On Stay (iOS/Mac Safari userscript manager) the long-lived
-        // GM_xmlhttpRequest onprogress callback fires unreliably (or not
-        // at all) for SSE streams, so the script never "activates"
-        // because no realtime data arrives. Detect Safari and keep
-        // Socket.IO running there as a failsafe.
-        //
-        // PDA: SSE unavailable (no GM_xmlhttpRequest in WebView), and
-        // Socket.IO is blocked by the WebView sandbox too — fall
-        // through to HTTP polling (started elsewhere).
-        const IS_SAFARI = /^((?!chrome|android).)*safari/i.test(navigator.userAgent || '');
-
+        // --- Real-time Connection Strategy (v4.8.4) ---
+        
+        // 1. Always attempt SSE via GM_xmlhttpRequest on desktop.
+        // This is the most reliable way to bypass Torn's Page CSP.
         if (canUseSSEStream() && !sseConnected) {
             log('Starting SSE Stream (CSP-bypass)...');
             connectSSEStream();
-            if (!IS_SAFARI) {
-                // Chrome / Firefox via TM/VM: SSE is reliable, skip
-                // Socket.IO to avoid the 3x WS-upgrade-rejected console
-                // noise and the redundant long-poll connection.
-                return;
-            }
-            // Safari (Stay): also run Socket.IO so realtime still works
-            // if Stay drops SSE events. Two connections is the cost of
-            // making the activation UI light up on Safari.
-            log('Safari detected — keeping Socket.IO alongside SSE as failsafe');
         }
 
+        // 2. Also attempt standard Socket.IO (now "unblocked").
+        // Note: On desktop, this may still be blocked by browser CSP, but will work on PDA
+        // or if the user has specific browser permissions.
         if (IS_PDA) {
             log('PDA detected — skipping Socket.IO (blocked by WebView). Using HTTP polling.');
+            // (Note: Socket.IO is blocked in PDA's specific sandbox, SSE/Poll is preferred there)
             return;
         }
 
@@ -5231,14 +5214,6 @@ body.wb-chain-active {
                             if (typeof firePdaNotification === 'function') {
                                 firePdaNotification('assist_request', '⚔️ Assist Needed!',
                                     `${data.playerName} needs help attacking ${data.targetName}!`,
-                                    data.attackUrl);
-                            }
-                        } else if (data && data.type === 'retal_request') {
-                            showAssistToast(data.playerName, data.targetName, data.attackUrl,
-                                { kind: 'retal' });
-                            if (typeof firePdaNotification === 'function') {
-                                firePdaNotification('assist_request', '⚠️ Retal Requested!',
-                                    `${data.playerName} wants retal on ${data.targetName}`,
                                     data.attackUrl);
                             }
                         } else if (data && data.type === 'enemy_surge') {
