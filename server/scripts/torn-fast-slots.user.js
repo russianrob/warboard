@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Fast Slots (tornwar fork)
 // @namespace    tornwar.com
-// @version      0.3-wb8
+// @version      0.3-wb9
 // @description  Fast slots — works on first spin, error responses don't infinite-loop. Torn's natural 'blur out unaffordable bets' behavior is preserved so you can't accidentally click a bet you can't pay for.
 // @author       Ramin Quluzade, Silmaril [2665762] (fork by RussianRob)
 // @match        https://www.torn.com/loader.php?sid=slots
@@ -47,12 +47,18 @@
     const originalAjax = $.ajax;
 
     $.ajax = function (options) {
-        // wb8 (1)+(2): intercept BOTH userinfo (for first-spin speed)
-        // and play (for subsequent spins). DO NOT delete error fields —
-        // upstream did this to suppress error UI but it broke the
-        // server-rejection path and caused infinite spinning.
+        // wb9: dropped the userinfo intercept from wb8 — user reported
+        // bet-button disable (Torn's natural blur on unaffordable bets)
+        // wasn't applying. Suspected cause: mutating the userinfo
+        // response breaks something downstream that checkButtons()
+        // depends on. Now back to play-only (upstream behavior) so the
+        // disable logic runs unchanged. First spin slow again per the
+        // upstream limitation, but bet tinting is restored.
+        // STILL: don't delete data.error (so error responses go through
+        // and slots.js stops the spin via its error path — no infinite
+        // spinning when the server rejects a play).
         if (options.data != null && options.data.sid == 'slotsData' &&
-            (options.data.step == 'play' || options.data.step == 'userinfo')) {
+            options.data.step == 'play') {
             const originalSuccess = options.success;
             options.success = function (data, textStatus, jqXHR) {
                 if (data && typeof data === 'object') {
