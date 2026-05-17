@@ -197,6 +197,13 @@ export function getOrCreateWar(warId, factionId, enemyFactionId = null) {
       war.strategy = null;
       war.enemyActivityByHour = null;
       war.chainData = { current: 0, max: 0, timeout: 0, cooldown: 0 };
+      // 2026-05-17: xanaxStats was leaking across wars — when a new
+      // opponent appeared, the previous war's per-member xanax counts
+      // stayed on war.xanaxStats and the tracker added to them.
+      // Result: post-war report for the NEW war showed combined counts
+      // (previous war + current war). Wipe it on new-enemy detection
+      // so each war starts clean.
+      delete war.xanaxStats;
       delete war.status;
       delete war.ourScore;
       delete war.enemyScore;
