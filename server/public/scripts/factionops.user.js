@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.5
+// @version      5.1.6
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.5';
+    const SCRIPT_VERSION = '5.1.6';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -2854,9 +2854,11 @@ body.wb-chain-active {
     background: rgba(255,255,255,0.05); padding: 2px 7px; border-radius: 3px;
 }
 .fo-bars-list { padding: 6px 12px 10px; }
+/* v5.1.6: cooldown column dropped (cooldowns no longer polled per
+   v5.0.90). Grid is now 2 columns: energy bar + name. */
 .fo-bars-row {
     display: grid;
-    grid-template-columns: 70px 100px minmax(0, 1fr);
+    grid-template-columns: 90px minmax(0, 1fr);
     gap: 10px; align-items: center; justify-content: start;
     padding: 4px 4px; font-size: 11px;
     border-bottom: 1px dashed rgba(255,255,255,0.04);
@@ -7241,31 +7243,17 @@ body.wb-chain-active {
             return (a[1]?.name || '').localeCompare(b[1]?.name || '');
         });
 
+        // v5.1.6: cooldowns column dropped — we stopped polling
+        // cooldowns in v5.0.90 to save cellular/CPU, so the values
+        // were going stale anyway. Drug/Medical/Booster bars and their
+        // projection math removed from the row render. Just energy +
+        // name now. The CSS grid was also re-tuned from 3 cols to 2.
         const html = entries.map(([pid, info]) => {
             const bars = info.bars || {};
-            const cd = info.cooldowns || {};
             const eRaw = bars.energy || { current: 0, maximum: 0 };
-            const n = bars.nerve  || { current: 0, maximum: 0 };
-            const nPct = n.maximum ? Math.round(100 * n.current / n.maximum) : 0;
-            // Project cooldowns + energy forward from the last report
-            // timestamp. Cooldowns only decrease (assuming no new
-            // drug/boost/medical); energy uses Torn's own regen metadata.
-            // If the member spent energy while offline we'll over-count —
-            // same tradeoff as cooldowns. Stale is better than zombie.
             const ageSec = info.updatedAt ? Math.max(0, (Date.now() - info.updatedAt) / 1000) : 0;
             const e = projectEnergy(eRaw, ageSec);
             const ePct = e.pct;
-            const projCd = (v) => Math.max(0, (Number(v) || 0) - ageSec);
-            const cdDrug    = projCd(cd.drug);
-            const cdMedical = projCd(cd.medical);
-            const cdBooster = projCd(cd.booster);
-            const fmtCd = (s) => {
-                s = Number(s) || 0;
-                if (s <= 0) return 'ready';
-                const h = Math.floor(s / 3600);
-                const m = Math.floor((s % 3600) / 60);
-                return h > 0 ? `${h}h${m.toString().padStart(2, '0')}m` : `${m}m`;
-            };
             const fmtAgo = (ts) => {
                 if (!ts) return '—';
                 const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
@@ -7279,24 +7267,6 @@ body.wb-chain-active {
                 const remHr = totalHr % 24;
                 return remHr > 0 ? `${days}d${remHr}h` : `${days}d`;
             };
-            const cdTitle = (label, v) => `${label}: ${fmtCd(v)}`;
-            // Booster max halves during an active war (48h → 24h). The war
-            // must actually be in progress — enemyFactionId lingers after a
-            // war ends, so also require !warEnded.
-            const inActiveWar = !!state.enemyFactionId && !state.warEnded;
-            const boosterRef = inActiveWar ? 86400 : 172800; // 24h in war, 48h otherwise
-            const CD_REF = { drug: 36000, medical: 18000, booster: boosterRef };
-            const cdPct = (v, max) => Math.max(0, Math.min(100, (Number(v) || 0) / max * 100));
-            const cdBar = (label, key, val) => {
-                const active = Number(val) > 0;
-                const pct = active ? cdPct(val, CD_REF[key]) : 0;
-                const tip = cdTitle(label, val);
-                const classes = `fo-cd-bar is-${key}${active ? '' : ' is-ready'}`;
-                return `<div class="${classes}" title="${tip}" data-fo-tip="${tip}">`
-                    + `<span class="fo-cd-bar-label">${label[0]}</span>`
-                    + `<div class="fo-cd-bar-track"><div class="fo-cd-bar-fill" style="width:${pct}%"></div></div>`
-                    + `</div>`;
-            };
             const name = escapeHtml(info.name || `#${pid}`);
             const energyTip = `Energy: ${e.current}/${e.maximum} (${ePct}%)`;
             return `
@@ -7306,11 +7276,6 @@ body.wb-chain-active {
                         <div class="fo-bar-track"><div class="fo-bar-fill" style="width:${ePct}%"></div></div>
                     </div>
                     <div class="fo-bars-name" title="${name} — last update ${fmtAgo(info.updatedAt)}" data-fo-tip="${name} — ${fmtAgo(info.updatedAt)}">${name} <span class="fo-bars-updated">${fmtAgo(info.updatedAt)}</span></div>
-                    <div class="fo-bars-cd">
-                        ${cdBar('Drug', 'drug', cdDrug)}
-                        ${cdBar('Medical', 'medical', cdMedical)}
-                        ${cdBar('Booster', 'booster', cdBooster)}
-                    </div>
                 </div>
             `;
         }).join('');
