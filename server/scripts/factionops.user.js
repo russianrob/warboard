@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.4
+// @version      5.1.5
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.4';
+    const SCRIPT_VERSION = '5.1.5';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -8790,6 +8790,10 @@ body.wb-chain-active {
                 <span style="color:#636e72;">–</span>
                 <input class="fo-stats-filter-input" id="fo-stats-filter-max" placeholder="max" title="Max stats — e.g. 50M, 2B, 1000000">
                 <button class="fo-stats-filter-clear" id="fo-stats-filter-clear" title="Clear filter">✕</button>
+                <label class="fo-sort-label" style="margin-left:8px;display:flex;align-items:center;gap:3px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:11px;color:var(--wb-text);">
+                    <input type="checkbox" id="fo-hide-online" style="margin:0;cursor:pointer;">
+                    Hide online
+                </label>
                 <span class="fo-stats-filter-hint" id="fo-stats-filter-hint" style="flex-basis:100%;margin-left:0;"></span>
             </div>
             <div class="fo-col-headers">
@@ -8894,6 +8898,17 @@ body.wb-chain-active {
                 if (minEl) minEl.value = '';
                 if (maxEl) maxEl.value = '';
                 applyStatsFilter();
+            });
+        }
+
+        // v5.1.5: hide-online checkbox handler
+        const hideOnlineEl = overlay.querySelector('#fo-hide-online');
+        if (hideOnlineEl) {
+            hideOnlineEl.checked = _hideOnline;
+            hideOnlineEl.addEventListener('change', () => {
+                _hideOnline = hideOnlineEl.checked;
+                try { GM_setValue('factionops_hide_online', _hideOnline); } catch (_) {}
+                renderOverlay();
             });
         }
 
@@ -9124,7 +9139,9 @@ body.wb-chain-active {
 
         // v5.1.1: track how many attackables get filtered out by the
         // stats range filter so we can show '(N hidden)' in the hint.
+        // v5.1.5: same counter also covers hide-online filtering.
         let _statsFilteredOut = 0;
+        let _onlineFilteredOut = 0;
         for (const tid of allIds) {
             const s = state.statuses[tid];
             const status = normalizeStatus(s ? s.status : 'ok');
@@ -9136,18 +9153,28 @@ body.wb-chain-active {
             } else {
                 // v5.1.1: apply stats range filter. Unknown stats pass.
                 if (!passesStatsFilter(tid)) { _statsFilteredOut++; continue; }
+                // v5.1.5: hide-online checkbox. Idle/offline still show;
+                // only activity==='online' gets hidden.
+                if (_hideOnline && s && String(s.activity || '').toLowerCase() === 'online') {
+                    _onlineFilteredOut++;
+                    continue;
+                }
                 targetIds.push(tid);
             }
         }
-        // Update the filter hint with hidden-count.
+        // Update the filter hint with hidden-count(s).
         const hintEl = document.getElementById('fo-stats-filter-hint');
         if (hintEl) {
-            if (_statsFilterMin == null && _statsFilterMax == null) {
+            const parts = [];
+            if (_statsFilteredOut > 0) parts.push(_statsFilteredOut + ' by stats');
+            if (_onlineFilteredOut > 0) parts.push(_onlineFilteredOut + ' online');
+            const anyFilterActive = _statsFilterMin != null || _statsFilterMax != null || _hideOnline;
+            if (!anyFilterActive) {
                 hintEl.textContent = '';
                 hintEl.classList.remove('active');
             } else {
-                hintEl.textContent = _statsFilteredOut > 0
-                    ? '(' + _statsFilteredOut + ' hidden)'
+                hintEl.textContent = parts.length > 0
+                    ? '(' + parts.join(' + ') + ' hidden)'
                     : '(filter active)';
                 hintEl.classList.add('active');
             }
@@ -9690,11 +9717,15 @@ body.wb-chain-active {
     // page reload / refresh.
     let _statsFilterMin = null;
     let _statsFilterMax = null;
+    // v5.1.5: hide-online toggle. When true, targets with
+    // activity==='online' are hidden from the attackable list.
+    let _hideOnline = false;
     try {
         const m = Number(GM_getValue('factionops_stats_filter_min', 0));
         if (Number.isFinite(m) && m > 0) _statsFilterMin = m;
         const x = Number(GM_getValue('factionops_stats_filter_max', 0));
         if (Number.isFinite(x) && x > 0) _statsFilterMax = x;
+        _hideOnline = !!GM_getValue('factionops_hide_online', false);
     } catch (_) {}
 
     // Parse user input like "50M", "1.5B", "10K", "100000".
