@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Fast Slots (tornwar fork)
 // @namespace    tornwar.com
-// @version      0.3-wb1
+// @version      0.3-wb2
 // @description  Makes slots stop instantly. Fork of Silmaril [2665762]'s v0.3 with jQuery-ready gate, error-resilience for the 'keeps spinning' bug, and bounce-animation kill so the barrel lands instantly instead of running the 400ms easeOutBounce settle.
 // @author       Ramin Quluzade, Silmaril [2665762] (fork by RussianRob)
 // @match        https://www.torn.com/loader.php?sid=slots
@@ -65,9 +65,24 @@
                     const originalSuccess = options.success;
                     options.success = function (data, textStatus, jqXHR) {
                         try {
-                            if (data && typeof data === 'object') {
-                                if (data.error) delete data.error;
-                                if (data.errorMsg) delete data.errorMsg;
+                            // 0.3-wb2: only fast-spin on SUCCESSFUL plays.
+                            // A real-result response has gameRes.images +
+                            // gameRes.itemsPositions; error responses
+                            // (not enough money, rate-limit, etc) don't.
+                            //
+                            // Upstream v0.3 deleted data.error and
+                            // data.errorMsg unconditionally — that masked
+                            // real errors and slots.js then ran stopReels
+                            // with an empty gameRes.images, leaving each
+                            // barrel's stopAt undefined. The frame check
+                            // `div.undefined` never matched → infinite spin.
+                            //
+                            // Now we only mutate when the response has a
+                            // valid result. On errors, pass through
+                            // unchanged so slots.js shows the error and
+                            // stops the spin normally.
+                            if (data && typeof data === 'object'
+                                && data.images && data.itemsPositions) {
                                 data.barrelsAnimationSpeed = 0;
                             }
                         } catch (_) { /* never break the success chain */ }
