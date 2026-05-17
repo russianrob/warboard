@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.13
+// @version      5.1.14
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -56,7 +56,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.13';
+    const SCRIPT_VERSION = '5.1.14';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -4957,37 +4957,40 @@ body.wb-chain-active {
         if (realtimeSocket) return; // already connected or connecting
         if (!state.jwtToken) return;
 
-        // --- Real-time Connection Strategy (v5.1.13) ---
+        // --- Real-time Connection Strategy (v5.1.14) ---
         //
-        // SSE via GM_xmlhttpRequest is the primary channel on EVERY
-        // non-PDA runtime. Torn's CSP blocks `wss://tornwar.com` so
-        // Socket.IO's WS-upgrade probe gets rejected 3 times in
-        // Chrome DevTools (visible as failed-WebSocket entries),
-        // then Socket.IO falls back to long-polling — which is
-        // redundant with our SSE stream and doubles the persistent
-        // connection count per client for no benefit.
+        // SSE via GM_xmlhttpRequest is the primary channel where it
+        // works reliably — Tampermonkey/Violentmonkey on Chrome/Firefox.
+        // On Stay (iOS/Mac Safari userscript manager) the long-lived
+        // GM_xmlhttpRequest onprogress callback fires unreliably (or not
+        // at all) for SSE streams, so the script never "activates"
+        // because no realtime data arrives. Detect Safari and keep
+        // Socket.IO running there as a failsafe.
         //
-        // So: if we can run SSE, we use SSE and skip Socket.IO
-        // entirely. The server still serves Socket.IO for the
-        // native iOS / macOS / Android apps (which aren't CSP-bound
-        // and use it happily).
-        //
-        // PDA: SSE not available (no GM_xmlhttpRequest), Socket.IO
-        // also blocked by the WebView sandbox — fall through to
-        // HTTP polling, which is started elsewhere.
+        // PDA: SSE unavailable (no GM_xmlhttpRequest in WebView), and
+        // Socket.IO is blocked by the WebView sandbox too — fall
+        // through to HTTP polling (started elsewhere).
+        const IS_SAFARI = /^((?!chrome|android).)*safari/i.test(navigator.userAgent || '');
+
         if (canUseSSEStream() && !sseConnected) {
-            log('Starting SSE Stream (CSP-bypass) — Socket.IO skipped on desktop');
+            log('Starting SSE Stream (CSP-bypass)...');
             connectSSEStream();
-            return;
+            if (!IS_SAFARI) {
+                // Chrome / Firefox via TM/VM: SSE is reliable, skip
+                // Socket.IO to avoid the 3x WS-upgrade-rejected console
+                // noise and the redundant long-poll connection.
+                return;
+            }
+            // Safari (Stay): also run Socket.IO so realtime still works
+            // if Stay drops SSE events. Two connections is the cost of
+            // making the activation UI light up on Safari.
+            log('Safari detected — keeping Socket.IO alongside SSE as failsafe');
         }
+
         if (IS_PDA) {
             log('PDA detected — skipping Socket.IO (blocked by WebView). Using HTTP polling.');
             return;
         }
-        // Edge case: desktop runtime without GM_xmlhttpRequest.
-        // SSE isn't possible, fall through and try Socket.IO as
-        // a best effort (may still hit CSP but it's the only
-        // real-time option left).
 
         const ioFn = (typeof io === 'function') ? io
             : (typeof io === 'object' && io !== null && typeof io.io === 'function') ? io.io
