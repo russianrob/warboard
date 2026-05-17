@@ -383,6 +383,11 @@ router.post("/api/gate", async (req, res) => {
  * The landing page requires a gate cookie.
  */
 export function gateMiddleware(req, res, next) {
+  // Gate disabled — the landing page is now public. The /api/gate
+  // endpoint and /gate.html are still available if you need to re-enable
+  // later; just restore the logic below.
+  return next();
+  /* Previous gated behavior:
   if (
     req.path.startsWith("/api/") ||
     req.path.startsWith("/data/") ||
@@ -402,6 +407,7 @@ export function gateMiddleware(req, res, next) {
     return res.redirect("/gate.html");
   }
   return res.redirect("/gate.html");
+  */
 }
 
 /** Simple cookie parser — no dependency needed. */
