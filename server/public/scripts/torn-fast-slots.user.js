@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Fast Slots (tornwar fork)
 // @namespace    tornwar.com
-// @version      0.3-wb9
+// @version      0.3-wb10
 // @description  Fast slots — works on first spin, error responses don't infinite-loop. Torn's natural 'blur out unaffordable bets' behavior is preserved so you can't accidentally click a bet you can't pay for.
 // @author       Ramin Quluzade, Silmaril [2665762] (fork by RussianRob)
 // @match        https://www.torn.com/loader.php?sid=slots
@@ -73,49 +73,17 @@
         return originalAjax(options);
     }
 
-    function enableBetButtons() {
-        document.querySelectorAll(".slots-btn-list .betbtn").forEach(btn => {
-            btn.classList.remove("disabled");
-        });
-    }
-
-    function disableBetButtons() {
-        document.querySelectorAll(".slots-btn-list .betbtn").forEach(btn => {
-            btn.classList.add("disabled");
-        });
-    }
-
-    function watchBarrelsSpinAndStop(delay = 60) {
-        const barrels = document.querySelectorAll("#barrel0, #barrel1, #barrel2");
-        let timers = new Map();
-        let stopped = new Map();
-
-        barrels.forEach(barrel => stopped.set(barrel, true));
-
-        barrels.forEach(barrel => {
-            const observer = new MutationObserver(() => {
-                disableBetButtons();
-                stopped.set(barrel, false);
-                clearTimeout(timers.get(barrel));
-                timers.set(barrel, setTimeout(() => {
-                    stopped.set(barrel, true);
-                    if ([...stopped.values()].every(Boolean)) {
-                        enableBetButtons();
-                    }
-                }, delay));
-            });
-
-            observer.observe(barrel, {
-                attributes: true,
-                attributeFilter: ["style"]
-            });
-        });
-    }
-
-    var o = setInterval(() => {
-        if($('#barrels').length == 1){
-            clearInterval(o)
-            watchBarrelsSpinAndStop();
-        }
-    }, 100);
+    // wb10: removed upstream's watchBarrelsSpinAndStop +
+    // enableBetButtons/disableBetButtons. They were a defensive layer
+    // to prevent mid-spin clicks, but:
+    //   1. Torn's own slots.js already prevents concurrent spins via
+    //      its `inRoll` flag check in placeBet().
+    //   2. enableBetButtons() unconditionally stripped the `disabled`
+    //      class from EVERY bet button ~60ms after each animation tick.
+    //      That nuked the `disabled` class that Torn's checkButtons()
+    //      legitimately put on unaffordable bets — which is why bets
+    //      you can't afford weren't blurred out.
+    // Without these helpers, Torn's native checkButtons() at the end of
+    // each spin (in displayResults) is the sole source of truth for
+    // which bet buttons are disabled. Affordability tinting restored.
 })();
