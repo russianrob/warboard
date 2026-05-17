@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.0
+// @version      5.1.1
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.0';
+    const SCRIPT_VERSION = '5.1.1';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1334,6 +1334,22 @@ body.wb-chain-active {
 }
 .fo-sort-select:hover { border-color: rgba(99,110,114,0.6); }
 .fo-sort-select option { background: var(--wb-bg-secondary); color: var(--wb-text); }
+.fo-stats-filter-input {
+    background: var(--wb-bg-secondary); color: var(--wb-text);
+    border: 1px solid var(--wb-border); border-radius: 4px;
+    padding: 3px 6px; font: inherit; font-size: 11px;
+    width: 56px; text-align: right;
+}
+.fo-stats-filter-input:focus { outline: 0; border-color: var(--wb-accent); }
+.fo-stats-filter-clear {
+    background: none; color: #636e72; border: 0; cursor: pointer;
+    font-size: 12px; padding: 0 4px; line-height: 1;
+}
+.fo-stats-filter-clear:hover { color: var(--wb-text); }
+.fo-stats-filter-hint {
+    color: #636e72; font-size: 10px; margin-left: 6px;
+}
+.fo-stats-filter-hint.active { color: var(--wb-accent); font-weight: 600; }
 
 /* ── Column labels ── v5.0.14: 8 → 7 cols (Prior. dropped) ── */
 .fo-col-headers {
@@ -8625,6 +8641,12 @@ body.wb-chain-active {
                     <option value="stats-asc">Stats &uarr; (weak first)</option>
                     <option value="stats-desc">Stats &darr; (strong first)</option>
                 </select>
+                <span class="fo-sort-label" style="margin-left:10px;">Stats:</span>
+                <input class="fo-stats-filter-input" id="fo-stats-filter-min" placeholder="min" title="Min stats — e.g. 10M, 1.5B, 100000">
+                <span style="color:#636e72;">–</span>
+                <input class="fo-stats-filter-input" id="fo-stats-filter-max" placeholder="max" title="Max stats — e.g. 50M, 2B, 1000000">
+                <button class="fo-stats-filter-clear" id="fo-stats-filter-clear" title="Clear filter">✕</button>
+                <span class="fo-stats-filter-hint" id="fo-stats-filter-hint"></span>
             </div>
             <div class="fo-col-headers">
                 <div class="fo-col-header">Target</div>
@@ -8691,6 +8713,43 @@ body.wb-chain-active {
                         if (_sortMode === newMode) renderOverlay();
                     }, 2500);
                 }
+            });
+        }
+
+        // v5.1.1: stats range filter — min/max inputs hide targets
+        // outside the range. Unknown-stats targets always pass.
+        const minEl = overlay.querySelector('#fo-stats-filter-min');
+        const maxEl = overlay.querySelector('#fo-stats-filter-max');
+        const clearEl = overlay.querySelector('#fo-stats-filter-clear');
+        function fmtBackToInput(n) {
+            if (n == null) return '';
+            if (n >= 1e9) return (n / 1e9).toString().replace(/\.0$/, '') + 'B';
+            if (n >= 1e6) return (n / 1e6).toString().replace(/\.0$/, '') + 'M';
+            if (n >= 1e3) return (n / 1e3).toString().replace(/\.0$/, '') + 'K';
+            return String(Math.round(n));
+        }
+        if (minEl && _statsFilterMin) minEl.value = fmtBackToInput(_statsFilterMin);
+        if (maxEl && _statsFilterMax) maxEl.value = fmtBackToInput(_statsFilterMax);
+        function applyStatsFilter() {
+            _statsFilterMin = parseStatsInput(minEl ? minEl.value : '');
+            _statsFilterMax = parseStatsInput(maxEl ? maxEl.value : '');
+            try {
+                GM_setValue('factionops_stats_filter_min', _statsFilterMin || 0);
+                GM_setValue('factionops_stats_filter_max', _statsFilterMax || 0);
+            } catch (_) {}
+            // Kick ffscouter so missing stats data fills in faster
+            if (_statsFilterMin || _statsFilterMax) {
+                try { fetchFairFightBatch(); } catch (_) {}
+            }
+            renderOverlay();
+        }
+        if (minEl) minEl.addEventListener('change', applyStatsFilter);
+        if (maxEl) maxEl.addEventListener('change', applyStatsFilter);
+        if (clearEl) {
+            clearEl.addEventListener('click', () => {
+                if (minEl) minEl.value = '';
+                if (maxEl) maxEl.value = '';
+                applyStatsFilter();
             });
         }
 
@@ -8911,6 +8970,9 @@ body.wb-chain-active {
         const unavailableIds = []; // collapsed section: traveling, abroad, jail
         // federal/fallen are simply excluded from everything
 
+        // v5.1.1: track how many attackables get filtered out by the
+        // stats range filter so we can show '(N hidden)' in the hint.
+        let _statsFilteredOut = 0;
         for (const tid of allIds) {
             const s = state.statuses[tid];
             const status = normalizeStatus(s ? s.status : 'ok');
@@ -8920,7 +8982,22 @@ body.wb-chain-active {
             } else if (unavailableStatuses.includes(status)) {
                 unavailableIds.push(tid);
             } else {
+                // v5.1.1: apply stats range filter. Unknown stats pass.
+                if (!passesStatsFilter(tid)) { _statsFilteredOut++; continue; }
                 targetIds.push(tid);
+            }
+        }
+        // Update the filter hint with hidden-count.
+        const hintEl = document.getElementById('fo-stats-filter-hint');
+        if (hintEl) {
+            if (_statsFilterMin == null && _statsFilterMax == null) {
+                hintEl.textContent = '';
+                hintEl.classList.remove('active');
+            } else {
+                hintEl.textContent = _statsFilteredOut > 0
+                    ? '(' + _statsFilteredOut + ' hidden)'
+                    : '(filter active)';
+                hintEl.classList.add('active');
             }
         }
 
@@ -9454,6 +9531,65 @@ body.wb-chain-active {
             el.textContent = ffs.human || formatBspNumber(num);
             el.title = `~${num.toLocaleString()} total stats (FFS)`;
         });
+    }
+
+    // v5.1.1: stats range filter state. Both bounds optional; null
+    // means unbounded. Persisted via GM_setValue so it survives
+    // page reload / refresh.
+    let _statsFilterMin = null;
+    let _statsFilterMax = null;
+    try {
+        const m = Number(GM_getValue('factionops_stats_filter_min', 0));
+        if (Number.isFinite(m) && m > 0) _statsFilterMin = m;
+        const x = Number(GM_getValue('factionops_stats_filter_max', 0));
+        if (Number.isFinite(x) && x > 0) _statsFilterMax = x;
+    } catch (_) {}
+
+    // Parse user input like "50M", "1.5B", "10K", "100000".
+    function parseStatsInput(s) {
+        if (s == null) return null;
+        const str = String(s).trim().toUpperCase().replace(/,/g, '');
+        if (!str) return null;
+        const m = str.match(/^([\d.]+)\s*([KMB])?$/);
+        if (!m) return null;
+        const n = parseFloat(m[1]);
+        if (!Number.isFinite(n) || n <= 0) return null;
+        const u = m[2] === 'B' ? 1e9 : m[2] === 'M' ? 1e6 : m[2] === 'K' ? 1e3 : 1;
+        return n * u;
+    }
+
+    // Returns the best stats estimate for a target, or null if unknown.
+    // Same chain as renderInlineBsp / sort: BSP TBS → FFS bs_estimate
+    // → ffCache bsHuman midpoint. Used by the range filter.
+    function getTargetStatsEstimate(targetId) {
+        try {
+            const bsp = fetchBspPrediction(targetId);
+            if (bsp && bsp.TBS != null) {
+                const n = Number(bsp.TBS);
+                if (Number.isFinite(n)) return n;
+            }
+        } catch (_) {}
+        const ffs = _ffsStatsCache.get(String(targetId));
+        if (typeof ffs === 'number') return ffs;
+        const cc = (typeof ffCache !== 'undefined') ? ffCache[targetId] : null;
+        if (cc && cc.bsHuman) {
+            const mid = parseBsHumanMid(cc.bsHuman);
+            if (mid !== null) return mid;
+        }
+        return null;
+    }
+
+    // Returns true if the target passes the current min/max stats
+    // filter. Unknown-stats targets always pass — we can't tell, so
+    // we don't hide them (otherwise war coverage gets unreliable
+    // immediately if FFS hasn't filled in for new enemies).
+    function passesStatsFilter(targetId) {
+        if (_statsFilterMin == null && _statsFilterMax == null) return true;
+        const n = getTargetStatsEstimate(targetId);
+        if (n == null) return true; // unknown → show
+        if (_statsFilterMin != null && n < _statsFilterMin) return false;
+        if (_statsFilterMax != null && n > _statsFilterMax) return false;
+        return true;
     }
 
     // Parse 'bsHuman' range string ("10M-50M", "1.2B", "500K") to a
