@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.10
+// @version      5.1.11
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -56,7 +56,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.10';
+    const SCRIPT_VERSION = '5.1.11';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3533,10 +3533,64 @@ body.wb-chain-active {
     // CAT script's HOSP_REGEX for compatibility.
     const HOSP_ICON_RE = /Hospital[^>]*data-time=(?:'|&#039;|&quot;|")(\d+)(?:'|&#039;|&quot;|")/i;
 
+    // v5.1.11: buffer-while-hidden queue for WS messages. When the tab
+    // is in the background on desktop, queue incoming WS frames instead
+    // of processing immediately — saves background CPU + DOM thrash
+    // and lets us batch the catch-up smoothly on focus return.
+    // PDA bypasses this entirely (per v5.0.89 memory note —
+    // document.hidden lies in the PDA WebView; always process there).
+    const _wsHiddenQueue = [];
+    const WS_QUEUE_MAX = 200;
+    const WS_DRAIN_PER_RAF = 10;
+    let _wsDraining = false;
+    function _wsIsHiddenForBuffer() {
+        if (IS_PDA) return false;
+        return typeof document.hidden === 'boolean' && document.hidden;
+    }
+    function _wsDrainQueue() {
+        if (_wsDraining || _wsHiddenQueue.length === 0) return;
+        _wsDraining = true;
+        const tick = () => {
+            const slice = _wsHiddenQueue.splice(0, WS_DRAIN_PER_RAF);
+            for (const data of slice) {
+                try { _processWsFrame(data); } catch (_) {}
+            }
+            if (_wsHiddenQueue.length > 0) {
+                requestAnimationFrame(tick);
+            } else {
+                _wsDraining = false;
+            }
+        };
+        requestAnimationFrame(tick);
+    }
+    if (typeof document.addEventListener === 'function') {
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && _wsHiddenQueue.length > 0) {
+                log('[ws-intercept] draining', _wsHiddenQueue.length, 'queued WS frames');
+                _wsDrainQueue();
+            }
+        });
+    }
+
     function handleTornWsMessage(event) {
+        const raw = event && event.data;
+        if (typeof raw !== 'string' || raw.length < 8 || raw[0] !== '{') return;
+        // v5.1.11: queue while tab hidden, process immediately when visible
+        if (_wsIsHiddenForBuffer()) {
+            _wsHiddenQueue.push(raw);
+            if (_wsHiddenQueue.length > WS_QUEUE_MAX) {
+                // LRU: drop oldest. Most-recent state is what matters
+                // on resume — older state is superseded by mergeStatuses-
+                // Monotonic's timestamp guard anyway.
+                _wsHiddenQueue.splice(0, _wsHiddenQueue.length - WS_QUEUE_MAX);
+            }
+            return;
+        }
+        _processWsFrame(raw);
+    }
+
+    function _processWsFrame(raw) {
         try {
-            const raw = event && event.data;
-            if (typeof raw !== 'string' || raw.length < 8 || raw[0] !== '{') return;
             let json;
             try { json = JSON.parse(raw); }
             catch (_) {
