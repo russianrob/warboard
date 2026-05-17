@@ -56,7 +56,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.11';
+    const SCRIPT_VERSION = '5.1.12';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -9032,6 +9032,10 @@ body.wb-chain-active {
                     <input type="checkbox" id="fo-hide-online" style="margin:0;cursor:pointer;">
                     Hide online
                 </label>
+                <label class="fo-sort-label" style="margin-left:6px;display:flex;align-items:center;gap:3px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:11px;color:var(--wb-text);" title="Hide players whose last action was 5+ min ago (Torn idle + offline)">
+                    <input type="checkbox" id="fo-hide-offline" style="margin:0;cursor:pointer;">
+                    Hide offline
+                </label>
                 <span class="fo-stats-filter-hint" id="fo-stats-filter-hint" style="flex-basis:100%;margin-left:0;"></span>
             </div>
             <div class="fo-col-headers">
@@ -9133,6 +9137,17 @@ body.wb-chain-active {
             hideOnlineEl.addEventListener('change', () => {
                 _hideOnline = hideOnlineEl.checked;
                 try { GM_setValue('factionops_hide_online', _hideOnline); } catch (_) {}
+                renderOverlay();
+            });
+        }
+        // v5.1.12: hide-offline checkbox handler. 'Offline' = activity
+        // not online (i.e. idle or offline — last action 5+ min ago).
+        const hideOfflineEl = overlay.querySelector('#fo-hide-offline');
+        if (hideOfflineEl) {
+            hideOfflineEl.checked = _hideOffline;
+            hideOfflineEl.addEventListener('change', () => {
+                _hideOffline = hideOfflineEl.checked;
+                try { GM_setValue('factionops_hide_offline', _hideOffline); } catch (_) {}
                 renderOverlay();
             });
         }
@@ -9372,11 +9387,12 @@ body.wb-chain-active {
         const unavailableIds = []; // collapsed section: traveling, abroad, jail
         // federal/fallen are simply excluded from everything
 
-        // v5.1.1: track how many attackables get filtered out by the
-        // stats range filter so we can show '(N hidden)' in the hint.
-        // v5.1.5: same counter also covers hide-online filtering.
+        // v5.1.1/5/12: filters applied per target. Track hidden counts
+        // per filter so the hint line shows the user which filter is
+        // doing the work.
         let _statsFilteredOut = 0;
         let _onlineFilteredOut = 0;
+        let _offlineFilteredOut = 0;
         for (const tid of allIds) {
             const s = state.statuses[tid];
             const status = normalizeStatus(s ? s.status : 'ok');
@@ -9386,12 +9402,20 @@ body.wb-chain-active {
             } else if (unavailableStatuses.includes(status)) {
                 unavailableIds.push(tid);
             } else {
-                // v5.1.1: apply stats range filter. Unknown stats pass.
+                // v5.1.1: stats range filter. Unknown stats pass.
                 if (!passesStatsFilter(tid)) { _statsFilteredOut++; continue; }
-                // v5.1.5: hide-online checkbox. Idle/offline still show;
-                // only activity==='online' gets hidden.
-                if (_hideOnline && s && String(s.activity || '').toLowerCase() === 'online') {
+                const activity = s && String(s.activity || '').toLowerCase();
+                // v5.1.5: hide-online — only activity==='online' is hidden.
+                if (_hideOnline && activity === 'online') {
                     _onlineFilteredOut++;
+                    continue;
+                }
+                // v5.1.12: hide-offline — anything NOT online (idle +
+                // offline, i.e. last action 5+ min per Torn's
+                // classification). Unknown activity treated as offline
+                // since we have no signal they're active.
+                if (_hideOffline && activity !== 'online') {
+                    _offlineFilteredOut++;
                     continue;
                 }
                 targetIds.push(tid);
@@ -9403,7 +9427,8 @@ body.wb-chain-active {
             const parts = [];
             if (_statsFilteredOut > 0) parts.push(_statsFilteredOut + ' by stats');
             if (_onlineFilteredOut > 0) parts.push(_onlineFilteredOut + ' online');
-            const anyFilterActive = _statsFilterMin != null || _statsFilterMax != null || _hideOnline;
+            if (_offlineFilteredOut > 0) parts.push(_offlineFilteredOut + ' offline');
+            const anyFilterActive = _statsFilterMin != null || _statsFilterMax != null || _hideOnline || _hideOffline;
             if (!anyFilterActive) {
                 hintEl.textContent = '';
                 hintEl.classList.remove('active');
@@ -9955,12 +9980,17 @@ body.wb-chain-active {
     // v5.1.5: hide-online toggle. When true, targets with
     // activity==='online' are hidden from the attackable list.
     let _hideOnline = false;
+    // v5.1.12: hide-offline toggle. 'Offline' here means 'last action
+    // 5+ min ago' per user — matches Torn's idle+offline activity
+    // states (online = <5 min, idle = 5-7 min, offline = 7+ min).
+    let _hideOffline = false;
     try {
         const m = Number(GM_getValue('factionops_stats_filter_min', 0));
         if (Number.isFinite(m) && m > 0) _statsFilterMin = m;
         const x = Number(GM_getValue('factionops_stats_filter_max', 0));
         if (Number.isFinite(x) && x > 0) _statsFilterMax = x;
         _hideOnline = !!GM_getValue('factionops_hide_online', false);
+        _hideOffline = !!GM_getValue('factionops_hide_offline', false);
     } catch (_) {}
 
     // Parse user input like "50M", "1.5B", "10K", "100000".
