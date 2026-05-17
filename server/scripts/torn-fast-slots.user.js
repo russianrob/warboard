@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Fast Slots (tornwar fork)
 // @namespace    tornwar.com
-// @version      0.3-wb3
+// @version      0.3-wb4
 // @description  Makes slots stop instantly. Fork of Silmaril [2665762]'s v0.3 with jQuery-ready gate, error-resilience for the 'keeps spinning' bug, and bounce-animation kill so the barrel lands instantly instead of running the 400ms easeOutBounce settle.
 // @author       Ramin Quluzade, Silmaril [2665762] (fork by RussianRob)
 // @match        https://www.torn.com/loader.php?sid=slots
@@ -65,22 +65,19 @@
                     const originalSuccess = options.success;
                     options.success = function (data, textStatus, jqXHR) {
                         try {
-                            // 0.3-wb3: only fast-spin on SUCCESSFUL plays.
-                            // The play response uses data.images for the
-                            // barrel stop positions (consumed by stopReels);
-                            // error responses lack it. (Upstream v0.3
-                            // deleted data.error unconditionally — that
-                            // masked real errors and caused infinite spin
-                            // when stopReels iterated an undefined images.)
-                            //
-                            // 0.3-wb2 ALSO required data.itemsPositions —
-                            // wrong: that field appears in the userinfo
-                            // response only, NOT play responses. The extra
-                            // gate rejected every valid play response and
-                            // left the animation at default 1000ms.
-                            //
-                            // Now: gate on data.images only.
-                            if (data && typeof data === 'object' && data.images) {
+                            // 0.3-wb4: matches upstream — always mutate.
+                            // Earlier wb2/wb3 attempts to gate on
+                            // response shape ended up rejecting some
+                            // valid plays (response field naming varies
+                            // by win/loss/bonus state we can't reliably
+                            // pre-detect), leaving them at the default
+                            // 1000ms animation speed. User reported this
+                            // as 'a lot slower than upstream'. Reverting
+                            // to upstream's behavior: always force
+                            // animation speed to 0 + delete error fields.
+                            if (data && typeof data === 'object') {
+                                if (data.error) delete data.error;
+                                if (data.errorMsg) delete data.errorMsg;
                                 data.barrelsAnimationSpeed = 0;
                             }
                         } catch (_) { /* never break the success chain */ }
