@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Fast Slots (tornwar fork)
 // @namespace    tornwar.com
-// @version      0.3-wb2
+// @version      0.3-wb3
 // @description  Makes slots stop instantly. Fork of Silmaril [2665762]'s v0.3 with jQuery-ready gate, error-resilience for the 'keeps spinning' bug, and bounce-animation kill so the barrel lands instantly instead of running the 400ms easeOutBounce settle.
 // @author       Ramin Quluzade, Silmaril [2665762] (fork by RussianRob)
 // @match        https://www.torn.com/loader.php?sid=slots
@@ -65,24 +65,22 @@
                     const originalSuccess = options.success;
                     options.success = function (data, textStatus, jqXHR) {
                         try {
-                            // 0.3-wb2: only fast-spin on SUCCESSFUL plays.
-                            // A real-result response has gameRes.images +
-                            // gameRes.itemsPositions; error responses
-                            // (not enough money, rate-limit, etc) don't.
+                            // 0.3-wb3: only fast-spin on SUCCESSFUL plays.
+                            // The play response uses data.images for the
+                            // barrel stop positions (consumed by stopReels);
+                            // error responses lack it. (Upstream v0.3
+                            // deleted data.error unconditionally — that
+                            // masked real errors and caused infinite spin
+                            // when stopReels iterated an undefined images.)
                             //
-                            // Upstream v0.3 deleted data.error and
-                            // data.errorMsg unconditionally — that masked
-                            // real errors and slots.js then ran stopReels
-                            // with an empty gameRes.images, leaving each
-                            // barrel's stopAt undefined. The frame check
-                            // `div.undefined` never matched → infinite spin.
+                            // 0.3-wb2 ALSO required data.itemsPositions —
+                            // wrong: that field appears in the userinfo
+                            // response only, NOT play responses. The extra
+                            // gate rejected every valid play response and
+                            // left the animation at default 1000ms.
                             //
-                            // Now we only mutate when the response has a
-                            // valid result. On errors, pass through
-                            // unchanged so slots.js shows the error and
-                            // stops the spin normally.
-                            if (data && typeof data === 'object'
-                                && data.images && data.itemsPositions) {
+                            // Now: gate on data.images only.
+                            if (data && typeof data === 'object' && data.images) {
                                 data.barrelsAnimationSpeed = 0;
                             }
                         } catch (_) { /* never break the success chain */ }
