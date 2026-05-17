@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC Spawn Assistance™
 // @namespace    torn-oc-spawn-assistance
-// @version      3.2.22
+// @version      3.2.23
 // @description  Analyzes faction OC slots vs member availability with scope budget and priority ordering
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -199,30 +199,6 @@
 (function () {
     'use strict';
 
-    // ── DEBUG PILL (wb-debug-pill-oc) — temporary diagnostic for Stay/Safari.
-    //    Shows a cyan pill below FactionOps' pink pill for 5s on every Torn
-    //    page the moment this script starts executing. If the pill is missing
-    //    on Stay, the script never loaded. Remove once the Stay issue is
-    //    diagnosed.
-    (function _wbDebugPillOC() {
-        try {
-            const mount = () => {
-                if (document.getElementById('wb-debug-pill-oc')) return;
-                const p = document.createElement('div');
-                p.id = 'wb-debug-pill-oc';
-                p.textContent = 'OC Spawn v3.2.22 loaded';
-                p.style.cssText = 'position:fixed;top:48px;left:8px;z-index:2147483647;background:#06b6d4;color:#fff;font:bold 12px/1.2 -apple-system,system-ui,sans-serif;padding:6px 10px;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.4);pointer-events:none;';
-                (document.body || document.documentElement).appendChild(p);
-                setTimeout(() => { try { p.remove(); } catch (_) {} }, 5000);
-            };
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', mount, { once: true });
-            } else {
-                mount();
-            }
-        } catch (_) {}
-    })();
-
     // ═══════════════════════════════════════════════════════════════════════
     //  SCOPE SYSTEM CONSTANTS
     //  Range → difficulty band, spawn cost, scope payout on success
@@ -292,7 +268,7 @@
     let _lastPendingDelays = {};     // v3.1.49: per-member pending flyer delays (crimeId::memberId → seconds)
     let _lastRecentCompletions = []; // v3.1.52: last-10 completed crimes for Outcome EV engine
     let _lastAvailableCrimes = [];   // v3.2.13: stash of last fetched crimes (with IDs + slot assignments) for live-success crimeId resolution
-    const SCRIPT_VERSION = '3.2.22';
+    const SCRIPT_VERSION = '3.2.23';
     const SERVER = 'https://tornwar.com';
 
     // Torn PDA (Flutter InAppWebView) doesn't support Web Push. Instead
