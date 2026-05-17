@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.3
+// @version      5.1.4
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.3';
+    const SCRIPT_VERSION = '5.1.4';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3601,17 +3601,55 @@ body.wb-chain-active {
         peerRelayTimer = setTimeout(flushPeerRelay, 500);
     }
 
-    function flushPeerRelay() {
+    function flushPeerRelay(viaKeepalive) {
         peerRelayTimer = null;
         const batch = peerRelayBatch;
         peerRelayBatch = {};
         if (Object.keys(batch).length === 0) return;
         const warId = deriveWarId();
         if (!warId || !state.jwtToken) return;
-        log(`[peer-relay] Sending ${Object.keys(batch).length} status updates`);
+        log(`[peer-relay] Sending ${Object.keys(batch).length} status updates${viaKeepalive ? ' (keepalive)' : ''}`);
+        // v5.1.4: use fetch({ keepalive: true }) when the page is
+        // unloading. Survives tab close (browser holds the request
+        // open past page death) AND supports the Authorization header
+        // that /api/status requires (unlike navigator.sendBeacon which
+        // can't set custom headers). Falls back to postAction if
+        // keepalive fetch fails or isn't supported.
+        if (viaKeepalive && typeof fetch === 'function') {
+            try {
+                fetch(CONFIG.SERVER_URL + '/api/status', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + state.jwtToken,
+                    },
+                    body: JSON.stringify({ warId, statuses: batch }),
+                    keepalive: true,
+                }).catch(() => {});
+                return;
+            } catch (_) { /* fall through to standard postAction */ }
+        }
         postAction('/api/status', { warId, statuses: batch }).catch(err => {
             warn('[peer-relay] Failed to send:', err.message);
         });
+    }
+
+    // v5.1.4: flush pending peer-relay on tab close. Users who attack
+    // in a new tab and close it within the 500ms debounce window were
+    // losing their hospital relay → server never broadcast → teammates
+    // and the user's own war tab waited for the 15-60s server polls
+    // instead of the ~2s peer-relay path. fetch({ keepalive: true })
+    // signals the browser to keep the request alive past unload.
+    if (typeof window.addEventListener === 'function') {
+        const flushOnUnload = () => {
+            if (peerRelayTimer) { clearTimeout(peerRelayTimer); peerRelayTimer = null; }
+            if (Object.keys(peerRelayBatch).length > 0) flushPeerRelay(true);
+        };
+        // pagehide fires reliably on both tab close AND mobile Safari
+        // going-to-background where beforeunload doesn't. beforeunload
+        // is the fallback for older browsers.
+        window.addEventListener('pagehide', flushOnUnload);
+        window.addEventListener('beforeunload', flushOnUnload);
     }
 
     /** Extract a Torn player ID from a URL or href string. */
