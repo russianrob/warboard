@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.15
+// @version      5.1.16
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -56,7 +56,30 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.15';
+    const SCRIPT_VERSION = '5.1.16';
+
+    // ── DEBUG PILL (wb-debug-pill-fo) — temporary diagnostic for Stay/Safari.
+    //    Shows a pink pill in the top-left of every Torn page for 5s the moment
+    //    this script starts executing. If the pill is missing on Stay, the
+    //    script never loaded. Remove once the Stay issue is diagnosed.
+    (function _wbDebugPillFO() {
+        try {
+            const mount = () => {
+                if (document.getElementById('wb-debug-pill-fo')) return;
+                const p = document.createElement('div');
+                p.id = 'wb-debug-pill-fo';
+                p.textContent = 'FactionOps v' + SCRIPT_VERSION + ' loaded';
+                p.style.cssText = 'position:fixed;top:8px;left:8px;z-index:2147483647;background:#ec4899;color:#fff;font:bold 12px/1.2 -apple-system,system-ui,sans-serif;padding:6px 10px;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.4);pointer-events:none;';
+                (document.body || document.documentElement).appendChild(p);
+                setTimeout(() => { try { p.remove(); } catch (_) {} }, 5000);
+            };
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', mount, { once: true });
+            } else {
+                mount();
+            }
+        } catch (_) {}
+    })();
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
