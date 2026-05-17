@@ -387,7 +387,11 @@ export function gateMiddleware(req, res, next) {
     req.path.startsWith("/api/") ||
     req.path.startsWith("/data/") ||
     req.path === "/gate.html" ||
-    req.path.endsWith(".meta.js") || req.path.endsWith(".user.js")
+    req.path.endsWith(".meta.js") || req.path.endsWith(".user.js") ||
+    // Install assets — same public-by-design rationale as userscript
+    // .user.js. Apps need to be installable without a gate cookie since
+    // the gate is part of the app's own setup flow.
+    req.path.endsWith(".apk") || req.path.endsWith(".ipa")
   ) {
     return next();
   }
