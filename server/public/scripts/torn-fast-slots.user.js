@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Fast Slots (tornwar fork)
 // @namespace    tornwar.com
-// @version      0.3-wb7
-// @description  Fast slots — works on first spin, all bet buttons stay clickable, no infinite-spin bug when you can't afford a bet.
+// @version      0.3-wb8
+// @description  Fast slots — works on first spin, error responses don't infinite-loop. Torn's natural 'blur out unaffordable bets' behavior is preserved so you can't accidentally click a bet you can't pay for.
 // @author       Ramin Quluzade, Silmaril [2665762] (fork by RussianRob)
 // @match        https://www.torn.com/loader.php?sid=slots
 // @match        https://www.torn.com/page.php?sid=slots
@@ -16,29 +16,29 @@
 // =============================================================================
 // CHANGELOG (tornwar fork)
 // =============================================================================
-// 0.3-wb7 — Three deliberate changes over upstream v0.3:
+// 0.3-wb8 — Two narrow changes over upstream v0.3:
 //
-//   (1) FIRST SPIN IS FAST. Upstream only intercepts the 'play' request,
-//       so the first spin after a refresh runs at the default 1000ms
-//       animation speed (the initial 'userinfo' response sets it before
-//       any play happens). Now intercepts userinfo too — when slots.js
-//       initializes the barrels with the userinfo data, they're already
-//       at speed=0. First spin then takes ~AJAX-RTT like every other.
+//   (1) FIRST SPIN IS FAST. Upstream only wraps the 'play' AJAX. First
+//       spin uses the speed from the 'userinfo' response (default
+//       1000ms). Now wraps userinfo too — barrels initialize with
+//       loopTime=0 baked in, so first spin takes ~AJAX RTT like every
+//       subsequent spin.
 //
-//   (2) ALL BET BUTTONS STAY CLICKABLE. Upstream slots.js tints out
-//       bet buttons you can't afford via `checkButtons()` adding a
-//       `disabled` class. The click handler then refuses to fire on
-//       disabled buttons. MutationObserver strips the `disabled` class
-//       the moment it's added, so every bet button stays clickable
-//       regardless of your money / token balance.
+//   (2) NO INFINITE-SPIN BUG. Removed upstream's
+//           if (data.error) delete data.error;
+//           if (data.errorMsg) delete data.errorMsg;
+//       lines. Those were added to suppress error UI but caused
+//       infinite spin: when the server rejects a play (rate limit,
+//       session expired, server hiccup), slots.js needs to see the
+//       error field to display the message and stop the spin via its
+//       error path. Keeping the field intact lets it work normally.
 //
-//   (3) NO INFINITE-SPIN BUG. Upstream deletes `data.error` from the
-//       response — when the server rejects a bet you can't afford,
-//       slots.js then thinks the play succeeded but gameRes.images is
-//       missing. stopReels() leaves each barrel's `stopAt` undefined,
-//       the frame-check `div.undefined` never matches, and barrels
-//       spin FOREVER. Fix: keep the error field intact. slots.js shows
-//       the real error and stops the spin normally.
+//   Bet-button tinting is LEFT ALONE: Torn's slots.js itself disables
+//   bet buttons you can't afford (checkButtons() at line 257 of
+//   slots.js). The earlier wb7 added a MutationObserver that stripped
+//   the disabled class — that turned out to enable the infinite-loop
+//   path because users could click unaffordable bets the server then
+//   rejects. Removed in wb8 — the natural blur stays.
 // =============================================================================
 
 (function() {
@@ -47,19 +47,15 @@
     const originalAjax = $.ajax;
 
     $.ajax = function (options) {
-        // wb7 (1)+(3): intercept BOTH userinfo (for first-spin speed) and
-        // play (for subsequent spins). DO NOT delete error fields —
-        // upstream did this to suppress error UI but it causes the
-        // infinite-spin bug when the server actually rejects a play.
+        // wb8 (1)+(2): intercept BOTH userinfo (for first-spin speed)
+        // and play (for subsequent spins). DO NOT delete error fields —
+        // upstream did this to suppress error UI but it broke the
+        // server-rejection path and caused infinite spinning.
         if (options.data != null && options.data.sid == 'slotsData' &&
             (options.data.step == 'play' || options.data.step == 'userinfo')) {
             const originalSuccess = options.success;
             options.success = function (data, textStatus, jqXHR) {
                 if (data && typeof data === 'object') {
-                    // Only force fast-spin if the response is a real
-                    // success (has barrelsAnimationSpeed to mutate).
-                    // Don't delete data.error — slots.js needs to see
-                    // it to display the message and stop cleanly.
                     data.barrelsAnimationSpeed = 0;
                 }
                 if (originalSuccess) {
@@ -110,53 +106,10 @@
         });
     }
 
-    // wb7 (2): keep all bet buttons clickable. slots.js's checkButtons()
-    // adds the `disabled` class to bet amounts you can't afford. The
-    // click handler refuses to fire on disabled buttons (line 118 of
-    // slots.js). Strip the class whenever it's added — slots.js still
-    // gets to manage the spin-time disable (via the watcher above),
-    // we only override the money-based one.
-    //
-    // Spin-time disable still works: the watcher above adds `disabled`
-    // to every betbtn on barrel motion, and the MutationObserver only
-    // strips it on .slots-btn-list > li (not betbtn directly), so the
-    // spin-state disable is preserved.
-    function installBetButtonUntinter() {
-        const listObserver = new MutationObserver((mutations) => {
-            for (const m of mutations) {
-                if (m.type !== 'attributes') continue;
-                if (m.attributeName !== 'class') continue;
-                const el = m.target;
-                // Only the LI elements (data-bet bet rows) — leave the
-                // betbtn child disabling alone for the spin-state UI.
-                if (!el.matches || !el.matches('.slots-btn-list > li[data-bet]')) continue;
-                if (el.classList.contains('disabled')) {
-                    el.classList.remove('disabled');
-                }
-            }
-        });
-        // Start watching once the bet list exists. The slots page lazy-
-        // renders the panel via Handlebars after userinfo lands.
-        const o = setInterval(() => {
-            const list = document.querySelector('.slots-btn-list');
-            if (!list) return;
-            clearInterval(o);
-            listObserver.observe(list, {
-                attributes: true,
-                attributeFilter: ['class'],
-                subtree: true,
-            });
-            // Initial sweep — strip any disabled class already present
-            list.querySelectorAll('li[data-bet].disabled').forEach(li => li.classList.remove('disabled'));
-        }, 100);
-    }
-
     var o = setInterval(() => {
         if($('#barrels').length == 1){
             clearInterval(o)
             watchBarrelsSpinAndStop();
         }
     }, 100);
-
-    installBetButtonUntinter();
 })();

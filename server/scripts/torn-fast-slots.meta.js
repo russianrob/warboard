@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Fast Slots (tornwar fork)
 // @namespace    tornwar.com
-// @version      0.3-wb7
-// @description  Fast slots — works on first spin, all bet buttons stay clickable, no infinite-spin bug when you can't afford a bet.
+// @version      0.3-wb8
+// @description  Fast slots — works on first spin, error responses don't infinite-loop. Torn's natural 'blur out unaffordable bets' behavior is preserved so you can't accidentally click a bet you can't pay for.
 // @author       Ramin Quluzade, Silmaril [2665762] (fork by RussianRob)
 // @match        https://www.torn.com/loader.php?sid=slots
 // @match        https://www.torn.com/page.php?sid=slots
