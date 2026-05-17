@@ -1,14 +1,15 @@
 // ==UserScript==
 // @name         Torn Fast Slots (tornwar fork)
 // @namespace    tornwar.com
-// @version      0.3-wb11
-// @description  Fast slots — works on first spin, error responses don't infinite-loop. Torn's natural 'blur out unaffordable bets' behavior is preserved so you can't accidentally click a bet you can't pay for.
+// @version      0.3-wb12
+// @description  Fast slots — works on first spin (desktop AND PDA), error responses don't infinite-loop. Torn's natural 'blur out unaffordable bets' behavior is preserved so you can't accidentally click a bet you can't pay for.
 // @author       Ramin Quluzade, Silmaril [2665762] (fork by RussianRob)
 // @match        https://www.torn.com/loader.php?sid=slots
 // @match        https://www.torn.com/page.php?sid=slots
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
 // @license      MIT
-// @run-at       document-idle
+// @grant        unsafeWindow
+// @run-at       document-start
 // @downloadURL  https://tornwar.com/scripts/torn-fast-slots.user.js
 // @updateURL    https://tornwar.com/scripts/torn-fast-slots.meta.js
 // ==/UserScript==
@@ -44,46 +45,63 @@
 (function() {
     'use strict';
 
-    const originalAjax = $.ajax;
+    // wb12: PDA fix — first spin wasn't fast on Torn PDA because:
+    //   (a) PDA runs userscripts in an isolated WebView world, so the
+    //       sandbox's `$` is NOT the page's jQuery. Patching `$.ajax`
+    //       from the sandbox left slots.js's calls unintercepted, and
+    //       the userinfo response came back with the default 1000ms
+    //       barrelsAnimationSpeed baked into the initial Barrels.
+    //   (b) @run-at document-idle ran AFTER slots.js had already fired
+    //       userinfo, so even on desktop the first-spin patch was racy.
+    // Fix: use unsafeWindow to grab the PAGE's jQuery, @run-at
+    // document-start so we're alive before slots.js loads, and poll
+    // until $.ajax appears (jQuery might load after us). Patch is
+    // idempotent.
+    const win = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
 
-    $.ajax = function (options) {
-        // wb11: re-add userinfo intercept for fast first spin.
-        // wb9's hypothesis (userinfo wrap broke the affordability
-        // disable) turned out to be wrong — the real culprit was the
-        // upstream watch helpers (removed in wb10). Now safe to wrap
-        // both: 'play' for every subsequent spin, 'userinfo' so the
-        // initial Barrel constructors get loopTime=0 baked in and the
-        // FIRST spin is fast too.
-        // STILL: don't delete data.error — server rejections must reach
-        // slots.js's error path so it stops the spin (no infinite-spin
-        // bug from upstream).
-        if (options.data != null && options.data.sid == 'slotsData' &&
-            (options.data.step == 'play' || options.data.step == 'userinfo')) {
-            const originalSuccess = options.success;
-            options.success = function (data, textStatus, jqXHR) {
-                if (data && typeof data === 'object') {
-                    data.barrelsAnimationSpeed = 0;
-                }
-                if (originalSuccess) {
-                    originalSuccess(data, textStatus, jqXHR);
-                }
-            };
-        }
+    function applyPatch($) {
+        if (!$ || !$.ajax || $.__fastSlotsWb12Patched) return false;
+        const originalAjax = $.ajax;
 
-        return originalAjax(options);
+        $.ajax = function (options) {
+            // Wrap BOTH 'play' (every subsequent spin) and 'userinfo'
+            // (sets initial barrelsAnimationSpeed → fast first spin).
+            // Don't delete data.error: slots.js needs error fields to
+            // stop the spin on server rejection (no infinite-spin bug).
+            if (options && options.data != null && options.data.sid == 'slotsData' &&
+                (options.data.step == 'play' || options.data.step == 'userinfo')) {
+                const originalSuccess = options.success;
+                options.success = function (data, textStatus, jqXHR) {
+                    if (data && typeof data === 'object') {
+                        data.barrelsAnimationSpeed = 0;
+                    }
+                    if (originalSuccess) {
+                        originalSuccess(data, textStatus, jqXHR);
+                    }
+                };
+            }
+
+            return originalAjax(options);
+        };
+        $.__fastSlotsWb12Patched = true;
+        return true;
     }
 
-    // wb10: removed upstream's watchBarrelsSpinAndStop +
-    // enableBetButtons/disableBetButtons. They were a defensive layer
-    // to prevent mid-spin clicks, but:
-    //   1. Torn's own slots.js already prevents concurrent spins via
-    //      its `inRoll` flag check in placeBet().
-    //   2. enableBetButtons() unconditionally stripped the `disabled`
-    //      class from EVERY bet button ~60ms after each animation tick.
-    //      That nuked the `disabled` class that Torn's checkButtons()
-    //      legitimately put on unaffordable bets — which is why bets
-    //      you can't afford weren't blurred out.
-    // Without these helpers, Torn's native checkButtons() at the end of
-    // each spin (in displayResults) is the sole source of truth for
-    // which bet buttons are disabled. Affordability tinting restored.
+    // Try now (jQuery may already be loaded); otherwise poll fast.
+    if (!applyPatch(win.$)) {
+        const iv = setInterval(() => {
+            if (applyPatch(win.$)) clearInterval(iv);
+        }, 5);
+        // Safety: stop polling after 15s regardless. If jQuery hasn't
+        // shown up by then we're on the wrong page or Torn changed
+        // the slots loader; nothing useful to do.
+        setTimeout(() => clearInterval(iv), 15000);
+    }
+
+    // No upstream watchBarrelsSpinAndStop helpers (removed in wb10).
+    // Reason: upstream's enableBetButtons() stripped the `disabled`
+    // class from EVERY bet button ~60ms after each animation tick,
+    // nuking the disable Torn's checkButtons() legitimately put on
+    // unaffordable bets. Torn's `inRoll` flag already blocks
+    // concurrent spins, so the defensive layer was net-negative.
 })();
