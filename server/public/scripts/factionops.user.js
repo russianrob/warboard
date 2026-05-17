@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.1
+// @version      5.1.2
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.1';
+    const SCRIPT_VERSION = '5.1.2';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -1319,12 +1319,14 @@ body.wb-chain-active {
     font-size: 12px; line-height: 1;
 }
 
-/* ── Sort bar (above col headers) ── v5.0.14 ── */
+/* ── Sort bar (above col headers) ── v5.0.14, v5.1.2 wrap-on-narrow ── */
 .fo-sort-bar {
-    display: flex; align-items: center; gap: 8px;
-    padding: 6px 16px; background: var(--wb-accent-20);
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px; background: var(--wb-accent-20);
     border-bottom: 1px solid var(--wb-border);
     font-size: 11px;
+    flex-wrap: wrap;  /* v5.1.2: wrap stats filter to a second row when too narrow */
+    row-gap: 4px;
 }
 .fo-sort-label { color: #636e72; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; }
 .fo-sort-select {
@@ -1337,8 +1339,8 @@ body.wb-chain-active {
 .fo-stats-filter-input {
     background: var(--wb-bg-secondary); color: var(--wb-text);
     border: 1px solid var(--wb-border); border-radius: 4px;
-    padding: 3px 6px; font: inherit; font-size: 11px;
-    width: 56px; text-align: right;
+    padding: 3px 5px; font: inherit; font-size: 11px;
+    width: 48px; text-align: right; min-width: 0;
 }
 .fo-stats-filter-input:focus { outline: 0; border-color: var(--wb-accent); }
 .fo-stats-filter-clear {
@@ -8641,12 +8643,12 @@ body.wb-chain-active {
                     <option value="stats-asc">Stats &uarr; (weak first)</option>
                     <option value="stats-desc">Stats &darr; (strong first)</option>
                 </select>
-                <span class="fo-sort-label" style="margin-left:10px;">Stats:</span>
+                <span class="fo-sort-label" style="margin-left:6px;">Stats:</span>
                 <input class="fo-stats-filter-input" id="fo-stats-filter-min" placeholder="min" title="Min stats — e.g. 10M, 1.5B, 100000">
                 <span style="color:#636e72;">–</span>
                 <input class="fo-stats-filter-input" id="fo-stats-filter-max" placeholder="max" title="Max stats — e.g. 50M, 2B, 1000000">
                 <button class="fo-stats-filter-clear" id="fo-stats-filter-clear" title="Clear filter">✕</button>
-                <span class="fo-stats-filter-hint" id="fo-stats-filter-hint"></span>
+                <span class="fo-stats-filter-hint" id="fo-stats-filter-hint" style="flex-basis:100%;margin-left:0;"></span>
             </div>
             <div class="fo-col-headers">
                 <div class="fo-col-header">Target</div>
