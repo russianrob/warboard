@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.7
+// @version      5.1.8
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -55,7 +55,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.7';
+    const SCRIPT_VERSION = '5.1.8';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -8767,15 +8767,7 @@ body.wb-chain-active {
             </div>
             ` : ''}
             <div class="fo-sort-bar" id="fo-sort-bar">
-                <span class="fo-sort-label">Sort:</span>
-                <select class="fo-sort-select" id="fo-sort-select">
-                    <option value="smart">Smart (default)</option>
-                    <option value="level-asc">Level &uarr; (low first)</option>
-                    <option value="level-desc">Level &darr; (high first)</option>
-                    <option value="stats-asc">Stats &uarr; (weak first)</option>
-                    <option value="stats-desc">Stats &darr; (strong first)</option>
-                </select>
-                <span class="fo-sort-label" style="margin-left:6px;">Stats:</span>
+                <span class="fo-sort-label">Stats:</span>
                 <input class="fo-stats-filter-input" id="fo-stats-filter-min" placeholder="min" title="Min stats — e.g. 10M, 1.5B, 100000">
                 <span style="color:#636e72;">–</span>
                 <input class="fo-stats-filter-input" id="fo-stats-filter-max" placeholder="max" title="Max stats — e.g. 50M, 2B, 1000000">
@@ -8833,26 +8825,13 @@ body.wb-chain-active {
         // the dropdown change so the user sees the sort apply once the
         // background pre-fetch has had time to populate the FFS cache.
         // The setTimeout is single-shot — no recursion possible.
-        const sortSel = overlay.querySelector('#fo-sort-select');
-        if (sortSel) {
-            sortSel.value = _sortMode;
-            sortSel.addEventListener('change', () => {
-                const newMode = sortSel.value;
-                setSortMode(newMode);
-                renderOverlay();
-                if (newMode === 'stats-asc' || newMode === 'stats-desc') {
-                    // v5.0.79: kick an immediate ffscouter batch fetch
-                    // when user picks stats sort. fetchFairFightBatch
-                    // is single-flight + skips already-cached uids, so
-                    // this is safe to call eagerly. Then re-render
-                    // after 2.5s to pick up fresh data.
-                    try { fetchFairFightBatch(); } catch (_) {}
-                    setTimeout(() => {
-                        if (_sortMode === newMode) renderOverlay();
-                    }, 2500);
-                }
-            });
-        }
+        // v5.1.8: sort dropdown removed — stats range filter replaces
+        // the manual sort modes (Level/Stats asc/desc). Smart sort is
+        // the default and only mode now. applyManualSort still exists
+        // for backward compat but returns immediately for _sortMode='smart'.
+        // Force _sortMode back to 'smart' in case it was persisted as
+        // something else from before this version.
+        try { setSortMode('smart'); } catch (_) {}
 
         // v5.1.1: stats range filter — min/max inputs hide targets
         // outside the range. Unknown-stats targets always pass.
