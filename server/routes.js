@@ -3782,9 +3782,28 @@ async function handlePostWarReport(req, res) {
   if (war.warEnded) {
     const cached = loadPostWarCache(warId);
     if (cached && cached.warReportData) {
-      warReportData = cached.warReportData;
-      attackLog     = cached.attackLog || [];
-      cacheStatus   = "hit";
+      // 2026-05-17: validate the cached report is FOR THIS war, not
+      // an older war that reused the same warboard internal warId.
+      // The warboard's warId is keyed by faction ('war_42055') so when
+      // a new ranked war starts against a new opponent, the cache
+      // file from the previous war keeps serving until invalidated.
+      // Bug case: Mile High Club just ended, user opens post-war
+      // report, sees Knockout/Ringside from 7 days earlier.
+      const factions = Array.isArray(cached.warReportData.factions)
+        ? cached.warReportData.factions : [];
+      const cachedEnemyId = factions
+        .map(f => String(f.id))
+        .find(id => id !== String(war.factionId));
+      const matches = !war.enemyFactionId
+        || !cachedEnemyId
+        || String(cachedEnemyId) === String(war.enemyFactionId);
+      if (matches) {
+        warReportData = cached.warReportData;
+        attackLog     = cached.attackLog || [];
+        cacheStatus   = "hit";
+      } else {
+        console.log(`[post-war] discarding stale cache for ${warId}: cached enemy ${cachedEnemyId} != current enemy ${war.enemyFactionId}`);
+      }
     }
   }
 
