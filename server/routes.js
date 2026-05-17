@@ -383,10 +383,6 @@ router.post("/api/gate", async (req, res) => {
  * The landing page requires a gate cookie.
  */
 export function gateMiddleware(req, res, next) {
-  // Gate disabled — diagnostic test for Stay/Safari script-loading issue.
-  // Restore the logic below to turn it back on.
-  return next();
-  /* Previous gated behavior:
   if (
     req.path.startsWith("/api/") ||
     req.path.startsWith("/data/") ||
@@ -406,7 +402,6 @@ export function gateMiddleware(req, res, next) {
     return res.redirect("/gate.html");
   }
   return res.redirect("/gate.html");
-  */
 }
 
 /** Simple cookie parser — no dependency needed. */
