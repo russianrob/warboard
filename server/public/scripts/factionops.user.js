@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.8
+// @version      5.1.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -23,6 +23,7 @@
 // @grant        GM_getValue
 // @grant        GM_addStyle
 // @grant        GM_setClipboard
+// @grant        unsafeWindow
 // @connect      tornwar.com
 // @connect      localhost
 // @connect      *
@@ -55,7 +56,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.8';
+    const SCRIPT_VERSION = '5.1.9';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -3493,6 +3494,104 @@ body.wb-chain-active {
     // giving near-real-time enemy status without any Torn API calls.
     let peerRelayBatch = {};
     let peerRelayTimer = null;
+
+    // v5.1.9: WebSocket intercept — monkey-patch window.WebSocket to
+    // capture Torn's own real-time push events (the same mechanism
+    // CAT script v3 uses for ~100ms hospital detection). Torn sends
+    // updateStatus messages via a Centrifugo-style envelope:
+    //   { push: { pub: { data: { message: { namespaces: { users: {
+    //       actions: { updateStatus: { userId, status: { text, until, ... } } }
+    //   } } } } } } }
+    // Deep-walk for 'updateStatus' instead of hardcoded path so a
+    // Torn restructuring won't immediately break us. Relays through
+    // the existing mergeStatusesMonotonic + queuePeerRelay so all the
+    // dedup / monotonic / peer-broadcast plumbing applies.
+    function deepFindActions(obj, depth = 0) {
+        if (!obj || typeof obj !== 'object' || depth > 8) return null;
+        if (obj.actions && typeof obj.actions === 'object') return obj.actions;
+        for (const k of Object.keys(obj)) {
+            const v = obj[k];
+            if (v && typeof v === 'object') {
+                const found = deepFindActions(v, depth + 1);
+                if (found) return found;
+            }
+        }
+        return null;
+    }
+    function _normalizeStatusText(t) {
+        const s = String(t || '').toLowerCase();
+        if (s.includes('hospital')) return 'hospital';
+        if (s.includes('travel') || s.includes('abroad')) return 'traveling';
+        if (s.includes('jail')) return 'jail';
+        if (s.includes('federal')) return 'federal';
+        if (s.includes('fallen')) return 'fallen';
+        return 'ok';
+    }
+    function handleTornWsMessage(event) {
+        try {
+            const raw = event && event.data;
+            if (typeof raw !== 'string' || raw.length < 8 || raw[0] !== '{') return;
+            let json;
+            try { json = JSON.parse(raw); }
+            catch (_) {
+                // Torn occasionally ships glued JSON ('{...}{...}')
+                const m = String(_).match(/position (\d+)/);
+                if (!m) return;
+                try { json = JSON.parse(raw.substring(0, parseInt(m[1], 10))); }
+                catch (__) { return; }
+            }
+            const actions = deepFindActions(json);
+            if (!actions || !actions.updateStatus) return;
+            const u = actions.updateStatus;
+            const uid = String(u.userId || u.user_id || '');
+            if (!uid) return;
+            const st = u.status || {};
+            const text = String(st.text || st.status || '');
+            if (!text) return;
+            const normalized = _normalizeStatusText(text);
+            // until: absolute unix-seconds timestamp from Torn. Falls
+            // back to updateAt for hospital pop targets if until missing.
+            const until = Number(st.until)
+                || (normalized === 'hospital' ? Number(st.updateAt) : 0)
+                || 0;
+            const batch = {};
+            const entry = { status: normalized, until };
+            if (st.details) entry.description = String(st.details);
+            batch[uid] = entry;
+            try { mergeStatusesMonotonic(batch); } catch (_) {}
+            try { queuePeerRelay(batch); } catch (_) {}
+        } catch (_) { /* never throw from WS handler */ }
+    }
+    let _wsInterceptorInstalled = false;
+    function installTornWsInterceptor() {
+        if (_wsInterceptorInstalled) return;
+        _wsInterceptorInstalled = true;
+        // Per memory note feedback_tampermonkey_unsafewindow.md: patching
+        // window.WebSocket from the userscript sandbox doesn't reach the
+        // page's own WebSocket constructor — must use unsafeWindow.
+        const tw = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+        if (!tw || !tw.WebSocket) return;
+        const OriginalWS = tw.WebSocket;
+        try {
+            tw.WebSocket = function PatchedWS(...args) {
+                const sock = new OriginalWS(...args);
+                try { sock.addEventListener('message', handleTornWsMessage); } catch (_) {}
+                return sock;
+            };
+            // Preserve constants + prototype so feature-detect code
+            // (e.g. WebSocket.OPEN === 1) keeps working.
+            Object.defineProperties(tw.WebSocket, {
+                prototype: { value: OriginalWS.prototype },
+                CONNECTING: { value: OriginalWS.CONNECTING },
+                OPEN: { value: OriginalWS.OPEN },
+                CLOSING: { value: OriginalWS.CLOSING },
+                CLOSED: { value: OriginalWS.CLOSED },
+            });
+            log('[ws-intercept] installed — listening for Torn status push events');
+        } catch (e) {
+            warn('[ws-intercept] install failed:', e && e.message);
+        }
+    }
 
     // v5.1.3: hospital-event scraper. Watches faction news / wall /
     // war ticker DOM for 'X hospitalized Y' phrasings and relays the
@@ -8922,6 +9021,11 @@ body.wb-chain-active {
         // coverage gives ~2s faction-wide detection latency for any
         // hospitalization visible in news.
         try { installHospitalNewsObserver(); } catch (_) {}
+
+        // v5.1.9: WebSocket intercept — primary fast path for hospital
+        // detection (~100ms vs ~2s for news scrape). Falls behind news
+        // + attack-result intercept + server polls as defense-in-depth.
+        try { installTornWsInterceptor(); } catch (_) {}
 
         // v5.0.30: combined heatmap modal — single 📊 button opens a
         // tabbed modal with Activity + Payouts heatmaps. Was two separate

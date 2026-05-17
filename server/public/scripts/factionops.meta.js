@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.8
+// @version      5.1.9
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -23,6 +23,7 @@
 // @grant        GM_getValue
 // @grant        GM_addStyle
 // @grant        GM_setClipboard
+// @grant        unsafeWindow
 // @connect      tornwar.com
 // @connect      localhost
 // @connect      *
