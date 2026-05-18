@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.26
+// @version      0.8.27
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -439,6 +439,7 @@
                             <span>Flamethrower</span>
                         </label>
                     </div>
+                    <input id="arsontest-ed-ignite" placeholder="Ignite (e.g. lighter, flamethrower, molotov)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
                     <div id="arsontest-ed-ppn" style="background:#0f1a14;color:#74c69d;border:1px solid #2d6a4f;border-radius:4px;padding:5px 8px;font-size:11px;font-weight:600;">
                         Profit/Nerve: <span id="arsontest-ed-ppn-val">—</span>
                         <span id="arsontest-ed-ppn-hint" style="color:#9ca3af;font-weight:400;margin-left:6px;"></span>
@@ -481,7 +482,7 @@
                 // surface in red.
                 const nerveForCalc = (r.nerve && r.nerve > 0)
                     ? r.nerve
-                    : autoCalcArsonNerve(r.items, r.stoke, r.dampen, r.flamethrower);
+                    : autoCalcArsonNerve(r.items, r.stoke, r.dampen, r.flamethrower, r.ignite);
                 let ppnHtml = '';
                 if (r.payout > 0 && nerveForCalc > 0) {
                     const cost = calcMaterialCost(r.items, r.stoke, r.dampen, listValueMap);
@@ -519,6 +520,7 @@
                 overlay.querySelector('#arsontest-ed-payout').value = r.payout;
                 overlay.querySelector('#arsontest-ed-nerve').value = r.nerve || '';
                 overlay.querySelector('#arsontest-ed-flame').checked = r.flamethrower === true;
+                overlay.querySelector('#arsontest-ed-ignite').value = r.ignite || '';
                 // Programmatic `.value =` doesn't fire input events, so
                 // the live Profit/Nerve readout would stay at "—" after
                 // loading a recipe via the edit button. Kick it manually.
@@ -563,8 +565,9 @@
                 const stoke = parseItemsString(overlay.querySelector('#arsontest-ed-stoke').value);
                 const dampen = parseItemsString(overlay.querySelector('#arsontest-ed-dampen').value);
                 const flame = overlay.querySelector('#arsontest-ed-flame').checked;
+                const ignite = overlay.querySelector('#arsontest-ed-ignite').value.trim().toLowerCase();
                 const nerveExplicit = Number.isFinite(nerveRaw) && nerveRaw > 0;
-                const nerve = nerveExplicit ? nerveRaw : autoCalcArsonNerve(items, stoke, dampen, flame);
+                const nerve = nerveExplicit ? nerveRaw : autoCalcArsonNerve(items, stoke, dampen, flame, ignite);
                 if (!Number.isFinite(payout) || payout <= 0 || !nerve || nerve <= 0) {
                     ppnEl.textContent = '—';
                     ppnHintEl.textContent = '';
@@ -595,7 +598,8 @@
             }
         }
         ['arsontest-ed-payout', 'arsontest-ed-nerve', 'arsontest-ed-items',
-         'arsontest-ed-stoke', 'arsontest-ed-dampen', 'arsontest-ed-flame']
+         'arsontest-ed-stoke', 'arsontest-ed-dampen', 'arsontest-ed-flame',
+         'arsontest-ed-ignite']
             .forEach(id => {
                 const el = overlay.querySelector('#' + id);
                 if (!el) return;
@@ -688,6 +692,7 @@
             const payout = Number(overlay.querySelector('#arsontest-ed-payout').value);
             const nerve = Number(overlay.querySelector('#arsontest-ed-nerve').value);
             const flamethrower = overlay.querySelector('#arsontest-ed-flame').checked;
+            const ignite = overlay.querySelector('#arsontest-ed-ignite').value.trim().toLowerCase();
             if (!key) { status('Need a name', '#ef4444'); return; }
             if (!Number.isFinite(payout) || payout <= 0) { status('Need a payout > 0', '#ef4444'); return; }
             const items = parseItemsString(itemsStr);
@@ -699,13 +704,15 @@
             const dampen = parseItemsString(dampenStr);
             if (Object.keys(dampen).length > 0) recipe.dampen = dampen;
             recipe.flamethrower = flamethrower;
-            // Auto-fill nerve when the field is empty. Formula lives
-            // in autoCalcArsonNerve — items×5 + start/end(5) +
-            // ignite(5) = items×5 + 10. Manual entries take precedence.
+            if (ignite) recipe.ignite = ignite;
+            // Auto-fill nerve when the field is empty. Formula in
+            // autoCalcArsonNerve counts ignite once (preferring the
+            // explicit ignite string, falling back to flamethrower
+            // bool for legacy entries). Manual nerve entries win.
             if (Number.isFinite(nerve) && nerve > 0) {
                 recipe.nerve = nerve;
             } else {
-                const auto = autoCalcArsonNerve(items, stoke, dampen, flamethrower);
+                const auto = autoCalcArsonNerve(items, stoke, dampen, flamethrower, ignite);
                 if (auto > 0) recipe.nerve = auto;
             }
             try {
@@ -850,12 +857,15 @@
     //   2 gasoline + 1 lighter           → 3×5 + 5 = 20
     //   5 gasoline + flamethrower        → 6×5 + 5 = 35
     // Returns 0 when the recipe has nothing at all.
-    function autoCalcArsonNerve(items, stoke, dampen, flamethrower) {
+    function autoCalcArsonNerve(items, stoke, dampen, flamethrower, ignite) {
         const sumQty = (obj) => obj && typeof obj === 'object'
             ? Object.values(obj).reduce((s, q) => s + (Number(q) || 0), 0)
             : 0;
-        const totalQty = sumQty(items) + sumQty(stoke) + sumQty(dampen)
-                       + (flamethrower ? 1 : 0);
+        // Count the ignite step once: prefer the explicit `ignite`
+        // field (string), fall back to legacy `flamethrower` bool.
+        const igniteCount = (ignite && String(ignite).trim()) ? 1
+                          : (flamethrower ? 1 : 0);
+        const totalQty = sumQty(items) + sumQty(stoke) + sumQty(dampen) + igniteCount;
         if (totalQty <= 0) return 0;
         return totalQty * 5 + 5;
     }

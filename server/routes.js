@@ -8448,6 +8448,15 @@ router.post("/api/arson/recipes", express.json({ limit: '8kb' }), async (req, re
   if (typeof body.flamethrower === 'boolean') {
     recipe.flamethrower = body.flamethrower;
   }
+  // Optional ignite tool — string like "lighter" / "flamethrower" /
+  // "molotov". Separate from the flamethrower bool so admins can
+  // record the actual ignite item that wasn't covered by the original
+  // schema (and was silently dropped during the 2026-05-16 BFB
+  // migration for every recipe with "Ignite: Lighter" upstream).
+  if (body.ignite && typeof body.ignite === 'string') {
+    const ig = body.ignite.trim().toLowerCase().slice(0, 40);
+    if (ig) recipe.ignite = ig;
+  }
   const data = loadArsonRecipes();
   // Preserve existing location if the new POST didn't include one — admins
   // editing items shouldn't have to retype the location every time.
@@ -8463,6 +8472,9 @@ router.post("/api/arson/recipes", express.json({ limit: '8kb' }), async (req, re
   }
   if (typeof recipe.flamethrower !== 'boolean' && typeof data.recipes[key]?.flamethrower === 'boolean') {
     recipe.flamethrower = data.recipes[key].flamethrower;
+  }
+  if (!recipe.ignite && data.recipes[key]?.ignite) {
+    recipe.ignite = data.recipes[key].ignite;
   }
   data.recipes[key] = recipe;
   data.updatedAt = Date.now();

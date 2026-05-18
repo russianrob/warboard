@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson bang for buck (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.00.040-fix3-wb7
+// @version      1.00.040-fix3-wb8
 // @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Mirror of neth392's 1.00.040-fix3 with download/update URLs pointing at tornwar.com so future patches auto-update. wb2: auto-syncs recipe edits from the tornwar server (written by arsontest) into the tooltip data.
 // @author       Para_Thenics, auboli77 (fix3 patches by neth392; mirrored by RussianRob)
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -155,8 +155,12 @@ async function getPricesFromAPI() {
         const sumQty = (obj) => obj && typeof obj === 'object'
             ? Object.values(obj).reduce((s, q) => s + (Number(q) || 0), 0)
             : 0;
-        const totalQty = sumQty(r.items) + sumQty(r.stoke) + sumQty(r.dampen)
-                       + (r.flamethrower ? 1 : 0);
+        // Count the ignite step once: prefer the explicit `ignite`
+        // string (added wb8 / arsontest 0.8.27), fall back to legacy
+        // `flamethrower` bool for recipes saved before the schema add.
+        const igniteCount = (r.ignite && String(r.ignite).trim()) ? 1
+                          : (r.flamethrower ? 1 : 0);
+        const totalQty = sumQty(r.items) + sumQty(r.stoke) + sumQty(r.dampen) + igniteCount;
         if (totalQty <= 0) return 0;
         return totalQty * 5 + 5;
     }
@@ -186,7 +190,11 @@ async function getPricesFromAPI() {
         } else {
             lines.push('Profit/Nerve: ');
         }
-        lines.push('Flamethrower: ' + (r.flamethrower || ''));
+        lines.push('Flamethrower: ' + (r.flamethrower ? 'Yes' : 'No'));
+        // Render the ignite tool when set. Mirrors upstream BFB's
+        // "Ignite: Lighter" line so users see the missing ignite info
+        // that the 2026-05-16 migration silently dropped.
+        if (r.ignite) lines.push('Ignite: ' + r.ignite);
         // Server stores items as { name: qty } (e.g. {"gasoline": 2,
         // "kerosene": 1}). Format as "2 gasoline, 1 kerosene" — matches
         // the way upstream BFB writes its "Place:" lines so the layout
