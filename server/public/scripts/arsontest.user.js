@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.27
+// @version      0.8.28
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -428,9 +428,9 @@
                     <span style="font-weight:600;color:#a78bfa;">Add / update</span>
                     <input id="arsontest-ed-key" placeholder="action name (e.g. spirit level)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
                     <input id="arsontest-ed-loc" placeholder="location (e.g. Apartment, Lakehouse)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
-                    <input id="arsontest-ed-items" placeholder="Place: gasoline:3 lighter:1" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
-                    <input id="arsontest-ed-stoke" placeholder="Stoke (optional): gasoline:2" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
-                    <input id="arsontest-ed-dampen" placeholder="Dampen (optional): waterbottle:1" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
+                    <input id="arsontest-ed-items" placeholder="Place: gasoline:3, hydrogen tank:1 (comma between items)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
+                    <input id="arsontest-ed-stoke" placeholder="Stoke (optional): gasoline:2, lighter:1" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
+                    <input id="arsontest-ed-dampen" placeholder="Dampen (optional): fire extinguisher:1" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
                     <div style="display:flex;gap:6px;align-items:center;">
                         <input id="arsontest-ed-payout" type="number" placeholder="Payout (e.g. 280000)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;flex:1;">
                         <input id="arsontest-ed-nerve" type="number" placeholder="Nerve (optional)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;flex:1;">
@@ -510,12 +510,12 @@
                 const k = b.dataset.k; const r = RECIPES[k];
                 overlay.querySelector('#arsontest-ed-key').value = k;
                 overlay.querySelector('#arsontest-ed-loc').value = r.location || '';
-                overlay.querySelector('#arsontest-ed-items').value = Object.entries(r.items).map(([n, q]) => n + ':' + q).join(' ');
+                overlay.querySelector('#arsontest-ed-items').value = Object.entries(r.items).map(([n, q]) => n + ':' + q).join(', ');
                 overlay.querySelector('#arsontest-ed-stoke').value = r.stoke
-                    ? Object.entries(r.stoke).map(([n, q]) => n + ':' + q).join(' ')
+                    ? Object.entries(r.stoke).map(([n, q]) => n + ':' + q).join(', ')
                     : '';
                 overlay.querySelector('#arsontest-ed-dampen').value = r.dampen
-                    ? Object.entries(r.dampen).map(([n, q]) => n + ':' + q).join(' ')
+                    ? Object.entries(r.dampen).map(([n, q]) => n + ':' + q).join(', ')
                     : '';
                 overlay.querySelector('#arsontest-ed-payout').value = r.payout;
                 overlay.querySelector('#arsontest-ed-nerve').value = r.nerve || '';
@@ -872,18 +872,47 @@
 
     // Reusable item-string parser ("gasoline:3 lighter:1" or "3 gasoline, 1 lighter")
     function parseItemsString(str) {
+        // v0.8.28: split on commas FIRST so multi-word item names
+        // (e.g. "hydrogen tank") survive. The previous space-split
+        // produced {tank: 1} for "hydrogen tank:1" — silently dropping
+        // the first word. Same root-cause as the 2026-05-16 migration
+        // truncations the user just had to manually fix.
         const out = {};
-        const tokens = String(str || '').split(/[,\s]+/).filter(Boolean);
-        for (let i = 0; i < tokens.length; i++) {
-            const t = tokens[i];
-            if (t.includes(':')) {
-                const [n, q] = t.split(':');
-                const qty = Number(q);
-                if (n && Number.isFinite(qty) && qty > 0) out[n.toLowerCase()] = qty;
-            } else if (/^\d+$/.test(t) && tokens[i+1]) {
-                const qty = Number(t);
-                const n = tokens[++i];
-                if (n && qty > 0) out[n.toLowerCase()] = qty;
+        const raw = String(str || '').trim();
+        if (!raw) return out;
+        let segments = raw.split(',').map(s => s.trim()).filter(Boolean);
+        // Legacy single-line "gas:3 lighter:1" (no commas, no multi-
+        // word names) → re-split on whitespace. Only applied when the
+        // sole segment matches that exact key:qty key:qty shape so we
+        // don't accidentally re-truncate a real multi-word name.
+        if (segments.length === 1 && /^\S+:\d+(\s+\S+:\d+)+$/.test(segments[0])) {
+            segments = segments[0].split(/\s+/).filter(Boolean);
+        }
+        for (const seg of segments) {
+            // "name:qty" — last colon is the separator so multi-word
+            // names like "hydrogen tank" stay intact.
+            const colonIdx = seg.lastIndexOf(':');
+            if (colonIdx > 0) {
+                const name = seg.slice(0, colonIdx).trim().toLowerCase();
+                const qty = Number(seg.slice(colonIdx + 1).trim());
+                if (name && Number.isFinite(qty) && qty > 0) {
+                    out[name] = qty;
+                    continue;
+                }
+            }
+            // "qty name" — number prefix, rest is name
+            const m1 = seg.match(/^(\d+)\s+(.+)$/);
+            if (m1) {
+                const qty = Number(m1[1]);
+                const name = m1[2].trim().toLowerCase();
+                if (name && qty > 0) { out[name] = qty; continue; }
+            }
+            // "name qty" — number suffix
+            const m2 = seg.match(/^(.+?)\s+(\d+)$/);
+            if (m2) {
+                const name = m2[1].trim().toLowerCase();
+                const qty = Number(m2[2]);
+                if (name && qty > 0) out[name] = qty;
             }
         }
         return out;
