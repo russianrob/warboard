@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson bang for buck (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.00.042-wb10
+// @version      1.00.043-wb10
 // @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Mirror of neth392's 1.00.040-fix3 with download/update URLs pointing at tornwar.com so future patches auto-update. wb2: auto-syncs recipe edits from the tornwar server (written by arsontest) into the tooltip data.
 // @author       Para_Thenics, auboli77 (fix3 patches by neth392; mirrored by RussianRob)
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -228,6 +228,12 @@ async function getPricesFromAPI() {
      *  recipe was silently ignored at render time. Fix: build a
      *  case-insensitive index once, then overlay onto the canonical
      *  upstream key when one exists. */
+    /** True if a single variant's lines flag flamethrower:yes. */
+    function wbVariantIsFlamethrower(variant) {
+        if (!Array.isArray(variant)) return false;
+        return variant.some(ln => typeof ln === 'string' && /^Flamethrower\s*:\s*yes/i.test(ln));
+    }
+
     function wbOverlayServerRecipes(serverRecipes) {
         if (!serverRecipes || typeof serverRecipes !== 'object') return 0;
         const canonical = Object.create(null);
@@ -237,7 +243,23 @@ async function getPricesFromAPI() {
             const lines = wbRecipeToLines(recipe);
             if (!lines) continue;
             const key = canonical[rawKey.toLowerCase()] || rawKey;
-            scenarios[key] = lines;
+            const existing = scenarios[key];
+            const serverIsFlame = !!recipe.flamethrower;
+            // v1.00.043: when upstream has multi-variant data, replace
+            // only the variant whose flamethrower flag matches the
+            // server recipe. Pre-wb11 single-variant replacement was
+            // killing the no-flame fallback for users who haven't
+            // unlocked flamethrower — they'd see no tooltip at all
+            // because shouldShowScenario filters yes-flame variants
+            // for them (BFB line 4253). Multi-variant shape preserves
+            // both paths.
+            if (Array.isArray(existing) && existing.length > 0 && Array.isArray(existing[0])) {
+                const variantIdx = existing.findIndex(v => wbVariantIsFlamethrower(v) === serverIsFlame);
+                if (variantIdx >= 0) existing[variantIdx] = lines;
+                else existing.push(lines);
+            } else {
+                scenarios[key] = lines;
+            }
             n++;
         }
         // After any overlay, re-derive Profit/Nerve for every recipe
