@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.25
+// @version      0.8.26
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -468,15 +468,38 @@
                 return a[0] < b[0] ? -1 : 1;
             });
             if (!entries.length) { list.innerHTML = '<div style="color:#6b7280;">No recipes yet.</div>'; return; }
+            const listValueMap = loadItemValueMap();
             list.innerHTML = entries.map(([k, r]) => {
                 const itemsStr = Object.entries(r.items).map(([n, q]) => q + ' ' + n).join(', ');
                 const nerveStr = r.nerve ? (' · ' + r.nerve + 'N') : '';
                 const locStr = r.location
                     ? `<span style="color:#f4a261;font-weight:700;">${r.location}</span> · `
                     : `<span style="color:#6b7280;font-style:italic;">(no location)</span> · `;
+                // Inline net Profit/Nerve so admins can scan the list
+                // without opening each recipe. Same (payout − cost) /
+                // nerve formula the editor + BFB use; negatives
+                // surface in red.
+                const nerveForCalc = (r.nerve && r.nerve > 0)
+                    ? r.nerve
+                    : autoCalcArsonNerve(r.items, r.stoke, r.dampen, r.flamethrower);
+                let ppnHtml = '';
+                if (r.payout > 0 && nerveForCalc > 0) {
+                    const cost = calcMaterialCost(r.items, r.stoke, r.dampen, listValueMap);
+                    const profit = r.payout - cost;
+                    const ppn = Math.round(profit / nerveForCalc);
+                    const sign = ppn < 0 ? '-' : '';
+                    const abs = Math.abs(ppn);
+                    let body;
+                    if (abs >= 1e6) body = (abs / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+                    else if (abs >= 1e4) body = Math.round(abs / 1e3) + 'K';
+                    else if (abs >= 1e3) body = (abs / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+                    else body = String(abs);
+                    const color = ppn < 0 ? '#fca5a5' : '#74c69d';
+                    ppnHtml = ` · <span style="color:${color};font-weight:600;" title="profit/nerve at current item prices">${sign}${body}/N</span>`;
+                }
                 return `<div style="display:flex;justify-content:space-between;gap:6px;padding:3px 0;border-bottom:1px solid #2a2a2a;">
                     <span style="color:#d1d5db;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.location ? r.location + ' / ' : ''}${k}\n${itemsStr}\n$${r.payout.toLocaleString()}${nerveStr}">
-                        ${locStr}<b>${k}</b> · <span style="color:#9ca3af;">${itemsStr}</span> · <span style="color:#74c69d;">$${(r.payout/1000).toFixed(0)}K</span>${nerveStr}
+                        ${locStr}<b>${k}</b> · <span style="color:#9ca3af;">${itemsStr}</span> · <span style="color:#74c69d;">$${(r.payout/1000).toFixed(0)}K</span>${nerveStr}${ppnHtml}
                     </span>
                     <button class="arsontest-ed-edit" data-k="${k}" style="background:transparent;border:1px solid #444;color:#a78bfa;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">edit</button>
                     <button class="arsontest-ed-del" data-k="${k}" style="background:transparent;border:1px solid #4a1a1a;color:#ef4444;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">del</button>
@@ -496,6 +519,10 @@
                 overlay.querySelector('#arsontest-ed-payout').value = r.payout;
                 overlay.querySelector('#arsontest-ed-nerve').value = r.nerve || '';
                 overlay.querySelector('#arsontest-ed-flame').checked = r.flamethrower === true;
+                // Programmatic `.value =` doesn't fire input events, so
+                // the live Profit/Nerve readout would stay at "—" after
+                // loading a recipe via the edit button. Kick it manually.
+                try { recomputeProfitNerve(); } catch (_) {}
                 status('Editing ' + k);
             }));
             list.querySelectorAll('.arsontest-ed-del').forEach(b => b.addEventListener('click', async () => {
