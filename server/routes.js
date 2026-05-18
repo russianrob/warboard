@@ -391,7 +391,11 @@ export function gateMiddleware(req, res, next) {
     // Install assets — same public-by-design rationale as userscript
     // .user.js. Apps need to be installable without a gate cookie since
     // the gate is part of the app's own setup flow.
-    req.path.endsWith(".apk") || req.path.endsWith(".ipa")
+    req.path.endsWith(".apk") || req.path.endsWith(".ipa") ||
+    // Version manifests the apps poll to detect updates. Must be
+    // public for the same reason as .apk — the update flow can't
+    // require an auth cookie since users may have lost / cleared it.
+    req.path.endsWith("_version")
   ) {
     return next();
   }
