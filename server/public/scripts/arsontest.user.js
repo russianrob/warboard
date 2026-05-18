@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.9.6
+// @version      0.10.0
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -490,7 +490,6 @@
                         <span id="arsontest-ed-variant-chip" style="font-weight:700;font-size:11px;padding:2px 7px;border-radius:4px;background:#0f1a14;border:1px solid #444;">🚫🔥 no-flame variant</span>
                     </div>
                     <input id="arsontest-ed-key" placeholder="action name (e.g. spirit level)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
-                    <input id="arsontest-ed-loc" placeholder="location (e.g. Apartment, Lakehouse)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
                     <input id="arsontest-ed-items" placeholder="Place: gasoline:3, hydrogen tank:1 (comma between items)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
                     <input id="arsontest-ed-stoke" placeholder="Stoke (optional): gasoline:2, lighter:1" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
                     <input id="arsontest-ed-dampen" placeholder="Dampen (optional): fire extinguisher:1" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
@@ -524,19 +523,11 @@
         };
         const renderList = () => {
             const list = overlay.querySelector('#arsontest-ed-list');
-            // Sort by location first (entries without location sink), then action.
-            // Sort: location → base crime name → no-flame before flame.
-            // Keeping variants of the same crime adjacent makes it
-            // obvious when both slots are filled (or which one is
-            // missing — relevant when scanning for crimes that still
-            // need their sibling variant created).
+            // Sort by base crime name (alphabetical), then no-flame
+            // before flame so variant siblings sit adjacent.
             const entries = Object.entries(RECIPES).sort((a, b) => {
-                const la = (a[1].location || '￿~~~').toLowerCase();
-                const lb = (b[1].location || '￿~~~').toLowerCase();
-                if (la !== lb) return la < lb ? -1 : 1;
                 const baseA = baseName(a[0]); const baseB = baseName(b[0]);
                 if (baseA !== baseB) return baseA < baseB ? -1 : 1;
-                // Same base crime → no-flame first, flame second.
                 return isFlameKey(a[0]) - isFlameKey(b[0]);
             });
             if (!entries.length) { list.innerHTML = '<div style="color:#6b7280;">No recipes yet.</div>'; return; }
@@ -544,9 +535,6 @@
             list.innerHTML = entries.map(([k, r]) => {
                 const itemsStr = Object.entries(r.items).map(([n, q]) => q + ' ' + n).join(', ');
                 const nerveStr = r.nerve ? (' · ' + r.nerve + 'N') : '';
-                const locStr = r.location
-                    ? `<span style="color:#f4a261;font-weight:700;">${r.location}</span> · `
-                    : `<span style="color:#6b7280;font-style:italic;">(no location)</span> · `;
                 // Inline net Profit/Nerve so admins can scan the list
                 // without opening each recipe. Same (payout − cost) /
                 // nerve formula the editor + BFB use; negatives
@@ -585,8 +573,8 @@
                     ? ''
                     : `<button class="arsontest-ed-dup" data-k="${k}" title="${isFlameKey(k) ? 'create no-flame variant' : 'create flame variant'}" style="background:transparent;border:1px solid #2d3a2a;color:#fb923c;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">+${isFlameKey(k) ? '🚫🔥' : '🔥'}</button>`;
                 return `<div style="display:flex;justify-content:space-between;gap:6px;padding:3px 0;border-bottom:1px solid #2a2a2a;">
-                    <span style="color:#d1d5db;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.location ? r.location + ' / ' : ''}${k}\n${itemsStr}\n$${r.payout.toLocaleString()}${nerveStr}">
-                        ${locStr}${flameChip}<b>${display}</b> · <span style="color:#9ca3af;">${itemsStr}</span> · <span style="color:#74c69d;">$${(r.payout/1000).toFixed(0)}K</span>${nerveStr}${ppnHtml}
+                    <span style="color:#d1d5db;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${k}\n${itemsStr}\n$${r.payout.toLocaleString()}${nerveStr}">
+                        ${flameChip}<b>${display}</b> · <span style="color:#9ca3af;">${itemsStr}</span> · <span style="color:#74c69d;">$${(r.payout/1000).toFixed(0)}K</span>${nerveStr}${ppnHtml}
                     </span>
                     ${variantBtn}
                     <button class="arsontest-ed-edit" data-k="${k}" style="background:transparent;border:1px solid #444;color:#a78bfa;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">edit</button>
@@ -598,7 +586,6 @@
                 // Show the base name in the editor — the :flame suffix
                 // is implicit from the flamethrower checkbox state.
                 overlay.querySelector('#arsontest-ed-key').value = baseName(k);
-                overlay.querySelector('#arsontest-ed-loc').value = r.location || '';
                 overlay.querySelector('#arsontest-ed-items').value = Object.entries(r.items).map(([n, q]) => n + ':' + q).join(', ');
                 overlay.querySelector('#arsontest-ed-stoke').value = r.stoke
                     ? Object.entries(r.stoke).map(([n, q]) => n + ':' + q).join(', ')
@@ -657,7 +644,6 @@
                 }
 
                 overlay.querySelector('#arsontest-ed-key').value = crime;
-                overlay.querySelector('#arsontest-ed-loc').value = r.location || '';
                 overlay.querySelector('#arsontest-ed-items').value = Object.entries(itemsObj).map(([n, q]) => n + ':' + q).join(', ');
                 overlay.querySelector('#arsontest-ed-stoke').value = Object.keys(stokeMap).length > 0
                     ? Object.entries(stokeMap).map(([n, q]) => n + ':' + q).join(', ')
@@ -847,7 +833,6 @@
         });
         overlay.querySelector('#arsontest-ed-save').addEventListener('click', async () => {
             const rawKey = overlay.querySelector('#arsontest-ed-key').value.trim().toLowerCase();
-            const location = overlay.querySelector('#arsontest-ed-loc').value.trim();
             const itemsStr = overlay.querySelector('#arsontest-ed-items').value.trim();
             const stokeStr = overlay.querySelector('#arsontest-ed-stoke').value.trim();
             const dampenStr = overlay.querySelector('#arsontest-ed-dampen').value.trim();
@@ -864,7 +849,6 @@
             const items = parseItemsString(itemsStr);
             if (Object.keys(items).length === 0) { status('Need at least 1 item (e.g. gasoline:3)', '#ef4444'); return; }
             const recipe = { items, payout };
-            if (location) recipe.location = location;
             const stoke = parseItemsString(stokeStr);
             if (Object.keys(stoke).length > 0) recipe.stoke = stoke;
             const dampen = parseItemsString(dampenStr);
@@ -943,8 +927,7 @@
             ? '$' + Math.round(recipe.payout / 1000) + 'K'
             : '$' + recipe.payout;
         const nerveStr = recipe.nerve ? (' · ' + recipe.nerve + 'N') : '';
-        const locStr = recipe.location ? recipe.location + ' · ' : '';
-        return locStr + itemsStr + stokeStr + dampenStr + ' · ' + payoutStr + nerveStr + flameStr;
+        return itemsStr + stokeStr + dampenStr + ' · ' + payoutStr + nerveStr + flameStr;
     }
     // ── Material costs for net-profit calc ───────────────────────────
     // Shares localStorage with arson-bang-for-buck (same origin), so
@@ -1188,7 +1171,7 @@
         // Header line — uses the SAME styling as the piggyback header
         // (v0.8.20) so this fallback tooltip looks identical to the
         // arson-bang-for-buck tooltip + piggyback header combo.
-        tt.appendChild(buildScenarioHeader(location ? location + ' · ' + action : action));
+        tt.appendChild(buildScenarioHeader(action));
         if (recipe) {
             // Same line order as arson-bang-for-buck:
             //   Payout, Profit/Nerve, Nerve, Flamethrower, Place, Stoke, Dampen
