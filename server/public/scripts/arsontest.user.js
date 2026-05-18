@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.23
+// @version      0.8.24
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -439,6 +439,10 @@
                             <span>Flamethrower</span>
                         </label>
                     </div>
+                    <div id="arsontest-ed-ppn" style="background:#0f1a14;color:#74c69d;border:1px solid #2d6a4f;border-radius:4px;padding:5px 8px;font-size:11px;font-weight:600;">
+                        Profit/Nerve: <span id="arsontest-ed-ppn-val">—</span>
+                        <span id="arsontest-ed-ppn-hint" style="color:#9ca3af;font-weight:400;margin-left:6px;"></span>
+                    </div>
                     <div style="display:flex;gap:6px;">
                         <button id="arsontest-ed-save" style="background:#2d6a4f;color:#fff;border:0;border-radius:4px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer;flex:1;">Save</button>
                         <button id="arsontest-ed-refresh" style="background:#374151;color:#fff;border:0;border-radius:4px;padding:6px 12px;font-size:11px;cursor:pointer;">Refresh</button>
@@ -507,6 +511,53 @@
             }));
         };
         renderList();
+
+        // Live Profit/Nerve readout. Recomputes on every input change so
+        // admins can sanity-check before saving. Uses the same nerve
+        // formula as autoCalcArsonNerve when the user leaves Nerve empty;
+        // otherwise uses the explicit value.
+        const ppnEl = overlay.querySelector('#arsontest-ed-ppn-val');
+        const ppnHintEl = overlay.querySelector('#arsontest-ed-ppn-hint');
+        function recomputeProfitNerve() {
+            try {
+                const payout = Number(overlay.querySelector('#arsontest-ed-payout').value);
+                const nerveRaw = Number(overlay.querySelector('#arsontest-ed-nerve').value);
+                const items = parseItemsString(overlay.querySelector('#arsontest-ed-items').value);
+                const stoke = parseItemsString(overlay.querySelector('#arsontest-ed-stoke').value);
+                const dampen = parseItemsString(overlay.querySelector('#arsontest-ed-dampen').value);
+                const flame = overlay.querySelector('#arsontest-ed-flame').checked;
+                const nerveExplicit = Number.isFinite(nerveRaw) && nerveRaw > 0;
+                const nerve = nerveExplicit ? nerveRaw : autoCalcArsonNerve(items, stoke, dampen, flame);
+                if (!Number.isFinite(payout) || payout <= 0 || !nerve || nerve <= 0) {
+                    ppnEl.textContent = '—';
+                    ppnHintEl.textContent = '';
+                    return;
+                }
+                const ppn = Math.round(payout / nerve);
+                let formatted;
+                if (ppn >= 1e6) formatted = (ppn / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+                else if (ppn >= 1e4) formatted = Math.round(ppn / 1e3) + 'K';
+                else if (ppn >= 1e3) formatted = (ppn / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+                else formatted = String(ppn);
+                ppnEl.textContent = formatted + ' /nerve';
+                ppnHintEl.textContent = nerveExplicit
+                    ? '(' + nerve + ' nerve, manual)'
+                    : '(' + nerve + ' nerve, auto)';
+            } catch (_) {
+                ppnEl.textContent = '—';
+                ppnHintEl.textContent = '';
+            }
+        }
+        ['arsontest-ed-payout', 'arsontest-ed-nerve', 'arsontest-ed-items',
+         'arsontest-ed-stoke', 'arsontest-ed-dampen', 'arsontest-ed-flame']
+            .forEach(id => {
+                const el = overlay.querySelector('#' + id);
+                if (!el) return;
+                el.addEventListener('input', recomputeProfitNerve);
+                el.addEventListener('change', recomputeProfitNerve);
+            });
+        recomputeProfitNerve();
+
         overlay.querySelector('#arsontest-ed-close').addEventListener('click', () => overlay.remove());
         overlay.querySelector('#arsontest-ed-debug').addEventListener('click', () => {
             const ta = overlay.querySelector('#arsontest-ed-debug-out');
