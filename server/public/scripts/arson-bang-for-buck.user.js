@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson bang for buck (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.00.040-fix3-wb4
+// @version      1.00.040-fix3-wb5
 // @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Mirror of neth392's 1.00.040-fix3 with download/update URLs pointing at tornwar.com so future patches auto-update. wb2: auto-syncs recipe edits from the tornwar server (written by arsontest) into the tooltip data.
 // @author       Para_Thenics, auboli77 (fix3 patches by neth392; mirrored by RussianRob)
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -148,15 +148,17 @@ async function getPricesFromAPI() {
 
     /** Auto-calc total nerve from a recipe's items/stoke/dampen maps.
      *  Mirrors arsontest's autoCalcArsonNerve — keep these in sync.
-     *  Formula: (items_qty + stoke_qty + dampen_qty) × 5 + 10
-     *  (5 per item action + 5 start/end + 5 ignite). */
+     *  Formula: (items_qty + stoke_qty + dampen_qty + (flame?1:0)) × 5 + 5
+     *  (5 per item action; flamethrower=true counts as +1 item since
+     *  it IS the ignite step; +5 for combined start/end of crime). */
     function wbAutoCalcArsonNerve(r) {
         const sumQty = (obj) => obj && typeof obj === 'object'
             ? Object.values(obj).reduce((s, q) => s + (Number(q) || 0), 0)
             : 0;
-        const totalQty = sumQty(r.items) + sumQty(r.stoke) + sumQty(r.dampen);
+        const totalQty = sumQty(r.items) + sumQty(r.stoke) + sumQty(r.dampen)
+                       + (r.flamethrower ? 1 : 0);
         if (totalQty <= 0) return 0;
-        return totalQty * 5 + 10;
+        return totalQty * 5 + 5;
     }
 
     /** Map a server recipe (structured fields) into the line-array shape

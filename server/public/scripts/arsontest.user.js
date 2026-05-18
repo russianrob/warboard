@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.22
+// @version      0.8.23
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -608,7 +608,7 @@
             if (Number.isFinite(nerve) && nerve > 0) {
                 recipe.nerve = nerve;
             } else {
-                const auto = autoCalcArsonNerve(items, stoke, dampen);
+                const auto = autoCalcArsonNerve(items, stoke, dampen, flamethrower);
                 if (auto > 0) recipe.nerve = auto;
             }
             try {
@@ -677,20 +677,26 @@
         return locStr + itemsStr + stokeStr + dampenStr + ' · ' + payoutStr + nerveStr + flameStr;
     }
     // Auto-calc total nerve from a recipe's items/stoke/dampen maps.
-    // Formula (user 2026-05-18):
+    // Formula (user 2026-05-18, revised):
     //   - each item action (place, stoke, dampen): 5 nerve × qty
-    //   - start + end of the crime (combined):       +5 nerve
-    //   - ignite (flamethrower OR lighter, one step): +5 nerve
-    //   → total = (items_qty + stoke_qty + dampen_qty) × 5 + 10
-    // Returns 0 when the recipe has no items at all (caller should
-    // treat that as "no auto-calc available" rather than 10).
-    function autoCalcArsonNerve(items, stoke, dampen) {
+    //   - flamethrower=true counts as +1 item (it IS the ignite step
+    //     when no lighter is in stoke — kept consistent with the
+    //     "ignite is 5" rule; the lighter, when present in stoke,
+    //     is already counted as a stoke item)
+    //   - start + end of the crime (combined): +5 nerve
+    //   → total = (items_qty + stoke_qty + dampen_qty + flame?1:0) × 5 + 5
+    // Examples user-verified:
+    //   2 gasoline + 1 lighter           → 3×5 + 5 = 20
+    //   5 gasoline + flamethrower        → 6×5 + 5 = 35
+    // Returns 0 when the recipe has nothing at all.
+    function autoCalcArsonNerve(items, stoke, dampen, flamethrower) {
         const sumQty = (obj) => obj && typeof obj === 'object'
             ? Object.values(obj).reduce((s, q) => s + (Number(q) || 0), 0)
             : 0;
-        const totalQty = sumQty(items) + sumQty(stoke) + sumQty(dampen);
+        const totalQty = sumQty(items) + sumQty(stoke) + sumQty(dampen)
+                       + (flamethrower ? 1 : 0);
         if (totalQty <= 0) return 0;
-        return totalQty * 5 + 10;
+        return totalQty * 5 + 5;
     }
 
     // Reusable item-string parser ("gasoline:3 lighter:1" or "3 gasoline, 1 lighter")
