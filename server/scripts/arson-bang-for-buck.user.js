@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson bang for buck (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.00.041-wb10
+// @version      1.00.042-wb10
 // @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Mirror of neth392's 1.00.040-fix3 with download/update URLs pointing at tornwar.com so future patches auto-update. wb2: auto-syncs recipe edits from the tornwar server (written by arsontest) into the tooltip data.
 // @author       Para_Thenics, auboli77 (fix3 patches by neth392; mirrored by RussianRob)
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -168,28 +168,31 @@ async function getPricesFromAPI() {
     /** Map a server recipe (structured fields) into the line-array shape
      *  the BFB tooltip code expects. Order mirrors upstream's existing
      *  scenario rows so the tooltip layout stays familiar. */
+    /** Compact money formatter matching upstream BFB's style:
+     *  1234 → "1.2K", 30500 → "30.5K", 210000 → "210K", 1500000 → "1.5M". */
+    function wbFormatMoney(n) {
+        const abs = Math.abs(n);
+        if (abs >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (abs >= 1e4) return Math.round(n / 1e3) + 'K';
+        if (abs >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+        return String(Math.round(n));
+    }
+
     function wbRecipeToLines(r) {
         if (!r || typeof r !== 'object') return null;
         const lines = [];
-        const payout = r.payout != null && r.payout !== '' ? String(r.payout) : '';
-        // Use stored nerve when present, otherwise auto-calc so the
-        // tooltip can still show Profit/Nerve for recipes whose author
-        // skipped the nerve field.
-        let nerve = r.nerve  != null && r.nerve  !== '' ? Number(r.nerve)  : null;
-        if (!(nerve && nerve > 0)) {
-            const auto = wbAutoCalcArsonNerve(r);
-            if (auto > 0) nerve = auto;
-        }
+        // Format raw payout int as "30.5K" / "210K" / "1.5M" so the
+        // tooltip's Payout line matches upstream style AND so the
+        // chip parser's regex (/^[\d.,kKmM]+$/) accepts it.
+        const rawPayout = r.payout != null && r.payout !== '' ? Number(r.payout) : null;
+        const payout = rawPayout && Number.isFinite(rawPayout) ? wbFormatMoney(rawPayout) : '';
         if (payout) lines.push('Payout: ' + payout);
-        if (nerve && nerve > 0 && /^[\d.,kKmM]+$/.test(payout)) {
-            // Best-effort profit/nerve calc only when payout parses cleanly.
-            const num = parseFloat(payout.replace(/,/g, ''));
-            const mult = /m/i.test(payout) ? 1_000_000 : /k/i.test(payout) ? 1_000 : 1;
-            const profitPerNerve = Math.round((num * mult) / nerve);
-            lines.push('Profit/Nerve: ' + profitPerNerve.toLocaleString());
-        } else {
-            lines.push('Profit/Nerve: ');
-        }
+        // Leave Profit/Nerve BLANK on purpose — wbDeriveProfitPerNerveAll
+        // (called from wbOverlayServerRecipes) fills it using the same
+        // compact "1.2K" / "30K" format as upstream-derived rows. Doing
+        // the calc here too with toLocaleString() (e.g. "2,033") broke
+        // the downstream chip parser, which only accepts the K/M form.
+        lines.push('Profit/Nerve: ');
         lines.push('Flamethrower: ' + (r.flamethrower ? 'Yes' : 'No'));
         // Render the ignite tool when set. Mirrors upstream BFB's
         // "Ignite: Lighter" line so users see the missing ignite info
