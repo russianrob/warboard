@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Fast Slots (tornwar fork)
 // @namespace    tornwar.com
-// @version      0.3-wb12
-// @description  Fast slots — works on first spin (desktop AND PDA), error responses don't infinite-loop. Torn's natural 'blur out unaffordable bets' behavior is preserved so you can't accidentally click a bet you can't pay for.
+// @version      0.3-wb13
+// @description  Fast slots — works on first spin across Chrome+TM, Firefox+TM, and PDA. Error responses don't infinite-loop. Torn's natural 'blur out unaffordable bets' behavior is preserved so you can't accidentally click a bet you can't pay for.
 // @author       Ramin Quluzade, Silmaril [2665762] (fork by RussianRob)
 // @match        https://www.torn.com/loader.php?sid=slots
 // @match        https://www.torn.com/page.php?sid=slots
@@ -59,11 +59,29 @@
     // idempotent.
     const win = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
 
+    // wb13: Firefox+TM fix. Chrome+TM lets `unsafeWindow.$.ajax = newFn`
+    // propagate to the page's jQuery transparently. Firefox+TM enforces
+    // an XPCNativeWrapper boundary — a sandbox function assigned to a
+    // page-context property is silently demoted, so slots.js's internal
+    // .ajax calls go to a broken wrapper that never returns and the
+    // slots UI never initializes (user reports "slots don't appear").
+    // Firefox exposes `exportFunction(fn, targetScope)` to safely cross
+    // the boundary; Chrome+TM and PDA don't define it, so we fall back
+    // to a direct assignment which already works there.
+    function safeExport(fn, scope) {
+        try {
+            if (typeof exportFunction === 'function') {
+                return exportFunction(fn, scope);
+            }
+        } catch (_) {}
+        return fn;
+    }
+
     function applyPatch($) {
-        if (!$ || !$.ajax || $.__fastSlotsWb12Patched) return false;
+        if (!$ || !$.ajax || $.__fastSlotsWb13Patched) return false;
         const originalAjax = $.ajax;
 
-        $.ajax = function (options) {
+        const patched = function (options) {
             // Wrap BOTH 'play' (every subsequent spin) and 'userinfo'
             // (sets initial barrelsAnimationSpeed → fast first spin).
             // Don't delete data.error: slots.js needs error fields to
@@ -71,7 +89,7 @@
             if (options && options.data != null && options.data.sid == 'slotsData' &&
                 (options.data.step == 'play' || options.data.step == 'userinfo')) {
                 const originalSuccess = options.success;
-                options.success = function (data, textStatus, jqXHR) {
+                const wrappedSuccess = function (data, textStatus, jqXHR) {
                     if (data && typeof data === 'object') {
                         data.barrelsAnimationSpeed = 0;
                     }
@@ -79,11 +97,16 @@
                         originalSuccess(data, textStatus, jqXHR);
                     }
                 };
+                // Same XPCNativeWrapper concern applies to mutating a
+                // page-context options.success — wrap before assigning
+                // so Firefox accepts the assignment.
+                options.success = safeExport(wrappedSuccess, options);
             }
 
             return originalAjax(options);
         };
-        $.__fastSlotsWb12Patched = true;
+        $.ajax = safeExport(patched, $);
+        $.__fastSlotsWb13Patched = true;
         return true;
     }
 
