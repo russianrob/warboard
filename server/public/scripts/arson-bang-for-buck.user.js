@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson bang for buck (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.00.043-wb10
+// @version      1.00.044-wb11
 // @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Mirror of neth392's 1.00.040-fix3 with download/update URLs pointing at tornwar.com so future patches auto-update. wb2: auto-syncs recipe edits from the tornwar server (written by arsontest) into the tooltip data.
 // @author       Para_Thenics, auboli77 (fix3 patches by neth392; mirrored by RussianRob)
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -242,7 +242,12 @@ async function getPricesFromAPI() {
         for (const [rawKey, recipe] of Object.entries(serverRecipes)) {
             const lines = wbRecipeToLines(recipe);
             if (!lines) continue;
-            const key = canonical[rawKey.toLowerCase()] || rawKey;
+            // arsontest v0.9.0 introduces composite keys ":flame" suffix
+            // for the flamethrower variant of a crime. Strip it before
+            // canonical lookup — the recipe's own `flamethrower` field
+            // still drives which variant slot we replace below.
+            const base = rawKey.endsWith(':flame') ? rawKey.slice(0, -6) : rawKey;
+            const key = canonical[base.toLowerCase()] || base;
             const existing = scenarios[key];
             const serverIsFlame = !!recipe.flamethrower;
             // v1.00.043: when upstream has multi-variant data, replace

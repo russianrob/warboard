@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.28
+// @version      0.9.0
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -317,16 +317,40 @@
             .replace(/\s+/g, ' ')
             .trim();
     }
+    // v0.9.0: composite-key variants. A crime can have two saved
+    // recipes — base ("hot dog") for the no-flamethrower path and
+    // ":flame" suffix ("hot dog:flame") for the flamethrower path.
+    // Helpers below strip / re-attach the suffix as needed.
+    const VARIANT_SUFFIX = ':flame';
+    function baseName(k) {
+        const s = String(k || '');
+        return s.endsWith(VARIANT_SUFFIX) ? s.slice(0, -VARIANT_SUFFIX.length) : s;
+    }
+    function variantKey(base, isFlame) {
+        return isFlame ? (base + VARIANT_SUFFIX) : base;
+    }
+    function isFlameKey(k) {
+        return String(k || '').endsWith(VARIANT_SUFFIX);
+    }
+
     // Lookup that tries exact-then-normalized. Returns the recipe or null.
+    // Variant-aware: if both ":flame" and base exist for an action, prefers
+    // the base (no-flame) variant since tooltip viewers without flamethrower
+    // are the majority case. Callers needing the flame variant explicitly
+    // can append :flame to the action string themselves.
     function lookupRecipe(action) {
         if (!action) return null;
-        const direct = RECIPES[action.toLowerCase()];
+        const lower = action.toLowerCase();
+        const direct = RECIPES[lower];
         if (direct) return direct;
         const norm = normalizeRecipeKey(action);
         if (RECIPES[norm]) return RECIPES[norm];
-        // Try every key with normalize-both-sides
         for (const k of Object.keys(RECIPES)) {
-            if (normalizeRecipeKey(k) === norm) return RECIPES[k];
+            if (normalizeRecipeKey(baseName(k)) === norm && !isFlameKey(k)) return RECIPES[k];
+        }
+        // Last resort: return the flame variant when no base exists.
+        for (const k of Object.keys(RECIPES)) {
+            if (normalizeRecipeKey(baseName(k)) === norm) return RECIPES[k];
         }
         return null;
     }
@@ -498,17 +522,32 @@
                     const color = ppn < 0 ? '#fca5a5' : '#74c69d';
                     ppnHtml = ` · <span style="color:${color};font-weight:600;" title="profit/nerve at current item prices">${sign}${body}/N</span>`;
                 }
+                const flameChip = isFlameKey(k)
+                    ? '<span style="color:#fb923c;font-weight:700;" title="flamethrower variant">🔥</span> '
+                    : '';
+                const display = baseName(k);
+                // Offer a "+ variant" button when the sibling variant
+                // doesn't exist yet — one tap clones this recipe into
+                // the other slot so the user can edit/tweak from there.
+                const siblingKey = isFlameKey(k) ? display : (display + VARIANT_SUFFIX);
+                const hasSibling = RECIPES[siblingKey] != null;
+                const variantBtn = hasSibling
+                    ? ''
+                    : `<button class="arsontest-ed-dup" data-k="${k}" title="${isFlameKey(k) ? 'create no-flame variant' : 'create flame variant'}" style="background:transparent;border:1px solid #2d3a2a;color:#fb923c;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">+${isFlameKey(k) ? '🚫🔥' : '🔥'}</button>`;
                 return `<div style="display:flex;justify-content:space-between;gap:6px;padding:3px 0;border-bottom:1px solid #2a2a2a;">
                     <span style="color:#d1d5db;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.location ? r.location + ' / ' : ''}${k}\n${itemsStr}\n$${r.payout.toLocaleString()}${nerveStr}">
-                        ${locStr}<b>${k}</b> · <span style="color:#9ca3af;">${itemsStr}</span> · <span style="color:#74c69d;">$${(r.payout/1000).toFixed(0)}K</span>${nerveStr}${ppnHtml}
+                        ${locStr}${flameChip}<b>${display}</b> · <span style="color:#9ca3af;">${itemsStr}</span> · <span style="color:#74c69d;">$${(r.payout/1000).toFixed(0)}K</span>${nerveStr}${ppnHtml}
                     </span>
+                    ${variantBtn}
                     <button class="arsontest-ed-edit" data-k="${k}" style="background:transparent;border:1px solid #444;color:#a78bfa;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">edit</button>
                     <button class="arsontest-ed-del" data-k="${k}" style="background:transparent;border:1px solid #4a1a1a;color:#ef4444;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">del</button>
                 </div>`;
             }).join('');
             list.querySelectorAll('.arsontest-ed-edit').forEach(b => b.addEventListener('click', () => {
                 const k = b.dataset.k; const r = RECIPES[k];
-                overlay.querySelector('#arsontest-ed-key').value = k;
+                // Show the base name in the editor — the :flame suffix
+                // is implicit from the flamethrower checkbox state.
+                overlay.querySelector('#arsontest-ed-key').value = baseName(k);
                 overlay.querySelector('#arsontest-ed-loc').value = r.location || '';
                 overlay.querySelector('#arsontest-ed-items').value = Object.entries(r.items).map(([n, q]) => n + ':' + q).join(', ');
                 overlay.querySelector('#arsontest-ed-stoke').value = r.stoke
@@ -526,6 +565,25 @@
                 // loading a recipe via the edit button. Kick it manually.
                 try { recomputeProfitNerve(); } catch (_) {}
                 status('Editing ' + k);
+            }));
+            list.querySelectorAll('.arsontest-ed-dup').forEach(b => b.addEventListener('click', () => {
+                // Load the existing recipe into the editor, flip the
+                // flamethrower checkbox, and let the user edit + save.
+                // Save handler will write to the sibling key thanks to
+                // variantKey(baseName(rawKey), flamethrower).
+                const k = b.dataset.k; const r = RECIPES[k];
+                if (!r) return;
+                overlay.querySelector('#arsontest-ed-key').value = baseName(k);
+                overlay.querySelector('#arsontest-ed-loc').value = r.location || '';
+                overlay.querySelector('#arsontest-ed-items').value = Object.entries(r.items).map(([n, q]) => n + ':' + q).join(', ');
+                overlay.querySelector('#arsontest-ed-stoke').value = r.stoke ? Object.entries(r.stoke).map(([n, q]) => n + ':' + q).join(', ') : '';
+                overlay.querySelector('#arsontest-ed-dampen').value = r.dampen ? Object.entries(r.dampen).map(([n, q]) => n + ':' + q).join(', ') : '';
+                overlay.querySelector('#arsontest-ed-payout').value = r.payout;
+                overlay.querySelector('#arsontest-ed-nerve').value = '';  // re-derive for the swapped variant
+                overlay.querySelector('#arsontest-ed-flame').checked = !isFlameKey(k);
+                overlay.querySelector('#arsontest-ed-ignite').value = r.ignite || '';
+                try { recomputeProfitNerve(); } catch (_) {}
+                status('Editing new ' + (isFlameKey(k) ? 'no-flame' : 'flame') + ' variant of ' + baseName(k) + ' — adjust items, then Save');
             }));
             list.querySelectorAll('.arsontest-ed-del').forEach(b => b.addEventListener('click', async () => {
                 const k = b.dataset.k;
@@ -684,7 +742,7 @@
             status('Refreshed (' + Object.keys(RECIPES).length + ' recipes)', '#74c69d');
         });
         overlay.querySelector('#arsontest-ed-save').addEventListener('click', async () => {
-            const key = overlay.querySelector('#arsontest-ed-key').value.trim().toLowerCase();
+            const rawKey = overlay.querySelector('#arsontest-ed-key').value.trim().toLowerCase();
             const location = overlay.querySelector('#arsontest-ed-loc').value.trim();
             const itemsStr = overlay.querySelector('#arsontest-ed-items').value.trim();
             const stokeStr = overlay.querySelector('#arsontest-ed-stoke').value.trim();
@@ -693,6 +751,10 @@
             const nerve = Number(overlay.querySelector('#arsontest-ed-nerve').value);
             const flamethrower = overlay.querySelector('#arsontest-ed-flame').checked;
             const ignite = overlay.querySelector('#arsontest-ed-ignite').value.trim().toLowerCase();
+            // Auto-attach :flame suffix when the checkbox is ticked,
+            // strip it when it isn't. User can type either form into
+            // the key field; the checkbox is the source of truth.
+            const key = variantKey(baseName(rawKey), flamethrower);
             if (!key) { status('Need a name', '#ef4444'); return; }
             if (!Number.isFinite(payout) || payout <= 0) { status('Need a payout > 0', '#ef4444'); return; }
             const items = parseItemsString(itemsStr);
