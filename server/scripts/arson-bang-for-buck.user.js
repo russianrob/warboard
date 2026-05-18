@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson bang for buck (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.00.040-fix3-wb5
+// @version      1.00.040-fix3-wb6
 // @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Mirror of neth392's 1.00.040-fix3 with download/update URLs pointing at tornwar.com so future patches auto-update. wb2: auto-syncs recipe edits from the tornwar server (written by arsontest) into the tooltip data.
 // @author       Para_Thenics, auboli77 (fix3 patches by neth392; mirrored by RussianRob)
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -219,7 +219,103 @@ async function getPricesFromAPI() {
             scenarios[key] = lines;
             n++;
         }
+        // After any overlay, re-derive Profit/Nerve for every recipe
+        // (including upstream-hardcoded ones whose authors left the
+        // field blank). Idempotent — skips lines that already carry a
+        // populated value.
+        wbDeriveProfitPerNerveAll();
         return n;
+    }
+
+    /** Parse a "Payout: 210K" / "Payout:210K" / "Payout: $1.2M" string
+     *  into a raw integer. Returns null on parse failure. */
+    function wbParsePayoutString(s) {
+        if (!s) return null;
+        const m = String(s).match(/Payout\s*:\s*\$?\s*([\d.,]+)\s*([kKmMbB]?)/);
+        if (!m) return null;
+        const num = parseFloat(m[1].replace(/,/g, ''));
+        if (!Number.isFinite(num)) return null;
+        const suffix = (m[2] || '').toLowerCase();
+        const mult = suffix === 'b' ? 1e9 : suffix === 'm' ? 1e6 : suffix === 'k' ? 1e3 : 1;
+        return Math.round(num * mult);
+    }
+
+    /** Count item quantities on a "Place: 2 Gasoline, 1 Kerosene" line.
+     *  Tolerant of the upstream format (no comma between item +
+     *  quantity, mixed whitespace). Returns total quantity. */
+    function wbCountItemsOnLine(s) {
+        if (!s) return 0;
+        // Strip the leading label "Place: " / "Stoke: " / "Dampen: ".
+        const body = String(s).replace(/^[A-Za-z/]+:\s*/, '').trim();
+        if (!body) return 0;
+        let total = 0;
+        // Match each leading digit run (each "N <item>" segment).
+        // Handles "2 Gasoline, 1 Lighter" and "2 Gasoline 1 Lighter"
+        // and stray punctuation upstream sometimes ships ("?1 Flamethrower?").
+        const re = /(\d+)\s*[A-Za-z]/g;
+        let m;
+        while ((m = re.exec(body)) !== null) {
+            const n = parseInt(m[1], 10);
+            if (Number.isFinite(n) && n > 0) total += n;
+        }
+        return total;
+    }
+
+    /** Mutate a single line-array variant in place: if it has a
+     *  "Profit/Nerve: " line with no value, compute one from the
+     *  sibling Payout + Place/Stoke/Dampen + Flamethrower lines. */
+    function wbDeriveProfitPerNerveForVariant(lines) {
+        if (!Array.isArray(lines)) return;
+        let payout = null;
+        let itemsQty = 0;
+        let flamethrowerYes = false;
+        let ppnIndex = -1;
+        for (let i = 0; i < lines.length; i++) {
+            const ln = lines[i];
+            if (typeof ln !== 'string') continue;
+            if (/^Payout\s*:/i.test(ln) && payout == null) {
+                payout = wbParsePayoutString(ln);
+            } else if (/^Profit\s*\/\s*Nerve\s*:/i.test(ln)) {
+                // Only auto-fill when the value side is empty/whitespace.
+                const valuePart = ln.replace(/^[^:]+:\s*/, '').trim();
+                if (!valuePart) ppnIndex = i;
+            } else if (/^(Place|Stoke|Dampen)\s*:/i.test(ln)) {
+                itemsQty += wbCountItemsOnLine(ln);
+            } else if (/^Flamethrower\s*:/i.test(ln)) {
+                if (/yes/i.test(ln)) flamethrowerYes = true;
+            }
+        }
+        if (ppnIndex < 0) return;          // nothing to fill
+        if (!payout || payout <= 0) return; // can't compute without payout
+        const totalQty = itemsQty + (flamethrowerYes ? 1 : 0);
+        if (totalQty <= 0) return;
+        const nerve = totalQty * 5 + 5;
+        const ppn = Math.round(payout / nerve);
+        // Format compactly so the tooltip stays narrow: 1234 → "1.2K",
+        // 12340 → "12K", 1234567 → "1.2M".
+        let formatted;
+        if (ppn >= 1e6) formatted = (ppn / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+        else if (ppn >= 1e4) formatted = Math.round(ppn / 1e3) + 'K';
+        else if (ppn >= 1e3) formatted = (ppn / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+        else formatted = String(ppn);
+        lines[ppnIndex] = 'Profit/Nerve: ' + formatted;
+    }
+
+    /** Walk every recipe in `scenarios` and fill blank Profit/Nerve
+     *  lines. Handles both single-variant entries (array of strings)
+     *  and multi-variant entries (array of arrays of strings). */
+    function wbDeriveProfitPerNerveAll() {
+        if (typeof scenarios !== 'object' || !scenarios) return;
+        for (const key of Object.keys(scenarios)) {
+            const entry = scenarios[key];
+            if (!Array.isArray(entry)) continue;
+            if (entry.length > 0 && Array.isArray(entry[0])) {
+                // Multi-variant
+                for (const variant of entry) wbDeriveProfitPerNerveForVariant(variant);
+            } else {
+                wbDeriveProfitPerNerveForVariant(entry);
+            }
+        }
     }
 
     /** Fire-and-forget fetch + cache + overlay. Synchronous overlay
@@ -3353,6 +3449,14 @@ async function getPricesFromAPI() {
     "Dampen: "
 ]
     };
+
+    // wb6: always pre-fill Profit/Nerve on upstream's hardcoded
+    // recipes (most of which ship with the field blank). Runs once
+    // up-front so the first hover already shows a value even before
+    // server overlay completes. The server-overlay path also calls
+    // wbDeriveProfitPerNerveAll() at the end so newly-overlaid recipes
+    // get the same treatment.
+    wbDeriveProfitPerNerveAll();
 
     // wb2: hydrate from cache synchronously so the first hover gets
     // last-seen server recipes immediately; then async-refresh if the
