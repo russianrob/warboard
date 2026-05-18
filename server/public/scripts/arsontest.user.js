@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.9.3
+// @version      0.9.4
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -485,7 +485,10 @@
                 </div>
                 <div id="arsontest-ed-list" style="overflow-y:auto;display:flex;flex-direction:column;gap:4px;max-height:40vh;font-family:monospace;font-size:11px;"></div>
                 <div style="border-top:1px solid #333;padding-top:8px;display:flex;flex-direction:column;gap:6px;">
-                    <span style="font-weight:600;color:#a78bfa;">Add / update</span>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-weight:600;color:#a78bfa;">Add / update</span>
+                        <span id="arsontest-ed-variant-chip" style="font-weight:700;font-size:11px;padding:2px 7px;border-radius:4px;background:#0f1a14;border:1px solid #444;">🚫🔥 no-flame variant</span>
+                    </div>
                     <input id="arsontest-ed-key" placeholder="action name (e.g. spirit level)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
                     <input id="arsontest-ed-loc" placeholder="location (e.g. Apartment, Lakehouse)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
                     <input id="arsontest-ed-items" placeholder="Place: gasoline:3, hydrogen tank:1 (comma between items)" style="background:#0f1a14;color:#eee;border:1px solid #444;border-radius:4px;padding:5px;font-size:11px;">
@@ -691,7 +694,24 @@
             else body = String(Math.round(abs));
             return sign + body;
         }
+        function updateVariantChip() {
+            const chip = overlay.querySelector('#arsontest-ed-variant-chip');
+            if (!chip) return;
+            const flame = overlay.querySelector('#arsontest-ed-flame').checked;
+            if (flame) {
+                chip.textContent = '🔥 flame variant';
+                chip.style.background = '#1f1410';
+                chip.style.borderColor = '#fb923c';
+                chip.style.color = '#fb923c';
+            } else {
+                chip.textContent = '🚫🔥 no-flame variant';
+                chip.style.background = '#0f1a14';
+                chip.style.borderColor = '#444';
+                chip.style.color = '#9ca3af';
+            }
+        }
         function recomputeProfitNerve() {
+            updateVariantChip();
             try {
                 const payout = Number(overlay.querySelector('#arsontest-ed-payout').value);
                 const nerveRaw = Number(overlay.querySelector('#arsontest-ed-nerve').value);
