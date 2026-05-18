@@ -1,11 +1,15 @@
 // ==UserScript==
 // @name         Arson bang for buck (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.00.040-fix3-wb1
-// @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Mirror of neth392's 1.00.040-fix3 with download/update URLs pointing at tornwar.com so future patches auto-update.
+// @version      1.00.040-fix3-wb2
+// @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Mirror of neth392's 1.00.040-fix3 with download/update URLs pointing at tornwar.com so future patches auto-update. wb2: auto-syncs recipe edits from the tornwar server (written by arsontest) into the tooltip data.
 // @author       Para_Thenics, auboli77 (fix3 patches by neth392; mirrored by RussianRob)
 // @match        https://www.torn.com/page.php?sid=crimes*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=torn.com
+// @grant        GM_xmlhttpRequest
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @connect      tornwar.com
 // @downloadURL  https://tornwar.com/scripts/arson-bang-for-buck.user.js
 // @updateURL    https://tornwar.com/scripts/arson-bang-for-buck.meta.js
 // ==/UserScript==
@@ -129,7 +133,86 @@ async function getPricesFromAPI() {
  
     //  Call API fetch without blocking UI
     //getPricesFromAPI();
- 
+
+    // ─────────────────────────────────────────────────────────────────
+    //  wb2: server-synced recipe overlay
+    //  Pulls /api/arson/recipes from tornwar.com (where arsontest writes
+    //  recipe edits) and overlays the rows onto `scenarios` so the
+    //  community/admin's latest edits show up in the tooltip without
+    //  the user needing to update this script. Cache (GM_setValue) for
+    //  5 min so we don't hammer the server on every Torn page load.
+    // ─────────────────────────────────────────────────────────────────
+    const WB_RECIPES_URL   = 'https://tornwar.com/api/arson/recipes';
+    const WB_CACHE_KEY     = 'bfb_server_recipes_v1';
+    const WB_CACHE_TTL_MS  = 5 * 60 * 1000;
+
+    /** Map a server recipe (structured fields) into the line-array shape
+     *  the BFB tooltip code expects. Order mirrors upstream's existing
+     *  scenario rows so the tooltip layout stays familiar. */
+    function wbRecipeToLines(r) {
+        if (!r || typeof r !== 'object') return null;
+        const lines = [];
+        const payout = r.payout != null && r.payout !== '' ? String(r.payout) : '';
+        const nerve  = r.nerve  != null && r.nerve  !== '' ? Number(r.nerve)  : null;
+        if (payout) lines.push('Payout: ' + payout);
+        if (nerve && nerve > 0 && /^[\d.,kKmM]+$/.test(payout)) {
+            // Best-effort profit/nerve calc only when payout parses cleanly.
+            const num = parseFloat(payout.replace(/,/g, ''));
+            const mult = /m/i.test(payout) ? 1_000_000 : /k/i.test(payout) ? 1_000 : 1;
+            const profitPerNerve = Math.round((num * mult) / nerve);
+            lines.push('Profit/Nerve: ' + profitPerNerve.toLocaleString());
+        } else {
+            lines.push('Profit/Nerve: ');
+        }
+        lines.push('Flamethrower: ' + (r.flamethrower || ''));
+        const items = Array.isArray(r.items) ? r.items.join(', ') : (r.items || '');
+        lines.push('Place: ' + items);
+        lines.push('Stoke: '  + (r.stoke  || ''));
+        lines.push('Dampen: ' + (r.dampen || ''));
+        if (r.location) lines.push('Location: ' + r.location);
+        return lines;
+    }
+
+    /** Overlay server recipes into the `scenarios` map (defined below).
+     *  Mutates in place; safe to call repeatedly. */
+    function wbOverlayServerRecipes(serverRecipes) {
+        if (!serverRecipes || typeof serverRecipes !== 'object') return 0;
+        let n = 0;
+        for (const [key, recipe] of Object.entries(serverRecipes)) {
+            const lines = wbRecipeToLines(recipe);
+            if (!lines) continue;
+            scenarios[key] = lines;
+            n++;
+        }
+        return n;
+    }
+
+    /** Fire-and-forget fetch + cache + overlay. Synchronous overlay
+     *  from cache happens at the call site (below) so the first hover
+     *  already has fresh-ish data even if the network is slow. */
+    function wbRefreshServerRecipes() {
+        try {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: WB_RECIPES_URL,
+                timeout: 10000,
+                onload: (resp) => {
+                    if (resp.status < 200 || resp.status >= 300) return;
+                    let body;
+                    try { body = JSON.parse(resp.responseText); } catch (_) { return; }
+                    const recipes = body && body.recipes;
+                    if (!recipes) return;
+                    wbOverlayServerRecipes(recipes);
+                    try {
+                        GM_setValue(WB_CACHE_KEY, JSON.stringify({
+                            ts: Date.now(), recipes
+                        }));
+                    } catch (_) {}
+                },
+            });
+        } catch (_) { /* GM_xmlhttpRequest unavailable — silent no-op */ }
+    }
+
     // Scenario data
     const scenarios = {
 "A Bitter Taste": [
@@ -3235,8 +3318,29 @@ async function getPricesFromAPI() {
     "Dampen: "
 ]
     };
- 
- 
+
+    // wb2: hydrate from cache synchronously so the first hover gets
+    // last-seen server recipes immediately; then async-refresh if the
+    // cache is older than TTL.
+    try {
+        const cached = GM_getValue(WB_CACHE_KEY, '');
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && parsed.recipes) {
+                wbOverlayServerRecipes(parsed.recipes);
+            }
+            if (!parsed || !parsed.ts || (Date.now() - parsed.ts) > WB_CACHE_TTL_MS) {
+                wbRefreshServerRecipes();
+            }
+        } else {
+            wbRefreshServerRecipes();
+        }
+    } catch (_) {
+        // Cache parse failed or GM_getValue unavailable — just fetch fresh.
+        wbRefreshServerRecipes();
+    }
+
+
 // Item values persistence
 const defaultItemValues = {
     "Molotov Cocktail": "184388",
