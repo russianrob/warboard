@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson bang for buck (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.00.040-fix3-wb2
+// @version      1.00.040-fix3-wb3
 // @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Mirror of neth392's 1.00.040-fix3 with download/update URLs pointing at tornwar.com so future patches auto-update. wb2: auto-syncs recipe edits from the tornwar server (written by arsontest) into the tooltip data.
 // @author       Para_Thenics, auboli77 (fix3 patches by neth392; mirrored by RussianRob)
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -165,8 +165,21 @@ async function getPricesFromAPI() {
             lines.push('Profit/Nerve: ');
         }
         lines.push('Flamethrower: ' + (r.flamethrower || ''));
-        const items = Array.isArray(r.items) ? r.items.join(', ') : (r.items || '');
-        lines.push('Place: ' + items);
+        // Server stores items as { name: qty } (e.g. {"gasoline": 2,
+        // "kerosene": 1}). Format as "2 gasoline, 1 kerosene" — matches
+        // the way upstream BFB writes its "Place:" lines so the layout
+        // stays consistent. Also accept arrays/strings for forward-compat.
+        let itemsStr = '';
+        if (Array.isArray(r.items)) {
+            itemsStr = r.items.join(', ');
+        } else if (r.items && typeof r.items === 'object') {
+            itemsStr = Object.entries(r.items)
+                .map(([name, qty]) => `${qty} ${name}`)
+                .join(', ');
+        } else if (typeof r.items === 'string') {
+            itemsStr = r.items;
+        }
+        lines.push('Place: ' + itemsStr);
         lines.push('Stoke: '  + (r.stoke  || ''));
         lines.push('Dampen: ' + (r.dampen || ''));
         if (r.location) lines.push('Location: ' + r.location);
