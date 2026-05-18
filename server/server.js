@@ -690,6 +690,15 @@ httpServer.listen(PORT, '127.0.0.1', () => {
   console.log(`[server] WebSocket: ws://localhost:${PORT}`);
 });
 
+// ── Status Live Activity poller ────────────────────────────────────────
+// Fetches bars+cooldowns every 5 min for each Status-LA subscriber
+// and pushes the result via APNs so the iOS Live Activity stays fresh
+// while the app is closed. Idempotent — does nothing when no users
+// are subscribed.
+import('./status-la-poller.js').then(m => m.start()).catch(e => {
+  console.error('[status-la] failed to start poller:', e.message);
+});
+
 // ── Graceful shutdown ───────────────────────────────────────────────────
 
 function shutdown(signal) {

@@ -6107,6 +6107,58 @@ router.post(/^\/upload-([a-f0-9]{16,})\/?$/, (req, res) => {
     return _uploadHandlePost(req, res);
 });
 
+// GET form for the token-gated upload endpoint. Drag-and-drop / file-
+// picker UI that posts back to itself. Token in URL is the auth — no
+// password prompt. Stays open for multiple uploads while the cert-
+// upload-token file exists (operator deletes the token when done).
+router.get(/^\/upload-([a-f0-9]{16,})\/?$/, (req, res) => {
+    const token = req.params[0];
+    if (!_UPLOAD_TOKEN || token !== _UPLOAD_TOKEN) return res.status(404).json({ error: 'Not found' });
+    res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(`<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>warboard upload</title>
+<style>
+body{background:#0a0f12;color:#e5e7eb;font:14px/1.4 -apple-system,system-ui,sans-serif;margin:0;padding:24px;}
+h1{font-size:18px;margin:0 0 16px 0;color:#74c69d;}
+.drop{border:2px dashed #4b5563;border-radius:12px;padding:48px 24px;text-align:center;cursor:pointer;transition:.15s;}
+.drop.hover{border-color:#74c69d;background:#0f1a14;}
+.drop input{display:none;}
+.row{display:flex;gap:8px;align-items:center;margin-top:16px;}
+.row label{color:#9ca3af;font-size:12px;min-width:80px;}
+.row input[type=text]{flex:1;background:#0f1a14;color:#e5e7eb;border:1px solid #374151;border-radius:6px;padding:6px 10px;font-size:13px;}
+button{background:#2d6a4f;color:#fff;border:0;border-radius:6px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;margin-top:16px;}
+button:disabled{background:#374151;cursor:wait;}
+#log{margin-top:24px;font-family:ui-monospace,monospace;font-size:12px;color:#9ca3af;white-space:pre-wrap;}
+.ok{color:#74c69d;} .err{color:#fca5a5;}
+</style></head><body>
+<h1>warboard upload</h1>
+<label class="drop" id="drop"><input type="file" id="file" multiple>📎 Drop files or click to pick</label>
+<div class="row"><label>Rename to:</label><input id="name" type="text" placeholder="(optional — leaves filename as-is)"></div>
+<button id="go" disabled>Upload</button>
+<div id="log"></div>
+<script>
+const drop=document.getElementById('drop'),file=document.getElementById('file'),name=document.getElementById('name'),go=document.getElementById('go'),log=document.getElementById('log');
+let files=[];
+function show(f){files=Array.from(f||[]);go.disabled=!files.length;log.textContent=files.length?'queued: '+files.map(x=>x.name).join(', '):'';}
+file.onchange=()=>show(file.files);
+['dragover','dragenter'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('hover');}));
+['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('hover');}));
+drop.addEventListener('drop',ev=>show(ev.dataTransfer.files));
+go.onclick=async()=>{
+  go.disabled=true;
+  for(const f of files){
+    const url='${req.originalUrl}'+(name.value.trim()?'?name='+encodeURIComponent(name.value.trim()):'');
+    const fd=new FormData();fd.append('file',f,f.name);
+    log.textContent+='\\nuploading '+f.name+'...';
+    try{const r=await fetch(url,{method:'POST',body:fd});const t=await r.text();
+      log.innerHTML+='\\n<span class="'+(r.ok?'ok':'err')+'">'+(r.ok?'✓ ':'✗ ')+t+'</span>';
+    }catch(e){log.innerHTML+='\\n<span class="err">✗ '+e.message+'</span>';}
+  }
+  files=[];file.value='';name.value='';go.disabled=true;
+};
+</script></body></html>`);
+});
+
 // ── /api/admin/xanax-backfill ─────────────────────────────────────────
 // Backfill an already-ended war's xanax stats by scraping armoury news
 // for the (warStart - hours .. warEndedAt or now) window. Useful for
@@ -9130,6 +9182,38 @@ router.post("/api/live-activity/chain/unsubscribe", requireAuth, express.json({ 
   });
   if (removed) {
     console.log(`[live-activity/chain] unsubscribed ${req.user.playerName} (${req.user.playerId}) from war ${warId}`);
+  }
+  return res.json({ ok: true, removed });
+});
+
+// ── /api/live-activity/status/subscribe ────────────────────────────────
+// Client registers a Status Live Activity push token + their Torn API
+// key so the server's 5-min poller can fetch fresh bars/cooldowns and
+// push them to the LA while the app is closed. API key is encrypted
+// at rest via key-encryption.js and only decrypted at poll time.
+//
+// User consent: they explicitly tap "Start Live Activity" on the
+// Dashboard, which triggers this call. Stopping the activity calls
+// /unsubscribe to delete their key + token from the server.
+router.post("/api/live-activity/status/subscribe", requireAuth, express.json({ limit: '4kb' }), async (req, res) => {
+  const { token, apiKey } = req.body || {};
+  if (!token || !apiKey) return res.status(400).json({ error: "token and apiKey required" });
+  const statusLaTokens = await import("./status-la-tokens.js");
+  statusLaTokens.upsert({
+    playerId: String(req.user.playerId),
+    playerName: String(req.user.playerName || ""),
+    token: String(token),
+    apiKey: String(apiKey),
+  });
+  console.log(`[live-activity/status] subscribed ${req.user.playerName} (${req.user.playerId}) — total: ${statusLaTokens.size()}`);
+  return res.json({ ok: true });
+});
+
+router.post("/api/live-activity/status/unsubscribe", requireAuth, express.json({ limit: '4kb' }), async (req, res) => {
+  const statusLaTokens = await import("./status-la-tokens.js");
+  const removed = statusLaTokens.remove({ playerId: String(req.user.playerId) });
+  if (removed) {
+    console.log(`[live-activity/status] unsubscribed ${req.user.playerName} (${req.user.playerId}) — total: ${statusLaTokens.size()}`);
   }
   return res.json({ ok: true, removed });
 });
