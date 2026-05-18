@@ -394,7 +394,7 @@
     const RECIPE_TTL_MS = 10 * 60 * 1000;
     function loadCachedRecipes() {
         try {
-            const raw = localStorage.getItem('arsontest_recipes_cache');
+            const raw = localStorage.getItem('arsontest_recipes_cache_v2');
             if (!raw) return null;
             const obj = JSON.parse(raw);
             if (Date.now() - (obj.cachedAt || 0) < RECIPE_TTL_MS) return obj;
@@ -423,7 +423,7 @@
             });
             if (data?.recipes) {
                 RECIPES = data.recipes;
-                try { localStorage.setItem('arsontest_recipes_cache', JSON.stringify({ data, cachedAt: Date.now() })); } catch (_) {}
+                try { localStorage.setItem('arsontest_recipes_cache_v2', JSON.stringify({ data, cachedAt: Date.now() })); } catch (_) {}
                 LOG('recipes fetched from server:', Object.keys(RECIPES).length);
             }
         } catch (e) { WARN('recipe fetch failed:', e?.message || e); }
@@ -670,7 +670,7 @@
                 try {
                     await deleteRecipe(k);
                     delete RECIPES[k];
-                    try { localStorage.removeItem('arsontest_recipes_cache'); } catch (_) {}
+                    try { localStorage.removeItem('arsontest_recipes_cache_v2'); } catch (_) {}
                     status('Deleted ' + k, '#74c69d');
                     renderList();
                 } catch (e) { status('Delete failed: ' + e.message, '#ef4444'); }
@@ -832,7 +832,7 @@
         });
         overlay.querySelector('#arsontest-ed-refresh').addEventListener('click', async () => {
             status('Fetching…');
-            try { localStorage.removeItem('arsontest_recipes_cache'); } catch (_) {}
+            try { localStorage.removeItem('arsontest_recipes_cache_v2'); } catch (_) {}
             await fetchRecipes(true);
             renderList();
             status('Refreshed (' + Object.keys(RECIPES).length + ' recipes)', '#74c69d');
@@ -876,7 +876,7 @@
             try {
                 await postRecipe(key, recipe);
                 RECIPES[key] = recipe;
-                try { localStorage.removeItem('arsontest_recipes_cache'); } catch (_) {}
+                try { localStorage.removeItem('arsontest_recipes_cache_v2'); } catch (_) {}
                 status('Saved ' + key, '#74c69d');
                 renderList();
             } catch (e) { status('Save failed: ' + e.message, '#ef4444'); }
@@ -1511,7 +1511,7 @@
                 _capturedThisSession.add(key);
                 postRecipe(key, updated).then(() => {
                     RECIPES[key] = updated;
-                    try { localStorage.removeItem('arsontest_recipes_cache'); } catch (_) {}
+                    try { localStorage.removeItem('arsontest_recipes_cache_v2'); } catch (_) {}
                     LOG('auto-captured location:', action, '→', location);
                 }).catch(e => WARN('auto-capture POST failed for', action, e.message));
             } catch (e) { /* skip malformed cards */ }
