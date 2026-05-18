@@ -1246,6 +1246,22 @@ router.post("/api/call", requireAuth, (req, res) => {
     });
   }
 
+  // Per-caller cap: each player can hold at most ONE regular call AND
+  // at most ONE deal call simultaneously (the two are independent
+  // buckets). Block a second call of the same bucket with a hint
+  // pointing at the existing target so the user knows what to uncall.
+  const existingSameBucket = Object.entries(war.calls).find(([, c]) =>
+    c && c.calledBy && c.calledBy.id === playerId && (!!c.isDeal) === !!isDeal
+  );
+  if (existingSameBucket) {
+    const [existingTid, existingCall] = existingSameBucket;
+    const existingName = (war.statuses && war.statuses[existingTid] && war.statuses[existingTid].name)
+      || existingCall.targetName || `target ${existingTid}`;
+    return res.status(409).json({
+      error: `You already have ${isDeal ? 'a deal call' : 'a call'} on ${existingName} — uncall first`,
+    });
+  }
+
   const callData = {
     calledBy: { id: playerId, name: playerName },
     timestamp: Date.now(),

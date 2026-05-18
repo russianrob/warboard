@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FactionOps™ - Faction War Coordinator
 // @namespace    https://tornwar.com
-// @version      5.1.17
+// @version      5.1.18
 // @description  Real-time faction war coordination tool for Torn.com
 // @author       RussianRob
 // @copyright    2024-2026, RussianRob (https://tornwar.com)
@@ -56,7 +56,7 @@ var io = io || (typeof globalThis !== 'undefined' && globalThis.io) || (typeof s
     const IS_PDA = typeof window.flutter_inappwebview !== 'undefined';
     const PDA_API_KEY = '###PDA-APIKEY###';
 
-    const SCRIPT_VERSION = '5.1.17';
+    const SCRIPT_VERSION = '5.1.18';
     const CONFIG = {
         VERSION: SCRIPT_VERSION,
         SERVER_URL: GM_getValue('factionops_server', 'https://tornwar.com'),
@@ -5514,8 +5514,27 @@ body.wb-chain-active {
             // promptly. Doesn't block the call attempt.
             try { startPolling(); } catch (_) {}
         }
-        // Optimistic update
+        // Preflight: enforce server's per-caller cap client-side so the
+        // user gets instant feedback instead of waiting for a 409 round
+        // trip. Each player can hold at most ONE regular call and ONE
+        // deal call simultaneously (two independent buckets).
         const tid = String(targetId);
+        const wantDeal = !!isDeal;
+        const existingTid = Object.keys(state.calls).find(t => {
+            const c = state.calls[t];
+            return c && c.calledBy && String(c.calledBy.id) === String(state.myPlayerId)
+                && (!!c.isDeal) === wantDeal && t !== tid;
+        });
+        if (existingTid) {
+            const existingName = (state.statuses[existingTid] && state.statuses[existingTid].name)
+                || ('target ' + existingTid);
+            showToast(
+                `You already have ${wantDeal ? 'a deal call' : 'a call'} on ${existingName} — uncall first`,
+                'warning'
+            );
+            return;
+        }
+        // Optimistic update
         state.calls[tid] = {
             calledBy: { id: state.myPlayerId, name: state.myPlayerName || 'You' },
             calledAt: Date.now(),
