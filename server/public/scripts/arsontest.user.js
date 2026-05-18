@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.9.0
+// @version      0.9.1
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -568,22 +568,43 @@
             }));
             list.querySelectorAll('.arsontest-ed-dup').forEach(b => b.addEventListener('click', () => {
                 // Load the existing recipe into the editor, flip the
-                // flamethrower checkbox, and let the user edit + save.
-                // Save handler will write to the sibling key thanks to
-                // variantKey(baseName(rawKey), flamethrower).
+                // flamethrower checkbox, swap the ignite tool for the
+                // target variant, then let the user edit + save.
+                // Save handler will write to the sibling key thanks
+                // to variantKey(baseName(rawKey), flamethrower).
                 const k = b.dataset.k; const r = RECIPES[k];
                 if (!r) return;
+                const toFlame = !isFlameKey(k); // we're creating the OPPOSITE variant
+                const stokeMap = r.stoke ? Object.assign({}, r.stoke) : {};
+                let igniteValue = r.ignite || '';
+                if (toFlame) {
+                    // Flame variant: flamethrower IS the ignite, so a
+                    // lighter in stoke would double-count. Strip it.
+                    delete stokeMap.lighter;
+                    igniteValue = 'flamethrower';
+                } else {
+                    // No-flame variant: needs an explicit ignite tool.
+                    // Default to a lighter in stoke (covers ~90% of
+                    // upstream BFB no-flame variants); user can swap
+                    // for kerosene/molotov/etc. before saving.
+                    if (!stokeMap.lighter) stokeMap.lighter = 1;
+                    if (igniteValue === 'flamethrower' || igniteValue === 'flame') {
+                        igniteValue = 'lighter';
+                    }
+                }
                 overlay.querySelector('#arsontest-ed-key').value = baseName(k);
                 overlay.querySelector('#arsontest-ed-loc').value = r.location || '';
                 overlay.querySelector('#arsontest-ed-items').value = Object.entries(r.items).map(([n, q]) => n + ':' + q).join(', ');
-                overlay.querySelector('#arsontest-ed-stoke').value = r.stoke ? Object.entries(r.stoke).map(([n, q]) => n + ':' + q).join(', ') : '';
+                overlay.querySelector('#arsontest-ed-stoke').value = Object.keys(stokeMap).length > 0
+                    ? Object.entries(stokeMap).map(([n, q]) => n + ':' + q).join(', ')
+                    : '';
                 overlay.querySelector('#arsontest-ed-dampen').value = r.dampen ? Object.entries(r.dampen).map(([n, q]) => n + ':' + q).join(', ') : '';
                 overlay.querySelector('#arsontest-ed-payout').value = r.payout;
                 overlay.querySelector('#arsontest-ed-nerve').value = '';  // re-derive for the swapped variant
-                overlay.querySelector('#arsontest-ed-flame').checked = !isFlameKey(k);
-                overlay.querySelector('#arsontest-ed-ignite').value = r.ignite || '';
+                overlay.querySelector('#arsontest-ed-flame').checked = toFlame;
+                overlay.querySelector('#arsontest-ed-ignite').value = igniteValue;
                 try { recomputeProfitNerve(); } catch (_) {}
-                status('Editing new ' + (isFlameKey(k) ? 'no-flame' : 'flame') + ' variant of ' + baseName(k) + ' — adjust items, then Save');
+                status('Editing new ' + (toFlame ? 'flame' : 'no-flame') + ' variant of ' + baseName(k) + ' — verify items, then Save');
             }));
             list.querySelectorAll('.arsontest-ed-del').forEach(b => b.addEventListener('click', async () => {
                 const k = b.dataset.k;
