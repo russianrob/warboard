@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson bang for buck (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.00.040-fix3-wb6
+// @version      1.00.040-fix3-wb7
 // @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Mirror of neth392's 1.00.040-fix3 with download/update URLs pointing at tornwar.com so future patches auto-update. wb2: auto-syncs recipe edits from the tornwar server (written by arsontest) into the tooltip data.
 // @author       Para_Thenics, auboli77 (fix3 patches by neth392; mirrored by RussianRob)
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -3621,8 +3621,18 @@ function calculateMaterialCost(lines) {
  
  
     function formatProfitNerve(value) {
-        const rounded = Math.floor(value / 100) * 100;
-        return rounded >= 1000 ? `${(rounded / 1000).toFixed(1)}K` : rounded.toString();
+        // wb7: format negatives with the same K-suffix that positives
+        // get. Previous code returned raw "-2000" for negative profit
+        // while positive >=1000 got "2.0K" — inconsistent and visually
+        // misleading (user reported seeing "0" for net-loss recipes
+        // when in practice the formatter was producing a long raw
+        // negative integer that the user mis-read).
+        const sign = value < 0 ? '-' : '';
+        const abs = Math.abs(value);
+        const rounded = Math.floor(abs / 100) * 100;
+        return rounded >= 1000
+            ? `${sign}${(rounded / 1000).toFixed(1)}K`
+            : `${sign}${rounded}`;
     }
  
  
