@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.21
+// @version      0.8.22
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -596,13 +596,21 @@
             const items = parseItemsString(itemsStr);
             if (Object.keys(items).length === 0) { status('Need at least 1 item (e.g. gasoline:3)', '#ef4444'); return; }
             const recipe = { items, payout };
-            if (Number.isFinite(nerve) && nerve > 0) recipe.nerve = nerve;
             if (location) recipe.location = location;
             const stoke = parseItemsString(stokeStr);
             if (Object.keys(stoke).length > 0) recipe.stoke = stoke;
             const dampen = parseItemsString(dampenStr);
             if (Object.keys(dampen).length > 0) recipe.dampen = dampen;
             recipe.flamethrower = flamethrower;
+            // Auto-fill nerve when the field is empty. Formula lives
+            // in autoCalcArsonNerve — items×5 + start/end(5) +
+            // ignite(5) = items×5 + 10. Manual entries take precedence.
+            if (Number.isFinite(nerve) && nerve > 0) {
+                recipe.nerve = nerve;
+            } else {
+                const auto = autoCalcArsonNerve(items, stoke, dampen);
+                if (auto > 0) recipe.nerve = auto;
+            }
             try {
                 await postRecipe(key, recipe);
                 RECIPES[key] = recipe;
@@ -668,6 +676,23 @@
         const locStr = recipe.location ? recipe.location + ' · ' : '';
         return locStr + itemsStr + stokeStr + dampenStr + ' · ' + payoutStr + nerveStr + flameStr;
     }
+    // Auto-calc total nerve from a recipe's items/stoke/dampen maps.
+    // Formula (user 2026-05-18):
+    //   - each item action (place, stoke, dampen): 5 nerve × qty
+    //   - start + end of the crime (combined):       +5 nerve
+    //   - ignite (flamethrower OR lighter, one step): +5 nerve
+    //   → total = (items_qty + stoke_qty + dampen_qty) × 5 + 10
+    // Returns 0 when the recipe has no items at all (caller should
+    // treat that as "no auto-calc available" rather than 10).
+    function autoCalcArsonNerve(items, stoke, dampen) {
+        const sumQty = (obj) => obj && typeof obj === 'object'
+            ? Object.values(obj).reduce((s, q) => s + (Number(q) || 0), 0)
+            : 0;
+        const totalQty = sumQty(items) + sumQty(stoke) + sumQty(dampen);
+        if (totalQty <= 0) return 0;
+        return totalQty * 5 + 10;
+    }
+
     // Reusable item-string parser ("gasoline:3 lighter:1" or "3 gasoline, 1 lighter")
     function parseItemsString(str) {
         const out = {};

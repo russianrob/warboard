@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson bang for buck (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.00.040-fix3-wb3
+// @version      1.00.040-fix3-wb4
 // @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Mirror of neth392's 1.00.040-fix3 with download/update URLs pointing at tornwar.com so future patches auto-update. wb2: auto-syncs recipe edits from the tornwar server (written by arsontest) into the tooltip data.
 // @author       Para_Thenics, auboli77 (fix3 patches by neth392; mirrored by RussianRob)
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -146,6 +146,19 @@ async function getPricesFromAPI() {
     const WB_CACHE_KEY     = 'bfb_server_recipes_v1';
     const WB_CACHE_TTL_MS  = 5 * 60 * 1000;
 
+    /** Auto-calc total nerve from a recipe's items/stoke/dampen maps.
+     *  Mirrors arsontest's autoCalcArsonNerve — keep these in sync.
+     *  Formula: (items_qty + stoke_qty + dampen_qty) × 5 + 10
+     *  (5 per item action + 5 start/end + 5 ignite). */
+    function wbAutoCalcArsonNerve(r) {
+        const sumQty = (obj) => obj && typeof obj === 'object'
+            ? Object.values(obj).reduce((s, q) => s + (Number(q) || 0), 0)
+            : 0;
+        const totalQty = sumQty(r.items) + sumQty(r.stoke) + sumQty(r.dampen);
+        if (totalQty <= 0) return 0;
+        return totalQty * 5 + 10;
+    }
+
     /** Map a server recipe (structured fields) into the line-array shape
      *  the BFB tooltip code expects. Order mirrors upstream's existing
      *  scenario rows so the tooltip layout stays familiar. */
@@ -153,7 +166,14 @@ async function getPricesFromAPI() {
         if (!r || typeof r !== 'object') return null;
         const lines = [];
         const payout = r.payout != null && r.payout !== '' ? String(r.payout) : '';
-        const nerve  = r.nerve  != null && r.nerve  !== '' ? Number(r.nerve)  : null;
+        // Use stored nerve when present, otherwise auto-calc so the
+        // tooltip can still show Profit/Nerve for recipes whose author
+        // skipped the nerve field.
+        let nerve = r.nerve  != null && r.nerve  !== '' ? Number(r.nerve)  : null;
+        if (!(nerve && nerve > 0)) {
+            const auto = wbAutoCalcArsonNerve(r);
+            if (auto > 0) nerve = auto;
+        }
         if (payout) lines.push('Payout: ' + payout);
         if (nerve && nerve > 0 && /^[\d.,kKmM]+$/.test(payout)) {
             // Best-effort profit/nerve calc only when payout parses cleanly.
