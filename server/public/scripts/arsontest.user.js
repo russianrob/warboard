@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.9.5
+// @version      0.9.6
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -525,11 +525,19 @@
         const renderList = () => {
             const list = overlay.querySelector('#arsontest-ed-list');
             // Sort by location first (entries without location sink), then action.
+            // Sort: location → base crime name → no-flame before flame.
+            // Keeping variants of the same crime adjacent makes it
+            // obvious when both slots are filled (or which one is
+            // missing — relevant when scanning for crimes that still
+            // need their sibling variant created).
             const entries = Object.entries(RECIPES).sort((a, b) => {
                 const la = (a[1].location || '￿~~~').toLowerCase();
                 const lb = (b[1].location || '￿~~~').toLowerCase();
                 if (la !== lb) return la < lb ? -1 : 1;
-                return a[0] < b[0] ? -1 : 1;
+                const baseA = baseName(a[0]); const baseB = baseName(b[0]);
+                if (baseA !== baseB) return baseA < baseB ? -1 : 1;
+                // Same base crime → no-flame first, flame second.
+                return isFlameKey(a[0]) - isFlameKey(b[0]);
             });
             if (!entries.length) { list.innerHTML = '<div style="color:#6b7280;">No recipes yet.</div>'; return; }
             const listValueMap = loadItemValueMap();
