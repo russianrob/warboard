@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson bang for buck (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.00.040-fix3-wb9
+// @version      1.00.040-fix3-wb10
 // @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Mirror of neth392's 1.00.040-fix3 with download/update URLs pointing at tornwar.com so future patches auto-update. wb2: auto-syncs recipe edits from the tornwar server (written by arsontest) into the tooltip data.
 // @author       Para_Thenics, auboli77 (fix3 patches by neth392; mirrored by RussianRob)
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -217,13 +217,23 @@ async function getPricesFromAPI() {
     }
 
     /** Overlay server recipes into the `scenarios` map (defined below).
-     *  Mutates in place; safe to call repeatedly. */
+     *  Mutates in place; safe to call repeatedly.
+     *  wb10: server stores keys lowercase ("hot dog"); upstream
+     *  scenarios use Title Case ("Hot Dog"). Without case-folding,
+     *  the overlay added a NEW lowercase key while Torn's lookup
+     *  kept hitting the stale Title Case entry — so every server
+     *  recipe was silently ignored at render time. Fix: build a
+     *  case-insensitive index once, then overlay onto the canonical
+     *  upstream key when one exists. */
     function wbOverlayServerRecipes(serverRecipes) {
         if (!serverRecipes || typeof serverRecipes !== 'object') return 0;
+        const canonical = Object.create(null);
+        for (const k of Object.keys(scenarios)) canonical[k.toLowerCase()] = k;
         let n = 0;
-        for (const [key, recipe] of Object.entries(serverRecipes)) {
+        for (const [rawKey, recipe] of Object.entries(serverRecipes)) {
             const lines = wbRecipeToLines(recipe);
             if (!lines) continue;
+            const key = canonical[rawKey.toLowerCase()] || rawKey;
             scenarios[key] = lines;
             n++;
         }
