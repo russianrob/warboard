@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson bang for buck (tornwar fork)
 // @namespace    tornwar.com
-// @version      1.00.044-wb11
+// @version      1.00.045-wb12
 // @description  Profit-per-nerve + how-to-perform tooltips on the crimes page. Mirror of neth392's 1.00.040-fix3 with download/update URLs pointing at tornwar.com so future patches auto-update. wb2: auto-syncs recipe edits from the tornwar server (written by arsontest) into the tooltip data.
 // @author       Para_Thenics, auboli77 (fix3 patches by neth392; mirrored by RussianRob)
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -168,6 +168,18 @@ async function getPricesFromAPI() {
     /** Map a server recipe (structured fields) into the line-array shape
      *  the BFB tooltip code expects. Order mirrors upstream's existing
      *  scenario rows so the tooltip layout stays familiar. */
+    /** Format { name: qty } / array / string as "1 lighter, 2 gasoline".
+     *  Returns empty string for null / undefined / empty. */
+    function wbFormatItemMap(v) {
+        if (!v) return '';
+        if (Array.isArray(v)) return v.join(', ');
+        if (typeof v === 'string') return v;
+        if (typeof v === 'object') {
+            return Object.entries(v).map(([n, q]) => q + ' ' + n).join(', ');
+        }
+        return String(v);
+    }
+
     /** Compact money formatter matching upstream BFB's style:
      *  1234 → "1.2K", 30500 → "30.5K", 210000 → "210K", 1500000 → "1.5M". */
     function wbFormatMoney(n) {
@@ -213,8 +225,10 @@ async function getPricesFromAPI() {
             itemsStr = r.items;
         }
         lines.push('Place: ' + itemsStr);
-        lines.push('Stoke: '  + (r.stoke  || ''));
-        lines.push('Dampen: ' + (r.dampen || ''));
+        // Same { name: qty } format as items — string-concatenating
+        // raw objects produced "Stoke: [object Object]" pre-wb12.
+        lines.push('Stoke: '  + wbFormatItemMap(r.stoke));
+        lines.push('Dampen: ' + wbFormatItemMap(r.dampen));
         if (r.location) lines.push('Location: ' + r.location);
         return lines;
     }
