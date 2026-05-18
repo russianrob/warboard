@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.9.1
+// @version      0.9.2
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -355,6 +355,42 @@
         return null;
     }
 
+    // Upstream BFB scenario data — fetched once per page load and used
+    // by the +variant button to pre-fill items + payout from BFB's
+    // hardcoded variant data (so e.g. creating the no-flame Hot Dog
+    // pre-fills 3 gasoline @ 38K, the flame one pre-fills 1 gasoline
+    // @ 30.5K). The server route /api/arson/upstream parses this once
+    // at boot from the BFB userscript's `scenarios` const.
+    let UPSTREAM_SCENARIOS = null;
+    async function fetchUpstreamScenarios() {
+        if (UPSTREAM_SCENARIOS) return UPSTREAM_SCENARIOS;
+        try {
+            const res = await new Promise((resolve, reject) => {
+                if (typeof GM_xmlhttpRequest === 'function') {
+                    GM_xmlhttpRequest({
+                        method: 'GET', url: SERVER + '/api/arson/upstream',
+                        timeout: 5000,
+                        onload: r => resolve(JSON.parse(r.responseText)),
+                        onerror: () => reject(new Error('net')),
+                        ontimeout: () => reject(new Error('timeout')),
+                    });
+                } else {
+                    fetch(SERVER + '/api/arson/upstream').then(r => r.json()).then(resolve).catch(reject);
+                }
+            });
+            UPSTREAM_SCENARIOS = res?.scenarios || {};
+        } catch (_) { UPSTREAM_SCENARIOS = {}; }
+        return UPSTREAM_SCENARIOS;
+    }
+    // Look up an upstream variant by crime name (case-insensitive) and
+    // target flamethrower flag. Returns null if no match.
+    function findUpstreamVariant(crimeName, wantFlame) {
+        if (!UPSTREAM_SCENARIOS) return null;
+        const variants = UPSTREAM_SCENARIOS[String(crimeName || '').toLowerCase()];
+        if (!Array.isArray(variants)) return null;
+        return variants.find(v => !!v.flamethrower === !!wantFlame) || null;
+    }
+
     const RECIPE_TTL_MS = 10 * 60 * 1000;
     function loadCachedRecipes() {
         try {
@@ -566,45 +602,61 @@
                 try { recomputeProfitNerve(); } catch (_) {}
                 status('Editing ' + k);
             }));
-            list.querySelectorAll('.arsontest-ed-dup').forEach(b => b.addEventListener('click', () => {
-                // Load the existing recipe into the editor, flip the
-                // flamethrower checkbox, swap the ignite tool for the
-                // target variant, then let the user edit + save.
-                // Save handler will write to the sibling key thanks
-                // to variantKey(baseName(rawKey), flamethrower).
+            list.querySelectorAll('.arsontest-ed-dup').forEach(b => b.addEventListener('click', async () => {
+                // Pre-fill the editor for the OPPOSITE variant. Priority:
+                //   1. upstream BFB scenario data (canonical items + payout
+                //      for that specific crime + flame state)
+                //   2. fall back to the existing recipe with the ignite
+                //      tool swapped (lighter ↔ flamethrower).
                 const k = b.dataset.k; const r = RECIPES[k];
                 if (!r) return;
-                const toFlame = !isFlameKey(k); // we're creating the OPPOSITE variant
-                const stokeMap = r.stoke ? Object.assign({}, r.stoke) : {};
-                let igniteValue = r.ignite || '';
-                if (toFlame) {
-                    // Flame variant: flamethrower IS the ignite, so a
-                    // lighter in stoke would double-count. Strip it.
-                    delete stokeMap.lighter;
-                    igniteValue = 'flamethrower';
+                const toFlame = !isFlameKey(k);
+                const crime = baseName(k);
+
+                await fetchUpstreamScenarios();
+                const upstream = findUpstreamVariant(crime, toFlame);
+
+                let itemsObj, stokeMap, payoutValue, dampenObj;
+                let igniteValue;
+                let source;
+                if (upstream && Object.keys(upstream.items || {}).length > 0) {
+                    itemsObj = upstream.items;
+                    stokeMap = Object.assign({}, upstream.stoke || {});
+                    dampenObj = upstream.dampen || {};
+                    payoutValue = upstream.payout || r.payout;
+                    igniteValue = toFlame ? 'flamethrower' : (stokeMap.lighter ? 'lighter' : '');
+                    source = 'upstream BFB';
                 } else {
-                    // No-flame variant: needs an explicit ignite tool.
-                    // Default to a lighter in stoke (covers ~90% of
-                    // upstream BFB no-flame variants); user can swap
-                    // for kerosene/molotov/etc. before saving.
-                    if (!stokeMap.lighter) stokeMap.lighter = 1;
-                    if (igniteValue === 'flamethrower' || igniteValue === 'flame') {
+                    // Fallback: clone current items, swap ignite tool.
+                    itemsObj = r.items;
+                    stokeMap = r.stoke ? Object.assign({}, r.stoke) : {};
+                    dampenObj = r.dampen || {};
+                    payoutValue = r.payout;
+                    if (toFlame) {
+                        delete stokeMap.lighter;
+                        igniteValue = 'flamethrower';
+                    } else {
+                        if (!stokeMap.lighter) stokeMap.lighter = 1;
                         igniteValue = 'lighter';
                     }
+                    source = 'fallback (no upstream)';
                 }
-                overlay.querySelector('#arsontest-ed-key').value = baseName(k);
+
+                overlay.querySelector('#arsontest-ed-key').value = crime;
                 overlay.querySelector('#arsontest-ed-loc').value = r.location || '';
-                overlay.querySelector('#arsontest-ed-items').value = Object.entries(r.items).map(([n, q]) => n + ':' + q).join(', ');
+                overlay.querySelector('#arsontest-ed-items').value = Object.entries(itemsObj).map(([n, q]) => n + ':' + q).join(', ');
                 overlay.querySelector('#arsontest-ed-stoke').value = Object.keys(stokeMap).length > 0
                     ? Object.entries(stokeMap).map(([n, q]) => n + ':' + q).join(', ')
                     : '';
-                overlay.querySelector('#arsontest-ed-dampen').value = r.dampen ? Object.entries(r.dampen).map(([n, q]) => n + ':' + q).join(', ') : '';
-                overlay.querySelector('#arsontest-ed-payout').value = r.payout;
-                overlay.querySelector('#arsontest-ed-nerve').value = '';  // re-derive for the swapped variant
+                overlay.querySelector('#arsontest-ed-dampen').value = Object.keys(dampenObj).length > 0
+                    ? Object.entries(dampenObj).map(([n, q]) => n + ':' + q).join(', ')
+                    : '';
+                overlay.querySelector('#arsontest-ed-payout').value = payoutValue;
+                overlay.querySelector('#arsontest-ed-nerve').value = '';
                 overlay.querySelector('#arsontest-ed-flame').checked = toFlame;
                 overlay.querySelector('#arsontest-ed-ignite').value = igniteValue;
                 try { recomputeProfitNerve(); } catch (_) {}
-                status('Editing new ' + (toFlame ? 'flame' : 'no-flame') + ' variant of ' + baseName(k) + ' — verify items, then Save');
+                status('Pre-filled ' + (toFlame ? 'flame' : 'no-flame') + ' variant of ' + crime + ' from ' + source + ' — review then Save');
             }));
             list.querySelectorAll('.arsontest-ed-del').forEach(b => b.addEventListener('click', async () => {
                 const k = b.dataset.k;

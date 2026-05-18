@@ -8445,6 +8445,28 @@ router.get("/api/arson/recipes", async (req, res) => {
   return res.json(loadArsonRecipes());
 });
 
+// Upstream BFB scenario table — parsed once at extract time from the
+// `scenarios` const inside the BFB userscript. arsontest reads this so
+// its "+variant" button can pre-fill the opposite flamethrower variant
+// with the items + payout BFB ships, rather than making the user retype
+// from memory. Re-extract via the brace-walk helper any time BFB's
+// upstream data changes (see ARSON_UPSTREAM_FILE).
+const ARSON_UPSTREAM_FILE = pathJoin(OC_HISTORY_DIR, '..', 'upstream-arson-scenarios.json');
+let _arsonUpstream = null;
+function loadArsonUpstream() {
+  if (_arsonUpstream) return _arsonUpstream;
+  try {
+    _arsonUpstream = JSON.parse(readFileSync(ARSON_UPSTREAM_FILE, 'utf-8'));
+  } catch (_) {
+    _arsonUpstream = { version: 1, extractedAt: 0, scenarios: {} };
+  }
+  return _arsonUpstream;
+}
+router.get("/api/arson/upstream", async (req, res) => {
+  res.set('Cache-Control', 'public, max-age=300');
+  return res.json(loadArsonUpstream());
+});
+
 router.post("/api/arson/recipes", express.json({ limit: '8kb' }), async (req, res) => {
   const body = req.body || {};
   const key = String(body.key || '').toLowerCase().trim();
