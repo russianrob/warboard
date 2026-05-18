@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.8.24
+// @version      0.8.25
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -518,6 +518,16 @@
         // otherwise uses the explicit value.
         const ppnEl = overlay.querySelector('#arsontest-ed-ppn-val');
         const ppnHintEl = overlay.querySelector('#arsontest-ed-ppn-hint');
+        function formatSigned(n) {
+            const sign = n < 0 ? '-' : '';
+            const abs = Math.abs(n);
+            let body;
+            if (abs >= 1e6) body = (abs / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+            else if (abs >= 1e4) body = Math.round(abs / 1e3) + 'K';
+            else if (abs >= 1e3) body = (abs / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+            else body = String(Math.round(abs));
+            return sign + body;
+        }
         function recomputeProfitNerve() {
             try {
                 const payout = Number(overlay.querySelector('#arsontest-ed-payout').value);
@@ -531,18 +541,27 @@
                 if (!Number.isFinite(payout) || payout <= 0 || !nerve || nerve <= 0) {
                     ppnEl.textContent = '—';
                     ppnHintEl.textContent = '';
+                    ppnEl.parentElement.style.color = '#74c69d';
+                    ppnEl.parentElement.style.borderColor = '#2d6a4f';
                     return;
                 }
-                const ppn = Math.round(payout / nerve);
-                let formatted;
-                if (ppn >= 1e6) formatted = (ppn / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
-                else if (ppn >= 1e4) formatted = Math.round(ppn / 1e3) + 'K';
-                else if (ppn >= 1e3) formatted = (ppn / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
-                else formatted = String(ppn);
-                ppnEl.textContent = formatted + ' /nerve';
-                ppnHintEl.textContent = nerveExplicit
-                    ? '(' + nerve + ' nerve, manual)'
-                    : '(' + nerve + ' nerve, auto)';
+                const valueMap = loadItemValueMap();
+                const cost = calcMaterialCost(items, stoke, dampen, valueMap);
+                const profit = payout - cost;
+                const ppn = Math.round(profit / nerve);
+                ppnEl.textContent = formatSigned(ppn) + ' /nerve';
+                ppnHintEl.textContent =
+                    '(' + nerve + ' nerve ' + (nerveExplicit ? 'manual' : 'auto')
+                    + ', cost ' + formatSigned(cost) + ')';
+                // Red border when profit is negative so it's instantly
+                // obvious the recipe is a net loss at current item prices.
+                if (ppn < 0) {
+                    ppnEl.parentElement.style.color = '#fca5a5';
+                    ppnEl.parentElement.style.borderColor = '#7f1d1d';
+                } else {
+                    ppnEl.parentElement.style.color = '#74c69d';
+                    ppnEl.parentElement.style.borderColor = '#2d6a4f';
+                }
             } catch (_) {
                 ppnEl.textContent = '—';
                 ppnHintEl.textContent = '';
@@ -727,6 +746,70 @@
         const locStr = recipe.location ? recipe.location + ' · ' : '';
         return locStr + itemsStr + stokeStr + dampenStr + ' · ' + payoutStr + nerveStr + flameStr;
     }
+    // ── Material costs for net-profit calc ───────────────────────────
+    // Shares localStorage with arson-bang-for-buck (same origin), so
+    // if BFB has loaded once with the user's customised item prices,
+    // we pick them up via localStorage['itemValues']. Falls back to
+    // BFB's hardcoded defaults when localStorage is empty.
+    const DEFAULT_ITEM_VALUES = {
+        "molotov cocktail": "184388", gasoline: "500", diesel: "30K",
+        kerosene: "70K", "potassium nitrate": "70K", "magnesium shavings": "80K",
+        thermite: "500K", "oxygen tank": "125K", "methane tank": "110K",
+        "hydrogen tank": "45K", sand: "144993", "fire extinguisher": "383256",
+        ammonia: "5257", cannabis: "5834", compass: "11094",
+        "diamond ring": "2732", "elephant statue": "16644", "family photo": "9298",
+        "glitter bomb": "902027", "gold tooth": "18485", grenade: "6999",
+        "hard drive": "400", "kabuki mask": "71853", lipstick: "228",
+        "mayan statue": "3008", opium: "32562", "pele charm": "3081",
+        "raw ivory": "69849", stapler: "9078", "sumo doll": "19275",
+        syringe: "1507", toothbrush: "5030",
+        // Stoke / ignite tools we treat as ~free if BFB doesn't know
+        // (lighter / flamethrower are tools, not consumed per-use in
+        // the same way the fuels are):
+        lighter: "0", flamethrower: "0",
+    };
+    /** Parse "30K" / "1.2M" / "184388" / "$500" → integer. */
+    function parseItemValue(raw) {
+        if (raw == null || raw === '') return 0;
+        const m = String(raw).match(/\$?\s*([\d.,]+)\s*([kKmMbB]?)/);
+        if (!m) return 0;
+        const num = parseFloat(m[1].replace(/,/g, ''));
+        if (!Number.isFinite(num)) return 0;
+        const s = (m[2] || '').toLowerCase();
+        const mult = s === 'b' ? 1e9 : s === 'm' ? 1e6 : s === 'k' ? 1e3 : 1;
+        return Math.round(num * mult);
+    }
+    /** Read item-value map: BFB's localStorage cache overlaid on the
+     *  hardcoded defaults. Case-insensitive lookups via lowercase keys. */
+    function loadItemValueMap() {
+        const out = {};
+        for (const [k, v] of Object.entries(DEFAULT_ITEM_VALUES)) out[k.toLowerCase()] = v;
+        try {
+            const saved = localStorage.getItem('itemValues');
+            if (saved) {
+                const loaded = JSON.parse(saved);
+                if (loaded && typeof loaded === 'object') {
+                    for (const [k, v] of Object.entries(loaded)) out[String(k).toLowerCase()] = v;
+                }
+            }
+        } catch (_) {}
+        return out;
+    }
+    /** Sum cost of every item across items/stoke/dampen. Unknown items
+     *  contribute 0 (caller may want to surface as a warning later). */
+    function calcMaterialCost(items, stoke, dampen, valueMap) {
+        const sumGroup = (g) => {
+            if (!g || typeof g !== 'object') return 0;
+            let total = 0;
+            for (const [name, qty] of Object.entries(g)) {
+                const v = parseItemValue(valueMap[String(name).toLowerCase()]);
+                total += v * (Number(qty) || 0);
+            }
+            return total;
+        };
+        return sumGroup(items) + sumGroup(stoke) + sumGroup(dampen);
+    }
+
     // Auto-calc total nerve from a recipe's items/stoke/dampen maps.
     // Formula (user 2026-05-18, revised):
     //   - each item action (place, stoke, dampen): 5 nerve × qty
