@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arson Recipe Sandbox (test)
 // @namespace    tornwar.com
-// @version      0.9.2
+// @version      0.9.3
 // @description  Lightweight recipe-editor UI for arson scenarios. Floating ⚙ button on the crimes page opens a panel to add / edit / delete server-hosted recipes (tornwar.com). NO DOM modification of crime options — leaves the upstream 'arson-bang-for-buck' tooltip / hover behavior completely untouched.
 // @author       RussianRob
 // @match        https://www.torn.com/page.php?sid=crimes*
@@ -558,9 +558,12 @@
                     const color = ppn < 0 ? '#fca5a5' : '#74c69d';
                     ppnHtml = ` · <span style="color:${color};font-weight:600;" title="profit/nerve at current item prices">${sign}${body}/N</span>`;
                 }
+                // Variant chip on EVERY row so the flame/no-flame
+                // state is visible at a glance and the listing reads
+                // symmetrically across variants.
                 const flameChip = isFlameKey(k)
                     ? '<span style="color:#fb923c;font-weight:700;" title="flamethrower variant">🔥</span> '
-                    : '';
+                    : '<span style="color:#9ca3af;font-weight:700;" title="no-flame variant">🚫🔥</span> ';
                 const display = baseName(k);
                 // Offer a "+ variant" button when the sibling variant
                 // doesn't exist yet — one tap clones this recipe into
