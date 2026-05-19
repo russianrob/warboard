@@ -9240,6 +9240,34 @@ router.post("/api/live-activity/status/unsubscribe", requireAuth, express.json({
   return res.json({ ok: true, removed });
 });
 
+// ── /api/watch/subscribe ───────────────────────────────────────────────
+// Apple Watch app registers its APNs device token + Torn API key so
+// the existing 5-min status poller can push bars/cooldowns to the
+// watch as a silent background notification (content-available: 1).
+// The watch decodes the userInfo payload, updates its local cache,
+// and reloads the StatusComplication timeline — same effective UX as
+// the iPhone Status LA, but on the watch face.
+router.post("/api/watch/subscribe", requireAuth, express.json({ limit: '4kb' }), async (req, res) => {
+  const { token, apiKey } = req.body || {};
+  if (!token || !apiKey) return res.status(400).json({ error: "token and apiKey required" });
+  const watchTokens = await import("./watch-tokens.js");
+  watchTokens.upsert({
+    playerId: String(req.user.playerId),
+    playerName: String(req.user.playerName || ""),
+    token: String(token),
+    apiKey: String(apiKey),
+  });
+  console.log(`[watch] subscribed ${req.user.playerName} (${req.user.playerId}) — total: ${watchTokens.size()}`);
+  return res.json({ ok: true });
+});
+
+router.post("/api/watch/unsubscribe", requireAuth, express.json({ limit: '4kb' }), async (req, res) => {
+  const watchTokens = await import("./watch-tokens.js");
+  watchTokens.remove({ playerId: String(req.user.playerId) });
+  console.log(`[watch] unsubscribed ${req.user.playerName} (${req.user.playerId}) — total: ${watchTokens.size()}`);
+  return res.json({ ok: true });
+});
+
 // ── /api/apns/subscribe ────────────────────────────────────────────────
 // Native iOS device-token registration. Stored in the same
 // fcm-subscriptions.json file as Android tokens — the `platform`

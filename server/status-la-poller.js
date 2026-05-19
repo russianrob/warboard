@@ -20,7 +20,14 @@
  */
 
 import * as tokens from "./status-la-tokens.js";
+import * as watchTokens from "./watch-tokens.js";
 import * as apns from "./apns.js";
+
+// The watch app's bundle ID — used as the apns-topic for background
+// pushes to the paired Apple Watch. Distinct from the iPhone bundle
+// (env APNS_BUNDLE_ID), so we hardcode the watchOS identifier here.
+// If we ever ship a separate watchOS app variant we can env-gate this.
+const WATCH_BUNDLE_ID = "com.tornwar.warboard.watchkitapp";
 
 const POLL_INTERVAL_MS = Number(process.env.STATUS_LA_POLL_MS) || 5 * 60 * 1000; // 5 min
 const POLL_JITTER_MS = 30 * 1000; // spread initial start so all users don't poll the same instant
@@ -62,27 +69,60 @@ function buildContentState(json) {
 }
 
 async function tick() {
-  const rows = tokens.listAllDecrypted();
-  if (rows.length === 0) return;
-  for (const row of rows) {
+  // Union of subscribers across LA + watch — a user may have either
+  // or both registered. We poll Torn ONCE per playerId regardless of
+  // which channels are active, then fan out the same state to every
+  // active channel for that player.
+  const laRows = tokens.listAllDecrypted();
+  const watchRows = watchTokens.listAllDecrypted();
+  const byPlayer = new Map();
+  for (const r of laRows) {
+    const p = byPlayer.get(r.playerId) || { playerId: r.playerId, apiKey: r.apiKey };
+    p.laToken = r.token;
+    byPlayer.set(r.playerId, p);
+  }
+  for (const r of watchRows) {
+    const p = byPlayer.get(r.playerId) || { playerId: r.playerId, apiKey: r.apiKey };
+    p.watchToken = r.token;
+    // Prefer the apiKey that was registered most recently — both
+    // sources carry it; either should work but the watch one is more
+    // likely current if the user just subscribed.
+    p.apiKey = r.apiKey;
+    byPlayer.set(r.playerId, p);
+  }
+  if (byPlayer.size === 0) return;
+
+  for (const row of byPlayer.values()) {
     const { data, error } = await fetchBars(row.apiKey);
-    if (error) {
-      // Don't reap on Torn-side errors — could be transient.
-      continue;
-    }
+    if (error) continue;
     const state = buildContentState(data);
-    const result = await apns.sendLiveActivity(row.token, state, { event: "update" });
-    if (!result.ok) {
-      const reason = result.reason || result.apnsStatus || "";
-      // Reap definitively-bad tokens. Apple's APNs returns 410 +
-      // "BadDeviceToken" / "Unregistered" for tokens that no longer
-      // map to an active activity (user dismissed, app uninstalled,
-      // 12h LA expiry). Anything else (5xx, timeouts) we leave for
-      // the next tick.
-      if (reason === "BadDeviceToken" || reason === "Unregistered"
-          || result.apnsStatus === 410) {
-        tokens.remove({ token: row.token });
-        console.log(`[status-la] reaped dead token for player ${row.playerId} (${reason})`);
+
+    // Channel 1: iPhone Status Live Activity.
+    if (row.laToken) {
+      const result = await apns.sendLiveActivity(row.laToken, state, { event: "update" });
+      if (!result.ok) {
+        const reason = result.reason || result.apnsStatus || "";
+        if (reason === "BadDeviceToken" || reason === "Unregistered"
+            || result.apnsStatus === 410) {
+          tokens.remove({ token: row.laToken });
+          console.log(`[status-la] reaped dead LA token for player ${row.playerId} (${reason})`);
+        }
+      }
+    }
+
+    // Channel 2: Apple Watch background push.
+    if (row.watchToken) {
+      // Same ContentState dict — the watch decodes it from userInfo
+      // and updates WatchBarsStore which reloads StatusComplication.
+      const result = await apns.sendBackgroundUpdate(row.watchToken, { bars: state }, {
+        topic: WATCH_BUNDLE_ID,
+      });
+      if (!result.ok) {
+        const reason = result.reason || result.status || "";
+        if (reason === "BadDeviceToken" || reason === "Unregistered" || result.status === 410) {
+          watchTokens.remove({ token: row.watchToken });
+          console.log(`[status-la] reaped dead watch token for player ${row.playerId} (${reason})`);
+        }
       }
     }
   }

@@ -201,6 +201,71 @@ export async function sendLiveActivity(deviceToken, contentState, opts = {}) {
 }
 
 /**
+ * Send a silent background push (content-available: 1) to a device.
+ * Used by the watch-status pipeline: server fetches bars + cooldowns
+ * every 5 min, encodes them as a userInfo dictionary, and pushes to
+ * the paired Apple Watch where the StatusComplication updates from
+ * the received data without ever showing the user a notification.
+ *
+ * @param {string} deviceToken hex token from didRegisterForRemoteNotifications
+ * @param {object} userInfo arbitrary JSON-encodable payload
+ * @param {object} [opts]
+ * @param {string} [opts.topic] override apns-topic (default BUNDLE_ID).
+ *   Pass the watch app's bundle ID (e.g. "com.tornwar.warboard.watchkitapp")
+ *   when pushing to a watch device token.
+ * @param {number} [opts.ttlSec] retry window in seconds (default 300)
+ */
+export async function sendBackgroundUpdate(deviceToken, userInfo, opts = {}) {
+  if (!isConfigured()) return { ok: false, reason: "not-configured" };
+  if (!deviceToken || typeof deviceToken !== "string") {
+    return { ok: false, reason: "missing-token" };
+  }
+  const body = { aps: { "content-available": 1 } };
+  if (userInfo && typeof userInfo === "object") Object.assign(body, userInfo);
+  const topic = opts.topic || BUNDLE_ID;
+  return new Promise((resolve) => {
+    let session;
+    try {
+      session = getClient();
+    } catch (err) {
+      return resolve({ ok: false, reason: `session-failed: ${err.message}` });
+    }
+    const expiresAt = Math.floor(Date.now() / 1000) + (opts.ttlSec ?? 300);
+    const headers = {
+      ":method": "POST",
+      ":path": `/3/device/${deviceToken}`,
+      "apns-topic": topic,
+      // Background pushes are mandatorily priority 5 (Apple rejects
+      // priority 10 silent pushes with "BadPriority"). Apple may
+      // throttle background delivery, but the 5-minute cadence is
+      // well within their published budget.
+      "apns-push-type": "background",
+      "apns-priority": "5",
+      "apns-expiration": String(expiresAt),
+      "authorization": `bearer ${getProviderJwt()}`,
+      "content-type": "application/json",
+    };
+    let req;
+    try { req = session.request(headers); }
+    catch (err) { return resolve({ ok: false, reason: `request-failed: ${err.message}` }); }
+    let respStatus = 0;
+    let respBody = "";
+    req.on("response", (h) => { respStatus = Number(h[":status"]) || 0; });
+    req.on("data", (chunk) => { respBody += chunk.toString("utf8"); });
+    req.on("end", () => {
+      if (respStatus === 200) return resolve({ ok: true, status: 200 });
+      let reason = `status-${respStatus}`;
+      try { const j = JSON.parse(respBody); if (j.reason) reason = j.reason; } catch {}
+      if (reason === "ExpiredProviderToken") _cachedToken = null;
+      resolve({ ok: false, status: respStatus, reason });
+    });
+    req.on("error", (err) => resolve({ ok: false, reason: `req-error: ${err.message}` }));
+    req.setEncoding("utf8");
+    req.end(JSON.stringify(body));
+  });
+}
+
+/**
  * Send a regular alert/banner push to a device token.
  *
  * Distinct from sendLiveActivity in two ways:
