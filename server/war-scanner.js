@@ -1,6 +1,8 @@
 import cron from 'node-cron';
 import axios from 'axios';
 import { startHeatmapScraper } from './heatmap-scraper.js';
+import * as store from './store.js';
+import { startChainMonitor } from './chain-monitor.js';
 
 // Dummy database service structure
 const db = {
@@ -25,7 +27,7 @@ async function scanFactions() {
             try {
                 console.log(`[WarScanner] Checking faction ${factionIdStr} for active wars...`);
                 
-                const url = `https://api.torn.com/faction/${factionIdStr}?selections=rankedwars&key=${faction.apiKey}`;
+                const url = `https://api.torn.com/faction/${factionIdStr}?selections=rankedwars&key=${faction.apiKey}&comment=wb-warscan`;
                 const response = await axios.get(url);
                 const data = response.data;
 
@@ -44,7 +46,34 @@ async function scanFactions() {
                         if (enemyId) {
                             const enemyName = warData.factions[enemyId]?.name || 'Unknown';
                             console.log(`[WarScanner] Active Ranked War detected! WarID: ${warId}, Enemy: ${enemyName} (${enemyId})`);
-                            startHeatmapScraper(warId, enemyId, faction.apiKey, enemyName);
+                            startHeatmapScraper(warId, enemyId, factionIdStr, faction.apiKey, enemyName);
+
+                            // 2026-05-19: previously the scanner only kicked
+                            // off the heatmap scraper, leaving war record
+                            // creation to whoever happened to load the war
+                            // page next. If nobody did, the new war was
+                            // invisible to FactionOps until a client triggered
+                            // it. Now we also create/refresh the war record
+                            // and start chain-monitor immediately, so the
+                            // server's view of the active war is current
+                            // regardless of client traffic.
+                            try {
+                                const stableWarId = `war_${factionIdStr}`;
+                                const war = store.getOrCreateWar(stableWarId, factionIdStr, String(enemyId));
+                                // getOrCreateWar wipes enemyFactionName on
+                                // enemy-change; refill from the scan result.
+                                war.enemyFactionName = enemyName;
+                                // Capture warStart + target if present so
+                                // pre-war countdowns work without waiting on
+                                // chain-monitor's first poll.
+                                if (warData.war?.start) war.warStart = warData.war.start;
+                                if (warData.war?.target) war.warOrigTarget = warData.war.target;
+                                store.saveState();
+                                startChainMonitor(null, stableWarId);
+                                console.log(`[WarScanner] Created war record + started chain-monitor for ${stableWarId} (vs ${enemyName})`);
+                            } catch (err) {
+                                console.error(`[WarScanner] Failed to wire war record for ${factionIdStr}:`, err.message);
+                            }
                         }
                     }
                 }

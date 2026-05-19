@@ -383,6 +383,11 @@ router.post("/api/gate", async (req, res) => {
  * The landing page requires a gate cookie.
  */
 export function gateMiddleware(req, res, next) {
+  // TEMP BYPASS (2026-05-19): user-requested gate disable so they can
+  // open the site without the fo_gate cookie. Revert by removing this
+  // early return — the rest of the middleware below is intact.
+  if (process.env.WB_DISABLE_GATE === "1") return next();
+
   if (
     req.path.startsWith("/api/") ||
     req.path.startsWith("/data/") ||

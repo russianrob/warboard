@@ -557,6 +557,11 @@ export function getAllFactionKeys() {
   return Array.from(factionApiKeys.entries());
 }
 
+/** factionIds that have a stored API key (no plaintext exposed). */
+export function listFactionApiKeyIds() {
+  return Array.from(factionApiKeys.keys());
+}
+
 export function storeFactionApiKey(factionId, apiKey) {
   factionApiKeys.set(factionId, apiKey);
   saveFactionKeys();
