@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.1-wb58
+// @version      2.73.1-wb59
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -3400,10 +3400,47 @@ if (!singleton) {
   //   - .members-list (factions.php)
   // ─────────────────────────────────────────────────────────────────────
   async function ffs_inject_sort_buttons() {
-    const containers = [
-      ...document.querySelectorAll(".members-cont"),
-      ...document.querySelectorAll(".members-list"),
-    ].filter(el => {
+    // Build a candidate-container set from multiple strategies.
+    //   1. Legacy classes (.members-cont, .members-list) — original
+    //      pre-React paths; still hit on some factions.php views.
+    //   2. Hashed React prefixes — Torn migrated war.php to React
+    //      with mangled class names like "membersList___ABC123".
+    //   3. Structural fallback — find the closest common ancestor of
+    //      multiple a[href*="XID="] links on the page; that's almost
+    //      certainly a member list regardless of class hash.
+    const candidates = new Set();
+
+    document.querySelectorAll(".members-cont").forEach(el => candidates.add(el));
+    document.querySelectorAll(".members-list").forEach(el => candidates.add(el));
+
+    // Hashed React selectors — match any class that starts with the
+    // common Torn-React patterns for the war-page member list.
+    document.querySelectorAll(
+      '[class*="membersList___"], [class*="membersCont___"], '
+      + '[class*="warMembersList___"], [class*="warMembers___"], '
+      + '[class*="memberList___"]'
+    ).forEach(el => candidates.add(el));
+
+    // Structural fallback — if we still have nothing, walk from the
+    // XID links. Their nearest ancestor that contains >=3 XID links
+    // is almost certainly the member-row wrapper, and its parent
+    // is the list container.
+    if (candidates.size === 0) {
+      const xidLinks = Array.from(document.querySelectorAll('a[href*="XID="]'));
+      const seenWrappers = new Set();
+      for (const link of xidLinks) {
+        let node = link.parentElement;
+        for (let depth = 0; node && depth < 10; depth++, node = node.parentElement) {
+          if (node.querySelectorAll('a[href*="XID="]').length >= 3) {
+            seenWrappers.add(node);
+            break;
+          }
+        }
+      }
+      seenWrappers.forEach(w => candidates.add(w));
+    }
+
+    const containers = Array.from(candidates).filter(el => {
       if (el.closest(".raid-members-list")) return false;
       const desc = el.closest(".desc-wrap");
       if (desc && !desc.matches('[class*="warDesc"]')) return false;
@@ -3411,7 +3448,12 @@ if (!singleton) {
     });
 
     for (const cont of containers) {
-      const header = cont.querySelector(".member");
+      // Header lookup: legacy `.member`, then a hashed-class equivalent
+      // (header rows usually carry a class with "header" in the name),
+      // then last resort: the container's first child element.
+      let header = cont.querySelector(".member")
+        || cont.querySelector('[class*="header___"], [class*="memberHeader___"], [class*="listHeader___"]')
+        || cont.firstElementChild;
       if (!header) continue;
       if (header.querySelector(".ff-scouter-sort-btn")) continue;
 
@@ -3422,7 +3464,8 @@ if (!singleton) {
       btn.style.cssText =
         "margin-left:6px;padding:1px 6px;border-radius:3px;"
         + "font-size:11px;font-weight:700;background:#2a3fff;color:#fff;"
-        + "border:0;cursor:pointer;line-height:14px;vertical-align:middle;";
+        + "border:0;cursor:pointer;line-height:14px;vertical-align:middle;"
+        + "position:relative;z-index:5;";
 
       btn.addEventListener("click", (ev) => {
         ev.stopPropagation();
@@ -3430,7 +3473,6 @@ if (!singleton) {
         ffs_sort_list(cont, btn);
       });
 
-      // Mirror BSP's insertion — right after the first child of header.
       header.insertBefore(btn, header.children[1] || null);
     }
   }
@@ -3441,13 +3483,30 @@ if (!singleton) {
     btn.dataset.sortDesc = descNow ? "0" : "1";
     btn.textContent = descNow ? "↑ FFS" : "↓ FFS";
 
-    // War pages: rows live under .members-list inside the container.
-    // Faction pages: rows live under .table-body inside .members-list.
-    let rowContainer = container.querySelector(".members-list");
-    if (!rowContainer) rowContainer = container.querySelector(".table-body");
-    if (!rowContainer) return;
+    // War pages (legacy): rows live under .members-list.
+    // Faction pages: rows live under .table-body.
+    // React-migrated war page: rows are direct children of the
+    // container or hashed-class wrappers — fall back to walking from
+    // XID links if the named selectors miss.
+    let rowContainer = container.querySelector(".members-list")
+      || container.querySelector(".table-body")
+      || container.querySelector('[class*="tableBody___"], [class*="rowsList___"], [class*="memberRows___"]');
+    if (!rowContainer) {
+      // Last resort: treat the container itself as the row parent,
+      // filtering to children that contain an XID link.
+      const childrenWithXid = Array.from(container.children).filter(
+        c => c.querySelector && c.querySelector('a[href*="XID="]')
+      );
+      if (childrenWithXid.length >= 2) {
+        rowContainer = container;
+      } else {
+        return;
+      }
+    }
 
-    const rows = Array.from(rowContainer.children);
+    const rows = Array.from(rowContainer.children).filter(
+      c => !c.classList.contains('member') && !c.matches('[class*="header"]')
+    );
     const playerIds = [];
     const rowMeta = rows.map(row => {
       const a = row.querySelector('a[href*="XID="]');
