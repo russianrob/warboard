@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Profile Link Formatter
 // @namespace    GNSC4 [268863]
-// @version      3.6.33
+// @version      3.6.34
 // @description  Copy formatted Torn profile/faction links. Uses BSP prediction TBS when available, falls back to FF Scouter V2 estimated stats. Strips BSP TBS prefixes from copied names, dedupes lines by ID, and uses war JSON faction IDs so your faction (Dead Fragment 42055) is always separated from the enemy in ranked wars. Faction copy includes member level and Xanax taken (via API or Xanax Viewer cache).
 // @author       GNSC4
 // @match        https://www.torn.com/profiles.php?XID=*
@@ -627,16 +627,42 @@
     function getFfScouterEstimate(userId) {
         return new Promise((resolve) => {
             try {
-                const request = window.indexedDB.open("ffscouter-cache", 1);
+                // Omit the version arg — ffs-banner-estimates bumped
+                // ffscouter-cache to v2 (self-healing migration for
+                // upstream forks that created the DB without our store).
+                // Passing `open(name, 1)` against a v2 database throws
+                // VersionError and the connection silently fails — that's
+                // what was making this function always return null and
+                // the copied output read "FFS: N/A".
+                const request = window.indexedDB.open("ffscouter-cache");
 
                 request.onerror = () => {
                     if (debug) console.error("FF Scouter: failed to open IndexedDB");
                     resolve(null);
                 };
+                request.onblocked = () => {
+                    if (debug) console.warn("FF Scouter: IndexedDB open blocked");
+                    resolve(null);
+                };
 
                 request.onsuccess = () => {
                     const db = request.result;
-                    const tx = db.transaction("cache", "readonly");
+                    if (!db.objectStoreNames.contains("cache")) {
+                        // ffs-banner-estimates hasn't created the store
+                        // yet (user hasn't loaded a page with the FFS
+                        // script active in this session). No cached data
+                        // to read; downstream renders "N/A".
+                        resolve(null);
+                        return;
+                    }
+                    let tx;
+                    try {
+                        tx = db.transaction("cache", "readonly");
+                    } catch (e) {
+                        if (debug) console.error("FF Scouter: tx open failed", e);
+                        resolve(null);
+                        return;
+                    }
                     const store = tx.objectStore("cache");
                     const getReq = store.get(parseInt(userId, 10));
 
