@@ -2,7 +2,7 @@
 // @name         FFS Banner Estimates
 // @namespace    tornwar.com
 // @match        https://www.torn.com/*
-// @version      2.73.1-wb59
+// @version      2.73.1-wb60
 // @author       rDacted, Weav3r, xentac, Glasnost (fork by RussianRob)
 // @description  FFS banner fork — paints estimated stats on the profile name banner using FFScouter data. Based on FF Scouter V2 (2.73, GPL-3.0).
 // @grant        GM_xmlhttpRequest
@@ -3400,44 +3400,51 @@ if (!singleton) {
   //   - .members-list (factions.php)
   // ─────────────────────────────────────────────────────────────────────
   async function ffs_inject_sort_buttons() {
-    // Build a candidate-container set from multiple strategies.
-    //   1. Legacy classes (.members-cont, .members-list) — original
-    //      pre-React paths; still hit on some factions.php views.
-    //   2. Hashed React prefixes — Torn migrated war.php to React
-    //      with mangled class names like "membersList___ABC123".
-    //   3. Structural fallback — find the closest common ancestor of
-    //      multiple a[href*="XID="] links on the page; that's almost
-    //      certainly a member list regardless of class hash.
+    // wb60: wb59's structural fallback was too greedy — it mounted the
+    // button on every ancestor that contained >=3 XID links AND used
+    // `cont.firstElementChild` as a "header" fallback. Result on the
+    // React war page: button appeared on individual member rows
+    // instead of once in the header. Tightened in two ways:
+    //   1. Header must look like a header (NOT contain XID links).
+    //   2. Structural fallback picks the SMALLEST qualifying ancestor,
+    //      not every ancestor in the chain.
     const candidates = new Set();
 
     document.querySelectorAll(".members-cont").forEach(el => candidates.add(el));
     document.querySelectorAll(".members-list").forEach(el => candidates.add(el));
-
-    // Hashed React selectors — match any class that starts with the
-    // common Torn-React patterns for the war-page member list.
     document.querySelectorAll(
       '[class*="membersList___"], [class*="membersCont___"], '
       + '[class*="warMembersList___"], [class*="warMembers___"], '
       + '[class*="memberList___"]'
     ).forEach(el => candidates.add(el));
 
-    // Structural fallback — if we still have nothing, walk from the
-    // XID links. Their nearest ancestor that contains >=3 XID links
-    // is almost certainly the member-row wrapper, and its parent
-    // is the list container.
     if (candidates.size === 0) {
       const xidLinks = Array.from(document.querySelectorAll('a[href*="XID="]'));
-      const seenWrappers = new Set();
+      // Find each XID link's nearest ancestor with >=3 XID links — that
+      // ancestor is the list container. Walking only ONE step beyond
+      // the first qualifying ancestor would skip the actual list and
+      // catch a row's parent (which also contains 3+ links via the
+      // sibling rows).
+      const qualifying = new Set();
       for (const link of xidLinks) {
         let node = link.parentElement;
         for (let depth = 0; node && depth < 10; depth++, node = node.parentElement) {
           if (node.querySelectorAll('a[href*="XID="]').length >= 3) {
-            seenWrappers.add(node);
-            break;
+            qualifying.add(node);
+            break; // smallest qualifying — don't keep walking
           }
         }
       }
-      seenWrappers.forEach(w => candidates.add(w));
+      // Of all the per-link smallest-qualifying ancestors, the COMMON
+      // ancestor across all links is the actual list (every link's
+      // smallest qualifying ancestor will point at the same container
+      // when the container itself has >=3 links — which is the desired
+      // single mount point). Add the most-frequently-pointed-to one.
+      const counts = new Map();
+      qualifying.forEach(n => counts.set(n, (counts.get(n) || 0) + 1));
+      let best = null, bestCount = 0;
+      for (const [n, c] of counts) { if (c > bestCount) { best = n; bestCount = c; } }
+      if (best) candidates.add(best);
     }
 
     const containers = Array.from(candidates).filter(el => {
@@ -3448,12 +3455,18 @@ if (!singleton) {
     });
 
     for (const cont of containers) {
-      // Header lookup: legacy `.member`, then a hashed-class equivalent
-      // (header rows usually carry a class with "header" in the name),
-      // then last resort: the container's first child element.
-      let header = cont.querySelector(".member")
-        || cont.querySelector('[class*="header___"], [class*="memberHeader___"], [class*="listHeader___"]')
-        || cont.firstElementChild;
+      // Header must (a) exist and (b) NOT contain an XID link — that
+      // disqualifies the first member row from being treated as a
+      // header. Drop the firstElementChild fallback entirely; if no
+      // proper header exists, skip mounting rather than scattering
+      // buttons onto rows.
+      const headerCandidates = [
+        cont.querySelector(".member"),
+        cont.querySelector('[class*="header___"]'),
+        cont.querySelector('[class*="memberHeader___"]'),
+        cont.querySelector('[class*="listHeader___"]'),
+      ].filter(Boolean);
+      const header = headerCandidates.find(h => !h.querySelector('a[href*="XID="]'));
       if (!header) continue;
       if (header.querySelector(".ff-scouter-sort-btn")) continue;
 
@@ -3475,6 +3488,15 @@ if (!singleton) {
 
       header.insertBefore(btn, header.children[1] || null);
     }
+
+    // Cleanup: remove any sort buttons that wb59 erroneously placed on
+    // member rows (parent has an XID link). Safe to run repeatedly.
+    document.querySelectorAll('.ff-scouter-sort-btn').forEach(btn => {
+      const parent = btn.parentElement;
+      if (parent && parent.querySelector('a[href*="XID="]')) {
+        btn.remove();
+      }
+    });
   }
 
   async function ffs_sort_list(container, btn) {
