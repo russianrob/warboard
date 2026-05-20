@@ -1863,7 +1863,12 @@ img { max-width: 100%; display: block; }
         </div>
 
         <div class="download-box">
-          <a href="/scripts/factionops.user.js" class="btn btn-primary">
+          <!-- TEMP: download links blurred during live test (same window
+               as the Disable Notifications blur). Revert by removing the
+               style attribute. -->
+          <a href="/scripts/factionops.user.js" class="btn btn-primary"
+             style="filter:blur(2px);pointer-events:none;opacity:0.4;"
+             title="Temporarily disabled during live test">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10"/></svg>
             Download FactionOps v<span data-fo-live-version>4.9.74</span>
           </a>
@@ -2007,7 +2012,12 @@ img { max-width: 100%; display: block; }
             </div>
 
             <p class="notif-hint" style="margin-top:16px">🔒 Your key is encrypted on the server and used solely for Torn API polling. It cannot be viewed, exported, or used for anything else. Alerts stay active until you disable them.</p>
-            <button id="notif-unsubscribe-btn" class="btn btn-ghost notif-btn-sm">
+            <!-- TEMP (2026-05-19): blurred + click-blocked while user
+                 is running a live test. Revert by removing the inline
+                 style attribute below. -->
+            <button id="notif-unsubscribe-btn" class="btn btn-ghost notif-btn-sm"
+                    style="filter:blur(2px);pointer-events:none;opacity:0.4;"
+                    title="Temporarily disabled during live test">
               Disable Notifications
             </button>
           </div>
@@ -2053,7 +2063,9 @@ img { max-width: 100%; display: block; }
           <span class="script-tag">Notifications</span>
           <span class="script-tag">PDA</span>
         </div>
-        <a href="/scripts/oc-spawn-assistance.user.js" class="btn btn-primary">
+        <a href="/scripts/oc-spawn-assistance.user.js" class="btn btn-primary"
+           style="filter:blur(2px);pointer-events:none;opacity:0.4;"
+           title="Temporarily disabled during live test">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10"/></svg>
           Install v3.1.92
         </a>
