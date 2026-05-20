@@ -596,11 +596,21 @@ startMembershipSchedule();
         if (seen.has(warId)) continue;
         const endedAt = Number(w.warEndedAt) || 0;
         if (endedAt && (now - endedAt) > REVIVE_WINDOW_MS) continue;
+        // 2026-05-19: ONLY revive synthetic per-faction war records
+        // (war_<factionId>). Reviving arbitrary historical-warId
+        // records lets chain-monitor re-poll Torn for them, see the
+        // CURRENT active war as a "new enemy", and overwrite the
+        // historical record's enemyFactionId/Name with the new one —
+        // creating a duplicate active war record with a null name
+        // that pollutes the /api/faction/<id>/war list. Synthetic
+        // records are designed to track whichever war is current;
+        // historical warId-keyed records should stay frozen.
+        if (warId !== `war_${w.factionId}`) continue;
         seen.add(warId);
         startChainMonitor(null, warId);
         revived++;
       }
-      if (revived > 0) console.log(`[boot-resume] revived chain-monitor for ${revived} recently-ended war(s) so new-war detection stays live`);
+      if (revived > 0) console.log(`[boot-resume] revived chain-monitor for ${revived} recently-ended synthetic war(s) so new-war detection stays live`);
     } catch (err) {
       console.warn(`[boot-resume] revive-recent failed: ${err.message}`);
     }
